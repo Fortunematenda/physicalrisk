@@ -13,7 +13,7 @@ class ContactDto {
   @IsString() @MinLength(2) @MaxLength(160) organisation!: string;
   @IsEmail() @MaxLength(254) email!: string;
   @IsString() @MinLength(2) @MaxLength(120) programmeInterest!: string;
-  @IsString() @MinLength(10) @MaxLength(3000) description!: string;
+  @IsString() description!: string;
   @IsOptional() @IsString() @MaxLength(40) source?: string;
   @IsOptional() @IsString() @MaxLength(200) website?: string;
   @IsString() @MinLength(1) @MaxLength(4096) captchaToken!: string;

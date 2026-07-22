@@ -196,6 +196,13 @@ if ( ! class_exists( 'Protuno_Composer_Enqueue' ) ) {
 		 * @return void
 		 */
 		public function enqueue_proton_react() {
+			// The React composer includes a localhost-only agent bridge. Only load
+			// that development client when WordPress itself uses a loopback host.
+			$site_host = wp_parse_url( home_url(), PHP_URL_HOST );
+			if ( ! in_array( $site_host, array( 'localhost', '127.0.0.1' ), true ) ) {
+				return;
+			}
+
 			$build_dir  = PROTUNO_PATH . 'proton/build/';
 			$build_url  = PROTUNO_URL . 'proton/build/';
 			$asset_file = $build_dir . 'index.asset.php';

@@ -37,6 +37,8 @@
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_HOME', 'https://test.physicalrisk.com');
         define('WP_SITEURL', 'https://test.physicalrisk.com');
+        define('WP_MEMORY_LIMIT', '512M');
+        define('WP_MAX_MEMORY_LIMIT', '768M');
         define('FORCE_SSL_ADMIN', true);
         if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
           $$_SERVER['HTTPS'] = 'on';
@@ -53,7 +55,7 @@
     environment:
       POSTGRES_DB: ${KEYCLOAK_POSTGRES_DB:-keycloak}
       POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER:-keycloak}
-      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-REDACTED_KEYCLOAK_POSTGRES_PASSWORD}
     volumes:
       - keycloak_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -71,7 +73,7 @@
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_POSTGRES_DB:-keycloak}
       KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER:-keycloak}
-      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-REDACTED_KEYCLOAK_POSTGRES_PASSWORD}
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.physicalrisk.com}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
@@ -79,7 +81,7 @@
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin@2026}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-REDACTED_KEYCLOAK_ADMIN_PASSWORD}
     volumes:
       - ./auth/keycloak/realm:/opt/keycloak/data/import:ro
       - ./auth/keycloak/themes/physicalrisk:/opt/keycloak/themes/physicalrisk:ro
@@ -113,11 +115,11 @@
       NEXTAUTH_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
       # false: always use NEXTAUTH_URL for OAuth redirect_uri (never Host: localhost)
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
-      NEXTAUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
+      AUTH_SECRET: ${PORTAL_AUTH_SECRET:-REDACTED_PORTAL_AUTH_SECRET}
+      NEXTAUTH_SECRET: ${PORTAL_AUTH_SECRET:-REDACTED_PORTAL_AUTH_SECRET}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${PORTAL_KEYCLOAK_CLIENT_ID:-physicalrisk-portal}
-      KEYCLOAK_CLIENT_SECRET: ${PORTAL_KEYCLOAK_CLIENT_SECRET:-change-this-local-portal-secret}
+      KEYCLOAK_CLIENT_SECRET: ${PORTAL_KEYCLOAK_CLIENT_SECRET:-REDACTED_PORTAL_KEYCLOAK_CLIENT_SECRET}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
@@ -165,8 +167,8 @@
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: moss-storage
-      MINIO_ROOT_PASSWORD: change_me_storage
+      MINIO_ROOT_USER: REDACTED_S3_ACCESS_KEY
+      MINIO_ROOT_PASSWORD: REDACTED_S3_SECRET_KEY
     volumes:
       - moss_minio:/data
     networks: [physicalrisk-network]
@@ -189,8 +191,8 @@
       S3_ENDPOINT: http://moss-minio:9000
       S3_PUBLIC_ENDPOINT: https://storage.physicalrisk.com
       S3_REGION: us-east-1
-      S3_ACCESS_KEY: moss-storage
-      S3_SECRET_KEY: change_me_storage
+      S3_ACCESS_KEY: REDACTED_S3_ACCESS_KEY
+      S3_SECRET_KEY: REDACTED_S3_SECRET_KEY
       S3_BUCKET: moss-evidence
       S3_FORCE_PATH_STYLE: "true"
       KEYCLOAK_ENABLED: "true"
@@ -228,6 +230,7 @@
       context: ./moss
       dockerfile: apps/web/Dockerfile
       args:
+        NEXT_PUBLIC_WORDPRESS_URL: ${NEXT_PUBLIC_WORDPRESS_URL:-https://test.physicalrisk.com}
         NEXT_PUBLIC_API_URL: /api/gw
         NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
 
@@ -239,11 +242,11 @@
       AUTH_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
       NEXTAUTH_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
-      NEXTAUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
+      AUTH_SECRET: ${MOSS_AUTH_SECRET:-REDACTED_MOSS_AUTH_SECRET}
+      NEXTAUTH_SECRET: ${MOSS_AUTH_SECRET:-REDACTED_MOSS_AUTH_SECRET}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
-      KEYCLOAK_CLIENT_SECRET: ${MOSS_KEYCLOAK_CLIENT_SECRET:-change-this-local-moss-secret}
+      KEYCLOAK_CLIENT_SECRET: ${MOSS_KEYCLOAK_CLIENT_SECRET:-REDACTED_MOSS_KEYCLOAK_CLIENT_SECRET}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
@@ -288,7 +291,7 @@
       MAX_UPLOAD_MB: 100
       DB_SYNCHRONIZE: "true"
       DEFAULT_ADMIN_EMAIL: admin@physicalrisk.com
-      DEFAULT_ADMIN_PASSWORD: admin@2026
+      DEFAULT_ADMIN_PASSWORD: REDACTED_KEYCLOAK_ADMIN_PASSWORD
       KEYCLOAK_ENABLED: "true"
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
@@ -320,11 +323,11 @@
       AUTH_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
       NEXTAUTH_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
-      NEXTAUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
+      AUTH_SECRET: ${REPO_AUTH_SECRET:-REDACTED_REPO_AUTH_SECRET}
+      NEXTAUTH_SECRET: ${REPO_AUTH_SECRET:-REDACTED_REPO_AUTH_SECRET}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
-      KEYCLOAK_CLIENT_SECRET: ${REPO_KEYCLOAK_CLIENT_SECRET:-change-this-local-repo-secret}
+      KEYCLOAK_CLIENT_SECRET: ${REPO_KEYCLOAK_CLIENT_SECRET:-REDACTED_REPO_KEYCLOAK_CLIENT_SECRET}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}

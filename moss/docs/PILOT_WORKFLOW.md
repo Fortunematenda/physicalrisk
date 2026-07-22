@@ -63,7 +63,7 @@ docker compose up -d --build
 ```
 
 API runs `prisma db push` + seed on start.  
-Open `http://localhost:8081` — admin `admin@physicalrisk.local` / `ChangeMe123!`
+Open `http://localhost:8081` — admin `admin@physicalrisk.local` / `REDACTED_SEED_ADMIN_PASSWORD`
 
 ## Assumptions
 

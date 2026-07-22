@@ -15,13 +15,17 @@ export class EspoCrmHttpError extends Error {
   readonly retryable: boolean;
   readonly statusCode?: number;
   readonly code: string;
+  readonly duplicateRecordIds: string[];
+  readonly conflictRecordIds: string[];
 
-  constructor(safe: EspoSafeError) {
+  constructor(safe: EspoSafeError & { duplicateRecordIds?: string[]; conflictRecordIds?: string[] }) {
     super(safe.message);
     this.name = 'EspoCrmHttpError';
     this.retryable = safe.retryable;
     this.statusCode = safe.statusCode;
     this.code = safe.code;
+    this.duplicateRecordIds = safe.duplicateRecordIds || [];
+    this.conflictRecordIds = safe.conflictRecordIds || [];
   }
 }
 
@@ -126,7 +130,11 @@ export class EspoCrmClient {
   async request<T = EspoRecord>(
     method: EspoHttpMethod,
     path: string,
-    options?: { data?: Record<string, unknown>; params?: Record<string, unknown> },
+    options?: {
+      data?: Record<string, unknown>;
+      params?: Record<string, unknown>;
+      headers?: Record<string, string>;
+    },
   ): Promise<EspoRequestResult<T>> {
     const normalisedPath = path.startsWith('/') ? path : `/${path}`;
     this.assertHostSafe(normalisedPath);
@@ -136,6 +144,7 @@ export class EspoCrmClient {
       url: normalisedPath,
       data: options?.data,
       params: options?.params,
+      headers: options?.headers,
     };
 
     try {
@@ -155,6 +164,21 @@ export class EspoCrmClient {
               (data ? JSON.stringify(data) : '') ||
               `EspoCRM HTTP ${response.status}`;
         const message = String(redactSecrets(raw)).slice(0, 500);
+        const submittedEmail = String(options?.data?.emailAddress || '').trim().toLowerCase();
+        const conflictRecordIds = response.status === 409 && Array.isArray(response.data)
+          ? (response.data as Array<Record<string, unknown>>)
+              .filter((row) => Boolean(row?.id))
+              .map((row) => String(row.id))
+          : [];
+        const duplicateRecordIds = response.status === 409 && Array.isArray(response.data)
+          ? (response.data as Array<Record<string, unknown>>)
+              .filter((row) =>
+                Boolean(row?.id) &&
+                Boolean(submittedEmail) &&
+                String(row.emailAddress || '').trim().toLowerCase() === submittedEmail,
+              )
+              .map((row) => String(row.id))
+          : [];
         throw new EspoCrmHttpError({
           retryable: response.status === 429 || response.status >= 500,
           statusCode: response.status,
@@ -167,6 +191,10 @@ export class EspoCrmClient {
                   ? 'NOT_FOUND'
                   : response.status === 400 || response.status === 422
                     ? 'VALIDATION'
+                    : response.status === 409 && duplicateRecordIds.length
+                      ? 'DUPLICATE_EMAIL'
+                      : response.status === 409
+                        ? 'CONFLICT'
                     : response.status === 429
                       ? 'RATE_LIMITED'
                       : response.status >= 500
@@ -179,7 +207,13 @@ export class EspoCrmClient {
                 ? 'EspoCRM permission denied (403).'
                 : response.status === 404
                   ? 'EspoCRM API path or record not found (404).'
-                  : message,
+                  : response.status === 409
+                    ? duplicateRecordIds.length
+                      ? 'EspoCRM rejected a duplicate email address.'
+                      : 'EspoCRM returned an unrelated conflict (409).'
+                    : message,
+          duplicateRecordIds,
+          conflictRecordIds,
         });
       }
       return { data: response.data, statusCode: response.status, durationMs };
@@ -193,8 +227,8 @@ export class EspoCrmClient {
     return this.request<T>('GET', path, { params });
   }
 
-  post<T = EspoRecord>(path: string, data: Record<string, unknown>) {
-    return this.request<T>('POST', path, { data });
+  post<T = EspoRecord>(path: string, data: Record<string, unknown>, headers?: Record<string, string>) {
+    return this.request<T>('POST', path, { data, headers });
   }
 
   put<T = EspoRecord>(path: string, data: Record<string, unknown>) {
@@ -293,19 +327,43 @@ export class EspoCrmClient {
     entity: string,
     email: string,
   ): Promise<T | null> {
-    const result = await this.get<unknown>(
-      `/${entity}`,
-      this.equalsWhere('emailAddress', email),
-    );
-
     const expected = email.trim().toLowerCase();
+    // Email is a relationship-backed Espo field. Ask Espo for the email field
+    // explicitly and inspect the returned list; `total` is not a record list.
+    const result = await this.get<unknown>(`/${entity}`, {
+      ...this.equalsWhere('emailAddress', expected),
+      select: 'id,emailAddress,emailAddressData',
+    });
 
-    return (
-      this.extractRecords<T>(result.data).find(
-        (row) =>
-          String(row.emailAddress || '').trim().toLowerCase() === expected,
-      ) || null
-    );
+    const exactMatch = (rows: T[]) => rows.find(
+        (row) => {
+          if (String(row.emailAddress || '').trim().toLowerCase() === expected) return true;
+          const data = Array.isArray(row.emailAddressData) ? row.emailAddressData : [];
+          return data.some((item) =>
+            String((item as { emailAddress?: unknown }).emailAddress || '').trim().toLowerCase() === expected,
+          );
+        },
+      ) || null;
+    const filteredMatch = exactMatch(this.extractRecords<T>(result.data));
+    if (filteredMatch) return filteredMatch;
+
+    // Some Espo installations don't expose the relationship-backed email
+    // field to SQL `equals` filters for API users. Page through the supported
+    // Lead list projection and compare both primary and relationship email
+    // values instead of interpreting `total` or response byte size as rows.
+    const pageSize = 200;
+    for (let offset = 0; offset < 10_000; offset += pageSize) {
+      const page = await this.get<unknown>(`/${entity}`, {
+        maxSize: pageSize,
+        offset,
+        select: 'id,emailAddress,emailAddressData',
+      });
+      const records = this.extractRecords<T>(page.data);
+      const match = exactMatch(records);
+      if (match) return match;
+      if (records.length < pageSize) break;
+    }
+    return null;
   }
 
   async testConnection(): Promise<EspoConnectionTestResult> {

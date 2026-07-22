@@ -69,7 +69,9 @@
     ],
     "client": {}
   },
-  "defaultRoles": ["portal_user"],
+  "defaultRoles": [
+    "portal_user"
+  ],
   "clients": [
     {
       "clientId": "physicalrisk-portal",
@@ -79,7 +81,6 @@
       "rootUrl": "https://apps.physicalrisk.com",
       "baseUrl": "/",
       "clientAuthenticatorType": "client-secret",
-      "secret": "change-this-local-portal-secret",
       "redirectUris": [
         "http://apps.localhost/api/auth/callback/keycloak",
         "http://localhost:3010/api/auth/callback/keycloak",
@@ -128,7 +129,6 @@
       "rootUrl": "https://moss.physicalrisk.com",
       "baseUrl": "/",
       "clientAuthenticatorType": "client-secret",
-      "secret": "change-this-local-moss-secret",
       "redirectUris": [
         "http://moss.localhost/api/auth/callback/keycloak",
         "http://localhost:3001/api/auth/callback/keycloak",
@@ -177,7 +177,6 @@
       "rootUrl": "https://repo.physicalrisk.com",
       "baseUrl": "/",
       "clientAuthenticatorType": "client-secret",
-      "secret": "change-this-local-repo-secret",
       "redirectUris": [
         "http://repo.localhost/api/auth/callback/keycloak",
         "http://localhost:3002/api/auth/callback/keycloak",
@@ -227,13 +226,6 @@
       "enabled": true,
       "firstName": "Platform",
       "lastName": "Administrator",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "admin@2026",
-          "temporary": false
-        }
-      ],
       "realmRoles": [
         "portal_user",
         "moss_admin",
@@ -247,13 +239,6 @@
       "enabled": true,
       "firstName": "Test",
       "lastName": "Analyst",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "ChangeMe123!",
-          "temporary": false
-        }
-      ],
       "realmRoles": [
         "portal_user",
         "moss_analyst",
@@ -267,13 +252,6 @@
       "enabled": true,
       "firstName": "Test",
       "lastName": "Client",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "ChangeMe123!",
-          "temporary": false
-        }
-      ],
       "realmRoles": [
         "portal_user",
         "moss_client",
@@ -287,6 +265,8 @@
   "loginTheme": "physicalrisk",
   "accountTheme": "physicalrisk",
   "internationalizationEnabled": false,
-  "supportedLocales": ["en"],
+  "supportedLocales": [
+    "en"
+  ],
   "defaultLocale": "en"
 }

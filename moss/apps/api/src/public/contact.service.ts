@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EspoCrmService } from '../crm/espocrm.service';
+import { EspoCrmHttpError } from '../crm/espocrm.client';
 import { EmailService } from '../email/email.service';
 
 export type ContactInput = {
@@ -61,11 +62,16 @@ export class ContactService {
     if (!this.allowedProgrammes().includes(normalized.programmeInterest)) {
       throw new BadRequestException({ programmeInterest: 'Select a valid programme.' });
     }
+    if (normalized.description.length < 10) {
+      throw new BadRequestException({ description: 'At least 10 characters required.' });
+    }
+    if (normalized.description.length > 3000) {
+      throw new BadRequestException({ description: 'Enter no more than 3,000 characters.' });
+    }
     const fingerprint = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
     const existing = await this.prisma.contactSubmission.findUnique({ where: { fingerprint } });
     if (existing) {
-      await this.deliver(existing.id);
-      await this.assertDeliveryQueued(existing.id);
+      await this.ensureQueued(existing.id);
       return this.publicResult(existing.publicReference);
     }
 
@@ -73,21 +79,28 @@ export class ContactService {
     const row = await this.prisma.contactSubmission.create({
       data: { ...normalized, source: 'wordpress', fingerprint, publicReference },
     });
-    await this.deliver(row.id);
-    await this.assertDeliveryQueued(row.id);
+    await this.ensureQueued(row.id);
     return this.publicResult(publicReference);
   }
 
-  private async assertDeliveryQueued(id: string) {
+  private async ensureQueued(id: string) {
     const row = await this.prisma.contactSubmission.findUnique({
       where: { id },
-      select: { crmStatus: true, emailJobId: true, notificationStatus: true },
     });
-    if (row?.crmStatus === 'SUCCESS' && row.emailJobId && row.notificationStatus === 'QUEUED') return;
-    throw new ServiceUnavailableException({
-      success: false,
-      message: 'We could not complete your enquiry right now. Your details have been kept; please try again shortly.',
-    });
+    if (!row) throw new ServiceUnavailableException({ success: false, message: 'We could not safely store your enquiry.' });
+    try {
+      if (!row.emailJobId) await this.queueNotification(row, row.espocrmLeadId);
+      await this.prisma.contactSubmission.update({
+        where: { id },
+        data: { crmStatus: row.crmStatus === 'SUCCESS' ? 'SUCCESS' : 'PENDING', nextAttemptAt: row.nextAttemptAt || new Date() },
+      });
+    } catch {
+      await this.prisma.contactSubmission.update({ where: { id }, data: { notificationStatus: 'PENDING', safeErrorCode: 'NOTIFICATION_QUEUE_UNAVAILABLE' } });
+      throw new ServiceUnavailableException({
+        success: false,
+        message: 'We could not safely queue your enquiry. Your details have been kept; please try again shortly.',
+      });
+    }
   }
 
   private publicResult(submissionId: string) {
@@ -98,7 +111,7 @@ export class ContactService {
     const row = await this.prisma.contactSubmission.findUnique({ where: { id } });
     if (!row) return;
     if (row.crmStatus === 'SUCCESS') {
-      if (!row.emailJobId && row.espocrmLeadId) await this.queueNotification(row, row.espocrmLeadId);
+      if (!row.emailJobId) await this.queueNotification(row, row.espocrmLeadId);
       return;
     }
     try {
@@ -132,18 +145,21 @@ export class ContactService {
       this.logger.log(JSON.stringify({ event: 'contact_delivery', submissionId: row.publicReference, leadId: result.leadId, crm: 'SUCCESS', notification: 'QUEUED' }));
     } catch (error) {
       const attempt = row.attemptCount + 1;
+      const safeCrmError = error instanceof EspoCrmHttpError
+        ? { errorCode: error.code, statusCode: error.statusCode, retryable: error.retryable }
+        : { errorCode: 'CRM_UNAVAILABLE' };
       await this.prisma.contactSubmission.update({
         where: { id },
         data: { crmStatus: 'PENDING', attemptCount: attempt, safeErrorCode: 'CRM_UNAVAILABLE', nextAttemptAt: new Date(Date.now() + Math.min(60, 2 ** attempt) * 60_000) },
       });
-      this.logger.warn(JSON.stringify({ event: 'contact_delivery', submissionId: row.publicReference, crm: 'PENDING', notification: 'WAITING', errorCode: 'CRM_UNAVAILABLE' }));
+      this.logger.warn(JSON.stringify({ event: 'contact_delivery', submissionId: row.publicReference, crm: 'PENDING', notification: 'WAITING', ...safeCrmError }));
     }
   }
 
   private async queueNotification(row: {
     id: string; fullName: string; organisation: string; email: string;
     programmeInterest: string; description: string; source: string; createdAt: Date;
-  }, leadId: string): Promise<string> {
+  }, leadId: string | null): Promise<string> {
     const job = await this.email.enqueue({
       recipient: this.config.get<string>('CONTACT_NOTIFICATION_TO') || 'info@physicalrisk.com',
       subject: `New MOSS assessment enquiry – ${row.organisation}`,
@@ -151,7 +167,7 @@ export class ContactService {
       payload: {
         fullName: row.fullName, organisation: row.organisation, email: row.email,
         programmeInterest: row.programmeInterest, description: row.description,
-        source: row.source, submittedAt: row.createdAt.toISOString(), leadId,
+        source: row.source, submittedAt: row.createdAt.toISOString(), ...(leadId ? { leadId } : {}),
         replyTo: row.email,
         fromEmail: this.config.get<string>('CONTACT_FROM_EMAIL') || 'no-reply@physicalrisk.com',
       },
@@ -170,7 +186,7 @@ export class ContactService {
     });
     for (const row of rows) await this.deliver(row.id);
     const notificationRows = await this.prisma.contactSubmission.findMany({
-      where: { crmStatus: 'SUCCESS', notificationStatus: 'PENDING', emailJobId: null, espocrmLeadId: { not: null } },
+      where: { notificationStatus: 'PENDING', emailJobId: null },
       orderBy: { createdAt: 'asc' }, take: 10,
     });
     for (const row of notificationRows) {

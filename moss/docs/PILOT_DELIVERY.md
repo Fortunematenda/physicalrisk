@@ -68,7 +68,7 @@ Set host/port/user/password/from in `.env`. Emails enqueue to `EmailJob` and pro
 docker compose up -d --build
 ```
 
-Admin: `admin@physicalrisk.local` / `ChangeMe123!`  
+Admin: `admin@physicalrisk.local` / `REDACTED_SEED_ADMIN_PASSWORD`  
 Public: `http://localhost:8081/start?source=wordpress`
 
 ## 10. Test results

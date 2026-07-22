@@ -7,8 +7,9 @@ import { PhysicalRiskShell } from '@/components/PhysicalRiskShell';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
-import { API_BASE } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/gw';
 
 type InputDef = {
   code: string;

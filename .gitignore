@@ -3,8 +3,7 @@
 .env.*
 **/.env
 **/.env.*
-!.env*.example
-!**/.env*.example
+!.env.example.disabled
 *.pem
 *.key
 *.p12
@@ -40,7 +39,6 @@ backups/
 logs/
 **/logs/
 *.sql
-!moss/apps/api/prisma/migrations/**/migration.sql
 *.sqlite
 *.sqlite3
 *.db

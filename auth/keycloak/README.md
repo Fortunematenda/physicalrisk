@@ -40,13 +40,13 @@ keycloak/
 
 | Email | Password | Roles |
 |-------|----------|-------|
-| `admin@physicalrisk.com` | `admin@2026` | All admin roles |
-| `analyst@physicalrisk.local` | `ChangeMe123!` | Analyst + importer |
-| `client@physicalrisk.local` | `ChangeMe123!` | Client + viewer |
+| `admin@physicalrisk.com` | `REDACTED_KEYCLOAK_ADMIN_PASSWORD` | All admin roles |
+| `analyst@physicalrisk.local` | `REDACTED_SEED_ADMIN_PASSWORD` | Analyst + importer |
+| `client@physicalrisk.local` | `REDACTED_SEED_ADMIN_PASSWORD` | Client + viewer |
 
 ## Admin Console
 
 Access Keycloak admin at: http://auth.localhost/admin
 
 - Username: `admin`
-- Password: `admin@2026` (from `.env.sso` `KEYCLOAK_ADMIN_PASSWORD`)
+- Password: `REDACTED_KEYCLOAK_ADMIN_PASSWORD` (from `.env.sso` `KEYCLOAK_ADMIN_PASSWORD`)

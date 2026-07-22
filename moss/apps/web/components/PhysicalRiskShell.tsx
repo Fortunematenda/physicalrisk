@@ -1,15 +1,17 @@
-const MARKETING_URL = process.env.NEXT_PUBLIC_MARKETING_URL || 'https://physicalrisk.com';
+import { PublicSiteHeader, type PublicNavItem } from './PublicSiteHeader';
 
-const NAV_LINKS = [
-  { label: 'Home', href: `${MARKETING_URL}/` },
-  { label: 'About', href: `${MARKETING_URL}/about/` },
-  { label: 'Security Governance', href: `${MARKETING_URL}/security-governance/` },
-  { label: 'Customer Solutions', href: `${MARKETING_URL}/customer-solutions/` },
-  { label: 'Industries', href: `${MARKETING_URL}/industries/` },
-  { label: 'Insights', href: `${MARKETING_URL}/insights/` },
-  { label: 'Resources', href: `${MARKETING_URL}/resources/` },
-  { label: 'Consultant Network', href: `${MARKETING_URL}/consultant-network/` },
-  { label: 'Contact', href: `${MARKETING_URL}/contact/` },
+const WORDPRESS_URL = (process.env.NEXT_PUBLIC_WORDPRESS_URL || 'https://test.physicalrisk.com').replace(/\/$/, '');
+
+const NAV_LINKS: PublicNavItem[] = [
+  { label: 'Home', href: `${WORDPRESS_URL}/` },
+  { label: 'About', href: `${WORDPRESS_URL}/#about` },
+  { label: 'Security Governance', href: `${WORDPRESS_URL}/#ourservices` },
+  { label: 'Customer Solutions', href: `${WORDPRESS_URL}/#ourservices` },
+  { label: 'Industries', href: `${WORDPRESS_URL}/#ourservices` },
+  { label: 'Insights', href: `${WORDPRESS_URL}/#insights` },
+  { label: 'Resources', href: `${WORDPRESS_URL}/#insights` },
+  { label: 'Consultant Network', href: `${WORDPRESS_URL}/#insights` },
+  { label: 'Contact', href: `${WORDPRESS_URL}/#contact` },
 ];
 
 function BrandMark() {
@@ -33,50 +35,40 @@ export function PhysicalRiskShell({ children }: { children: React.ReactNode; act
         </div>
       </div>
 
-      <header className="pr-header">
-        <a className="pr-brand" href={MARKETING_URL} aria-label="Physical Risk">
-          <BrandMark />
-        </a>
-        <nav className="pr-nav" aria-label="Primary">
-          {NAV_LINKS.map((link) => (
-            <a key={link.label} href={link.href}>{link.label}</a>
-          ))}
-        </nav>
-        <a className="pr-cta" href={`${MARKETING_URL}/#book-moss`}>Book MOSS Assessment</a>
-      </header>
+      <PublicSiteHeader wordpressUrl={WORDPRESS_URL} items={NAV_LINKS} />
 
       <div className="pr-content">{children}</div>
 
       <footer className="pr-footer">
         <div className="pr-footer-grid">
           <div>
-            <a className="pr-brand" href={MARKETING_URL} aria-label="Physical Risk">
+            <a className="pr-brand" href={`${WORDPRESS_URL}/`} aria-label="Physical Risk">
               <BrandMark />
             </a>
             <p>Independent security risk professionals delivering governance, leakage reduction and executive assurance.</p>
           </div>
           <div>
             <h4>Explore</h4>
-            <a href={`${MARKETING_URL}/about/`}>About</a>
-            <a href={`${MARKETING_URL}/customer-solutions/`}>Customer Solutions</a>
-            <a href={`${MARKETING_URL}/industries/`}>Industries</a>
-            <a href={`${MARKETING_URL}/insights/`}>Insights</a>
+            <a href={`${WORDPRESS_URL}/#about`}>About</a>
+            <a href={`${WORDPRESS_URL}/#ourservices`}>Customer Solutions</a>
+            <a href={`${WORDPRESS_URL}/#ourservices`}>Industries</a>
+            <a href={`${WORDPRESS_URL}/#insights`}>Insights</a>
           </div>
           <div>
             <h4>Assessments</h4>
             <a href="/start?source=wordpress">Cost Leakage Questionnaire</a>
-            <a href={`${MARKETING_URL}/#book-moss`}>Book MOSS Assessment</a>
+            <a href="https://moss.physicalrisk.com/start?source=wordpress">Book MOSS Assessment</a>
           </div>
           <div>
             <h4>Contact</h4>
             <a href="tel:+27210000000">+27 (0) 21 000 0000</a>
             <a href="mailto:info@physicalrisk.com">info@physicalrisk.com</a>
-            <a href={`${MARKETING_URL}/contact/`}>Contact form</a>
+            <a href={`${WORDPRESS_URL}/#contact`}>Contact form</a>
           </div>
         </div>
         <div className="pr-footer-bottom">
           <span>© {new Date().getFullYear()} Physical Risk. All rights reserved.</span>
-          <span>Powered by MOSS</span>
+          <span>Powered by Bretune Technologies</span>
         </div>
       </footer>
     </div>

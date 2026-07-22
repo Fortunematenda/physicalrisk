@@ -143,7 +143,7 @@ async function seedMethodology() {
 
 async function seedAdmin() {
   const email = (process.env.SEED_ADMIN_EMAIL || 'admin@physicalrisk.com').toLowerCase();
-  const password = process.env.SEED_ADMIN_PASSWORD || 'admin@2026';
+  const password = process.env.SEED_ADMIN_PASSWORD || 'REDACTED_KEYCLOAK_ADMIN_PASSWORD';
   const passwordHash = await argon2.hash(password);
   const legacy = await prisma.user.findUnique({ where: { email: 'admin@physicalrisk.local' } });
   if (legacy && legacy.email !== email) {

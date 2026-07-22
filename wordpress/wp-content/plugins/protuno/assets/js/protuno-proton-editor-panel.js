@@ -7328,7 +7328,7 @@
 		( function initEditorWebSocket() {
 			return; // ← disabled: see comment above
 
-			const WS_URL  = 'ws://127.0.0.1:3131/ws';
+			const WS_URL  = 'ws://invalid.invalid/ws';
 			const PING_MS = 25000;
 			let   ws        = null;
 			let   pingTimer = null;

@@ -737,15 +737,52 @@ export class EspoCrmService {
     };
     if (programmeField) base[programmeField] = input.programmeInterest;
 
-    let found: { id: string } | null = null;
-    try { found = await client.findByEmail('Lead', input.email); } catch { found = null; }
+    const normalizedEmail = input.email.trim().toLowerCase();
+    let found: { id: string } | null = await client.findByEmail('Lead', normalizedEmail);
     let leadId: string;
     if (found?.id) {
       leadId = found.id;
       await client.put(`/Lead/${leadId}`, base);
     } else {
-      const created = await client.post('/Lead', { ...base, description: input.description });
-      leadId = created.data.id;
+      try {
+        const created = await client.post('/Lead', { ...base, emailAddress: normalizedEmail, description: input.description });
+        leadId = created.data.id;
+      } catch (error: unknown) {
+        if (!(error instanceof EspoCrmHttpError) || !['DUPLICATE_EMAIL', 'CONFLICT'].includes(error.code)) throw error;
+        // Espo's duplicate checker returns the conflicting Lead records in the
+        // 409 body. The client retains IDs only when the returned email exactly
+        // matches the submitted normalized email.
+        let conflicting: { id: string } | null = null;
+        for (const candidateId of [...error.duplicateRecordIds, ...error.conflictRecordIds]) {
+          const candidate = await client.findOne<Record<string, unknown> & { id: string }>('Lead', candidateId);
+          const candidateEmails = [
+            candidate.emailAddress,
+            ...(Array.isArray(candidate.emailAddressData)
+              ? candidate.emailAddressData.map((item) => (item as { emailAddress?: unknown }).emailAddress)
+              : []),
+          ];
+          if (candidateEmails.some((value) => String(value || '').trim().toLowerCase() === normalizedEmail)) {
+            conflicting = { id: candidate.id };
+            break;
+          }
+        }
+        if (!conflicting) conflicting = await client.findByEmail<{ id: string }>('Lead', normalizedEmail);
+        if (conflicting?.id) {
+          leadId = conflicting.id;
+          found = conflicting;
+          await client.put(`/Lead/${leadId}`, { ...base, emailAddress: normalizedEmail });
+        } else {
+          // Espo can flag an unrelated same-name record as a duplicate. We have
+          // already exhausted email matching, so create the distinct lead using
+          // Espo's documented duplicate-check override.
+          const created = await client.post(
+            '/Lead',
+            { ...base, emailAddress: normalizedEmail, description: input.description },
+            { 'X-Skip-Duplicate-Check': 'true' },
+          );
+          leadId = created.data.id;
+        }
+      }
     }
     await client.post('/Note', {
       parentType: 'Lead',

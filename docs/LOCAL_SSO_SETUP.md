@@ -54,9 +54,9 @@ First run will build all containers (~5-10 minutes).
 
 | User | Password | Access |
 |------|----------|--------|
-| admin@physicalrisk.local | ChangeMe123! | All applications (admin) |
-| analyst@physicalrisk.local | ChangeMe123! | MOSS analyst, Repo importer |
-| client@physicalrisk.local | ChangeMe123! | MOSS client, Repo viewer |
+| admin@physicalrisk.local | REDACTED_SEED_ADMIN_PASSWORD | All applications (admin) |
+| analyst@physicalrisk.local | REDACTED_SEED_ADMIN_PASSWORD | MOSS analyst, Repo importer |
+| client@physicalrisk.local | REDACTED_SEED_ADMIN_PASSWORD | MOSS client, Repo viewer |
 
 Keycloak admin console: `admin` / value of `KEYCLOAK_ADMIN_PASSWORD` in `.env.sso`
 

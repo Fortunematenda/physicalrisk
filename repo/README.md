@@ -44,7 +44,7 @@ Default seeded administrator:
 
 ```text
 Email: admin@physicalrisk.com
-Password: ChangeMe123!
+Password: REDACTED_SEED_ADMIN_PASSWORD
 ```
 
 Change the seeded password before production use.

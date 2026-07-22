@@ -1,0 +1,6 @@
+.moss-success-overlay[hidden] { display: none !important; }
+.moss-success-overlay { position: fixed; inset: 0; z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(0,0,0,.62); opacity: 0; visibility: hidden; pointer-events: none; }
+.moss-success-overlay.is-visible { opacity: 1; visibility: visible; pointer-events: auto; }
+.moss-success-dialog { width: min(100%, 30rem); max-width: 30rem; padding: 2rem; text-align: center; background: #fff; border-radius: .5rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.25); }
+.moss-success-icon { font-size: 2rem; color: #16834b; }
+.moss-success-close { cursor: pointer; }

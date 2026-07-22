@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $base = 'http://localhost:4000/api'
-$login = Invoke-RestMethod -Uri "$base/auth/login" -Method POST -ContentType 'application/json' -Body '{"email":"admin@physicalrisk.com","password":"ChangeMe123!"}'
+$login = Invoke-RestMethod -Uri "$base/auth/login" -Method POST -ContentType 'application/json' -Body '{"email":"admin@physicalrisk.com","password":"REDACTED_SEED_ADMIN_PASSWORD"}'
 $token = $login.accessToken
 $headers = @{ 'Authorization' = "Bearer $token" }
 
