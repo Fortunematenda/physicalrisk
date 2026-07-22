@@ -1,0 +1,236 @@
+# Spanish (Spain) translation for SwiftCurrency
+# Copyright (C) 2026 Codeies
+# This file is distributed under the GPL v2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: SwiftCurrency - Multi-Currency Switcher for WooCommerce 1.0.0\n"
+"Report-Msgid-Bugs-To: https://codeies.com\n"
+"POT-Creation-Date: 2026-02-07 01:22+0500\n"
+"PO-Revision-Date: 2026-02-07 01:25+0500\n"
+"Last-Translator: Codeies <support@codeies.com>\n"
+"Language-Team: Spanish <es@li.org>\n"
+"Language: es_ES\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Manual\n"
+"X-Domain: swift-currency\n"
+
+#: swiftcurrency.php:150
+msgid "Settings"
+msgstr "Configuración"
+
+#: swiftcurrency.php:318
+msgid "<strong>SwiftCurrency</strong> requires WooCommerce to be installed and active. Please install and activate %s."
+msgstr "<strong>SwiftCurrency</strong> requiere que WooCommerce esté instalado y activo. Por favor, instale y active %s."
+
+#: swiftcurrency.php:393
+msgid "Cloning is forbidden."
+msgstr "La clonación está prohibida."
+
+#: swiftcurrency.php:400
+msgid "Unserializing instances of this class is forbidden."
+msgstr "La deserialización de instancias de esta clase está prohibida."
+
+#: includes/frontend/class-currency-switcher.php:86
+msgid "Switching currency..."
+msgstr "Cambiando moneda..."
+
+#: includes/frontend/class-currency-switcher.php:127
+msgid "SwiftCurrency: No currencies enabled. Please enable currencies in the plugin settings."
+msgstr "SwiftCurrency: No hay monedas habilitadas. Por favor, habilite monedas en la configuración del plugin."
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:35
+msgid "Currency Switcher"
+msgstr "Selector de Moneda"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:36
+msgid "Display a currency switcher for customers to change currencies."
+msgstr "Muestra un selector de moneda para que los clientes cambien de moneda."
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:51
+msgid "SwiftCurrency"
+msgstr "SwiftCurrency"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:64
+msgid "Switcher Style"
+msgstr "Estilo del Selector"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:69
+msgid "Dropdown"
+msgstr "Desplegable"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:70
+msgid "List"
+msgstr "Lista"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:71
+msgid "Buttons"
+msgstr "Botones"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:78
+msgid "Show Flags"
+msgstr "Mostrar Banderas"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:86
+msgid "Show Currency Code"
+msgstr "Mostrar Código de Moneda"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:94
+msgid "Show Currency Symbol"
+msgstr "Mostrar Símbolo de Moneda"
+
+#: includes/integrations/elementor/class-currency-switcher-widget.php:102
+msgid "Show Currency Name"
+msgstr "Mostrar Nombre de Moneda"
+
+#: includes/security/class-security-manager.php:67
+#: includes/security/class-security-manager.php:68
+msgid "Security"
+msgstr "Seguridad"
+
+#: includes/security/class-security-manager.php:82
+msgid "Security & Compliance"
+msgstr "Seguridad y Cumplimiento"
+
+#: includes/security/class-security-manager.php:87
+msgid "Upgrade to SwiftCurrency Pro"
+msgstr "Actualizar a SwiftCurrency Pro"
+
+#: includes/security/class-security-manager.php:88
+msgid "Get advanced security features, detailed security logs, and rate limiting to protect your store from automated abuse."
+msgstr "Obtenga funciones de seguridad avanzadas, registros de seguridad detallados y limitación de velocidad para proteger su tienda del abuso automatizado."
+
+#: includes/security/class-security-manager.php:90
+msgid "Upgrade to Pro"
+msgstr "Actualizar a Pro"
+
+#: includes/security/class-security-manager.php:99
+msgid "Security Settings"
+msgstr "Configuración de Seguridad"
+
+#: includes/security/class-security-manager.php:105
+msgid "Enable Rate Limiting"
+msgstr "Habilitar Limitación de Velocidad"
+
+#: includes/security/class-security-manager.php:115
+msgid "Limit AJAX requests to prevent abuse"
+msgstr "Limitar solicitudes AJAX para prevenir abusos"
+
+#: includes/security/class-security-manager.php:122
+msgid "Enable Data Encryption"
+msgstr "Habilitar Cifrado de Datos"
+
+#: includes/security/class-security-manager.php:132
+msgid "Encrypt sensitive data in database"
+msgstr "Cifrar datos sensibles en la base de datos"
+
+#: includes/security/class-security-manager.php:139
+msgid "GDPR Mode"
+msgstr "Modo RGPD"
+
+#: includes/security/class-security-manager.php:149
+msgid "Enable GDPR compliance features"
+msgstr "Habilitar funciones de cumplimiento del RGPD"
+
+#: includes/security/class-security-manager.php:152
+msgid "Anonymize IP addresses and respect Do Not Track headers"
+msgstr "Anonimizar direcciones IP y respetar encabezados Do Not Track"
+
+#: includes/security/class-security-manager.php:159
+msgid "Security Logging"
+msgstr "Registro de Seguridad"
+
+#: includes/security/class-security-manager.php:169
+msgid "Log security-related events"
+msgstr "Registrar eventos relacionados con la seguridad"
+
+#: includes/security/class-security-manager.php:180
+msgid "Recent Security Events"
+msgstr "Eventos de Seguridad Recientes"
+
+#: includes/security/class-security-manager.php:258
+#: includes/security/class-security-manager.php:295
+msgid "Time"
+msgstr "Hora"
+
+#: includes/security/class-security-manager.php:259
+#: includes/security/class-security-manager.php:296
+msgid "Event"
+msgstr "Evento"
+
+#: includes/security/class-security-manager.php:260
+#: includes/security/class-security-manager.php:297
+msgid "IP Address"
+msgstr "Dirección IP"
+
+#: includes/security/class-security-manager.php:261
+#: includes/security/class-security-manager.php:298
+msgid "User"
+msgstr "Usuario"
+
+#: includes/security/class-security-manager.php:287
+msgid "No security events logged yet."
+msgstr "Aún no se han registrado eventos de seguridad."
+
+#: includes/security/class-security-manager.php:336
+#: includes/security/class-security-manager.php:373
+msgid "Too many requests. Please try again later."
+msgstr "Demasiadas solicitudes. Por favor, inténtelo de nuevo más tarde."
+
+#: includes/security/class-gdpr-compliance.php:91
+msgid "SwiftCurrency Multi-Currency"
+msgstr "SwiftCurrency Multi-Moneda"
+
+#: includes/security/class-gdpr-compliance.php:92
+msgid "Our multi-currency plugin collects and stores certain data to provide currency conversion functionality."
+msgstr "Nuestro plugin multi-moneda recopila y almacena ciertos datos para proporcionar funcionalidad de conversión de moneda."
+
+#: includes/security/class-gdpr-compliance.php:93
+msgid "What Data We Collect"
+msgstr "Qué Datos Recopilamos"
+
+#: includes/security/class-gdpr-compliance.php:94
+msgid "Currency preferences: We store your selected currency in a cookie to remember your preference."
+msgstr "Preferencias de moneda: Almacenamos su moneda seleccionada en una cookie para recordar su preferencia."
+
+#: includes/security/class-gdpr-compliance.php:95
+msgid "IP Address: We may use your IP address for geolocation to suggest a currency (anonymized if GDPR mode is enabled)."
+msgstr "Dirección IP: Podemos usar su dirección IP para geolocalización para sugerir una moneda (anonimizada si el modo RGPD está habilitado)."
+
+#: includes/security/class-gdpr-compliance.php:96
+msgid "Order currency: We store which currency was used for each order."
+msgstr "Moneda del pedido: Almacenamos qué moneda se utilizó para cada pedido."
+
+#: includes/security/class-gdpr-compliance.php:97
+msgid "How Long We Keep Your Data"
+msgstr "Cuánto Tiempo Conservamos Sus Datos"
+
+#: includes/security/class-gdpr-compliance.php:98
+msgid "Currency preference cookies are stored for 30 days. Order currency data is kept as long as the order exists. IP addresses are anonymized immediately if GDPR mode is enabled."
+msgstr "Las cookies de preferencia de moneda se almacenan durante 30 días. Los datos de moneda del pedido se conservan mientras exista el pedido. Las direcciones IP se anonimizan inmediatamente si el modo RGPD está habilitado."
+
+#: includes/security/class-gdpr-compliance.php:99
+msgid "Your Rights"
+msgstr "Sus Derechos"
+
+#: includes/security/class-gdpr-compliance.php:100
+msgid "You can request to export or delete your currency preference data at any time. Contact us to exercise your rights."
+msgstr "Puede solicitar exportar o eliminar sus datos de preferencia de moneda en cualquier momento. Contáctenos para ejercer sus derechos."
+
+#: includes/security/class-gdpr-compliance.php:112
+msgid "SwiftCurrency Data"
+msgstr "Datos de SwiftCurrency"
+
+#: includes/security/class-gdpr-compliance.php:145
+msgid "Currency Preferences"
+msgstr "Preferencias de Moneda"
+
+#: includes/security/class-gdpr-compliance.php:149
+msgid "Preferred Currency"
+msgstr "Moneda Preferida"
+
+#: includes/security/class-gdpr-compliance.php:167
+msgid "Order Currency Data"
+msgstr "Datos de Moneda del Pedido"

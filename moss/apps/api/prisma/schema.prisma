@@ -1,0 +1,792 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// SUPER_ADMIN = system admin; REVIEWER = senior reviewer; SALES = sales user (kept for MVP compatibility)
+enum SystemRole {
+  SUPER_ADMIN
+  METHODOLOGY_ADMIN
+  ANALYST
+  REVIEWER
+  SALES
+  CLIENT_EXECUTIVE
+  CLIENT_CONTRIBUTOR
+  AUDITOR
+}
+
+enum QuestionnaireStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum ValueType {
+  TEXT
+  NUMBER
+  CURRENCY
+  PERCENT
+  BOOLEAN
+  SELECT
+  DATE
+}
+
+enum AssessmentStatus {
+  DRAFT
+  IN_PROGRESS
+  AWAITING_CONTRIBUTOR
+  SUBMITTED
+  REVIEWED
+  /// Legacy pilot statuses retained for existing rows; Lean MVP uses DRAFT→…→REPORT_ISSUED.
+  AUTOMATED_EVALUATION_COMPLETE
+  EVIDENCE_REVIEW
+  ANALYST_REVIEW
+  QUALITY_ASSURANCE
+  APPROVED
+  REPORT_GENERATED
+  REPORT_ISSUED
+  REMEDIATION_IN_PROGRESS
+  REASSESSMENT_DUE
+  CLOSED
+  ARCHIVED
+}
+
+enum EvidenceStatus {
+  SUBMITTED
+  PENDING
+  UNDER_REVIEW
+  ACCEPTED
+  VERIFIED
+  PARTIALLY_VERIFIED
+  REJECTED
+  OUTDATED
+  MISSING
+  MISSING_INFORMATION
+  NOT_APPLICABLE
+}
+
+enum FindingSeverity {
+  INFORMATIONAL
+  LOW
+  MEDIUM
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum FindingStatus {
+  DRAFT
+  UNDER_REVIEW
+  CONFIRMED
+  DISPUTED
+  ACCEPTED
+  REMEDIATION_IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum RecommendationStatus {
+  GENERATED
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+  DISMISSED
+}
+
+enum ReportStatus {
+  DRAFT
+  GENERATED
+  APPROVED
+  ISSUED
+  SUPERSEDED
+}
+
+enum ReportType {
+  PRELIMINARY_EXECUTIVE
+  VERIFIED_EXECUTIVE
+  ANALYST_WORKING_PAPER
+  EVIDENCE_REGISTER
+  FINDINGS_REPORT
+  REMEDIATION_ACTION_PLAN
+  REASSESSMENT_COMPARISON
+}
+
+enum SyncStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  SYNCED
+  FAILED
+  RETRYING
+  SKIPPED
+  CANCELLED
+}
+
+enum AssignmentRole {
+  PRIMARY_ANALYST
+  SENIOR_REVIEWER
+  CONTRIBUTOR
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum OverrideStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum QaItemStatus {
+  PENDING
+  PASSED
+  FAILED
+  NOT_APPLICABLE
+}
+
+enum ActionItemStatus {
+  NOT_STARTED
+  PLANNED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  VERIFIED
+  CANCELLED
+}
+
+enum EmailJobStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum AssumptionRecordStatus {
+  ACTIVE
+  INACTIVE
+  SUPERSEDED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  systemRole   SystemRole   @default(CLIENT_CONTRIBUTOR)
+  isActive     Boolean      @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+  createdAssessments AssessmentSession[] @relation("AssessmentCreator")
+  reviewedAssessments AssessmentSession[] @relation("AssessmentReviewer")
+  approvedAssessments AssessmentSession[] @relation("AssessmentApprover")
+  unlockedAssessments AssessmentSession[] @relation("AssessmentUnlocker")
+  generatedReports Report[] @relation("ReportGenerator")
+  assignmentsMade AssessmentAssignment[] @relation("AssignmentAssigner")
+  assignmentsHeld AssessmentAssignment[] @relation("AssignmentAssignee")
+  evidenceReviewed EvidenceDocument[] @relation("EvidenceReviewer")
+  findingsOwned Finding[] @relation("FindingAnalyst")
+  findingsReviewed Finding[] @relation("FindingReviewer")
+  overridesRequested ScoreOverride[] @relation("OverrideRequester")
+  overridesDecided ScoreOverride[] @relation("OverrideDecider")
+  qaChecks QaChecklistItem[] @relation("QaChecker")
+  actionItemsOwned ActionItem[] @relation("ActionOwner")
+  actionItemsVerified ActionItem[] @relation("ActionVerifier")
+  assumptionsApproved CalibrationAssumption[] @relation("AssumptionApprover")
+  auditEvents  AuditEvent[]
+}
+
+model Organisation {
+  id               String       @id @default(cuid())
+  name             String
+  industry         String?
+  registrationNo   String?
+  website          String?
+  primaryEmail     String?
+  primaryPhone     String?
+  espocrmAccountId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  memberships      Membership[]
+  assessments      AssessmentSession[]
+  crmSyncRecords   CrmSyncRecord[]
+  actionItems      ActionItem[]
+}
+
+model Membership {
+  id             String     @id @default(cuid())
+  userId         String
+  organisationId String
+  role           SystemRole
+  createdAt      DateTime   @default(now())
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  @@unique([userId, organisationId])
+}
+
+model Questionnaire {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  versions    QuestionnaireVersion[]
+}
+
+model QuestionnaireVersion {
+  id              String              @id @default(cuid())
+  questionnaireId String
+  version         String
+  status          QuestionnaireStatus @default(DRAFT)
+  methodologyNote String?
+  publishedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  questionnaire   Questionnaire       @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  inputDefinitions AssessmentInputDefinition[]
+  questions       Question[]
+  assumptions     CalibrationAssumption[]
+  recommendationRules RecommendationRule[]
+  assessments     AssessmentSession[]
+  @@unique([questionnaireId, version])
+}
+
+model AssessmentInputDefinition {
+  id                     String   @id @default(cuid())
+  questionnaireVersionId String
+  code                   String
+  label                  String
+  guidance               String?
+  valueType              ValueType
+  unit                   String?
+  required               Boolean  @default(true)
+  options                Json?
+  sortOrder              Int
+  defaultValue           Json?
+  questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id], onDelete: Cascade)
+  values                 AssessmentInputValue[]
+  evidence               EvidenceDocument[]
+  @@unique([questionnaireVersionId, code])
+}
+
+model Question {
+  id                     String   @id @default(cuid())
+  questionnaireVersionId String
+  code                   String
+  category               String
+  text                   String
+  guidance               String?
+  evidenceHint           String?
+  weight                 Decimal  @db.Decimal(8, 2)
+  required               Boolean  @default(true)
+  sortOrder              Int
+  questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id], onDelete: Cascade)
+  options                ResponseOption[]
+  responses              AssessmentResponse[]
+  recommendationRules    RecommendationRule[]
+  evidence               EvidenceDocument[]
+  @@unique([questionnaireVersionId, code])
+}
+
+model ResponseOption {
+  id         String   @id @default(cuid())
+  questionId String
+  label      String
+  riskScore  Decimal  @db.Decimal(8, 2)
+  sortOrder  Int
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  responses  AssessmentResponse[]
+  @@unique([questionId, label])
+}
+
+model CalibrationAssumption {
+  id                     String  @id @default(cuid())
+  questionnaireVersionId String
+  code                   String
+  label                  String
+  value                  Decimal @db.Decimal(18, 8)
+  format                 String
+  description            String?
+  dataType               String  @default("NUMBER")
+  unit                   String?
+  minValue               Decimal? @db.Decimal(18, 8)
+  maxValue               Decimal? @db.Decimal(18, 8)
+  formulaUsage           String?
+  effectiveFrom          DateTime?
+  expiresAt              DateTime?
+  status                 AssumptionRecordStatus @default(ACTIVE)
+  changeReason           String?
+  approvedById           String?
+  previousVersionId      String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @default(now()) @updatedAt
+  questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id], onDelete: Cascade)
+  approvedBy             User? @relation("AssumptionApprover", fields: [approvedById], references: [id])
+  previousVersion        CalibrationAssumption? @relation("AssumptionVersions", fields: [previousVersionId], references: [id])
+  nextVersions           CalibrationAssumption[] @relation("AssumptionVersions")
+  @@unique([questionnaireVersionId, code])
+  @@index([code, status])
+}
+
+model AssessmentSession {
+  id                     String           @id @default(cuid())
+  reference              String           @unique
+  organisationId         String
+  questionnaireVersionId String
+  createdById            String
+  title                  String
+  status                 AssessmentStatus @default(DRAFT)
+  executiveUrgency       Int              @default(50)
+  engagementReadiness    Int              @default(50)
+  submittedAt            DateTime?
+  reviewedAt             DateTime?
+  reviewedById           String?
+  reviewNote             String?
+  approvedAt             DateTime?
+  approvedById           String?
+  lockedAt               DateTime?
+  unlockedAt             DateTime?
+  unlockedById           String?
+  unlockReason           String?
+  returnReason           String?
+  parentAssessmentId     String?
+  espocrmOpportunityId   String?
+  espocrmTaskId          String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  organisation           Organisation     @relation(fields: [organisationId], references: [id])
+  questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id])
+  createdBy              User             @relation("AssessmentCreator", fields: [createdById], references: [id])
+  reviewedBy             User?            @relation("AssessmentReviewer", fields: [reviewedById], references: [id])
+  approvedBy             User?            @relation("AssessmentApprover", fields: [approvedById], references: [id])
+  unlockedBy             User?            @relation("AssessmentUnlocker", fields: [unlockedById], references: [id])
+  parentAssessment       AssessmentSession? @relation("AssessmentReassessments", fields: [parentAssessmentId], references: [id])
+  reassessments          AssessmentSession[] @relation("AssessmentReassessments")
+  inputValues            AssessmentInputValue[]
+  responses              AssessmentResponse[]
+  scoreSnapshots         ScoreSnapshot[]
+  evidence               EvidenceDocument[]
+  findings               Finding[]
+  recommendations        Recommendation[]
+  reports                Report[]
+  crmSyncRecords         CrmSyncRecord[]
+  assignments            AssessmentAssignment[]
+  scoreOverrides         ScoreOverride[]
+  qaChecklist            QaChecklistItem[]
+  actionItems            ActionItem[]
+  @@index([status])
+  @@index([organisationId])
+  @@index([organisationId, status])
+  @@index([reference])
+}
+
+model AssessmentAssignment {
+  id             String           @id @default(cuid())
+  assessmentId   String
+  userId         String
+  role           AssignmentRole
+  assignedById   String
+  assignedAt     DateTime         @default(now())
+  dueDate        DateTime?
+  completedAt    DateTime?
+  status         AssignmentStatus @default(ASSIGNED)
+  notes          String?
+  assessment     AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  user           User             @relation("AssignmentAssignee", fields: [userId], references: [id])
+  assignedBy     User             @relation("AssignmentAssigner", fields: [assignedById], references: [id])
+  @@index([userId, status])
+  @@index([assessmentId, role])
+}
+
+model AssessmentInputValue {
+  id                String @id @default(cuid())
+  assessmentId      String
+  inputDefinitionId String
+  value             Json
+  updatedAt         DateTime @updatedAt
+  assessment        AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  inputDefinition   AssessmentInputDefinition @relation(fields: [inputDefinitionId], references: [id])
+  @@unique([assessmentId, inputDefinitionId])
+}
+
+model AssessmentResponse {
+  id               String @id @default(cuid())
+  assessmentId     String
+  questionId       String
+  responseOptionId String?
+  comment          String?
+  analystOverrideRisk Decimal? @db.Decimal(8, 2)
+  overrideReason   String?
+  updatedAt        DateTime @updatedAt
+  assessment       AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  question         Question @relation(fields: [questionId], references: [id])
+  responseOption   ResponseOption? @relation(fields: [responseOptionId], references: [id])
+  @@unique([assessmentId, questionId])
+}
+
+model ScoreSnapshot {
+  id                 String   @id @default(cuid())
+  assessmentId       String
+  modelVersion       String
+  overallRiskScore   Decimal  @db.Decimal(8, 2)
+  maturityScore      Decimal  @db.Decimal(8, 2)
+  riskBand           String
+  methodologyConfidence Decimal @db.Decimal(8, 4)
+  evidenceConfidence Decimal @db.Decimal(8, 4)
+  opportunityScore   Decimal @db.Decimal(8, 2)
+  categoryScores     Json
+  leakageResult      Json
+  calculationTrace   Json
+  createdAt          DateTime @default(now())
+  assessment         AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+}
+
+model ScoreOverride {
+  id                   String         @id @default(cuid())
+  assessmentId         String
+  originalScore        Decimal        @db.Decimal(8, 2)
+  proposedScore        Decimal        @db.Decimal(8, 2)
+  finalScore           Decimal?       @db.Decimal(8, 2)
+  reason               String
+  supportingEvidenceIds Json?
+  requestedById        String
+  requestedAt          DateTime       @default(now())
+  decidedById          String?
+  decidedAt            DateTime?
+  reviewerComments     String?
+  status               OverrideStatus @default(REQUESTED)
+  assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  requestedBy          User           @relation("OverrideRequester", fields: [requestedById], references: [id])
+  decidedBy            User?          @relation("OverrideDecider", fields: [decidedById], references: [id])
+  @@index([assessmentId, status])
+}
+
+model EvidenceDocument {
+  id                 String         @id @default(cuid())
+  assessmentId       String
+  questionId         String?
+  questionCode       String?
+  inputDefinitionId  String?
+  findingId          String?
+  title              String
+  documentType       String?
+  description        String?
+  fileName           String
+  mimeType           String
+  sizeBytes          Int
+  storageKey         String
+  evidencePeriod     String?
+  evidenceSource     String?
+  uploadedById       String?
+  status             EvidenceStatus @default(PENDING)
+  reviewerId         String?
+  reviewedAt         DateTime?
+  reviewerNote       String?
+  uploadedAt         DateTime       @default(now())
+  assessment         AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  question           Question? @relation(fields: [questionId], references: [id])
+  inputDefinition    AssessmentInputDefinition? @relation(fields: [inputDefinitionId], references: [id])
+  finding            Finding? @relation(fields: [findingId], references: [id])
+  reviewer           User? @relation("EvidenceReviewer", fields: [reviewerId], references: [id])
+  @@index([assessmentId, status])
+}
+
+model Finding {
+  id                   String          @id @default(cuid())
+  assessmentId         String
+  reference            String
+  title                String
+  category             String
+  description          String
+  relatedQuestionCodes Json?
+  relatedEvidenceIds   Json?
+  rootCause            String?
+  riskImplication      String?
+  governanceImplication String?
+  financialImplication String?
+  estimatedExposure    Decimal?        @db.Decimal(18, 2)
+  severity             FindingSeverity
+  likelihood           String?
+  impact               String?
+  priority             FindingSeverity?
+  recommendationText   String?
+  managementResponse   String?
+  analystId            String?
+  reviewerId           String?
+  status               FindingStatus   @default(DRAFT)
+  targetResolutionDate DateTime?
+  financialImpact      Decimal?        @db.Decimal(18, 2)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  analyst              User? @relation("FindingAnalyst", fields: [analystId], references: [id])
+  reviewer             User? @relation("FindingReviewer", fields: [reviewerId], references: [id])
+  evidence             EvidenceDocument[]
+  actionItems          ActionItem[]
+  @@unique([assessmentId, reference])
+  @@index([assessmentId, status])
+}
+
+model RecommendationRule {
+  id                     String          @id @default(cuid())
+  questionnaireVersionId String
+  code                   String
+  title                  String
+  category               String
+  priority               FindingSeverity
+  triggerQuestionId      String?
+  triggerMinRisk         Decimal?        @db.Decimal(8, 2)
+  summary                String
+  serviceOffering        String?
+  questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id], onDelete: Cascade)
+  triggerQuestion        Question? @relation(fields: [triggerQuestionId], references: [id])
+  recommendations        Recommendation[]
+  @@unique([questionnaireVersionId, code])
+}
+
+model Recommendation {
+  id                   String               @id @default(cuid())
+  assessmentId         String
+  recommendationRuleId String?
+  title                String
+  category             String
+  priority             FindingSeverity
+  summary              String
+  originalSummary      String?
+  suggestedNextStep    String?
+  serviceOffering      String?
+  responsibleRole      String?
+  expectedOutcome      String?
+  estimatedEffort      String?
+  estimatedCost        Decimal?             @db.Decimal(18, 2)
+  expectedBenefit      Decimal?             @db.Decimal(18, 2)
+  targetTimeframe      String?
+  includeInReport      Boolean              @default(true)
+  status               RecommendationStatus @default(GENERATED)
+  targetDate           DateTime?
+  ownerName            String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  recommendationRule   RecommendationRule? @relation(fields: [recommendationRuleId], references: [id])
+  actionItems          ActionItem[]
+}
+
+model QaChecklistItem {
+  id           String      @id @default(cuid())
+  assessmentId String
+  code         String
+  label        String
+  status       QaItemStatus @default(PENDING)
+  comment      String?
+  checkedById  String?
+  checkedAt    DateTime?
+  sortOrder    Int         @default(0)
+  assessment   AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  checkedBy    User? @relation("QaChecker", fields: [checkedById], references: [id])
+  @@unique([assessmentId, code])
+}
+
+model ActionItem {
+  id                 String          @id @default(cuid())
+  reference          String
+  assessmentId       String
+  organisationId     String
+  findingId          String?
+  recommendationId   String?
+  title              String
+  description        String?
+  ownerUserId        String?
+  ownerName          String?
+  department         String?
+  priority           FindingSeverity @default(MEDIUM)
+  startDate          DateTime?
+  dueDate            DateTime?
+  status             ActionItemStatus @default(NOT_STARTED)
+  progressPercent    Int             @default(0)
+  estimatedCost      Decimal?        @db.Decimal(18, 2)
+  expectedBenefit    Decimal?        @db.Decimal(18, 2)
+  actualBenefit      Decimal?        @db.Decimal(18, 2)
+  completionEvidence String?
+  verificationStatus String?
+  verifiedById       String?
+  verifiedAt         DateTime?
+  comments           String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  assessment         AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  organisation       Organisation    @relation(fields: [organisationId], references: [id])
+  finding            Finding?        @relation(fields: [findingId], references: [id])
+  recommendation     Recommendation? @relation(fields: [recommendationId], references: [id])
+  ownerUser          User?           @relation("ActionOwner", fields: [ownerUserId], references: [id])
+  verifiedBy         User?           @relation("ActionVerifier", fields: [verifiedById], references: [id])
+  @@unique([assessmentId, reference])
+  @@index([organisationId, status])
+  @@index([dueDate, status])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  assessmentId   String
+  reportType     ReportType   @default(PRELIMINARY_EXECUTIVE)
+  version        Int          @default(1)
+  status         ReportStatus @default(DRAFT)
+  title          String
+  storageKey     String?
+  fileName       String?
+  mimeType       String       @default("application/pdf")
+  generatedById  String?
+  generatedAt    DateTime?
+  approvedAt     DateTime?
+  issuedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  assessment     AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  generatedBy    User?        @relation("ReportGenerator", fields: [generatedById], references: [id])
+  @@index([assessmentId])
+  @@index([assessmentId, reportType, version])
+}
+
+model CrmSyncRecord {
+  id             String     @id @default(cuid())
+  organisationId String?
+  assessmentId   String?
+  entityType     String
+  localEntityId  String
+  remoteEntityId String?
+  jobType        String?
+  action         String?
+  status         SyncStatus @default(PENDING)
+  payload        Json
+  response       Json?
+  errorMessage   String?
+  errorCode      String?
+  attemptCount   Int        @default(0)
+  nextRetryAt    DateTime?
+  lastAttemptAt  DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  organisation   Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  assessment     AssessmentSession? @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  @@index([entityType, localEntityId])
+  @@index([status])
+  @@index([status, nextRetryAt])
+  @@index([jobType, status])
+}
+
+model EmailJob {
+  id            String         @id @default(cuid())
+  recipient     String
+  subject       String
+  template      String
+  payload       Json?
+  relatedType   String?
+  relatedId     String?
+  organisationId String?
+  status        EmailJobStatus @default(QUEUED)
+  attemptCount  Int            @default(0)
+  errorMessage  String?
+  sentAt        DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  @@index([status, createdAt])
+}
+
+/// Key/value app settings (e.g. key "smtp" for outbound mail transport).
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([key])
+}
+
+model AuditEvent {
+  id             String   @id @default(cuid())
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String
+  organisationId String?
+  oldValue       Json?
+  newValue       Json?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([entityType, entityId])
+  @@index([organisationId, createdAt])
+}
+
+model PublicLead {
+  id                    String    @id @default(cuid())
+  organisationName      String
+  industry              String?
+  firstName             String
+  lastName              String
+  email                 String
+  phone                 String?
+  source                String?
+  status                String    @default("CAPTURED")
+  organisationId        String?
+  assessmentId          String?
+  espocrmLeadId         String?
+  espocrmContactId      String?
+  progressPhase         String?
+  progressLabel         String?
+  progressPercent       Int       @default(0)
+  progressCalStep       Int?
+  progressQuestionIndex Int?
+  lastProgressAt        DateTime?
+  thankYouSentAt        DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  @@index([email])
+  @@index([status])
+  @@index([assessmentId])
+}
+
+model ContactSubmission {
+  id              String   @id @default(cuid())
+  publicReference String   @unique
+  fingerprint     String   @unique
+  fullName        String
+  organisation    String
+  email           String
+  programmeInterest String
+  description     String
+  source          String
+  espocrmLeadId   String?
+  emailJobId      String?
+  crmStatus       String   @default("PENDING")
+  notificationStatus String @default("PENDING")
+  safeErrorCode   String?
+  attemptCount    Int      @default(0)
+  nextAttemptAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([email])
+  @@index([crmStatus, nextAttemptAt])
+}

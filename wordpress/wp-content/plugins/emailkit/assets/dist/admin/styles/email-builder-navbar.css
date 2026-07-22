@@ -1,0 +1,59 @@
+/* .email-builder-header{
+    padding: 0 30px;
+    transition: all 0.4s;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    -webkit-backdrop-filter: blur(30px);
+    backdrop-filter: blur(30px);
+    background-color: #ffffff80;
+    margin-left: -20px;
+    position: sticky;
+    top: 32px;
+}
+.email-builder-header .email-builder-header-row{
+    padding-top: 5px;
+    padding-bottom: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.email-builder-header .email-builder-header-row .email-builder-left-column{
+    display: flex;
+}
+.email-builder-header .email-builder-header-row .email-builder-left-column .email-builder-header-logo{
+    height: 43px;
+    margin-top: 5px;
+    margin-left: 40px;
+    padding-right: 5px;
+} */
+
+.email_page_settings-page #wpfooter,
+.email_page_settings-page #adminmenu,
+.email_page_settings-page #adminmenuback,
+.email_page_settings-page #wpadminbar {
+    display: none;
+}
+
+.email_page_settings-page #wpcontent {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.email_page_settings-page #wpbody-content {
+    padding-bottom: 0 !important;
+}
+
+.email_page_settings-page .wp-toolbar {
+    padding-top: 0 !important;
+}
+
+/* For Iframe body */
+
+.iframe-container {
+    display: block;
+    height: 100vh;
+    width: 100%;
+    /* margin-top: -32px; */
+    z-index: 9999;
+    /* position: absolute; */
+    /* top: 0; */
+}

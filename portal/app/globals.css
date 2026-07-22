@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pr-red: #c41230;
+  --pr-red-deep: #9a0e26;
+  --pr-ink: #0f1419;
+  --pr-hero: #121820;
+  --pr-surface: #f4f6f8;
+  --font-display: var(--font-display), Georgia, serif;
+  --font-sans: var(--font-sans), system-ui, sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--pr-hero);
+  color: #f7f3ef;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+@keyframes pr-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pr-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes pr-grid {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(48px);
+  }
+}
+
+.pr-rise {
+  animation: pr-rise 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pr-rise-delay-1 {
+  animation-delay: 0.08s;
+}
+
+.pr-rise-delay-2 {
+  animation-delay: 0.16s;
+}
+
+.pr-rise-delay-3 {
+  animation-delay: 0.24s;
+}
+
+.pr-glow {
+  animation: pr-pulse 9s ease-in-out infinite;
+}
+
+.pr-grid-drift {
+  animation: pr-grid 28s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-rise,
+  .pr-glow,
+  .pr-grid-drift {
+    animation: none !important;
+  }
+}

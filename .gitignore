@@ -1,0 +1,88 @@
+# Secrets and environment configuration
+.env
+.env.*
+**/.env
+**/.env.*
+!.env*.example
+!**/.env*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+*.keystore
+
+# Dependencies and generated application output
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+dist/
+**/dist/
+# WordPress ships required runtime assets in directories named dist.
+!wordpress/**/dist/
+!wordpress/**/dist/**
+coverage/
+**/coverage/
+.turbo/
+**/.turbo/
+*.tsbuildinfo
+
+# Runtime data, logs, databases and backups
+backups/
+**/backups/
+*.backup
+*.backup-*
+*.bak
+*.log
+logs/
+**/logs/
+*.sql
+!moss/apps/api/prisma/migrations/**/migration.sql
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+repo/storage/**
+!repo/storage/**/.gitkeep
+tmp/
+**/tmp/
+cache/
+**/cache/
+
+# WordPress runtime/private content
+wordpress/.git/
+wordpress/wp-config.php
+wordpress/wp-config.php.*
+!wordpress/wp-config-sample.php
+wordpress/wp-content/uploads/
+wordpress/wp-content/cache/
+wordpress/wp-content/upgrade/
+wordpress/wp-content/backups/
+wordpress/wp-content/ai1wm-backups/
+wordpress/wp-content/wflogs/
+wordpress/wp-content/debug.log
+# Conservatively exclude a minified vendor worker that triggers token signatures.
+wordpress/wp-includes/js/dist/script-modules/vips/worker.min.js
+
+# Docker/runtime infrastructure
+**/docker-data/
+**/volumes/
+infrastructure/nginx/certificates/
+/var/
+
+# Local editor, agent and OS metadata
+.agents/
+.codex/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

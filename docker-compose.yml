@@ -1,0 +1,385 @@
+﻿services:
+  # WordPress website (test.physicalrisk.com)
+  wordpress-db:
+    image: mysql:8.0
+    container_name: wordpress-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
+      MYSQL_USER: ${WORDPRESS_DB_USER:-wpuser}
+      MYSQL_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${WORDPRESS_DB_ROOT_PASSWORD}
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - wordpress_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [physicalrisk-network]
+
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress-app
+    restart: unless-stopped
+    depends_on:
+      wordpress-db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wpuser}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      MOSS_CONTACT_API_URL: https://moss.physicalrisk.com/api/public/contact
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME', 'https://test.physicalrisk.com');
+        define('WP_SITEURL', 'https://test.physicalrisk.com');
+        define('FORCE_SSL_ADMIN', true);
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+          $$_SERVER['HTTPS'] = 'on';
+        }
+    volumes:
+      - ./wordpress:/var/www/html
+      - ./php/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+    networks: [physicalrisk-network]
+
+  # â”€â”€â”€ Identity Provider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  keycloak-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_POSTGRES_DB:-keycloak}
+      POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
+    volumes:
+      - keycloak_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KEYCLOAK_POSTGRES_USER:-keycloak}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [physicalrisk-network]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_POSTGRES_DB:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.physicalrisk.com}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin@2026}
+    volumes:
+      - ./auth/keycloak/realm:/opt/keycloak/data/import:ro
+      - ./auth/keycloak/themes/physicalrisk:/opt/keycloak/themes/physicalrisk:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    ports:
+      - "8086:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [physicalrisk-network]
+
+  # â”€â”€â”€ Portal (Application Launcher) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  portal:
+    build:
+      context: ./portal
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+        NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+        NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+        NEXT_PUBLIC_KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+    restart: unless-stopped
+    environment:
+      HOSTNAME: "0.0.0.0"
+      AUTH_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+      NEXTAUTH_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+      # false: always use NEXTAUTH_URL for OAuth redirect_uri (never Host: localhost)
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
+      NEXTAUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      KEYCLOAK_CLIENT_ID: ${PORTAL_KEYCLOAK_CLIENT_ID:-physicalrisk-portal}
+      KEYCLOAK_CLIENT_SECRET: ${PORTAL_KEYCLOAK_CLIENT_SECRET:-change-this-local-portal-secret}
+      NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+      NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+      NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      SSO_DEBUG: ${SSO_DEBUG:-false}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    ports:
+      - "3010:3000"
+    networks: [physicalrisk-network]
+
+  # â”€â”€â”€ MOSS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  moss-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moss
+      POSTGRES_USER: moss
+      POSTGRES_PASSWORD: change_me_now
+    volumes:
+      - moss_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moss -d moss"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [physicalrisk-network]
+
+  moss-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - moss_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [physicalrisk-network]
+
+  moss-minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: moss-storage
+      MINIO_ROOT_PASSWORD: change_me_storage
+    volumes:
+      - moss_minio:/data
+    networks: [physicalrisk-network]
+
+  moss-api:
+    env_file:
+      - ./moss/.env
+    build:
+      context: ./moss
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://moss:change_me_now@moss-db:5432/moss?schema=public
+      REDIS_URL: redis://moss-redis:6379
+      JWT_SECRET: sso-managed-jwt-secret-for-moss-local
+      JWT_EXPIRES_IN: 8h
+      CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-https://moss.physicalrisk.com,https://apps.physicalrisk.com}
+      PORT: 4000
+      S3_ENDPOINT: http://moss-minio:9000
+      S3_PUBLIC_ENDPOINT: https://storage.physicalrisk.com
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: moss-storage
+      S3_SECRET_KEY: change_me_storage
+      S3_BUCKET: moss-evidence
+      S3_FORCE_PATH_STYLE: "true"
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+      CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-info@physicalrisk.com}
+      CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
+      CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}
+      CONTACT_ALLOWED_ORIGINS: ${CONTACT_ALLOWED_ORIGINS:-https://test.physicalrisk.com}
+      CONTACT_ALLOWED_HOSTS: ${CONTACT_ALLOWED_HOSTS:-test.physicalrisk.com}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      ESPO_LEAD_PROGRAMME_FIELD: ${ESPO_LEAD_PROGRAMME_FIELD:-}
+      ESPO_LEAD_SOURCE_FIELD: ${ESPO_LEAD_SOURCE_FIELD:-source}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    depends_on:
+      moss-db:
+        condition: service_healthy
+      moss-redis:
+        condition: service_healthy
+      moss-minio:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+    ports:
+      - "4001:4000"
+    networks: [physicalrisk-network]
+
+  moss-web:
+    build:
+      context: ./moss
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/gw
+        NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+
+    restart: unless-stopped
+
+    environment:
+      NEXT_PUBLIC_API_URL: /api/gw
+      INTERNAL_API_URL: http://moss-api:4000
+      AUTH_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+      NEXTAUTH_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
+      NEXTAUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
+      KEYCLOAK_CLIENT_SECRET: ${MOSS_KEYCLOAK_CLIENT_SECRET:-change-this-local-moss-secret}
+      NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+      NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+      NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+      ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
+      NEXT_PUBLIC_ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
+      SSO_DEBUG: ${SSO_DEBUG:-false}
+    depends_on:
+      - moss-api
+    ports:
+      - "3001:3000"
+    networks: [physicalrisk-network]
+
+  # â”€â”€â”€ Repository â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  repo-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gateway
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: change-this-database-password
+    volumes:
+      - repo_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [physicalrisk-network]
+
+  repo-api:
+    build:
+      context: ./repo
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://gateway:change-this-database-password@repo-db:5432/gateway
+      API_PORT: 4000
+      JWT_SECRET: sso-managed-jwt-secret-for-repo-local
+      AUTH_DISABLED: "false"
+      CORS_ORIGIN: ${REPO_CORS_ORIGINS:-https://repo.physicalrisk.com,https://apps.physicalrisk.com}
+      STORAGE_ROOT: /app/storage
+      MAX_UPLOAD_MB: 100
+      DB_SYNCHRONIZE: "true"
+      DEFAULT_ADMIN_EMAIL: admin@physicalrisk.com
+      DEFAULT_ADMIN_PASSWORD: admin@2026
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+    volumes:
+      - repo_storage:/app/storage
+    depends_on:
+      repo-db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    ports:
+      - "4002:4000"
+    networks: [physicalrisk-network]
+
+  repo-web:
+    build:
+      context: ./repo
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/gw
+        NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+
+    restart: unless-stopped
+
+    environment:
+      NEXT_PUBLIC_API_URL: /api/gw
+      INTERNAL_API_URL: http://repo-api:4000
+      AUTH_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+      NEXTAUTH_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+      AUTH_TRUST_HOST: "true"
+      AUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
+      NEXTAUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
+      KEYCLOAK_CLIENT_SECRET: ${REPO_KEYCLOAK_CLIENT_SECRET:-change-this-local-repo-secret}
+      NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-https://apps.physicalrisk.com}
+      NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-https://moss.physicalrisk.com}
+      NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-https://repo.physicalrisk.com}
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
+      ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
+      NEXT_PUBLIC_ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
+      SSO_DEBUG: ${SSO_DEBUG:-false}
+    depends_on:
+      - repo-api
+    ports:
+      - "3002:3000"
+    networks: [physicalrisk-network]
+
+  # â”€â”€â”€ Reverse Proxy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - wordpress
+      - keycloak
+      - portal
+      - moss-web
+      - moss-api
+      - repo-web
+      - repo-api
+    networks:
+      physicalrisk-network:
+        aliases:
+          - auth.localhost
+          - apps.localhost
+          - moss.localhost
+          - repo.localhost
+          - test.physicalrisk.com
+          - auth.physicalrisk.com
+          - apps.physicalrisk.com
+          - moss.physicalrisk.com
+          - repo.physicalrisk.com
+
+volumes:
+  wordpress_mysql:
+  keycloak_postgres:
+  moss_postgres:
+  moss_redis:
+  moss_minio:
+  repo_postgres:
+  repo_storage:
+
+networks:
+  physicalrisk-network:
+    name: physicalrisk-network
+    driver: bridge

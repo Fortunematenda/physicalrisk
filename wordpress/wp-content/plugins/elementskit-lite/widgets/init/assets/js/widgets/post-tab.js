@@ -1,0 +1,1 @@
+!function(e){"use strict";ElementsKit_Helper.registerWidget("elementskit-post-tab.default",(function(t){var s=t.hasClass("is-click-yes")?"click":"mouseover",i=t.find(".tab__list__item"),a=t.find(".tabItem");i.on(s,(function(){i.removeClass("active"),a.removeClass("active"),e(this).addClass("active"),a.eq(e(this).index()).addClass("active")}))}))}(jQuery);

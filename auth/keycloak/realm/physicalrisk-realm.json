@@ -1,0 +1,292 @@
+{
+  "id": "physicalrisk",
+  "realm": "physicalrisk",
+  "displayName": "Physical Risk",
+  "displayNameHtml": "<strong>Physical Risk</strong>",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 300,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 3600,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 28800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "portal_user",
+        "description": "Can access the Physical Risk application launcher"
+      },
+      {
+        "name": "moss_admin",
+        "description": "MOSS administrator (maps to SUPER_ADMIN)"
+      },
+      {
+        "name": "moss_analyst",
+        "description": "MOSS analyst"
+      },
+      {
+        "name": "moss_reviewer",
+        "description": "MOSS senior reviewer"
+      },
+      {
+        "name": "moss_client",
+        "description": "MOSS client user"
+      },
+      {
+        "name": "repo_admin",
+        "description": "Repository administrator"
+      },
+      {
+        "name": "repo_importer",
+        "description": "Repository importer"
+      },
+      {
+        "name": "repo_reviewer",
+        "description": "Repository reviewer"
+      },
+      {
+        "name": "repo_viewer",
+        "description": "Repository viewer"
+      }
+    ],
+    "client": {}
+  },
+  "defaultRoles": ["portal_user"],
+  "clients": [
+    {
+      "clientId": "physicalrisk-portal",
+      "name": "Physical Risk Portal",
+      "description": "Application launcher for the Physical Risk platform",
+      "enabled": true,
+      "rootUrl": "https://apps.physicalrisk.com",
+      "baseUrl": "/",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-this-local-portal-secret",
+      "redirectUris": [
+        "http://apps.localhost/api/auth/callback/keycloak",
+        "http://localhost:3010/api/auth/callback/keycloak",
+        "https://apps.physicalrisk.com/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://apps.localhost",
+        "http://localhost:3010",
+        "https://apps.physicalrisk.com"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://apps.localhost##http://apps.localhost/##http://apps.localhost/*##http://localhost:3010/*##https://apps.physicalrisk.com##https://apps.physicalrisk.com/*",
+        "backchannel.logout.url": "http://portal:3000/api/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "physicalrisk-moss",
+      "name": "MOSS Application",
+      "description": "Management Operating Security System",
+      "enabled": true,
+      "rootUrl": "https://moss.physicalrisk.com",
+      "baseUrl": "/",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-this-local-moss-secret",
+      "redirectUris": [
+        "http://moss.localhost/api/auth/callback/keycloak",
+        "http://localhost:3001/api/auth/callback/keycloak",
+        "https://moss.physicalrisk.com/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://moss.localhost",
+        "http://localhost:3001",
+        "https://moss.physicalrisk.com"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://moss.localhost/*##http://apps.localhost##http://apps.localhost/##http://apps.localhost/*##http://localhost:3001/*##https://moss.physicalrisk.com/*##https://apps.physicalrisk.com##https://apps.physicalrisk.com/*",
+        "backchannel.logout.url": "http://moss-web:3000/api/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "physicalrisk-repo",
+      "name": "Enterprise Repository",
+      "description": "Physical Risk Repository Import Gateway",
+      "enabled": true,
+      "rootUrl": "https://repo.physicalrisk.com",
+      "baseUrl": "/",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-this-local-repo-secret",
+      "redirectUris": [
+        "http://repo.localhost/api/auth/callback/keycloak",
+        "http://localhost:3002/api/auth/callback/keycloak",
+        "https://repo.physicalrisk.com/api/auth/callback/keycloak"
+      ],
+      "webOrigins": [
+        "http://repo.localhost",
+        "http://localhost:3002",
+        "https://repo.physicalrisk.com"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://repo.localhost/*##http://apps.localhost##http://apps.localhost/##http://apps.localhost/*##http://localhost:3002/*##https://repo.physicalrisk.com/*##https://apps.physicalrisk.com##https://apps.physicalrisk.com/*",
+        "backchannel.logout.url": "http://repo-web:3000/api/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@physicalrisk.com",
+      "email": "admin@physicalrisk.com",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Platform",
+      "lastName": "Administrator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin@2026",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "portal_user",
+        "moss_admin",
+        "repo_admin"
+      ]
+    },
+    {
+      "username": "analyst@physicalrisk.local",
+      "email": "analyst@physicalrisk.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Analyst",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "portal_user",
+        "moss_analyst",
+        "repo_importer"
+      ]
+    },
+    {
+      "username": "client@physicalrisk.local",
+      "email": "client@physicalrisk.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Test",
+      "lastName": "Client",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "portal_user",
+        "moss_client",
+        "repo_viewer"
+      ]
+    }
+  ],
+  "scopeMappings": [],
+  "clientScopeMappings": {},
+  "smtpServer": {},
+  "loginTheme": "physicalrisk",
+  "accountTheme": "physicalrisk",
+  "internationalizationEnabled": false,
+  "supportedLocales": ["en"],
+  "defaultLocale": "en"
+}

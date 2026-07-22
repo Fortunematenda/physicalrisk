@@ -1,0 +1,1323 @@
+{
+  "name": "Executive Security Cost Leakage Assessment",
+  "code": "SCLI",
+  "version": "1.1",
+  "status": "PUBLISHED",
+  "description": "Executive Assurance Gap and Security Cost Leakage Index preliminary decision-support assessment. Not an audit finding.",
+  "inputs": [
+    {
+      "code": "C1",
+      "label": "Organisation name",
+      "guidance": "Enter organisation or business unit name",
+      "valueType": "TEXT",
+      "unit": "Text",
+      "required": true,
+      "sortOrder": 1,
+      "defaultValue": "ABC Group Limited",
+      "options": []
+    },
+    {
+      "code": "C2",
+      "label": "Industry vertical",
+      "guidance": "Select closest industry",
+      "valueType": "SELECT",
+      "unit": "Dropdown",
+      "required": true,
+      "sortOrder": 2,
+      "defaultValue": "Government / Public Infrastructure",
+      "options": [
+        "Telecommunications",
+        "Mining",
+        "Energy / Utilities",
+        "Ports and Logistics",
+        "Manufacturing",
+        "Retail",
+        "Financial Services",
+        "Data Centres",
+        "Government / Public Infrastructure",
+        "Healthcare",
+        "Other"
+      ]
+    },
+    {
+      "code": "C3",
+      "label": "Total sites / facilities",
+      "guidance": "Count all sites covered by security arrangements",
+      "valueType": "NUMBER",
+      "unit": "Count",
+      "required": true,
+      "sortOrder": 3,
+      "defaultValue": 1250,
+      "options": []
+    },
+    {
+      "code": "C4",
+      "label": "Guard force total",
+      "guidance": "Total contracted guards/officers across all sites and shifts",
+      "valueType": "NUMBER",
+      "unit": "Count",
+      "required": true,
+      "sortOrder": 4,
+      "defaultValue": 4000,
+      "options": []
+    },
+    {
+      "code": "C5",
+      "label": "Annual security contract value incl. ad hoc services",
+      "guidance": "Include guarding, extra services, variations and recurring technology service costs",
+      "valueType": "CURRENCY",
+      "unit": "Currency",
+      "required": true,
+      "sortOrder": 5,
+      "defaultValue": 480000000,
+      "options": []
+    },
+    {
+      "code": "C6",
+      "label": "Estimated annual security losses – low",
+      "guidance": "Conservative range for losses, claims, theft, shrinkage or avoidable incidents",
+      "valueType": "CURRENCY",
+      "unit": "Currency",
+      "required": true,
+      "sortOrder": 6,
+      "defaultValue": 1400000,
+      "options": []
+    },
+    {
+      "code": "C7",
+      "label": "Estimated annual security losses – high",
+      "guidance": "Upper range for losses, claims, theft, shrinkage or avoidable incidents",
+      "valueType": "CURRENCY",
+      "unit": "Currency",
+      "required": true,
+      "sortOrder": 7,
+      "defaultValue": 2800000,
+      "options": []
+    },
+    {
+      "code": "C8",
+      "label": "Internal security team size",
+      "guidance": "Full-time internal staff responsible for security management and governance",
+      "valueType": "NUMBER",
+      "unit": "Count",
+      "required": true,
+      "sortOrder": 8,
+      "defaultValue": 9,
+      "options": []
+    },
+    {
+      "code": "C9",
+      "label": "Number of contracted security vendors",
+      "guidance": "Guarding, monitoring, technology and specialist providers",
+      "valueType": "NUMBER",
+      "unit": "Count",
+      "required": true,
+      "sortOrder": 9,
+      "defaultValue": 4,
+      "options": []
+    },
+    {
+      "code": "C10",
+      "label": "Integrated technology footprint coverage %",
+      "guidance": "Share of geographic footprint covered by integrated surveillance/access/patrol monitoring",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 10,
+      "defaultValue": 0.65,
+      "options": []
+    },
+    {
+      "code": "C11",
+      "label": "Technology used for independent SLA verification %",
+      "guidance": "Extent to which security technology is actively used to verify SLA obligations",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 11,
+      "defaultValue": 0.2,
+      "options": []
+    },
+    {
+      "code": "C12",
+      "label": "Manual security records for service verification %",
+      "guidance": "Share of service verification dependent on manual registers/OBs/paper records",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 12,
+      "defaultValue": 0.6,
+      "options": []
+    },
+    {
+      "code": "C13",
+      "label": "Centralised monitored surveillance coverage %",
+      "guidance": "Sites where surveillance materially supports access/patrol/incident verification",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 13,
+      "defaultValue": 0.35,
+      "options": []
+    },
+    {
+      "code": "C14",
+      "label": "Electronic access control coverage %",
+      "guidance": "Sites with usable electronic access control evidence",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 14,
+      "defaultValue": 0.45,
+      "options": []
+    },
+    {
+      "code": "C15",
+      "label": "Real-time patrol monitoring coverage %",
+      "guidance": "Sites where patrol monitoring is available and reviewed in real time",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 15,
+      "defaultValue": 0.25,
+      "options": []
+    },
+    {
+      "code": "C16",
+      "label": "Delayed patrol reporting %",
+      "guidance": "Patrol data downloaded/reviewed after shift or monthly",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 16,
+      "defaultValue": 0.5,
+      "options": []
+    },
+    {
+      "code": "C17",
+      "label": "Proof of supervisory/management visits %",
+      "guidance": "Independent proof quality of supervisory and management site visits",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 17,
+      "defaultValue": 0.55,
+      "options": []
+    },
+    {
+      "code": "C18",
+      "label": "Proof of guard attendance verification %",
+      "guidance": "Independent proof quality of guard attendance verification",
+      "valueType": "PERCENT",
+      "unit": "Percent",
+      "required": true,
+      "sortOrder": 18,
+      "defaultValue": 0.75,
+      "options": []
+    },
+    {
+      "code": "C19",
+      "label": "Performance allowance paid",
+      "guidance": "YES/NO",
+      "valueType": "BOOLEAN",
+      "unit": "YES/NO",
+      "required": true,
+      "sortOrder": 19,
+      "defaultValue": "YES",
+      "options": [
+        "YES",
+        "NO"
+      ]
+    },
+    {
+      "code": "C20",
+      "label": "Night allowance paid",
+      "guidance": "YES/NO",
+      "valueType": "BOOLEAN",
+      "unit": "YES/NO",
+      "required": true,
+      "sortOrder": 20,
+      "defaultValue": "YES",
+      "options": [
+        "YES",
+        "NO"
+      ]
+    },
+    {
+      "code": "C21",
+      "label": "Firearm allowance paid",
+      "guidance": "YES/NO",
+      "valueType": "BOOLEAN",
+      "unit": "YES/NO",
+      "required": true,
+      "sortOrder": 21,
+      "defaultValue": "YES",
+      "options": [
+        "YES",
+        "NO"
+      ]
+    },
+    {
+      "code": "C22",
+      "label": "Site allowance paid",
+      "guidance": "YES/NO",
+      "valueType": "BOOLEAN",
+      "unit": "YES/NO",
+      "required": true,
+      "sortOrder": 22,
+      "defaultValue": "YES",
+      "options": [
+        "YES",
+        "NO"
+      ]
+    },
+    {
+      "code": "C23",
+      "label": "National Key Point allowance paid",
+      "guidance": "YES/NO",
+      "valueType": "BOOLEAN",
+      "unit": "YES/NO",
+      "required": true,
+      "sortOrder": 23,
+      "defaultValue": "NO",
+      "options": [
+        "YES",
+        "NO"
+      ]
+    }
+  ],
+  "questions": [
+    {
+      "code": "Q1",
+      "category": "Contract and SLA Enforcement",
+      "text": "Do you have a Service Level Agreement as part of the security service agreement?",
+      "weight": 8.0,
+      "sortOrder": 1,
+      "required": true,
+      "evidenceHint": "Signed security service agreement and SLA schedules.",
+      "options": [
+        {
+          "label": "Yes – comprehensive SLA",
+          "riskScore": 0.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Yes – partial/basic SLA",
+          "riskScore": 40.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No formal SLA",
+          "riskScore": 90.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q2",
+      "category": "Executive Assurance",
+      "text": "If the Board asked tomorrow, could management certify that every contracted security service was independently verified over the past 12 months?",
+      "weight": 10.0,
+      "sortOrder": 2,
+      "required": true,
+      "evidenceHint": "Board packs, assurance certificates and independent verification records.",
+      "options": [
+        {
+          "label": "Yes",
+          "riskScore": 0.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially",
+          "riskScore": 50.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 95.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 80.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q3",
+      "category": "Executive Assurance",
+      "text": "How much of your annual security expenditure is independently verified rather than accepted through supplier reporting?",
+      "weight": 9.0,
+      "sortOrder": 3,
+      "required": true,
+      "evidenceHint": "Sampling reports, verification dashboards or reconciliations.",
+      "options": [
+        {
+          "label": "0–20%",
+          "riskScore": 90.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "21–40%",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "41–60%",
+          "riskScore": 50.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "61–80%",
+          "riskScore": 25.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "81–100%",
+          "riskScore": 5.0,
+          "sortOrder": 5
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 6
+        }
+      ]
+    },
+    {
+      "code": "Q4",
+      "category": "Contract and SLA Enforcement",
+      "text": "If your largest guarding contract was audited tomorrow, what percentage of contractual obligations could be supported by independently verified evidence?",
+      "weight": 9.0,
+      "sortOrder": 4,
+      "required": true,
+      "evidenceHint": "Contract-obligation evidence matrix and supporting records.",
+      "options": [
+        {
+          "label": "0–20%",
+          "riskScore": 90.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "21–40%",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "41–60%",
+          "riskScore": 50.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "61–80%",
+          "riskScore": 25.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "81–100%",
+          "riskScore": 5.0,
+          "sortOrder": 5
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 6
+        }
+      ]
+    },
+    {
+      "code": "Q5",
+      "category": "Contract and SLA Enforcement",
+      "text": "How much money did the organisation recover through SLA penalties or service credits during the past financial year?",
+      "weight": 8.0,
+      "sortOrder": 5,
+      "required": true,
+      "evidenceHint": "Penalty registers, credit notes and service-credit reconciliations.",
+      "options": [
+        {
+          "label": "None recovered",
+          "riskScore": 85.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Less than 1% of annual contract value",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "1–3% of annual contract value",
+          "riskScore": 35.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "More than 3% of annual contract value",
+          "riskScore": 10.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 5
+        }
+      ]
+    },
+    {
+      "code": "Q6",
+      "category": "Labour Deployment",
+      "text": "Has the security deployment model been independently validated against current operational risk during the past 24 months?",
+      "weight": 8.0,
+      "sortOrder": 6,
+      "required": true,
+      "evidenceHint": "Independent deployment review or risk-based guarding model.",
+      "options": [
+        {
+          "label": "Yes – independently validated",
+          "riskScore": 0.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially validated",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 85.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q7",
+      "category": "Labour Deployment",
+      "text": "How many guard posts currently exist mainly because they have always existed?",
+      "weight": 7.0,
+      "sortOrder": 7,
+      "required": true,
+      "evidenceHint": "Post establishment list and current risk justification.",
+      "options": [
+        {
+          "label": "None",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Few",
+          "riskScore": 35.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "Many",
+          "riskScore": 75.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 65.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q8",
+      "category": "Executive Assurance",
+      "text": "How reliant is your organisation on manual security records for service verification?",
+      "weight": 8.0,
+      "sortOrder": 8,
+      "required": true,
+      "evidenceHint": "Occurrence books, registers and electronic verification records.",
+      "options": [
+        {
+          "label": "Low reliance",
+          "riskScore": 10.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Moderate reliance",
+          "riskScore": 40.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "High reliance",
+          "riskScore": 70.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Almost entirely manual",
+          "riskScore": 90.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q9",
+      "category": "Technology Verification",
+      "text": "If security enabling technology is integrated, how much of the geographical footprint is effectively covered?",
+      "weight": 7.0,
+      "sortOrder": 9,
+      "required": true,
+      "evidenceHint": "Technology coverage map by site or region.",
+      "options": [
+        {
+          "label": "0–20%",
+          "riskScore": 90.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "21–40%",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "41–60%",
+          "riskScore": 50.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "61–80%",
+          "riskScore": 25.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "81–100%",
+          "riskScore": 5.0,
+          "sortOrder": 5
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 6
+        }
+      ]
+    },
+    {
+      "code": "Q10",
+      "category": "Technology Verification",
+      "text": "To what extent is security enabling technology actively used for independent verification of SLA obligations?",
+      "weight": 8.0,
+      "sortOrder": 10,
+      "required": true,
+      "evidenceHint": "SLA verification reports produced from security technology.",
+      "options": [
+        {
+          "label": "0–20%",
+          "riskScore": 90.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "21–40%",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "41–60%",
+          "riskScore": 50.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "61–80%",
+          "riskScore": 25.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "81–100%",
+          "riskScore": 5.0,
+          "sortOrder": 5
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 6
+        }
+      ]
+    },
+    {
+      "code": "Q11",
+      "category": "Executive Assurance",
+      "text": "Do executive reports include an independent assurance score or evidence-based performance view rather than only operational activity?",
+      "weight": 8.0,
+      "sortOrder": 11,
+      "required": true,
+      "evidenceHint": "Executive reports, scorecards and assurance dashboards.",
+      "options": [
+        {
+          "label": "Yes – evidence-based assurance reporting",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No – mostly activity reporting",
+          "riskScore": 80.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 70.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q12",
+      "category": "Loss, Reporting and Value",
+      "text": "Are security incidents and losses reconciled against SLA performance, contractor obligations and potential penalties?",
+      "weight": 7.0,
+      "sortOrder": 12,
+      "required": true,
+      "evidenceHint": "Incident, loss, SLA and penalty reconciliation records.",
+      "options": [
+        {
+          "label": "Yes",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 85.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 70.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q13",
+      "category": "Contract and SLA Enforcement",
+      "text": "Are ad hoc additional security services formally approved, tracked and reconciled against contract terms?",
+      "weight": 6.0,
+      "sortOrder": 13,
+      "required": true,
+      "evidenceHint": "Ad hoc service approvals, invoices and reconciliation schedules.",
+      "options": [
+        {
+          "label": "Formal pre-approval and reconciliation",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Some post-facto review",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "Weak control",
+          "riskScore": 80.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 70.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q14",
+      "category": "Executive Assurance",
+      "text": "Are supplier reports independently sampled or validated every month across a representative site set?",
+      "weight": 8.0,
+      "sortOrder": 14,
+      "required": true,
+      "evidenceHint": "Monthly supplier-report sampling packs.",
+      "options": [
+        {
+          "label": "Yes – representative monthly sampling",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Selected sites only",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "Rarely",
+          "riskScore": 75.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "No",
+          "riskScore": 90.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q15",
+      "category": "Contract and SLA Enforcement",
+      "text": "Is supplier non-performance linked to formal consequence management in monthly or quarterly governance forums?",
+      "weight": 7.0,
+      "sortOrder": 15,
+      "required": true,
+      "evidenceHint": "Governance minutes and consequence-management records.",
+      "options": [
+        {
+          "label": "Yes – formal consequence management",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partial/inconsistent",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 85.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 70.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q16",
+      "category": "Technology Verification",
+      "text": "Does your PMIS / technology stack cover the entire organisation sufficiently to support independent service verification?",
+      "weight": 7.0,
+      "sortOrder": 16,
+      "required": true,
+      "evidenceHint": "PMIS coverage report and organisation-wide integration map.",
+      "options": [
+        {
+          "label": "0–20%",
+          "riskScore": 90.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "21–40%",
+          "riskScore": 70.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "41–60%",
+          "riskScore": 50.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "61–80%",
+          "riskScore": 25.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "81–100%",
+          "riskScore": 5.0,
+          "sortOrder": 5
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 6
+        }
+      ]
+    },
+    {
+      "code": "Q17",
+      "category": "Loss, Reporting and Value",
+      "text": "Can executive management quantify the financial value created by the current security programme?",
+      "weight": 8.0,
+      "sortOrder": 17,
+      "required": true,
+      "evidenceHint": "Benefits, avoided-loss and value-realisation reports.",
+      "options": [
+        {
+          "label": "Yes",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially",
+          "riskScore": 45.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 85.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q18",
+      "category": "Executive Assurance",
+      "text": "Is the internal security function adequately resourced to independently verify SLA performance nationally?",
+      "weight": 9.0,
+      "sortOrder": 18,
+      "required": true,
+      "evidenceHint": "Organisation chart, role profiles and oversight workload.",
+      "options": [
+        {
+          "label": "Yes",
+          "riskScore": 10.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Partially",
+          "riskScore": 55.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No",
+          "riskScore": 90.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 4
+        }
+      ]
+    },
+    {
+      "code": "Q19",
+      "category": "Executive Assurance",
+      "text": "How frequently are high-risk sites subjected to independent assurance review?",
+      "weight": 7.0,
+      "sortOrder": 19,
+      "required": true,
+      "evidenceHint": "Independent high-risk site assurance review schedule and reports.",
+      "options": [
+        {
+          "label": "Monthly",
+          "riskScore": 10.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Quarterly",
+          "riskScore": 30.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "Ad hoc",
+          "riskScore": 65.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "None",
+          "riskScore": 90.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 5
+        }
+      ]
+    },
+    {
+      "code": "Q20",
+      "category": "Contract and SLA Enforcement",
+      "text": "Were SLA penalties identified and applied during the last 12 months where performance failures occurred?",
+      "weight": 8.0,
+      "sortOrder": 20,
+      "required": true,
+      "evidenceHint": "Penalty calculations, approvals and proof of application.",
+      "options": [
+        {
+          "label": "Yes – identified and applied",
+          "riskScore": 5.0,
+          "sortOrder": 1
+        },
+        {
+          "label": "Identified but not applied",
+          "riskScore": 65.0,
+          "sortOrder": 2
+        },
+        {
+          "label": "No penalties identified",
+          "riskScore": 75.0,
+          "sortOrder": 3
+        },
+        {
+          "label": "No SLA",
+          "riskScore": 90.0,
+          "sortOrder": 4
+        },
+        {
+          "label": "Unknown",
+          "riskScore": 75.0,
+          "sortOrder": 5
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    {
+      "code": "minimum_leakage_base_floor",
+      "label": "Minimum leakage base floor",
+      "value": 0.01,
+      "format": "percent",
+      "description": "Conservative leakage floor present in large outsourced guarding environments."
+    },
+    {
+      "code": "minimum_leakage_manual_record_weight",
+      "label": "Minimum leakage | Manual record weight",
+      "value": 0.025,
+      "format": "percent",
+      "description": "Higher manual dependence raises unverifiable service delivery risk."
+    },
+    {
+      "code": "minimum_leakage_delayed_patrol_reporting_weight",
+      "label": "Minimum leakage | Delayed patrol reporting weight",
+      "value": 0.015,
+      "format": "percent",
+      "description": "After-shift or monthly review weakens recoverability and timely correction."
+    },
+    {
+      "code": "minimum_leakage_supervisory_proof_gap_weight",
+      "label": "Minimum leakage | Supervisory proof gap weight",
+      "value": 0.03,
+      "format": "percent",
+      "description": "Lower proof of supervisory visits raises baseline leakage risk."
+    },
+    {
+      "code": "minimum_leakage_attendance_proof_gap_weight",
+      "label": "Minimum leakage | Attendance proof gap weight",
+      "value": 0.007,
+      "format": "percent",
+      "description": "Lower proof of attendance verification raises baseline leakage risk."
+    },
+    {
+      "code": "minimum_leakage_internal_capacity_gap_weight",
+      "label": "Minimum leakage | Internal capacity gap weight",
+      "value": 0.005,
+      "format": "percent",
+      "description": "Insufficient internal governance headcount raises baseline risk."
+    },
+    {
+      "code": "minimum_leakage_scale_complexity_weight",
+      "label": "Minimum leakage | Scale complexity weight",
+      "value": 0.004,
+      "format": "percent",
+      "description": "Guard force, spend, premises count, and footprint complexity create coordination risk."
+    },
+    {
+      "code": "minimum_leakage_allowance_complexity_weight",
+      "label": "Minimum leakage | Allowance complexity weight",
+      "value": 0.003,
+      "format": "percent",
+      "description": "More active allowance types raise baseline validation complexity."
+    },
+    {
+      "code": "likely_reality_surveillance_gap_weight",
+      "label": "Likely reality | Surveillance gap weight",
+      "value": 0.03,
+      "format": "percent",
+      "description": "Limited monitored surveillance coverage reduces proof quality."
+    },
+    {
+      "code": "likely_reality_access_control_gap_weight",
+      "label": "Likely reality | Access control gap weight",
+      "value": 0.025,
+      "format": "percent",
+      "description": "Limited central access control coverage reduces certainty."
+    },
+    {
+      "code": "likely_reality_electronic_record_monitoring_gap_weight",
+      "label": "Likely reality | Electronic record monitoring gap weight",
+      "value": 0.01,
+      "format": "percent",
+      "description": "Electronic data not centrally monitored loses much of its value."
+    },
+    {
+      "code": "likely_reality_real_time_patrol_gap_weight",
+      "label": "Likely reality | Real-time patrol gap weight",
+      "value": 0.008,
+      "format": "percent",
+      "description": "Missing real-time patrol visibility increases variance between invoice and delivery."
+    },
+    {
+      "code": "likely_reality_manual_record_weight",
+      "label": "Likely reality | Manual record weight",
+      "value": 0.02,
+      "format": "percent",
+      "description": "Manual records further widen likely leakage above the minimum band."
+    },
+    {
+      "code": "likely_reality_scale_complexity_weight",
+      "label": "Likely reality | Scale complexity weight",
+      "value": 0.005,
+      "format": "percent",
+      "description": "Complex estate sizes widen likely leakage."
+    },
+    {
+      "code": "likely_reality_allowance_complexity_weight",
+      "label": "Likely reality | Allowance complexity weight",
+      "value": 0.015,
+      "format": "percent",
+      "description": "Allowance admin complexity increases likely leakage."
+    },
+    {
+      "code": "maximum_exposure_manual_record_weight",
+      "label": "Maximum exposure | Manual record weight",
+      "value": 0.03,
+      "format": "percent",
+      "description": "Worst-case slippage is highest where proof is manual."
+    },
+    {
+      "code": "maximum_exposure_delayed_patrol_reporting_weight",
+      "label": "Maximum exposure | Delayed patrol reporting weight",
+      "value": 0.03,
+      "format": "percent",
+      "description": "Delayed reporting creates broad exposure."
+    },
+    {
+      "code": "maximum_exposure_supervisory_proof_gap_weight",
+      "label": "Maximum exposure | Supervisory proof gap weight",
+      "value": 0.05,
+      "format": "percent",
+      "description": "Weak supervisory proof expands loss envelope."
+    },
+    {
+      "code": "maximum_exposure_attendance_proof_gap_weight",
+      "label": "Maximum exposure | Attendance proof gap weight",
+      "value": 0.05,
+      "format": "percent",
+      "description": "Weak attendance proof expands loss envelope."
+    },
+    {
+      "code": "maximum_exposure_surveillance_gap_weight",
+      "label": "Maximum exposure | Surveillance gap weight",
+      "value": 0.04,
+      "format": "percent",
+      "description": "Low surveillance verification expands exposure."
+    },
+    {
+      "code": "maximum_exposure_electronic_record_monitoring_gap_weight",
+      "label": "Maximum exposure | Electronic record monitoring gap weight",
+      "value": 0.02,
+      "format": "percent",
+      "description": "Electronic data not watched centrally provides weak defensibility."
+    },
+    {
+      "code": "maximum_exposure_internal_capacity_gap_weight",
+      "label": "Maximum exposure | Internal capacity gap weight",
+      "value": 0.04,
+      "format": "percent",
+      "description": "Low governance staffing expands maximum loss envelope."
+    },
+    {
+      "code": "maximum_exposure_allowance_complexity_weight",
+      "label": "Maximum exposure | Allowance complexity weight",
+      "value": 0.01,
+      "format": "percent",
+      "description": "Allowance complexity widens exposure in the upper band."
+    },
+    {
+      "code": "guard_force_saturation_point",
+      "label": "Guard force saturation point",
+      "value": 500.0,
+      "format": "count",
+      "description": "At or above this scale the model assumes full guard-force complexity."
+    },
+    {
+      "code": "annual_cost_saturation_point",
+      "label": "Annual cost saturation point",
+      "value": 50000000.0,
+      "format": "currency",
+      "description": "At or above this spend the model assumes full spend complexity."
+    },
+    {
+      "code": "protected_premises_saturation_point",
+      "label": "Protected premises saturation point",
+      "value": 2000.0,
+      "format": "count",
+      "description": "At or above this estate size the model assumes full site complexity."
+    },
+    {
+      "code": "geographical_footprint_saturation_point",
+      "label": "Geographical footprint saturation point",
+      "value": 9.0,
+      "format": "count",
+      "description": "At or above 9 provinces or regions the model assumes full footprint complexity."
+    },
+    {
+      "code": "target_sites_per_internal_security_staff_member",
+      "label": "Target sites per internal security staff member",
+      "value": 4.0,
+      "format": "count",
+      "description": "One internal oversight person per this number of protected premises."
+    },
+    {
+      "code": "minimum_leakage_cap",
+      "label": "Minimum leakage cap",
+      "value": 0.06,
+      "format": "percent",
+      "description": "Hard cap for conservative band."
+    },
+    {
+      "code": "likely_leakage_cap",
+      "label": "Likely leakage cap",
+      "value": 0.12,
+      "format": "percent",
+      "description": "Hard cap for likely band."
+    },
+    {
+      "code": "maximum_exposure_cap",
+      "label": "Maximum exposure cap",
+      "value": 0.2,
+      "format": "percent",
+      "description": "Hard cap for maximum exposure band."
+    },
+    {
+      "code": "recoverable_low_factor",
+      "label": "Recoverable low factor",
+      "value": 0.45,
+      "format": "percent",
+      "description": "Conservative recoverable portion of minimum leakage."
+    },
+    {
+      "code": "recoverable_high_factor",
+      "label": "Recoverable high factor",
+      "value": 0.65,
+      "format": "percent",
+      "description": "Conservative recoverable portion of likely leakage."
+    }
+  ],
+  "recommendationRules": [
+    {
+      "code": "NO_FORMAL_SLA",
+      "title": "Contract and SLA remediation review",
+      "category": "Contract and SLA Enforcement",
+      "priority": "CRITICAL",
+      "triggerQuestionCode": "Q1",
+      "triggerMinRisk": 80,
+      "summary": "Establish a comprehensive, measurable SLA with evidence requirements, service credits and governance controls.",
+      "serviceOffering": "Independent Contract and SLA Assurance Review"
+    },
+    {
+      "code": "LOW_VERIFICATION",
+      "title": "Independent service-verification programme",
+      "category": "Executive Assurance",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q3",
+      "triggerMinRisk": 65,
+      "summary": "Introduce independent sampling and reconciliation of contracted service delivery across representative sites.",
+      "serviceOffering": "Independent Executive Security Assurance Review"
+    },
+    {
+      "code": "WEAK_EVIDENCE",
+      "title": "Contract-obligation evidence matrix",
+      "category": "Contract and SLA Enforcement",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q4",
+      "triggerMinRisk": 65,
+      "summary": "Map every material contractual obligation to an evidence source, owner, frequency and exception process.",
+      "serviceOffering": "SLA Evidence and Controls Design"
+    },
+    {
+      "code": "MANUAL_RECORDS",
+      "title": "Electronic service-verification roadmap",
+      "category": "Technology Verification",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q8",
+      "triggerMinRisk": 65,
+      "summary": "Reduce dependence on manual records by integrating attendance, patrol, access and incident evidence.",
+      "serviceOffering": "Security Technology Assurance Roadmap"
+    },
+    {
+      "code": "NO_MONTHLY_SAMPLING",
+      "title": "Representative monthly assurance sampling",
+      "category": "Executive Assurance",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q14",
+      "triggerMinRisk": 65,
+      "summary": "Implement independent monthly sampling across high-risk and representative sites.",
+      "serviceOffering": "Managed Assurance Sampling"
+    },
+    {
+      "code": "PENALTIES_NOT_APPLIED",
+      "title": "Penalty and service-credit recovery review",
+      "category": "Contract and SLA Enforcement",
+      "priority": "CRITICAL",
+      "triggerQuestionCode": "Q20",
+      "triggerMinRisk": 60,
+      "summary": "Reconcile service failures to contractual remedies and establish formal approval and recovery workflows.",
+      "serviceOffering": "Security Cost Recovery Review"
+    },
+    {
+      "code": "WEAK_INTERNAL_CAPACITY",
+      "title": "Security governance operating-model review",
+      "category": "Executive Assurance",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q18",
+      "triggerMinRisk": 70,
+      "summary": "Align internal assurance capacity, roles and review frequencies to estate scale and supplier complexity.",
+      "serviceOffering": "Security Governance Operating Model"
+    },
+    {
+      "code": "NO_VALUE_QUANTIFICATION",
+      "title": "Security value and benefits framework",
+      "category": "Loss, Reporting and Value",
+      "priority": "MEDIUM",
+      "triggerQuestionCode": "Q17",
+      "triggerMinRisk": 70,
+      "summary": "Create a repeatable model for avoided loss, recovered value, service credits and assurance outcomes.",
+      "serviceOffering": "Security Value Realisation Framework"
+    },
+    {
+      "code": "DEPLOYMENT_NOT_VALIDATED",
+      "title": "Risk-based guarding deployment optimisation",
+      "category": "Labour Deployment",
+      "priority": "HIGH",
+      "triggerQuestionCode": "Q6",
+      "triggerMinRisk": 70,
+      "summary": "Independently validate posts, shifts and staffing against current risk and technology coverage.",
+      "serviceOffering": "Guarding Deployment Optimisation"
+    }
+  ],
+  "riskBands": [
+    {
+      "label": "Controlled",
+      "min": 0,
+      "max": 39.999
+    },
+    {
+      "label": "Moderate",
+      "min": 40,
+      "max": 59.999
+    },
+    {
+      "label": "High",
+      "min": 60,
+      "max": 74.999
+    },
+    {
+      "label": "Critical",
+      "min": 75,
+      "max": 100
+    }
+  ]
+}

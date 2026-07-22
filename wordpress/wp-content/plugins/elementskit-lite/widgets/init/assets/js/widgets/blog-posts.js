@@ -1,0 +1,1 @@
+!function(e){"use strict";ElementsKit_Helper.registerWidget("elementskit-blog-posts.default",(function(e){var t=e.find(".post-items");t.data("masonry-config")&&t.imagesLoaded((function(){t.masonry()}))}))}(jQuery);

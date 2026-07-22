@@ -1,0 +1,183 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.statCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 96px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #dce4ec;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(11, 47, 85, 0.05);
+}
+
+.statCard span,
+.statCard strong,
+.statCard small {
+  display: block;
+}
+
+.statCard span {
+  color: #66778a;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.statCard strong {
+  margin: 2px 0;
+  color: #001b36;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.statCard small {
+  color: #8795a5;
+  font-size: 11px;
+}
+
+.statIcon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  flex: none;
+}
+
+.statIconTotal {
+  background: #eaf3fb;
+  color: #0d3a68;
+}
+
+.statIconCurrent {
+  background: #e9f8f0;
+  color: #198754;
+}
+
+.statIconRelations {
+  background: #fff6e8;
+  color: #d97706;
+}
+
+.actionsHeading {
+  width: 56px;
+  text-align: right;
+}
+
+.actionsCell {
+  width: 56px;
+  text-align: right;
+  vertical-align: middle;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
+.actionsCellOpen {
+  z-index: 10050;
+}
+
+.menuWrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+  z-index: 1;
+}
+
+.menuWrapOpen {
+  z-index: 10050;
+}
+
+.menuButton {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #536577;
+  cursor: pointer;
+}
+
+.menuButton:hover,
+.menuButtonActive {
+  border-color: #c9d7e6;
+  background: #eef5fb;
+  color: #0d3a68;
+}
+
+.menuButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10060;
+  min-width: 140px;
+  padding: 6px;
+  border: 1px solid #d7e2ee;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(8, 42, 77, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #26384b;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: left;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.menu button:hover {
+  background: #eef5fb;
+  color: #0d3a68;
+}
+
+.dangerItem {
+  color: #c41212 !important;
+}
+
+.dangerItem:hover {
+  background: #fff0ef !important;
+  color: #a10f0f !important;
+}
+
+.tableWrapOpen {
+  overflow: visible !important;
+}
+
+.panelOpen {
+  overflow: visible !important;
+}
+
+@media (max-width: 960px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+}

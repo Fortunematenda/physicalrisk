@@ -1,0 +1,3447 @@
+.attr-nav-tabs .emailkit-admin-nav-link {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	padding: 16px 44px 18px 20px;
+	color: #121116;
+	border-top: 1px solid #e0e4e9;
+	border-left: 2px solid transparent;
+	-webkit-transition: all 100ms ease-out;
+	transition: all 100ms ease-out;
+	background-color: #f1f1f1;
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-transition: all 0.4s ease;
+	transition: all 0.4s ease;
+	border-radius: 0;
+}
+
+.attr-nav-tabs .emailkit-admin-nav-link .emailkit-admin-title {
+	font-size: 0.8125rem;
+	font-weight: bold;
+	color: #121116;
+	display: block;
+	margin-bottom: 2px;
+	line-height: 1;
+}
+
+.attr-nav-tabs .emailkit-admin-nav-link .emailkit-admin-subtitle {
+	color: #72777c;
+	font-size: 0.8125rem;
+	-webkit-transition: all 150ms ease-out;
+	transition: all 150ms ease-out;
+}
+
+.attr-nav-tabs .emailkit-admin-nav-link .emailkit-admin-tab-icon {
+	color: #72777c;
+	font-size: 1.4375rem;
+	-webkit-transition: all 0.4s ease;
+	transition: all 0.4s ease;
+}
+
+.attr-nav-tabs .attr-active > a,
+.attr-nav-tabs > li > a:hover,
+.attr-nav-tabs > li > a:focus {
+	background-color: #fff;
+	border-left-color: #f2295b;
+}
+
+.attr-nav-tabs .attr-active > a .emailkit-admin-title,
+.attr-nav-tabs .attr-active > a .emailkit-admin-tab-icon,
+.attr-nav-tabs > li > a:hover .emailkit-admin-title,
+.attr-nav-tabs > li > a:hover .emailkit-admin-tab-icon,
+.attr-nav-tabs > li > a:focus .emailkit-admin-title,
+.attr-nav-tabs > li > a:focus .emailkit-admin-tab-icon {
+	color: #f2295b;
+}
+
+/* tab content */
+.emailkit-admin-header {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+	padding-bottom: 9px;
+	border-bottom: 1px solid #e0e4e9;
+	margin-bottom: 8px;
+}
+
+.emailkit-admin-header-title {
+	font-size: 1rem;
+	font-weight: bold;
+	color: #f2295b;
+	margin-bottom: 0;
+}
+
+.emailkit-admin-help {
+	color: #0073aa;
+	font-weight: bold;
+	font-size: 0.75rem;
+}
+
+.emailkit-admin-help > i {
+	padding-right: 5px;
+}
+
+.emailkit-admin-input-switch {
+	position: relative;
+	display: block;
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	    -ms-user-select: none;
+	        user-select: none;
+	line-height: 1;
+	-ms-flex-item-align: end;
+	    align-self: flex-end;
+}
+
+#v-elementskit-dashboard > .emailkit-admin-section-header > .emailkit-admin-input-switch {
+	display: none;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-input:checked ~ .emailkit-admin-control-label .emailkit-admin-control-label-switch::after {
+	left: 30px;
+	background-color: #f2295b;
+	color: #f2295b;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-input:checked ~ .emailkit-admin-control-label .emailkit-admin-control-label-switch::before {
+	border-color: #f2295b;
+	text-indent: 52px;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label {
+	cursor: pointer;
+	margin-bottom: 0;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label-switch {
+	position: relative;
+	overflow: hidden;
+	width: 52px;
+	height: 26px;
+	display: inline-block;
+	margin-left: 10px;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label-switch::before, .emailkit-admin-input-switch .emailkit-admin-control-label-switch::after {
+	position: absolute;
+	-webkit-transition: all 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+	transition: all 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+	font-weight: 700;
+	font-size: 0.6875rem;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label-switch::before {
+	content: attr(data-inactive);
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: #fff;
+	border: #444 solid 1px;
+	border-radius: 26px;
+	text-indent: 24px;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label-switch::after {
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	display: block;
+	content: attr(data-active);
+	width: 18px;
+	height: 18px;
+	background-color: #444;
+	border-radius: 100%;
+	-webkit-transition: all 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+	transition: all 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+	text-indent: -22px;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-input {
+	opacity: 0;
+	z-index: -1;
+	position: absolute;
+}
+
+.emailkit-admin-section-header {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+	position: relative;
+	border-bottom: 1px solid #e0e4e9;
+	padding-bottom: 24px;
+	margin-bottom: 48px;
+}
+
+.emailkit-admin-section-header::before {
+	content: "";
+	position: absolute;
+	display: block;
+	width: 48px;
+	height: 2px;
+	bottom: -1px;
+	left: 0;
+	background: #f2295b;
+}
+
+.emailkit-admin-section-heaer-title {
+	position: relative;
+	font-size: 1.625rem;
+	font-weight: 600;
+	margin-bottom: 0;
+	line-height: 1;
+}
+
+.emailkit-admin-section-heaer-title::before {
+	content: "\f15b";
+	font-family: "FontAwesome";
+	display: inline-block;
+	width: 48px;
+	height: 48px;
+	line-height: 48px;
+	margin-right: 24px;
+	background-color: #fee9ee;
+	color: #f2295b;
+	text-align: center;
+	border-radius: 3px;
+	vertical-align: middle;
+	font-size: 20px;
+}
+
+.emailkit-admin-fields-container {
+	font-size: 0.875rem;
+	color: #666;
+}
+
+.custom-control .custom-control-label {
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	    -ms-user-select: none;
+	        user-select: none;
+	cursor: pointer;
+	color: #121116;
+	font-size: 0.875rem;
+}
+
+.custom-control .custom-control-input:checked ~ .custom-control-label::before {
+	border-color: #19073b;
+	background-color: #19073b;
+	-webkit-transform: scale(1);
+	        transform: scale(1);
+}
+
+.custom-control .custom-control-input:checked ~ .custom-control-label::after {
+	-webkit-transform: scale(1);
+	        transform: scale(1);
+}
+
+.custom-control .custom-control-input .custom-control-label::after, .custom-control .custom-control-input .custom-control-label::before {
+	-webkit-transform: scale(0);
+	        transform: scale(0);
+	-webkit-transition: all 0.4s ease;
+	transition: all 0.4s ease;
+}
+
+.custom-control .custom-control-input .custom-control-label::after {
+	background-repeat: no-repeat;
+	background-position: center center;
+	background-size: 50% 50%;
+}
+
+.emailkit-admin-fields-container-fieldset {
+	margin-top: 16px;
+}
+
+.attr-nav-tabs {
+	margin-top: 0;
+}
+
+.attr-nav-tabs > li {
+	width: 100%;
+}
+
+.attr-nav-tabs > li > a {
+	margin-right: 0;
+}
+
+@media (min-width: 992px) {
+	.emailkit-admin-right-content {
+		width: 70%;
+	}
+}
+
+@media (min-width: 992px) and (max-width: 1199px) {
+	.emailkit-admin-right-content {
+		width: 100%;
+		padding: 0;
+	}
+	.emailkit-admin-support-section .emailkit-admin-right-content,
+	.emailkit-admin-feature-request-section .emailkit-admin-right-content {
+		padding-left: 20px;
+	}
+	#v-elementskit-userdata .emailkit-admin-fields-container {
+		max-width: 75%;
+	}
+	.emailkit-admin-rate-now-section .emailkit-admin-right-content {
+		padding-bottom: 20px;
+	}
+	.emailkit-admin-fields-container-description {
+		width: 100% !important;
+	}
+	.emailkit-admin-section-header {
+		-webkit-box-orient: vertical;
+		-webkit-box-direction: normal;
+		    -ms-flex-direction: column;
+		        flex-direction: column;
+	}
+	.emailkit-admin-section-heaer-title {
+		-webkit-box-pack: start !important;
+		    -ms-flex-pack: start !important;
+		        justify-content: start !important;
+	}
+	.emailkit-admin-input-switch {
+		-ms-flex-item-align: start;
+		    align-self: flex-start;
+	}
+	.emailkit-all-element-switch {
+		margin: 15px 0 !important;
+		min-width: 215px !important;
+	}
+	.emailkit-all-element-switch .emailkit-admin-control-label {
+		padding: 7px 0 !important;
+	}
+}
+
+@media screen and (min-device-width: 1200px) and (max-device-width: 1600px) {
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-04 img {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-04 .shape-17 {
+		display: block;
+	}
+}
+
+@media (max-width: 991px) {
+	.emailkit-admin-fields-container-description {
+		width: 100%;
+	}
+	.emailkit-admin-right-content {
+		width: 100%;
+		padding: 0;
+	}
+	.emailkit-admin-support-section .emailkit-admin-right-content,
+	.emailkit-admin-feature-request-section .emailkit-admin-right-content {
+		padding-left: 20px;
+	}
+	#v-elementskit-userdata .emailkit-admin-fields-container {
+		max-width: 75%;
+	}
+	.emailkit-admin-section-header {
+		-webkit-box-orient: vertical;
+		-webkit-box-direction: normal;
+		    -ms-flex-direction: column;
+		        flex-direction: column;
+	}
+	.emailkit-admin-section-heaer-title {
+		-webkit-box-pack: start !important;
+		    -ms-flex-pack: start !important;
+		        justify-content: start !important;
+	}
+	.emailkit-admin-input-switch {
+		-ms-flex-item-align: start;
+		    align-self: flex-start;
+	}
+	.emailkit-all-element-switch {
+		margin: 15px 0 !important;
+		min-width: 215px !important;
+	}
+	.emailkit-all-element-switch .emailkit-admin-control-label {
+		padding: 7px 0 !important;
+	}
+	body .emailkit-onboard-dashboard img {
+		max-width: 100%;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-2-inner {
+		padding: 0;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-nav-item {
+		width: 100%;
+		margin-bottom: 10px  !important;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-nav-item:last-child {
+		margin-bottom: 0;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-02:before {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-nav .emailkit-onboard-progressbar {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-wrapper {
+		padding: 0 55px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-dashboard .emailkit-onboard-tutorial {
+		padding: 50px 0;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-dashboard .emailkit-onboard-module-meta li {
+		display: block;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-04 .shape-07 {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-plugin-list .attr-row > div {
+		-webkit-box-flex: 0;
+		    -ms-flex: 0 0 50%;
+		        flex: 0 0 50%;
+	}
+}
+
+@media (max-width: 480px) {
+	.emailkit-admin-video-tutorial-iframe iframe {
+		max-width: 300px;
+		height: auto;
+	}
+	.emailkit-admin-video-tutorial-list a h2 {
+		font-size: 16px;
+	}
+	.emailkit_accordion_card:not(:last-child) {
+		margin-bottom: 15px;
+	}
+	.emailkit_accordion_card .attr-btn {
+		padding: 16px;
+		font-size: 12px;
+		padding-left: 20px;
+	}
+	.emailkit-admin-right-content--link {
+		font-size: 12px;
+		padding: 10px 15px;
+	}
+	.emailkit-admin-right-content--heading h2 {
+		font-size: 20px;
+	}
+	.emailkit-admin-right-content--heading__sub-title {
+		font-size: 50px;
+	}
+	.emailkit-admin-right-content p {
+		font-size: 16px;
+		line-height: 25px;
+	}
+	.emailkit-admin-right-content--form input {
+		height: 50px;
+		padding: 0 25px;
+	}
+	.emailkit-admin-right-content--form button {
+		width: 45px;
+		height: 45px;
+	}
+	.emailkit-admin-section-heaer-title {
+		margin-bottom: 10px;
+		font-size: 14px;
+	}
+	.emailkit-admin-input-switch .emailkit-admin-settings-form-submit {
+		font-size: 12px;
+		padding: 9px 18px;
+	}
+	.emailkit-admin-section-header {
+		font-size: 15px;
+	}
+	.emailkit-admin-section-header .emailkit-admin-input-switch {
+		-ms-flex-item-align: center;
+		    align-self: center;
+	}
+	.emailkit_accordion_card .attr-panel-body {
+		padding: 20px;
+	}
+	.emailkit-admin-fields-container-description {
+		font-size: 15px;
+		line-height: 22px;
+	}
+	#v-elementskit-userdata .emailkit-admin-fields-container {
+		max-width: 100%;
+	}
+	#v-elementskit-userdata::before {
+		background-size: contain;
+		width: 100%;
+		height: 100%;
+	}
+	.emailkit-admin-section {
+		padding: 30px 0;
+	}
+	.emailkit-admin-video-tutorial-list {
+		display: block;
+	}
+	.emailkit-admin-video-tutorial-list .emailkit-admin-video-tutorial-item {
+		margin-bottom: 15px;
+	}
+	.emailkit-admin-video-tutorial-list .emailkit-admin-video-tutorial-item:last-child {
+		margin-bottom: 0;
+	}
+	.emailkit-admin-dual-layout {
+		display: block;
+	}
+	.emailkit-admin-dual-layout.emailkit-admin-subscribed-section .emailkit-admin-left-thumb, .emailkit-admin-dual-layout.emailkit-admin-rate-now-section .emailkit-admin-left-thumb {
+		margin: 0;
+		margin-top: 50px;
+	}
+	.emailkit-admin-dual-layout .emailkit-admin-left-thumb {
+		margin-bottom: 50px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-step-wrapper {
+		padding: 0;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-shapes {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-main-header--title {
+		font-size: 30px;
+		line-height: 35px !important;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-main-header--title br {
+		display: none;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-main-header--description {
+		font-size: 16px;
+		line-height: 25px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-section {
+		padding: 30px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-btn {
+		padding: 10px 30px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-single-plugin label {
+		-webkit-box-align: center;
+		    -ms-flex-align: center;
+		        align-items: center;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-tutorial {
+		padding: 35px 15px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-module-meta li {
+		display: block;
+		margin: 0;
+		margin-bottom: 10px;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-modules li {
+		margin-right: 0;
+		display: block;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-plugin-list .attr-row > div {
+		-webkit-box-flex: 100%;
+		    -ms-flex: 100%;
+		        flex: 100%;
+	}
+	body .emailkit-onboard-dashboard .emailkit-onboard-tut-term--helptext {
+		padding-right: 0;
+	}
+}
+
+body.toplevel_page_elementskit {
+	overflow-y: scroll;
+}
+
+#emailkit-admin-settings-form {
+	margin-top: 30px;
+}
+
+.emailkit_tab_wraper_group {
+	margin-right: 0;
+	margin-left: 0;
+}
+
+.emailkit_tab_wraper_group > div:first-of-type {
+	padding-right: 0;
+}
+
+.emailkit_tab_wraper_group > div:last-of-type {
+	padding-left: 0;
+}
+
+.emailkit_tab_wraper_group .attr-tab-pane {
+	min-height: 500px;
+}
+
+.attr-tab-content {
+	background-color: #fff;
+	padding: 30px;
+	border-radius: 20px;
+}
+
+.emailkit-admin-section-heaer-title {
+	margin-top: 0;
+	color: #f2295b;
+	font-size: 24px;
+	line-height: 28px;
+	font-weight: bold;
+	vertical-align: middle;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.emailkit-admin-section-heaer-title i {
+	font-size: 18px;
+	line-height: 18px !important;
+	color: #f2295b;
+	width: 40px;
+	height: 40px;
+	background-color: #fde9ee;
+	border-radius: 5px;
+	display: -webkit-inline-box;
+	display: -ms-inline-flexbox;
+	display: inline-flex;
+	vertical-align: middle;
+	text-align: center;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+	margin-right: 13px;
+}
+
+.emailkit-admin-nav .attr-nav-tabs {
+	border: none;
+}
+
+.emailkit-admin-nav li {
+	background-color: #fff;
+}
+
+.emailkit-admin-nav li.attr-active {
+	border-top-left-radius: 10px;
+	border-bottom-left-radius: 10px;
+}
+
+.emailkit-admin-nav li.attr-active .emailkit-admin-nav-link {
+	border-radius: 10px;
+}
+
+.emailkit-admin-nav li.attr-active .emailkit-admin-nav-link::before {
+	content: "";
+	background-color: #f2295b;
+	height: 10px;
+	width: 10px;
+	position: absolute;
+	left: 17px;
+	border-radius: 100px;
+	top: 50%;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+}
+
+.emailkit-admin-nav li.attr-active .emailkit-admin-nav-link:hover {
+	background-color: #fff;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link {
+	text-decoration: none;
+	border: none;
+	padding: 23px 40px;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link .emailkit-admin-tab-icon {
+	color: #121116;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link.top {
+	border-bottom-right-radius: 30px;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link.bottom {
+	border-top-right-radius: 30px;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link.emailkit-admin-nav-hidden {
+	background-color: #f1f1f1;
+	cursor: default;
+	padding: 15px;
+	pointer-events: none;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link:hover {
+	background-color: #f1f1f1;
+}
+
+.emailkit-admin-nav .emailkit-admin-nav-link:focus {
+	outline: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-admin-nav .emailkit-admin-title {
+	text-transform: uppercase;
+	color: #f2295b;
+	font-size: 14px;
+	line-height: 16px;
+	font-weight: bold;
+}
+
+.attr-btn {
+	cursor: pointer;
+}
+
+.emailkit_container {
+	width: 100%;
+}
+
+.emailkit-admin-card-shadow {
+	border-radius: 3px;
+	border: 1px solid rgba(0, 0, 0, 0.05);
+	-webkit-box-shadow: 0 6px 20px 0 rgba(194, 204, 222, 0.3);
+	        box-shadow: 0 6px 20px 0 rgba(194, 204, 222, 0.3);
+}
+
+#emailkit-admin-settings-form .emailkit-admin-card {
+	margin-bottom: 50px;
+	border-radius: 20px;
+}
+
+.attr-input-switch {
+	margin-bottom: 10px;
+	position: relative;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-control-label {
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+	font-weight: 600;
+	font-size: 14px;
+	line-height: 16px;
+	color: #121116;
+	padding: 23px 26px;
+}
+
+.emailkit-all-element-switch {
+	width: 23%;
+	display: inline-block;
+	margin: auto 1rem 0 auto;
+	color: #fff;
+	min-width: 277px;
+}
+
+.emailkit-all-element-switch .emailkit-admin-input-switch {
+	padding: 0;
+}
+
+.emailkit-all-element-switch .emailkit-admin-control-label {
+	padding: 7px 26px;
+}
+
+.emailkit-admin-input-text {
+	margin-bottom: 0;
+	margin-top: 0 !important;
+}
+
+.emailkit-admin-input-text:not(:last-child) {
+	margin-bottom: 0;
+}
+
+.emailkit-admin-input-text > label {
+	font-weight: 700;
+	margin-bottom: 7px;
+	display: inline-block;
+	color: #121116;
+	font-size: 14px;
+	line-height: 16px;
+}
+
+.emailkit-admin-input-text .attr-form-control {
+	border-radius: 5px;
+	padding: 8px 30px;
+	height: 54px;
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+	font-size: 14px;
+	line-height: 28px;
+	display: inline-block;
+	color: rgba(18, 17, 22, 0.4);
+	border: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	color: #121116;
+}
+
+.emailkit-admin-input-text .attr-form-control:focus {
+	border: 1px solid #f2295b;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	outline: none;
+}
+
+#emailkit-admin-license-form .attr-form-control {
+	border-radius: 3px;
+	border: 1px solid rgba(0, 0, 0, 0.05);
+	-webkit-box-shadow: 0 6px 20px 0 rgba(194, 204, 222, 0.3);
+	box-shadow: 0 6px 20px 0 rgba(194, 204, 222, 0.3);
+}
+
+.emailkit-admin-license-form-submit {
+	border-radius: 5px;
+	padding: 8px 30px;
+	height: 54px;
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+}
+
+.emailkit_logo {
+	padding-top: 35px;
+}
+
+.emailkit-admin-input-text .attr-form-control::-moz-placeholder {
+	color: rgba(0, 0, 0, 0.3);
+}
+
+.emailkit-admin-input-text .attr-form-control:-moz-placeholder {
+	color: rgba(0, 0, 0, 0.3);
+}
+
+.emailkit-admin-input-text .attr-form-control:-ms-input-placeholder {
+	color: rgba(0, 0, 0, 0.3);
+}
+
+.emailkit-admin-input-text .attr-form-control::-webkit-input-placeholder {
+	color: rgba(0, 0, 0, 0.3);
+}
+
+.emailkit_accordion_card {
+	background-color: #f5f5f5;
+	border-radius: 20px;
+}
+
+.emailkit_accordion_card:not(:last-child) {
+	margin-bottom: 30px;
+}
+
+.emailkit_accordion_card .emailkit-admin-input-text:not(:last-child) {
+	margin-bottom: 30px;
+}
+
+.emailkit_accordion_card .attr-panel-body {
+	padding: 30px;
+	padding-top: 0;
+}
+
+.emailkit_accordion_card .card-header {
+	padding: 0;
+	border-bottom: 0 solid #000;
+}
+
+.emailkit_accordion_card .attr-btn {
+	display: block;
+	text-decoration: none;
+	width: 100%;
+	text-align: left;
+	padding: 29px 30px;
+	color: #333;
+	font-weight: 700;
+	cursor: pointer;
+	font-size: 14px;
+	line-height: 16px;
+	text-transform: uppercase;
+	position: relative;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.emailkit_accordion_card .attr-btn::before {
+	content: "\f107";
+	color: #121116;
+	font-size: 16px;
+	font-family: "fontawesome";
+	position: absolute;
+	right: 30px;
+	top: 50%;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+}
+
+.emailkit_accordion_card .attr-btn[aria-expanded="true"] {
+	color: #f2295b;
+}
+
+.emailkit_accordion_card .attr-btn[aria-expanded="true"]::before {
+	content: "\f106";
+	color: #f2295b;
+}
+
+.emailkit_accordion_card .attr-btn:focus {
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit_accordion_card .attr-panel-heading {
+	padding: 0;
+	border-radius: 0;
+}
+
+.emailkit_accordion_card .attr-widget-activate-text {
+	text-transform: none;
+	border: 1px solid #333;
+	padding: 0 6px 1px;
+	border-radius: 5px;
+	margin-left: 5px;
+}
+
+[class^="attr"] {
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+}
+
+.attr-btn-primary {
+	color: #fff;
+	background-color: #f2295b;
+	border-color: #f2295b;
+	text-decoration: none;
+}
+
+.attr-btn-primary:hover, .attr-btn-primary:focus {
+	background-color: #f2295b;
+	border-color: #f2295b;
+	outline: none;
+}
+
+.attr-card-body {
+	padding: 1.25rem;
+}
+
+.attr-card-body .attr-card-title {
+	margin-top: 0;
+	margin-bottom: 0.75rem;
+}
+
+.emailkit-admin-dashboard-banner {
+	display: block;
+}
+
+.emailkit-admin-save-icon {
+	color: #fff;
+	font-size: 14px;
+	margin-right: 6px;
+	height: 14px;
+	width: 14px;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-settings-form-submit {
+	background-color: #f2295b;
+	border-radius: 27px;
+	-webkit-box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	        box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	font-size: 14px;
+	line-height: 16px;
+	text-transform: uppercase;
+	color: #fff;
+	font-weight: bold;
+	border: none;
+	padding: 12px 23px;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.emailkit-admin-input-switch .emailkit-admin-settings-form-submit:hover, .emailkit-admin-input-switch .emailkit-admin-settings-form-submit:focus {
+	background-color: #ad0730;
+	outline: none;
+}
+
+.emailkit-admin-section-header {
+	padding-bottom: 17px;
+	margin-bottom: 30px;
+}
+
+.emailkit-admin-section-header.fixed {
+	position: fixed;
+	top: 0;
+	padding-top: 30px;
+	background-color: #fff;
+	z-index: 1;
+}
+
+.emailkit-admin-section-header.fixed + div {
+	margin-top: 90px;
+}
+
+.emailkit-admin-dual-layout {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.emailkit-admin-dual-layout .emailkit-admin-right-content {
+	margin: 0;
+}
+
+.emailkit-admin-dual-layout .emailkit-admin-right-content--heading__sub-title {
+	left: 0;
+	-webkit-transform: inherit;
+	        transform: inherit;
+}
+
+.emailkit-admin-section {
+	padding: 50px 30px;
+}
+
+.emailkit-admin-section:last-of-type {
+	padding-bottom: 0;
+}
+
+.emailkit-admin-right-content {
+	padding: 0 50px;
+	width: 50%;
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+	margin: 0 auto;
+}
+
+.emailkit-admin-right-content p {
+	color: #121116;
+	font-size: 18px;
+	line-height: 28px;
+}
+
+.emailkit-admin-right-content p:last-of-type {
+	margin-bottom: 0;
+}
+
+.emailkit-admin-right-content--form {
+	position: relative;
+	max-width: 300px;
+}
+
+.emailkit-admin-right-content--form input {
+	height: 54px;
+	background-color: #2d3cfe;
+	border: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	border-radius: 27px;
+	padding: 0 30px;
+	color: #fff;
+	font-size: 14px;
+	-webkit-box-shadow: 0 7px 15px rgba(45, 60, 254, 0.3);
+	        box-shadow: 0 7px 15px rgba(45, 60, 254, 0.3);
+	padding-right: 70px;
+}
+
+.emailkit-admin-right-content--form input::-webkit-input-placeholder {
+	color: #fff;
+	opacity: 0.5;
+}
+
+.emailkit-admin-right-content--form input::-moz-placeholder {
+	color: #fff;
+	opacity: 0.5;
+}
+
+.emailkit-admin-right-content--form input:-ms-input-placeholder {
+	color: #fff;
+	opacity: 0.5;
+}
+
+.emailkit-admin-right-content--form input::-ms-input-placeholder {
+	color: #fff;
+	opacity: 0.5;
+}
+
+.emailkit-admin-right-content--form input::placeholder {
+	color: #fff;
+	opacity: 0.5;
+}
+
+.emailkit-admin-right-content--form input:focus {
+	outline: none;
+	border: none;
+	-webkit-box-shadow: 0 7px 15px rgba(45, 60, 254, 0.3);
+	        box-shadow: 0 7px 15px rgba(45, 60, 254, 0.3);
+}
+
+.emailkit-admin-right-content--form button {
+	width: 48px;
+	height: 48px;
+	background-color: #fff;
+	border-radius: 100px;
+	color: #2d3cfe;
+	position: absolute;
+	right: 2px;
+	top: 50%;
+	border-color: transparent;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+}
+
+.emailkit-admin-right-content--form button:hover, .emailkit-admin-right-content--form button:focus {
+	outline: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	background-color: inherit;
+	border: 1px solid #fff;
+}
+
+.emailkit-admin-right-content--form button i {
+	font-size: 18px;
+	line-height: 16px;
+}
+
+.emailkit-admin-right-content--heading {
+	position: relative;
+}
+
+.emailkit-admin-right-content--heading h2 {
+	color: #f2295b;
+	font-size: 24px;
+	line-height: 28px;
+	font-weight: bold;
+	letter-spacing: -1px;
+}
+
+.emailkit-admin-right-content--heading__sub-title {
+	font-size: 60px;
+	line-height: 69px;
+	color: #000;
+	opacity: 0.05;
+	letter-spacing: -1px;
+	font-weight: bold;
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	-webkit-transform: translateX(-50%);
+	        transform: translateX(-50%);
+}
+
+.emailkit-admin-right-content--button, .emailkit-admin-right-content--form {
+	margin-top: 45px;
+}
+
+.emailkit-admin-right-content--link {
+	display: inline-block;
+	border-radius: 27px;
+	background-color: #f2295b;
+	-webkit-box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	        box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	border: none;
+	font-size: 14px;
+	line-height: 16px;
+	font-weight: bold;
+	text-transform: uppercase;
+	padding: 19px 34px;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.emailkit-admin-right-content--link i {
+	margin-right: 7px;
+}
+
+.emailkit-admin-right-content--link:hover, .emailkit-admin-right-content--link:focus {
+	background-color: #ad0730;
+}
+
+.emailkit-admin-subscribed-section .emailkit-admin-right-content--heading h2 {
+	color: #2d3cfe;
+}
+
+.emailkit-admin-support-section .emailkit-admin-right-content--heading h2 {
+	color: #00be75;
+}
+
+.emailkit-admin-support-section .emailkit-admin-right-content--link {
+	background-color: #00be75;
+	-webkit-box-shadow: 0 7px 15px rgba(0, 190, 117, 0.3);
+	        box-shadow: 0 7px 15px rgba(0, 190, 117, 0.3);
+}
+
+.emailkit-admin-support-section .emailkit-admin-right-content--link:hover, .emailkit-admin-support-section .emailkit-admin-right-content--link:focus {
+	background-color: #108458;
+}
+
+.emailkit-admin-subscribed-section,
+.emailkit-admin-support-section {
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+}
+
+.emailkit-admin-rate-now-section {
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+}
+
+.emailkit-admin-rate-now-section .emailkit-admin-right-content p span {
+	color: #fec42d;
+}
+
+.emailkit-admin-rate-now-section .emailkit-admin-right-content--heading h2 {
+	color: #fec42d;
+}
+
+.emailkit-admin-rate-now-section .emailkit-admin-right-content--link {
+	background-color: #fec42d;
+	-webkit-box-shadow: 0 7px 15px rgba(254, 196, 45, 0.3);
+	        box-shadow: 0 7px 15px rgba(254, 196, 45, 0.3);
+}
+
+.emailkit-admin-rate-now-section .emailkit-admin-right-content--link:hover, .emailkit-admin-rate-now-section .emailkit-admin-right-content--link:focus {
+	background-color: #dea203;
+}
+
+.emailkit-admin-except-title p {
+	font-size: 24px;
+	line-height: 25px;
+}
+
+.emailkit-admin-except-title p span {
+	display: block;
+	font-weight: bold;
+}
+
+.emailkit-admin-left-thumb img {
+	max-width: 100%;
+}
+
+.emailkit-admin-faq-section .emailkit-admin-accordion {
+	max-width: 700px;
+	margin: 0 auto;
+	margin-top: 30px;
+}
+
+.emailkit-admin-single-accordion {
+	background-color: #fff;
+	-webkit-box-shadow: 0 7px 15px rgba(0, 0, 0, 0.07);
+	        box-shadow: 0 7px 15px rgba(0, 0, 0, 0.07);
+	margin: 10px 0;
+}
+
+.emailkit-admin-single-accordion.active .emailkit-admin-single-accordion--heading::after {
+	content: "\f106";
+	color: #f2295b;
+}
+
+.emailkit-admin-single-accordion--heading {
+	cursor: pointer;
+	margin: 0;
+	color: #121116;
+	font-size: 14px;
+	line-height: 20px;
+	padding: 18px 20px;
+	position: relative;
+}
+
+.emailkit-admin-single-accordion--heading::after {
+	content: "\f107";
+	font-family: "fontawesome";
+	position: absolute;
+	right: 30px;
+	top: 50%;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+	font-size: 12px;
+}
+
+.emailkit-admin-single-accordion--body {
+	padding: 0;
+	display: none;
+}
+
+.emailkit-admin-single-accordion--body__content {
+	padding: 30px;
+	padding-top: 0;
+}
+
+.emailkit-admin-single-accordion--body p {
+	margin: 0;
+}
+
+.emailkit-admin-video-tutorial-list {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: justify;
+	    -ms-flex-pack: justify;
+	        justify-content: space-between;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	margin-top: 30px;
+}
+
+.emailkit-admin-video-tutorial-list a {
+	text-decoration: none;
+}
+
+.emailkit-admin-video-tutorial-list a h2 {
+	font-size: 18px;
+	line-height: 20px;
+	text-align: center;
+	display: block;
+}
+
+.emailkit-admin-video-tutorial-list .tutorial-thumb {
+	position: relative;
+}
+
+.emailkit-admin-video-tutorial-list .tutorial-thumb::before {
+	content: "";
+	background-image: url(../images/video-icon.png);
+	display: inline-block;
+	height: 30px;
+	width: 30px;
+	background-color: #fff;
+	padding: 20px;
+	background-repeat: no-repeat;
+	border-radius: 100px;
+	-webkit-box-shadow: 0 7px 15px rgba(0, 0, 0, 0.1);
+	        box-shadow: 0 7px 15px rgba(0, 0, 0, 0.1);
+	background-position: center;
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	-webkit-transform: translate(-50%, -50%);
+	        transform: translate(-50%, -50%);
+}
+
+.emailkit-admin-video-tutorial-list .tutorial-thumb img {
+	max-width: 100%;
+	display: block;
+}
+
+.emailkit-admin-video-tutorial-popup {
+	position: fixed;
+	background-color: rgba(0, 0, 0, 0.5);
+	width: 100%;
+	height: 100%;
+	left: 0;
+	top: 0;
+	overflow-y: auto;
+	z-index: 10000;
+	opacity: 0;
+	visibility: hidden;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.emailkit-admin-video-tutorial-popup.show {
+	opacity: 1;
+	visibility: visible;
+}
+
+.emailkit-admin-video-tutorial-popup.show .emailkit-admin-video-tutorial-popup-content {
+	-webkit-transform: translate(-50%, -50%) scale(1);
+	        transform: translate(-50%, -50%) scale(1);
+}
+
+.emailkit-admin-video-tutorial-popup .emailkit-admin-video-tutorial-popup-content {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	-webkit-transition: all 0.7s;
+	transition: all 0.7s;
+	-webkit-transform: translate(-50%, -50%) scale(0);
+	        transform: translate(-50%, -50%) scale(0);
+}
+
+.emailkit-admin-video-tutorial-close {
+	position: absolute;
+	top: -10px;
+	right: -6px;
+	cursor: pointer;
+	background-color: #ce1b04;
+	border-radius: 100px;
+	width: 30px;
+	height: 30px;
+	-webkit-box-sizing: border-box;
+	box-sizing: border-box;
+	text-align: center;
+	line-height: 33px;
+}
+
+.emailkit-admin-video-tutorial-close i {
+	color: #fff;
+	font-size: 20px;
+}
+
+.emailkit-admin-access-token {
+	text-decoration: none;
+	color: #f2295b;
+	text-align: right;
+	display: block;
+	font-size: 16px;
+	font-weight: 600;
+}
+
+.emailkit-admin-access-token:focus, .emailkit-admin-access-token:hover {
+	color: #cd1c48;
+	outline: none;
+}
+
+#v-elementskit-userdata {
+	padding-bottom: 150px;
+	position: relative;
+	z-index: 1;
+}
+
+#v-elementskit-userdata .emailkit-admin-fields-container {
+	max-width: 60%;
+}
+
+#v-elementskit-userdata::before {
+	content: "";
+	background-image: url(../images/user-data-thumb.png);
+	position: absolute;
+	display: block;
+	bottom: 0;
+	right: 0;
+	height: 281px;
+	width: 444px;
+	display: block;
+	background-repeat: no-repeat;
+	background-position: right bottom;
+	z-index: -1;
+}
+
+.emailkit-admin-fields-container-description {
+	font-size: 18px;
+	line-height: 28px;
+	color: #121116;
+	width: 55%;
+	display: inline-block;
+}
+
+#v-elementskit-elements .emailkit-admin-fields-container-fieldset,
+#v-elementskit-modules .emailkit-admin-fields-container-fieldset {
+	margin-top: 20px;
+}
+
+#v-elementskit-elements .emailkit-admin-section-header,
+#v-elementskit-modules .emailkit-admin-section-header {
+	margin-bottom: 20px;
+}
+
+.emailkit-admin-fields-container-fieldset .attr-row {
+	margin-left: -12px;
+	margin-right: -12px;
+}
+
+.emailkit-admin-fields-container-fieldset .attr-row > div {
+	padding: 0 10px;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-card-shadow {
+	background-color: #fff;
+	border-radius: 10px;
+	-webkit-box-shadow: none;
+	box-shadow: none;
+	border: 1px solid #ededed;
+	padding: 0;
+	margin: 0;
+	margin-bottom: 20px;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-card-shadow:hover {
+	border-color: #f2295b;
+}
+
+.emailkit-admin-fields-container-fieldset .attr-input-switch:hover .emailkit-admin-demo-tooltip {
+	visibility: visible;
+	opacity: 1;
+	top: -10px;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-control-input {
+	opacity: 1;
+	position: static;
+	z-index: 1;
+	-webkit-box-flex: 0;
+	    -ms-flex: 0 0 20px;
+	        flex: 0 0 20px;
+	width: 20px;
+	height: 20px;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	border: 2px solid #CCCED9;
+	margin-top: 26px;
+	position: relative;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-control-input:checked {
+	border-color: #FE0467;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-control-input:checked::before {
+	background-color: #FE0467;
+	height: 10px;
+	width: 10px;
+	margin: 0;
+	top: 50%;
+	left: 50%;
+	-webkit-transform: translate(-50%, -50%);
+	        transform: translate(-50%, -50%);
+	position: absolute;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-card-shadow {
+	margin-bottom: 10px;
+	padding: 0 0 0 26px;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-shadow: 0 1px 2px rgba(2, 19, 67, 0.1);
+	        box-shadow: 0 1px 2px rgba(2, 19, 67, 0.1);
+	border: 1px solid transparent;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-card-shadow.active {
+	-webkit-box-shadow: 0 20px 30px rgba(2, 19, 67, 0.1);
+	        box-shadow: 0 20px 30px rgba(2, 19, 67, 0.1);
+	position: relative;
+	z-index: 1;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-card-shadow:hover {
+	border-color: #FE0467;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-control-label {
+	-webkit-box-orient: vertical;
+	-webkit-box-direction: normal;
+	    -ms-flex-direction: column;
+	        flex-direction: column;
+	-webkit-box-align: start;
+	    -ms-flex-align: start;
+	        align-items: flex-start;
+	color: #021343;
+	font-size: 20px;
+	line-height: 12px;
+	padding: 29px 10px;
+	display: block;
+	font-weight: normal;
+	width: 100%;
+}
+
+.emailkit-admin-fields-container-fieldset .emailkit-admin-input-radio .emailkit-admin-control-desc {
+	color: #5D5E65;
+	font-size: 14px;
+	line-height: 18px;
+	font-weight: normal;
+	margin-top: 11px;
+	display: block;
+}
+
+.emailkit-admin-user-data-separator {
+	display: block;
+	border: 2px solid #fff;
+	margin-bottom: 30px;
+	position: relative;
+}
+
+.emailkit-admin-user-data-separator::before {
+	content: "";
+	width: 40px;
+	height: 4px;
+	background-color: #f2295b;
+	display: block;
+	position: absolute;
+	top: -2px;
+	left: -2px;
+}
+
+.emailkit-admin-demo-tooltip {
+	background-color: #121116;
+	color: #fff;
+	font-size: 10px;
+	line-height: 13px;
+	text-decoration: none;
+	text-transform: uppercase;
+	padding: 2px 9px;
+	border-radius: 3px;
+	display: inline-block;
+	position: absolute;
+	right: 20px;
+	top: 0;
+	opacity: 0;
+	visibility: hidden;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.emailkit-admin-demo-tooltip:hover, .emailkit-admin-demo-tooltip:focus {
+	color: #fff;
+	border: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-admin-demo-tooltip::before {
+	content: "";
+	border-left: 8px solid transparent;
+	border-right: 8px solid transparent;
+	border-top: 8px solid #121116;
+	position: absolute;
+	bottom: -8px;
+	left: 50%;
+	-webkit-transform: translateX(-50%);
+	        transform: translateX(-50%);
+}
+
+.emailkit-admin-demo-tooltip i {
+	margin-right: 5px;
+}
+
+.admin-bar .emailkit-admin-section-header.fixed {
+	top: 30px;
+}
+
+.emailkit-go-pro-con {
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+}
+
+.emailkit-go-pro-close {
+	float: right;
+	font-size: 21px;
+	font-weight: bold;
+	line-height: 1;
+	color: #000;
+	text-shadow: 0 1px 0 #fff;
+	filter: alpha(opacity=20);
+	opacity: 0.2;
+	border: none;
+	background-color: transparent;
+	position: relative;
+	z-index: 9;
+	cursor: pointer;
+}
+
+.emailkit-go-pro-close:focus {
+	outline: none;
+	border: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.attr-modal-dialog-centered {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	-ms-flex-align: center;
+	align-items: center;
+}
+
+.toplevel_page_elementskit.attr-modal-open .attr-modal {
+	display: -webkit-box !important;
+	display: -ms-flexbox !important;
+	display: flex !important;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.modal-backdrop {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100vw;
+	height: 100vh;
+	background-color: rgba(0, 0, 0, 0.5);
+	z-index: 1;
+}
+
+.emailkit-admin-input-text--elementskit-license-key {
+	display: block;
+}
+
+.emailkit-admin-license-form-submit.btn-license-activate {
+	background-color: #f2295b;
+	border-radius: 27px !important;
+	-webkit-box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	font-size: 14px;
+	line-height: 16px;
+	text-transform: uppercase;
+	color: #fff;
+	font-weight: bold;
+	border: none;
+	padding: 12px 23px;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+	margin-left: 0 !important;
+	height: auto;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+}
+
+.emailkit-admin-license-form-submit.btn-license-activate:hover, .emailkit-admin-license-form-submit.btn-license-activate:focus {
+	background-color: #ad0730;
+	outline: none;
+}
+
+.attr-input-group-btn {
+	text-align: left;
+	margin-top: 0;
+}
+
+.emailkit-spinner {
+	width: 13px !important;
+	height: 13px !important;
+	top: 0 !important;
+}
+
+.attr-modal-content {
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-go-pro-con .attr-modal-body {
+	padding: 30px;
+}
+
+.emailkit-go-pro-con .attr-modal-body a {
+	color: #f2295b;
+}
+
+.emailkit-go-pro-con .attr-modal-body a:focus {
+	outline: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.elementskit-template-save-btn-editor {
+	background-color: #ccc;
+	border: none;
+	display: -webkit-inline-box;
+	display: -ms-inline-flexbox;
+	display: inline-flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	color: #fff;
+	border-radius: 27px;
+	-webkit-box-shadow: 0 7px 15px rgba(204, 204, 204, 0.3);
+	        box-shadow: 0 7px 15px rgba(204, 204, 204, 0.3);
+	font-size: 14px;
+	line-height: 16px;
+	text-transform: uppercase;
+	color: #fff;
+	font-weight: bold;
+	border: none;
+	padding: 12px 23px;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.elementskit-template-save-btn-editor:hover, .elementskit-template-save-btn-editor:focus, .elementskit-template-save-btn-editor:active {
+	color: #fff !important;
+	background-color: #adadad !important;
+	outline: none;
+	border: none;
+	-webkit-box-shadow: 0 7px 15px rgba(204, 204, 204, 0.3) !important;
+	        box-shadow: 0 7px 15px rgba(204, 204, 204, 0.3) !important;
+}
+
+.elementskit-template-save-btn-editor img {
+	max-width: 14px;
+	margin-right: 5px;
+}
+
+.elementskit-template-save-btn {
+	background-color: #f2295b;
+	border-radius: 27px;
+	-webkit-box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	box-shadow: 0 7px 15px rgba(242, 41, 91, 0.3);
+	font-size: 14px;
+	line-height: 16px;
+	text-transform: uppercase;
+	color: #fff;
+	font-weight: bold;
+	border: none;
+	padding: 12px 23px;
+	-webkit-transition: all 0.4s;
+	transition: all 0.4s;
+}
+
+.elementskit-template-save-btn:hover, .elementskit-template-save-btn:focus {
+	background-color: #ad0730;
+	outline: none;
+}
+
+/* pro labal etc */
+.attr-panel-heading.pro-disabled {
+	position: relative;
+	overflow: hidden;
+	border-radius: 20px !important;
+}
+
+.attr-panel-heading.widget-disabled .attr-btn::before,
+.attr-panel-heading.pro-disabled .attr-btn::before {
+	display: none;
+}
+
+.attr-panel-heading.pro-disabled::after {
+	background-color: #f2295b;
+	background-image: none;
+	-webkit-box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	        box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	color: #fff;
+	content: "PRO";
+	display: block;
+	font-size: 10px;
+	font-weight: 600;
+	height: 25px;
+	left: -41px;
+	line-height: 28px;
+	padding-bottom: 1px;
+	padding-left: 3px;
+	padding-right: 0;
+	padding-top: 1px;
+	position: absolute;
+	text-align: center;
+	text-transform: uppercase;
+	top: 0;
+	-webkit-transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	        transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	width: 100px;
+}
+
+.modal-backdrop.attr-fade {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100vw;
+	height: 100vh;
+	background-color: rgba(0, 0, 0, 0.5);
+}
+
+.emailkit-go-pro-con {
+	margin-top: 50px;
+}
+
+.emailkit-go-pro-con .icon {
+	font-size: 90px;
+	/* color: #339417; */
+	color: #f2295b;
+	opacity: 0.3;
+}
+
+.emailkit-go-pro-con h2 {
+	font-size: 44px;
+	margin: 56px 0 34px 0;
+}
+
+.emailkit-go-pro-con p {
+	font-size: 20px;
+	font-weight: 300;
+	line-height: 1.2;
+}
+
+.emailkit-go-pro-con .attr-modal-body {
+	padding: 30px 15px;
+}
+
+#v-elementskit-emailkit-go-pro-nav-tab .emailkit-admin-tab-icon {
+	height: 40px;
+	overflow: visible;
+}
+
+.emailkit-go-pro-gif {
+	height: 58px;
+	position: absolute;
+	top: 9px;
+	right: 25px;
+	-webkit-transform: rotate(32deg);
+	        transform: rotate(32deg);
+	opacity: 0.55;
+}
+
+.attr-nav-tabs > li > #v-elementskit-emailkit-go-pro-nav-tab:focus,
+.attr-nav-tabs > li > #v-elementskit-emailkit-go-pro-nav-tab:hover {
+	/* background-color: #eaeaea; */
+	border-left-color: #fcb214;
+}
+
+.attr-nav-tabs > li > #v-elementskit-emailkit-go-pro-nav-tab:focus .emailkit-go-pro-gif,
+.attr-nav-tabs > li > #v-elementskit-emailkit-go-pro-nav-tab:hover .emailkit-go-pro-gif {
+	-webkit-filter: invert(1) brightness(60%) sepia(80%) saturate(10000%) hue-rotate(35deg);
+	        filter: invert(1) brightness(60%) sepia(80%) saturate(10000%) hue-rotate(35deg);
+}
+
+.attr-nav-tabs > li > #v-elementskit-emailkit-go-pro-nav-tab .emailkit-admin-title {
+	color: #fcb214;
+}
+
+/* pro labal etc */
+.emailkit-content-type-pro-disabled .emailkit-admin-input-switch::before {
+	background-color: #f2295b;
+	background-image: none;
+	-webkit-box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	        box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	color: #fff;
+	content: "PRO";
+	display: block;
+	font-size: 10px;
+	font-weight: 600;
+	height: 25px;
+	left: -41px;
+	line-height: 28px;
+	padding-bottom: 1px;
+	padding-left: 3px;
+	padding-right: 0;
+	padding-top: 1px;
+	position: absolute;
+	text-align: center;
+	text-transform: uppercase;
+	top: 0;
+	-webkit-transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	        transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	width: 100px;
+}
+
+.attr-panel-heading.pro-disabled {
+	position: relative;
+	overflow: hidden;
+	border-radius: 20px !important;
+}
+
+.attr-panel-heading.pro-disabled .attr-btn::before {
+	display: none;
+}
+
+.attr-panel-heading.pro-disabled::after {
+	background-color: #f2295b;
+	background-image: none;
+	-webkit-box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	        box-shadow: rgba(0, 5, 41, 0.1) 0 3px 7px 0;
+	color: #fff;
+	content: "PRO";
+	display: block;
+	font-size: 10px;
+	font-weight: 600;
+	height: 25px;
+	left: -41px;
+	line-height: 28px;
+	padding-bottom: 1px;
+	padding-left: 3px;
+	padding-right: 0;
+	padding-top: 6px;
+	position: absolute;
+	text-align: center;
+	text-transform: uppercase;
+	top: -4px;
+	-webkit-transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	        transform: matrix(0.707107, -0.707107, 0.707107, 0.707107, 0, 0);
+	width: 100px;
+}
+
+.emailkit-content-type-pro-disabled .emailkit-admin-input-switch::after {
+	position: absolute;
+	content: "";
+	top: 0;
+	left: 0;
+	height: 100%;
+	width: 100%;
+	/* background-color: #fff; */
+	opacity: 0.4;
+}
+
+/**
+ * Accordion Buttons
+ */
+.emailkit-admin-accordion-btn {
+	display: block;
+	margin-left: 10px;
+	padding: 10px 30px 12px;
+	color: #021343;
+	border: 2px solid #E3E5EB;
+	border-radius: 6px;
+	font-size: 15px;
+	font-weight: 500;
+	line-height: 18px;
+	text-transform: capitalize;
+	-webkit-transition: color .3s, background .3s, border-color .3s;
+	transition: color .3s, background .3s, border-color .3s;
+	cursor: pointer;
+}
+
+.emailkit-admin-accordion-btn-group {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-ms-flex-wrap: wrap;
+	    flex-wrap: wrap;
+	-webkit-box-pack: end;
+	    -ms-flex-pack: end;
+	        justify-content: flex-end;
+}
+
+.emailkit-admin-accordion-btn:hover {
+	color: #f2295b;
+	background-color: #fff;
+	border-color: #fff;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-admin-accordion-btn:focus {
+	color: #021343;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-admin-accordion-btn[disabled] {
+	opacity: 0.85;
+	pointer-events: none;
+}
+
+.emailkit-admin-accordion-btn-focused {
+	color: #fff;
+	background-color: #f2295b;
+	border-color: #f2295b;
+}
+
+.emailkit-admin-accordion-btn-focused:hover, .emailkit-admin-accordion-btn-focused:focus {
+	color: #fff;
+	background-color: #f2295b;
+	border-color: #f2295b;
+}
+
+.emailkit-admin-widget-list .emailkit-widget-group-title,
+.emailkit-admin-widgets-container .emailkit-widget-group-title {
+	color: #021343;
+	font-size: 16px;
+	line-height: 28px;
+	margin-top: 36px;
+	margin-bottom: 16px;
+}
+
+.emailkit-admin-widget-list .emailkit-widget-group-title:first-child,
+.emailkit-admin-widgets-container .emailkit-widget-group-title:first-child {
+	margin-top: 0;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-input-switch .emailkit-admin-control-label {
+	height: 52px;
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+	font-weight: normal;
+	padding-left: 15px;
+	padding-right: 15px;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-input-switch .emailkit-admin-control-label-switch {
+	width: 45px;
+	height: 20px;
+	margin-left: 0;
+	min-width: 45px;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-input-switch .emailkit-admin-control-label-switch::after {
+	width: 12px;
+	height: 12px;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-input-switch .emailkit-admin-control-label-switch::before {
+	text-indent: 18px;
+}
+
+.emailkit-admin-widget-list .emailkit-content-type-pro-disabled .emailkit-admin-input-switch::before {
+	font-size: 9px;
+	left: -46px;
+	line-height: 35px;
+	top: -6px;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-demo-tooltip {
+	right: 0;
+}
+
+.emailkit-admin-widget-list .emailkit-admin-control-label-text {
+	padding-right: 10px;
+	padding-left: 10px;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-input-switch .emailkit-admin-control-label-switch {
+	display: none;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-input-switch .emailkit-admin-control-input {
+	opacity: 1;
+	z-index: 1;
+	position: static;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	border: 1.5px solid #C0C2CE;
+	height: 16px;
+	width: 16px;
+	border-radius: 3px;
+	margin: 0;
+	margin-right: 13px;
+	-webkit-transition: background .4s;
+	transition: background .4s;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-input-switch .emailkit-admin-control-input:checked {
+	background-color: #FE0467;
+	border-color: #FE0467;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-input-switch .emailkit-admin-control-input:checked::before {
+	content: "\e901";
+	font-family: 'xs-onboard-icons';
+	padding: 0;
+	width: auto;
+	height: auto;
+	font-size: 10px;
+	font-weight: bold;
+	color: #fff;
+	margin: 0;
+	position: absolute;
+	top: 50%;
+	left: 8px;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+}
+
+.emailkit-admin-widgets-container .attr-input-switch {
+	margin-bottom: 0;
+}
+
+.emailkit-admin-widgets-container .emailkit-content-type-pro-disabled .emailkit-admin-control-label:after {
+	background-color: rgba(62, 119, 252, 0.1);
+	background-image: none;
+	content: "PRO";
+	display: block;
+	position: absolute;
+	text-align: center;
+	text-transform: uppercase;
+	top: 50%;
+	right: -40px;
+	color: #3E77FC;
+	font-size: 11px;
+	line-height: 13px;
+	border-radius: 4px;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+	font-weight: 500;
+	padding: 2px 5px;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-control-label {
+	padding: 0;
+	color: #5D5E65;
+	font-size: 14px;
+	line-height: 17px;
+	position: relative;
+	font-weight: normal;
+}
+
+.emailkit-admin-widgets-container .emailkit-admin-fields-container-fieldset .emailkit-admin-card-shadow {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	border: none;
+	padding: 5px;
+	margin-bottom: 0;
+}
+
+.emailkit-admin-widgets-container .emailkit-content-type-pro-disabled .emailkit-admin-input-switch::before {
+	display: none;
+}
+
+.emailkit-onboard-dashboard {
+	background-color: #F5F6F9;
+	margin-left: -20px;
+	padding: 30px;
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 1;
+	width: calc(100% + 20px);
+	-webkit-box-sizing: border-box;
+	        box-sizing: border-box;
+	min-height: calc(100vh - 32px);
+	padding-top: 30px;
+	padding-bottom: 100px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn {
+	color: #FFFFFF;
+	font-size: 15px;
+	line-height: 18px;
+	font-weight: 500;
+	background-color: #FE0467;
+	border-radius: 6px;
+	text-decoration: none;
+	padding: 16px 37px;
+	display: inline-block;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	outline: none;
+	cursor: pointer;
+	border: none;
+	position: relative;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn:hover {
+	-webkit-box-shadow: 0 10px 20px #d602574d;
+	        box-shadow: 0 10px 20px #d602574d;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn.prev {
+	background-color: transparent;
+	color: #021343;
+	padding-right: 26px;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-column-gap: 10px;
+	   -moz-column-gap: 10px;
+	        column-gap: 10px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn.prev .icon {
+	margin-right: 10px;
+	font-weight: bold;
+	position: relative;
+	top: 1px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn.prev:hover {
+	background-color: transparent;
+	color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-btn .emailkit-spinner {
+	position: absolute;
+	left: 16px;
+	top: 20px !important;
+}
+
+.emailkit-onboard-dashboard .emailkit-pro-btn {
+	color: #3E77FC;
+	font-size: 15px;
+	line-height: 18px;
+	background-color: transparent;
+	font-weight: 500;
+	border: 1.5px solid #3E77FC;
+	border-radius: 6px;
+	padding: 11px 32px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+	text-decoration: none;
+	display: inline-block;
+}
+
+.emailkit-onboard-dashboard .emailkit-pro-btn:hover {
+	background-color: #3E77FC;
+	color: #fff;
+}
+
+.emailkit-onboard-dashboard .emailkit-pro-btn:focus {
+	border-color: #3E77FC;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-pro-btn .icon {
+	position: relative;
+	top: 1px;
+}
+
+.emailkit-onboard-dashboard .emailkit_container {
+	max-width: 1110px;
+	margin: auto;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-progressbar {
+	background-color: #3E77FC;
+	height: 4px;
+	display: block;
+	position: absolute;
+	bottom: -4px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-ms-flex-wrap: wrap;
+	    flex-wrap: wrap;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	border-bottom: 4px solid #E4E6EE;
+	padding-bottom: 20px;
+	position: relative;
+	margin: 0;
+	margin-bottom: 50px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-item {
+	padding-right: 28px;
+	margin-right: 97px;
+	color: #5D5E65;
+	font-size: 14px;
+	line-height: 17px;
+	font-weight: 500;
+	cursor: pointer;
+	margin-bottom: 0;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-item.selected .emailkit-onboard-nav-icon {
+	background-color: #d9e5ff;
+	font-size: 22px;
+	vertical-align: middle;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-item:last-child {
+	margin-right: 0;
+	padding-right: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-item.active .emailkit-onboard-nav-icon {
+	color: #fff;
+	background-color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-item.selected .emailkit-onboard-nav-icon:before {
+	content: "\e901";
+	color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-nav-icon {
+	height: 40px;
+	width: 40px;
+	background-color: #fff;
+	display: -webkit-inline-box;
+	display: -ms-inline-flexbox;
+	display: inline-flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+	border-radius: 6px;
+	margin-right: 11px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+	font-size: 20px;
+}
+
+.emailkit-onboard-dashboard .emailkit-admin-fields-container-description {
+	display: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-section {
+	background-color: #fff;
+	overflow: hidden;
+	border-radius: 6px;
+	padding: 50px;
+	margin-bottom: 10px;
+	padding-top: 30px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-section:last-child {
+	margin-bottom: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-section-title {
+	font-size: 20px;
+	line-height: 28px;
+	color: #021343;
+	font-weight: bold;
+	margin-top: 0;
+	margin-bottom: 24px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module {
+	margin-top: 60px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-card-shadow {
+	border-radius: 6px;
+	border: 2px solid #EFF0F5;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-card-shadow:hover {
+	border-color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-control-label {
+	padding: 17px 20px 17px 30px;
+	font-size: 14px;
+	line-height: 17px;
+	font-weight: 500;
+	color: #021343;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-input-switch::before {
+	background-color: #3E77FC;
+	left: -43px;
+	top: -3px;
+	line-height: 34px;
+	-webkit-box-shadow: none;
+	box-shadow: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-input-switch .emailkit-admin-control-label-switch {
+	width: 56px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-input-switch .emailkit-admin-control-label-switch::before {
+	border-color: #E7E9EF;
+	background-color: #F2F3F5;
+	color: #5D5E65;
+	font-size: 14px;
+	line-height: 17px;
+	font-weight: 400;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-input-switch .emailkit-admin-control-label-switch:after {
+	background: #777F92;
+	height: 16px;
+	width: 16px;
+	top: 5px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-control-input:checked ~ .emailkit-admin-control-label .emailkit-admin-control-label-switch::before {
+	border-color: #E7E9EF;
+	text-indent: 8px;
+	content: attr(data-active);
+	font-size: 14px;
+	line-height: 17px;
+	font-weight: 400;
+	color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module .emailkit-admin-control-input:checked ~ .emailkit-admin-control-label .emailkit-admin-control-label-switch:after {
+	left: 35px;
+	background-color: #3E77FC;
+	content: '';
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-widget .emailkit-admin-fields-container-fieldset .attr-input-switch .emailkit-admin-demo-tooltip {
+	top: -20px;
+	right: inherit;
+	left: 32px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-widget .emailkit-admin-fields-container-fieldset .attr-input-switch .emailkit-admin-demo-tooltip::before {
+	left: 15px;
+}
+
+.emailkit-onboard-dashboard .emailkit-admin-fields-container-fieldset {
+	margin: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-wrapper {
+	opacity: 0;
+	visibility: hidden;
+	position: absolute;
+	left: -999999px;
+	top: -999999px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+	padding: 0 100px 0 100px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-wrapper.active {
+	opacity: 1;
+	left: inherit;
+	top: inherit;
+	visibility: visible;
+	position: relative;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-main-header {
+	margin-bottom: 43px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-main-header--title {
+	color: #021343;
+	font-size: 40px;
+	line-height: 54px;
+	font-weight: normal;
+	margin: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-main-header--title strong {
+	font-weight: 700;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-main-header--description {
+	color: #021343;
+	font-size: 18px;
+	line-height: 28px;
+	margin: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup {
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	-ms-flex-align: center;
+	align-items: center;
+	border-radius: 6px;
+	background-color: #fff;
+	padding: 0 26px;
+	padding-right: 0;
+	border-left: 3px solid #3E77FC;
+	margin: 0;
+	-webkit-box-shadow: 0 20px 40px rgba(0, 10, 36, 0.1);
+	        box-shadow: 0 20px 40px rgba(0, 10, 36, 0.1);
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup label {
+	color: #AAABAF;
+	font-size: 15px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup input {
+	color: #98999E;
+	font-size: 15px;
+	line-height: 18px;
+	font-weight: normal;
+	-webkit-box-flex: 1;
+	    -ms-flex: 1;
+	        flex: 1;
+	padding: 19px 15px;
+	outline: none;
+	border: none;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	padding-left: 9px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup input:-webkit-autofill, .emailkit-onboard-dashboard .emailkit-onboard-signup input:-webkit-autofill:hover, .emailkit-onboard-dashboard .emailkit-onboard-signup input:-webkit-autofill:focus, .emailkit-onboard-dashboard .emailkit-onboard-signup input:-webkit-autofill:active {
+	-webkit-transition: background-color 5000s ease-in-out 0s;
+	transition: background-color 5000s ease-in-out 0s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup--helptext {
+	color: #021343;
+	font-size: 16px;
+	line-height: 26px;
+	font-weight: normal;
+	margin: 0;
+	margin-top: 40px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-signup--helptext span {
+	color: #FE0467;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-2-inner {
+	max-width: 100%;
+	padding: 0 148px;
+	padding-top: 30px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-2-inner .error {
+	color: red;
+	font-size: 14px;
+	margin: 0;
+	position: absolute;
+	margin-top: 4px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02:before {
+	content: "";
+	background-image: url(../images/shape-08.png);
+	height: 110px;
+	width: 105px;
+	display: block;
+	position: fixed;
+	right: -45px;
+	top: 200px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02.active {
+	position: relative  !important;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-main-header--title {
+	margin-bottom: 12px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-01 {
+	position: absolute;
+	margin-top: 130px;
+	margin-right: 25px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-09 {
+	position: absolute;
+	right: 56px;
+	margin-top: 16px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-07 {
+	position: absolute;
+	top: 20px;
+	right: 220px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-03,
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-02 {
+	position: absolute;
+	right: 0;
+	top: 300px;
+	opacity: .3;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-02 {
+	right: inherit;
+	left: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-06 {
+	position: absolute;
+	left: -35px;
+	top: 130px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-05 {
+	position: absolute;
+	left: -100px;
+	top: 20px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-02 .emailkit-onboard-shapes .shape-04 {
+	position: absolute;
+	top: 230px;
+	left: -150px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 {
+	padding-top: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .emailkit-onboard-main-header {
+	margin-bottom: 26px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .shape-11 {
+	position: absolute;
+	top: 235px;
+	right: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .shape-12 {
+	position: absolute;
+	left: 20px;
+	bottom: 150px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .shape-06 {
+	position: absolute;
+	top: 90px;
+	left: -37px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .shape-10 {
+	position: absolute;
+	top: 185px;
+	left: -2px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .shape-13 {
+	position: absolute;
+	top: 390px;
+	left: -145px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .emailkit-onboard-main-header--description {
+	color: #5D5E65;
+	font-size: 16px;
+	line-height: 26px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .emailkit-onboard-main-header--title {
+	margin-bottom: 15px;
+	line-height: 50px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-03 .emailkit-onboard-pagination {
+	margin-top: 50px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .emailkit-onboard-main-header {
+	margin-bottom: 50px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .emailkit-onboard-main-header--title {
+	margin-top: -7px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .emailkit-onboard-pagination {
+	margin-top: 30px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .shape-07 {
+	position: absolute;
+	top: 230px;
+	right: -90px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .shape-14 {
+	position: absolute;
+	top: 100px;
+	left: -200px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .shape-15 {
+	position: absolute;
+	top: 230px;
+	left: -100px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .shape-16 {
+	position: absolute;
+	left: -35px;
+	top: 370px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-01 .shape-17 {
+	position: absolute;
+	right: 45px;
+	top: 310px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-plugin-list .attr-row {
+	margin-left: -11px;
+	margin-right: -11px;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+	-ms-flex-wrap: wrap;
+	    flex-wrap: wrap;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-plugin-list .attr-row > div {
+	padding: 11px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin {
+	background-color: #fff;
+	border-radius: 6px;
+	-webkit-box-shadow: 0 30px 50px rgba(0, 10, 36, 0.1);
+	        box-shadow: 0 30px 50px rgba(0, 10, 36, 0.1);
+	position: relative;
+	height: 100%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin label {
+	display: block;
+	padding: 30px 62px 36px 27px;
+	cursor: default;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin .badge--featured {
+	position: absolute;
+	right: -20px;
+	top: -30px;
+	height: 100px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--input {
+	border: 1px solid #CCCED9;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	background-color: #F5F5F6;
+	height: 20px;
+	width: 20px;
+	border-radius: 50%;
+	position: absolute;
+	top: 14px;
+	right: 14px;
+	margin: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--input:checked {
+	background-color: #3E77FC;
+	border-color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--input:checked::before {
+	content: "\e901";
+	font-family: 'xs-onboard-icons';
+	padding: 0;
+	width: auto;
+	height: auto;
+	font-size: 12px;
+	font-weight: bold;
+	color: #fff;
+	margin: 0;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	-webkit-transform: translate(-50%, -50%);
+	        transform: translate(-50%, -50%);
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--install {
+	color: #021343;
+	font-size: 15px;
+	font-weight: 500;
+	display: block;
+	border: 2px solid #E4E6EE;
+	border-radius: 6px;
+	min-height: 175px;
+	line-height: 175px;
+	position: relative;
+	text-decoration: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--install i {
+	padding-left: 9px;
+	font-weight: bold;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--description {
+	color: #5D5E65;
+	font-size: 15px;
+	line-height: 22px;
+	font-weight: 400;
+	margin: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--description span {
+	background: #d7a1f973;
+	color: #021343;
+	font-weight: 500;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--logo {
+	margin-bottom: 12px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--install_plugin {
+	padding: 5px 20px 7px 20px;
+	margin-top: 23px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--install_plugin.emailkit-plugin-install-activate {
+	cursor: no-drop;
+	background-color: #E8E9EF;
+	color: #5D5E65;
+	border-color: #E8E9EF;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin--install_plugin.activated {
+	cursor: default;
+	border: 1px solid #2AAE1433;
+	background: rgba(42, 174, 20, 0.1);
+	color: #2AAE14;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-single-plugin.badge--featured:before {
+	display: block;
+	position: absolute;
+	top: 10px;
+	right: 4px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial {
+	text-align: center;
+	background-image: url(../images/tutorial-banner.png);
+	background-repeat: no-repeat;
+	background-size: cover;
+	background-position: center;
+	padding: 80px 0;
+	border-radius: 14px;
+	-webkit-box-shadow: 0 30px 40px rgba(0, 8, 30, 0.2);
+	        box-shadow: 0 30px 40px rgba(0, 8, 30, 0.2);
+	position: relative;
+	overflow: hidden;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial--btn {
+	display: inline-block;
+	padding: 50px;
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	border-radius: 100%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial--link {
+	text-decoration: none;
+	display: inline-block;
+	padding: 35px;
+	border: 2px solid rgba(255, 255, 255, 0.1);
+	border-radius: 100%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial i {
+	color: #fff;
+	font-size: 25px;
+	background-color: #FE0467;
+	height: 90px;
+	width: 90px;
+	display: block;
+	line-height: 90px;
+	text-align: center;
+	border-radius: 100%;
+	margin: auto;
+	border: 1px solid red;
+	margin: 10px;
+	-webkit-transition: all .4s;
+	transition: all .4s;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial i:before {
+	margin-left: 5px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial i:hover {
+	background-color: #fff;
+	color: #FE0467;
+	border-color: #fff;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial .emailkit-admin-video-tutorial-popup {
+	position: absolute;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial .emailkit-admin-video-tutorial-popup iframe {
+	width: 100%;
+	height: 100%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tutorial .emailkit-admin-video-tutorial-popup .emailkit-admin-video-tutorial-iframe {
+	height: 100%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term {
+	margin-top: 35px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--label {
+	color: #5D5E65;
+	font-size: 16px;
+	line-height: 26px;
+	font-weight: normal;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--input {
+	height: 18px;
+	width: 18px;
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	border: 1.5px solid #C0C2CE;
+	background-color: #F5F5F6;
+	border-radius: 4px;
+	position: relative;
+	box-shadow: none;
+	outline: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--input:checked {
+	background-color: #FE0467;
+	border-color: #FE0467;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--input:checked::before {
+	content: "\e901";
+	font-family: 'xs-onboard-icons';
+	padding: 0;
+	width: auto;
+	height: auto;
+	font-size: 10px;
+	font-weight: bold;
+	color: #fff;
+	margin: 0;
+	position: absolute;
+	top: 50%;
+	left: 3px;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--input:focus {
+	-webkit-box-shadow: none;
+	        box-shadow: none;
+	outline: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--help {
+	margin: 0;
+	color: #021343;
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 26px;
+	margin-top: 10px;
+	cursor: pointer;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--help:hover {
+	color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--help.active {
+	color: #3E77FC;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--helptext {
+	height: 0;
+	-webkit-transition: opacity .4s;
+	transition: opacity .4s;
+	opacity: 0;
+	visibility: hidden;
+	line-height: 22px;
+	color: #5D5E65;
+	font-size: 14px;
+	cursor: default;
+	font-weight: normal;
+	position: absolute;
+	padding-right: 95px;
+	margin-top: 20px;
+	margin-bottom: -4px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--helptext.active {
+	opacity: 1;
+	visibility: visible;
+	height: auto;
+	position: static;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-tut-term--helptext:hover {
+	text-decoration: none;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-pagination {
+	text-align: right;
+	border-top: 1px solid #E4E6EE;
+	padding-top: 20px;
+	margin-top: 60px;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-pack: end;
+	    -ms-flex-pack: end;
+	        justify-content: flex-end;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-shapes {
+	position: absolute;
+	top: 50%;
+	width: 100%;
+	left: 0;
+	-webkit-transform: translateY(-50%);
+	        transform: translateY(-50%);
+	height: 100%;
+	display: -webkit-box;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-box-align: center;
+	    -ms-flex-align: center;
+	        align-items: center;
+	-webkit-box-pack: center;
+	    -ms-flex-pack: center;
+	        justify-content: center;
+	z-index: -9;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-pro-features h2 {
+	margin: 0;
+	color: #021343;
+	font-size: 24px;
+	line-height: 29px;
+	margin-bottom: 35px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-pro-features h2 span {
+	color: #FE0467;
+	position: relative;
+	display: inline-block;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-pro-features h2 span:before {
+	content: "";
+	background-image: url(../images/pro-line-shape.png);
+	width: 64px;
+	height: 44px;
+	display: block;
+	top: 50%;
+	position: absolute;
+	-webkit-transform: translate(-50%, -50%);
+	        transform: translate(-50%, -50%);
+	left: 50%;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-modules li {
+	display: inline-block;
+	color: #021343;
+	font-size: 14px;
+	line-height: 18px;
+	font-weight: 500;
+	background-color: #fff;
+	-webkit-box-shadow: 0 30px 40px rgba(0, 10, 36, 0.1);
+	        box-shadow: 0 30px 40px rgba(0, 10, 36, 0.1);
+	border-radius: 4px;
+	padding-left: 10px;
+	padding-right: 50px;
+	padding-top: 4px;
+	padding-bottom: 4px;
+	margin-right: 10px;
+	margin-bottom: 10px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-modules img {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-modules span {
+	display: inline-block;
+	padding-left: 10px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module-meta {
+	margin: 0;
+	margin-top: 30px;
+	margin-bottom: 50px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module-meta li {
+	display: inline-block;
+	font-size: 14px;
+	line-height: 17px;
+	font-weight: 500;
+	margin: 0;
+	color: #5D5E65;
+	margin-right: 45px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module-meta li:last-child {
+	margin-right: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-module-meta li i {
+	font-size: 15px;
+	height: 24px;
+	width: 24px;
+	display: inline-block;
+	background-color: rgba(62, 119, 252, 0.1);
+	text-align: center;
+	border-radius: 100%;
+	line-height: 24px;
+	color: #3E77FC;
+	margin-right: 7px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .emailkit-onboard-main-header {
+	margin-bottom: 44px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .emailkit-onboard-pagination {
+	margin-top: 70px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .shape-14 {
+	position: absolute;
+	top: 90px;
+	left: -200px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .shape-15 {
+	position: absolute;
+	top: 240px;
+	left: -124px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .shape-18 {
+	position: absolute;
+	margin-right: 150px;
+	margin-top: 80px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-05 .shape-19 {
+	position: absolute;
+	top: 240px;
+	right: 80px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .emailkit-onboard-main-header {
+	text-align: center;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .emailkit-onboard-btn {
+	margin-top: 43px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .emailkit-onboard-main-header {
+	padding-top: 20px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .emailkit-onboard-main-header--description {
+	font-size: 16px;
+	line-height: 26px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .emailkit-onboard-main-header--title {
+	margin-bottom: 10px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .shape-04 {
+	position: absolute;
+	left: 20px;
+	top: 400px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .shape-07 {
+	position: absolute;
+	top: 100px;
+	right: 74px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .shape-15 {
+	position: absolute;
+	left: 130px;
+	top: 200px;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .shape-21 {
+	position: absolute;
+	top: 90px;
+	left: 0;
+}
+
+.emailkit-onboard-dashboard .emailkit-onboard-step-06 .shape-22 {
+	position: absolute;
+	top: 300px;
+	right: 95px;
+}
+
+@-webkit-keyframes infinite-spinning {
+	from {
+		-webkit-transform: rotate(0);
+		transform: rotate(0);
+	}
+	to {
+		-webkit-transform: rotate(360deg);
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes infinite-spinning {
+	from {
+		-webkit-transform: rotate(0);
+		transform: rotate(0);
+	}
+	to {
+		-webkit-transform: rotate(360deg);
+		transform: rotate(360deg);
+	}
+}
+
+.emailkit-spinner {
+	display: none;
+	position: relative;
+	width: 18px;
+	height: 18px;
+	border-radius: 18px;
+	background: rgba(0, 0, 0, 0.5);
+	-webkit-animation: infinite-spinning 1.08s linear infinite;
+	animation: infinite-spinning 1.08s linear infinite;
+	vertical-align: middle;
+	margin-right: 7px;
+	top: -1px;
+}
+
+.is-loading .emailkit-spinner {
+	display: inline-block;
+}
+
+.emailkit-spinner:after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 50%;
+	width: 4px;
+	height: 4px;
+	border-radius: 4px;
+	margin-left: -2px;
+	background: #fff;
+}
+
+.emailkit-admin-fields-container-description {
+	margin-bottom: 16px;
+}
+
+.emailkit-admin-dashboard-banner {
+	width: 100%;
+}
+
+.xx {
+	margin: 16px 0 0 0 !important;
+}
+
+.emailkit-admin-input-text {
+	margin-top: 2rem;
+}
+
+.emailkit-admin-section-heaer-title > i {
+	display: inline-block;
+	width: 48px;
+	height: 48px;
+	line-height: 48px !important;
+	margin-right: 24px;
+	background-color: #fee9ee;
+	color: #f2295b;
+	text-align: center;
+	border-radius: 3px;
+	vertical-align: middle;
+	font-size: 20px;
+}
+
+.attr-card-body {
+	position: relative;
+	overflow: hidden;
+}
+
+.emailkit-admin-section-heaer-title::before {
+	display: none;
+}
+
+.emailkit_tab_wraper {
+	margin: 0 15px;
+}
+
+.btn-license-activate {
+	border-radius: 4px !important;
+	margin: 0 0 0 15px !important;
+}
+
+.emailkit-admin-form {
+	margin-top: 30px;
+}
+
+@-webkit-keyframes Gradient {
+	0%, 100% {
+		background-position: 0 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+}
+
+@keyframes Gradient {
+	0%, 100% {
+		background-position: 0 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+}
+
+a.toplevel_page_elementskit.wp-menu-open {
+	background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab) !important;
+	-webkit-animation: Gradient 15s ease infinite;
+	animation: Gradient 15s ease infinite;
+	background-size: 400% 400% !important;
+	color: #fff !important;
+}
+
+#emailkit-admin-option-text-elementskit-license-key {
+	color: #f2295b;
+}
+
+.attr-panel-body .emailkit-admin-input-switch {
+	padding: 0 0 11px;
+	border-width: 0;
+	-webkit-box-shadow: none;
+	box-shadow: none;
+}
+
+.attr-panel-body .emailkit-admin-input-switch > label {
+	padding: 0;
+	-webkit-box-orient: vertical;
+	-webkit-box-direction: normal;
+	-ms-flex-direction: column;
+	flex-direction: column;
+	-webkit-box-align: start;
+	-ms-flex-align: start;
+	-ms-grid-row-align: flex-start;
+	-webkit-box-align: start;
+	-ms-flex-align: start;
+	align-items: flex-start;
+}
+
+.attr-panel-body .emailkit-admin-input-switch > label > span {
+	margin-top: 10px;
+	margin-left: 0;
+}

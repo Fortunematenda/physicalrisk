@@ -1,0 +1,97 @@
+
+.emailkit_pro_overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.emailkit_pro_overlay .pro-notice {
+    background: #fff;
+    text-align: center;
+    border-radius: 4px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    position: relative;
+    /* height: 370px; */
+    max-width: 640px; /* Set your desired max-width */
+    margin: 100px auto; /* Center align */
+}
+.emailkit-admin-pro-content .emailkit-admin-pro-logo{
+    padding-top: 70px;
+}
+.emailkit-admin-pro-content .emailkit-admin-pro-logo img{
+    width: 100%;
+    height: 100%;
+}
+.emailkit_pro_overlay #buyProBtn {
+
+    color: #fff;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 4px;
+    background: #227BFF;
+    width: max-content;
+    transition: all .3s ease-in-out;
+    margin-bottom: 81px;
+}
+.emailkit_pro_overlay #buyProBtn span svg{
+    margin-bottom: -2px;
+}
+.emailkit_pro_overlay #buyProBtn:hover{
+    background-color: #1168E9;
+}
+
+.emailkit_pro_overlay #closeProBtn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    cursor: pointer;
+}
+.emailkit_pro_overlay #closeProBtn svg path{
+    transition: all .3s ease-in-out;
+}
+.emailkit_pro_overlay #closeProBtn:hover svg path{
+    stroke: #202534;
+}
+.emailkit_pro_overlay .pro-notice .emailkit-admin-pro-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
+
+.emailkit-admin-pro-content .emailkit-admin-pro-header .emailkit-admin-pro-header-text{
+    color: #202534;
+    text-align: center;
+    font-family: 'Roboto', sans-serif;
+    font-size: 36px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: normal;
+    margin-bottom: 0px;
+    margin-top: 15px;
+}
+.emailkit-admin-pro-content .emailkit-admin-pro-subtext{
+    margin-top: 9px;
+    margin-bottom: 26px;
+    color: #55575D;
+    text-align: center;
+    font-family: "Roboto", sans-serif;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: normal;
+}
+

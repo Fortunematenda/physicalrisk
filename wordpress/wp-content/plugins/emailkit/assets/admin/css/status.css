@@ -1,0 +1,170 @@
+.emailkit-admin-template-switch {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.switch-container {
+    display: flex;
+    align-items: center;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 47px;
+    height: 20px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    -webkit-transition: .4s;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    -webkit-transition: .4s;
+    transition: .4s;
+    border-radius: 50%;
+    z-index: 99;
+}
+.slider-active-text{
+    width: 100%;
+    display: inline-block;
+    height: 100%;
+    position: relative;
+}
+.slider-active-text::before{
+    content: "Yes";
+    position: absolute;
+    left: 5px;
+    font-size: 13px;
+    color: white;
+    opacity: 0;
+}
+.slider-active-text::after{
+    content: "No";
+    position: absolute;
+    right: 5px;
+    font-size: 13px;
+    opacity: 0;
+}
+
+input.change-status-btn + .slider .slider-active-text::after{
+    opacity: 1;
+}
+input.change-status-btn + .slider .slider-active-text::before{
+    opacity: 0;
+}
+
+input.change-status-btn:checked + .slider .slider-active-text::before {
+    opacity: 1;
+}
+input.change-status-btn:checked + .slider .slider-active-text::after {
+    opacity: 0;
+}
+
+.emailkit-slider-loader{
+    pointer-events: none;
+}
+
+.emailkit-slider-loader::after {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border: 3px solid #a39a9af1;
+    border-radius: 50%;
+    border-top-color: #210d0d;
+    position: absolute;
+    left: 3px;
+    bottom: 3px;
+    z-index: 9999999999999;
+    animation: spin 1s ease-in-out infinite;
+    -webkit-animation: spin 1s ease-in-out infinite;
+}
+
+.emailkit-open-new-form-editor-modal.emailkit-slider-loader::after{
+    position: relative;
+    margin-bottom: -2px;
+    bottom: auto;
+    border: 3px solid #fff;
+    border-top-color: transparent;
+}
+.emailkit-admin-template-switch-inactive,.emailkit-admin-template-switch-active{
+    color: #121213;
+    font-weight: 500;
+}
+.emailkit-slider-active{
+    color: rgb(8, 8, 8);
+}
+
+
+@keyframes spin {
+    to {
+        -webkit-transform: rotate(360deg);
+    }
+}
+
+input.change-status-btn:checked+.slider {
+    background-color: #2196F3;
+}
+
+input:focus+.slider {
+    box-shadow: 0 0 1px #2196F3;
+}
+
+input.change-status-btn:checked+.slider:before {
+    -webkit-transform: translateX(27px);
+    -ms-transform: translateX(27px);
+    transform: translateX(27px);
+}
+
+
+
+input.change-status-btn:checked+ .emailkit-slider-loader::after{
+    left: 30px;
+}
+
+input.change-status-btn + .emailkit-slider-loader::after{
+    left: 3px;
+}
+
+
+
+
+/* Optional: Style the label text */
+
+.switch-label {
+    margin-left: 1px;
+}
+
+.emailkit-admin-template-status-inactive {
+    color: #eb0ca0de;
+    font-weight: 500;
+}
+
+.emailkit-admin-template-status-active {
+    color: #43eb10de;
+    font-weight: 500;
+}

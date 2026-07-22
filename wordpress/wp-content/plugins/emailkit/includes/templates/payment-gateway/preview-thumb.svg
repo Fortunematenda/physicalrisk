@@ -1,0 +1,33 @@
+<svg width="290" height="312" viewBox="0 0 290 312" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- White background -->
+  <rect width="290" height="312" fill="white"/>
+
+  <!-- Blue header background -->
+  <rect width="290" height="100" fill="#3F83F8"/>
+
+  <!-- Header title text -->
+  <text x="14" y="34" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">payment gateway "direct bank</text>
+  <text x="14" y="52" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="white">transfer" enabled</text>
+
+  <!-- Body content -->
+  <!-- Greeting -->
+  <text x="14" y="118" font-family="Arial, sans-serif" font-size="8" fill="#111111">Howdy admin,</text>
+
+  <!-- Body paragraph 1 -->
+  <text x="14" y="134" font-family="Arial, sans-serif" font-size="7.5" fill="#333333">The payment gateway "Direct bank transfer" was just enabled on this</text>
+  <text x="14" y="145" font-family="Arial, sans-serif" font-size="7.5" fill="#333333">site: http://wpmetplugins.local</text>
+
+  <!-- Body paragraph 2 -->
+  <text x="14" y="161" font-family="Arial, sans-serif" font-size="7.5" fill="#333333">If you did not enable this payment gateway, please log in to your</text>
+  <text x="14" y="172" font-family="Arial, sans-serif" font-size="7.5" fill="#333333">site and consider disabling it here:</text>
+
+  <!-- Link (purple/blue) -->
+  <text x="14" y="188" font-family="Arial, sans-serif" font-size="7.5" fill="#3F83F8" text-decoration="underline">http://wpmetplugins.local/wp-admin/admin.php?page=wc-</text>
+  <text x="14" y="199" font-family="Arial, sans-serif" font-size="7.5" fill="#3F83F8" text-decoration="underline">settings&amp;tab=checkout&amp;section=bacs</text>
+
+  <!-- Footer paragraph -->
+  <text x="14" y="215" font-family="Arial, sans-serif" font-size="7.5" fill="#333333">This email has been sent to dev-email@wpengine.local</text>
+
+  <!-- Thin border around card -->
+  <rect width="289" height="311" x="0.5" y="0.5" rx="1" stroke="#E5E7EB" stroke-width="1" fill="none"/>
+</svg>

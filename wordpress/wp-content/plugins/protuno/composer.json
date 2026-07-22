@@ -1,0 +1,37 @@
+{
+    "name": "posimyth/protuno",
+    "description": "Protuno WordPress plugin — the Proton code-to-Elementor composer widget and its MCP server.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=7.4",
+        "wordpress/mcp-adapter": "0.5.0"
+    },
+    "require-dev": {
+        "brianhenryie/strauss": "^0.20"
+    },
+    "extra": {
+        "strauss": {
+            "target_directory": "vendor-prefixed",
+            "namespace_prefix": "Protuno\\Deps\\",
+            "classmap_prefix": "Protuno_Deps_",
+            "packages": [
+                "wordpress/mcp-adapter",
+                "wordpress/php-mcp-schema"
+            ],
+            "delete_vendor_files": false
+        }
+    },
+    "scripts": {
+        "post-install-cmd": ["@strauss"],
+        "post-update-cmd": ["@strauss"],
+        "strauss": ["vendor/bin/strauss"]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "allow-plugins": {
+            "composer/installers": false
+        }
+    }
+}

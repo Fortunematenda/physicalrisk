@@ -1,0 +1,358 @@
+.cardHeader {
+  padding: 0;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.importedFile,
+.importedFileMissing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #d7e2ee;
+  border-radius: 10px;
+  background: #f7fbff;
+}
+
+.importedFile strong,
+.importedFileMissing strong {
+  display: block;
+  font-size: 12px;
+  color: #435467;
+  margin-bottom: 4px;
+}
+
+.importedFile p,
+.importedFileMissing p {
+  margin: 0;
+  font-weight: 700;
+  color: #0f2740;
+  word-break: break-word;
+}
+
+.fileSectionHead {
+  margin-bottom: 8px;
+}
+
+.fileSectionHead label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.fileSectionHead p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted, #66788a);
+}
+
+.uploadZone {
+  position: relative;
+  border: 1.5px dashed #9fc0df;
+  border-radius: 12px;
+  background: #f7fbff;
+  padding: 28px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.uploadZone:hover,
+.uploadZoneActive {
+  border-color: var(--blue, #1f6fb2);
+  background: #eef6fc;
+}
+
+.uploadZone input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.fileInputOverlay {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.fileInputHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.uploadIcon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 10px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #d7e6f3;
+  display: grid;
+  place-items: center;
+  color: var(--blue, #1f6fb2);
+}
+
+.uploadTitle {
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--navy, #16324f);
+  font-size: 14px;
+}
+
+.uploadHint {
+  margin: 0;
+  color: var(--muted, #66788a);
+  font-size: 12px;
+}
+
+.fileCard {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line, #d7e2ee);
+  border-radius: 10px;
+  padding: 12px 14px;
+  position: relative;
+  z-index: 2;
+}
+
+.fileIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #fff0ef;
+  color: var(--red, #c0392b);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.fileMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.fileMeta strong {
+  display: block;
+  font-size: 13px;
+  color: var(--ink, #0f1f2e);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted, #66788a);
+  margin-top: 2px;
+}
+
+.fileOk {
+  color: var(--green, #1f8a4c);
+  flex: none;
+}
+
+.fileRemove {
+  border: 0;
+  background: transparent;
+  color: var(--muted, #66788a);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  flex: none;
+}
+
+.fileRemove:hover {
+  background: #f1f5f9;
+  color: var(--red, #c0392b);
+}
+
+.editForm {
+  margin-top: 4px;
+}
+
+.readOnly {
+  background: #f4f7fa !important;
+  color: #4a5d70 !important;
+  cursor: default;
+}
+
+.fixedTextarea {
+  resize: none !important;
+  min-height: 104px !important;
+  max-height: 104px !important;
+  height: 104px !important;
+  overflow-y: auto;
+}
+
+.descriptionField,
+.pathField {
+  grid-column: 1 / -1;
+}
+
+.editActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.sideColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sideCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sideCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sideCardHeader h2 {
+  margin: 0;
+}
+
+.relationshipForm,
+.notesForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fixedTextareaSmall {
+  resize: none !important;
+  min-height: 72px !important;
+  max-height: 72px !important;
+  height: 72px !important;
+  overflow-y: auto;
+}
+
+.notesTextarea {
+  resize: none !important;
+  min-height: 180px !important;
+  max-height: 180px !important;
+  height: 180px !important;
+  overflow-y: auto;
+}
+
+.notesCompose {
+  resize: none !important;
+  min-height: 96px !important;
+  max-height: 96px !important;
+  height: 96px !important;
+  overflow-y: auto;
+}
+
+.noteTrail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+}
+
+.relationshipList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #e4edf5;
+  padding-top: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
+}
+
+.noteEntry {
+  border: 1px solid #e4edf5;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px 12px;
+}
+
+.noteEntry p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #0f1f2e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.noteEntryMeta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.noteEntryMeta strong {
+  font-size: 12px;
+  color: #16324f;
+}
+
+.noteEntryMeta time {
+  font-size: 11px;
+  color: var(--muted, #66788a);
+  white-space: nowrap;
+}
+
+.relationshipItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e4edf5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.relationshipMeta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .importedFile,
+  .importedFileMissing {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

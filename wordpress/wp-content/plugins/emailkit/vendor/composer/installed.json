@@ -1,0 +1,51 @@
+{
+    "packages": [
+        {
+            "name": "wpmet/utility-package",
+            "version": "dev-main",
+            "version_normalized": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/wpmetcom/utility-pacakge.git",
+                "reference": "6598a45f7b1b65ee87e71de1e142856490e8c838"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/wpmetcom/utility-pacakge/zipball/6598a45f7b1b65ee87e71de1e142856490e8c838",
+                "reference": "6598a45f7b1b65ee87e71de1e142856490e8c838",
+                "shasum": ""
+            },
+            "time": "2024-02-07T10:16:37+00:00",
+            "default-branch": true,
+            "type": "library",
+            "installation-source": "dist",
+            "autoload": {
+                "psr-4": {
+                    "Wpmet\\UtilityPackage\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "GPL-3.0-only"
+            ],
+            "authors": [
+                {
+                    "name": "XpeedStudio",
+                    "email": "info@xpeedstudio.com"
+                },
+                {
+                    "name": "Wpmet",
+                    "email": "info@xpeedstudio.com"
+                }
+            ],
+            "description": "Utility packages for Wpmet plugin, It will be used to serve Stories, Notice , Banner and Ratings",
+            "support": {
+                "issues": "https://github.com/wpmetcom/utility-pacakge/issues",
+                "source": "https://github.com/wpmetcom/utility-pacakge/tree/1.0.5"
+            },
+            "install-path": "../wpmet/utility-package"
+        }
+    ],
+    "dev": true,
+    "dev-package-names": []
+}

@@ -1,0 +1,22 @@
+{
+  "name": "physical-risk-repository-import-gateway",
+  "version": "1.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run start:dev -w @gateway/api\" \"npm run dev -w @gateway/web\"",
+    "build": "npm run build -w @gateway/api && npm run build -w @gateway/web",
+    "start": "concurrently \"npm run start:prod -w @gateway/api\" \"npm run start -w @gateway/web\"",
+    "db:schema": "echo \"Database schema is created by TypeORM on API start; see docs/schema.sql\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "libphonenumber-js": "^1.13.9",
+    "lucide-react": "^1.25.0",
+    "recharts": "^3.9.2"
+  }
+}

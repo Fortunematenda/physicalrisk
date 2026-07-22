@@ -1,0 +1,1 @@
+!function(t){"use strict";ElementsKit_Helper.registerWidget("elementskit-simple-tab.default",(function(t){var e=t.find('[data-ekit-toggle="tab"]'),i=e.data("ekit-toggle-trigger"),n=t.data("settings");ElementsKit_Helper.triggerClickOnEvent(i,e),e.on("shown.bs.tab",(function(){ElementsKit_Helper.setURLHash(n,this,"ekit-handler-id")}))}))}(jQuery);

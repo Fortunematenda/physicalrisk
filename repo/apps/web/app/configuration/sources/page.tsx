@@ -1,0 +1,3 @@
+'use client';
+import { SimpleCrud } from '@/components/simple-crud';
+export default function SourcesPage(){return <SimpleCrud title="Source Systems" description="Configure current and future document origins without changing the import engine." endpoint="/source-systems" fields={[{key:'code',label:'Code',required:true},{key:'name',label:'Name',required:true},{key:'type',label:'Integration type',required:true,defaultValue:'MANUAL_UPLOAD'},{key:'description',label:'Description',type:'textarea'},{key:'active',label:'Active',type:'checkbox',defaultValue:true}]} columns={[{key:'code',label:'Code'},{key:'name',label:'Name'},{key:'type',label:'Type'},{key:'active',label:'Status'}]}/>}

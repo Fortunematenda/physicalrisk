@@ -1,0 +1,11 @@
+@font-face {
+    font-family: 'genie-seo';
+    src: url('./genie-seo.eot?7nwset');
+    src: url('./genie-seo.eot?7nwset#iefix') format('embedded-opentype'),
+        url('./genie-seo.ttf?7nwset') format('truetype'),
+        url('./genie-seo.woff?7nwset') format('woff'),
+        url('./genie-seo.svg?7nwset#genie-seo') format('svg');
+    font-weight: normal;
+    font-style: normal;
+    font-display: block;
+}
