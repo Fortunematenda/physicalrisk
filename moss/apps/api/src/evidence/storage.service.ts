@@ -14,8 +14,8 @@ export class StorageService implements OnModuleInit {
     const region = config.get<string>('S3_REGION') || 'us-east-1';
     const forcePathStyle = (config.get<string>('S3_FORCE_PATH_STYLE') || 'true') === 'true';
     const credentials = {
-      accessKeyId: config.get<string>('S3_ACCESS_KEY') || 'REDACTED_S3_ACCESS_KEY',
-      secretAccessKey: config.get<string>('S3_SECRET_KEY') || 'REDACTED_S3_SECRET_KEY',
+      accessKeyId: config.get<string>('S3_ACCESS_KEY') || 'moss-storage',
+      secretAccessKey: config.get<string>('S3_SECRET_KEY') || 'change_me_storage',
     };
     const endpoint = config.get<string>('S3_ENDPOINT') || 'http://minio:9000';
     const publicEndpoint = config.get<string>('S3_PUBLIC_ENDPOINT') || endpoint;

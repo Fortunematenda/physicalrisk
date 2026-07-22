@@ -33,8 +33,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-REDACTED_S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-REDACTED_S3_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-moss-storage}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change_me_storage}
     volumes:
       - minio_data:/data
     ports:

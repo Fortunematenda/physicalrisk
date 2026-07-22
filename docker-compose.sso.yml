@@ -51,7 +51,7 @@
     environment:
       POSTGRES_DB: ${KEYCLOAK_POSTGRES_DB:-keycloak}
       POSTGRES_USER: ${KEYCLOAK_POSTGRES_USER:-keycloak}
-      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-REDACTED_KEYCLOAK_POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
     volumes:
       - keycloak_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -69,7 +69,7 @@
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_POSTGRES_DB:-keycloak}
       KC_DB_USERNAME: ${KEYCLOAK_POSTGRES_USER:-keycloak}
-      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-REDACTED_KEYCLOAK_POSTGRES_PASSWORD}
+      KC_DB_PASSWORD: ${KEYCLOAK_POSTGRES_PASSWORD:-change-this-local-database-password}
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.localhost}
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
@@ -77,7 +77,7 @@
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-REDACTED_KEYCLOAK_ADMIN_PASSWORD}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-CHANGE_ME_ADMIN_PASSWORD}
     volumes:
       - ./auth/keycloak/realm:/opt/keycloak/data/import:ro
       - ./auth/keycloak/themes/physicalrisk:/opt/keycloak/themes/physicalrisk:ro
@@ -106,11 +106,11 @@
       NEXTAUTH_URL: ${PORTAL_URL:-http://apps.localhost}
       # false: always use NEXTAUTH_URL for OAuth redirect_uri (never Host: localhost)
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${PORTAL_AUTH_SECRET:-REDACTED_PORTAL_AUTH_SECRET}
-      NEXTAUTH_SECRET: ${PORTAL_AUTH_SECRET:-REDACTED_PORTAL_AUTH_SECRET}
+      AUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
+      NEXTAUTH_SECRET: ${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${PORTAL_KEYCLOAK_CLIENT_ID:-physicalrisk-portal}
-      KEYCLOAK_CLIENT_SECRET: ${PORTAL_KEYCLOAK_CLIENT_SECRET:-REDACTED_PORTAL_KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_CLIENT_SECRET: ${PORTAL_KEYCLOAK_CLIENT_SECRET:-change-this-local-portal-secret}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-http://repo.localhost}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-http://apps.localhost}
@@ -158,8 +158,8 @@
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: REDACTED_S3_ACCESS_KEY
-      MINIO_ROOT_PASSWORD: REDACTED_S3_SECRET_KEY
+      MINIO_ROOT_USER: moss-storage
+      MINIO_ROOT_PASSWORD: change_me_storage
     volumes:
       - moss_minio:/data
     networks: [physicalrisk-network]
@@ -180,8 +180,8 @@
       S3_ENDPOINT: http://moss-minio:9000
       S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
-      S3_ACCESS_KEY: REDACTED_S3_ACCESS_KEY
-      S3_SECRET_KEY: REDACTED_S3_SECRET_KEY
+      S3_ACCESS_KEY: moss-storage
+      S3_SECRET_KEY: change_me_storage
       S3_BUCKET: moss-evidence
       S3_FORCE_PATH_STYLE: "true"
       KEYCLOAK_ENABLED: "true"
@@ -214,11 +214,11 @@
       AUTH_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       NEXTAUTH_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${MOSS_AUTH_SECRET:-REDACTED_MOSS_AUTH_SECRET}
-      NEXTAUTH_SECRET: ${MOSS_AUTH_SECRET:-REDACTED_MOSS_AUTH_SECRET}
+      AUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
+      NEXTAUTH_SECRET: ${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
-      KEYCLOAK_CLIENT_SECRET: ${MOSS_KEYCLOAK_CLIENT_SECRET:-REDACTED_MOSS_KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_CLIENT_SECRET: ${MOSS_KEYCLOAK_CLIENT_SECRET:-change-this-local-moss-secret}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-http://apps.localhost}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-http://repo.localhost}
@@ -263,7 +263,7 @@
       MAX_UPLOAD_MB: 100
       DB_SYNCHRONIZE: "true"
       DEFAULT_ADMIN_EMAIL: admin@physicalrisk.com
-      DEFAULT_ADMIN_PASSWORD: REDACTED_KEYCLOAK_ADMIN_PASSWORD
+      DEFAULT_ADMIN_PASSWORD: CHANGE_ME_ADMIN_PASSWORD
       KEYCLOAK_ENABLED: "true"
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
@@ -292,11 +292,11 @@
       AUTH_URL: ${REPO_WEB_URL:-http://repo.localhost}
       NEXTAUTH_URL: ${REPO_WEB_URL:-http://repo.localhost}
       AUTH_TRUST_HOST: "true"
-      AUTH_SECRET: ${REPO_AUTH_SECRET:-REDACTED_REPO_AUTH_SECRET}
-      NEXTAUTH_SECRET: ${REPO_AUTH_SECRET:-REDACTED_REPO_AUTH_SECRET}
+      AUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
+      NEXTAUTH_SECRET: ${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
-      KEYCLOAK_CLIENT_SECRET: ${REPO_KEYCLOAK_CLIENT_SECRET:-REDACTED_REPO_KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_CLIENT_SECRET: ${REPO_KEYCLOAK_CLIENT_SECRET:-change-this-local-repo-secret}
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-http://apps.localhost}
       NEXT_PUBLIC_MOSS_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       NEXT_PUBLIC_REPO_URL: ${REPO_WEB_URL:-http://repo.localhost}

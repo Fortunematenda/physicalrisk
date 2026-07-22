@@ -52,7 +52,7 @@ export class SeedService implements OnApplicationBootstrap {
 
   private async seed() {
     const adminEmail = (this.config.get<string>('DEFAULT_ADMIN_EMAIL') ?? 'admin@physicalrisk.com').toLowerCase();
-    const adminPassword = this.config.get<string>('DEFAULT_ADMIN_PASSWORD') ?? 'REDACTED_KEYCLOAK_ADMIN_PASSWORD';
+    const adminPassword = this.config.get<string>('DEFAULT_ADMIN_PASSWORD') ?? 'CHANGE_ME_ADMIN_PASSWORD';
     // Keep local display name aligned with Keycloak (Platform Administrator).
     const adminName = 'Platform Administrator';
     let admin =
