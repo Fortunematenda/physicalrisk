@@ -617,14 +617,24 @@ function ImportDocumentPageContent() {
   };
 
   const fileExtension = useMemo(() => {
-    const name = file?.name || (draftHasFile ? draftFileName : '');
+    const pasteName =
+      contentMode === 'paste'
+        ? (/\.[a-z0-9]+$/i.test(pasteFileName.trim()) ? pasteFileName.trim() : `${(pasteFileName.trim() || 'pasted-content')}.txt`)
+        : '';
+    const name = file?.name || (draftHasFile ? draftFileName : '') || pasteName;
     if (!name.includes('.')) return '';
     return name.split('.').pop()?.toLowerCase() ?? '';
-  }, [file, draftHasFile, draftFileName]);
+  }, [file, draftHasFile, draftFileName, contentMode, pasteFileName]);
 
   const hasApprovedFile = Boolean(file) || draftHasFile || (contentMode === 'paste' && pasteContent.trim().length > 0);
-  const displayFileName = file?.name || draftFileName;
-  const displayFileSize = file?.size ?? draftFileSize;
+  const displayFileName =
+    file?.name ||
+    draftFileName ||
+    (contentMode === 'paste'
+      ? (/\.[a-z0-9]+$/i.test(pasteFileName.trim()) ? pasteFileName.trim() : `${(pasteFileName.trim() || 'pasted-content')}.txt`)
+      : '');
+  const displayFileSize =
+    file?.size ?? draftFileSize ?? (contentMode === 'paste' && pasteContent.trim() ? new Blob([pasteContent]).size : undefined);
 
   const matchedFileType = useMemo(() => {
     if (!fileExtension) return null;
