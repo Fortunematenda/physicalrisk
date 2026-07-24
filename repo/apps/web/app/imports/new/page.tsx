@@ -443,11 +443,12 @@ function ImportDocumentPageContent() {
       if (uploadFile) body.append('file', uploadFile);
       Object.entries({
         ...form,
+        relationshipsJson: relationshipsPayload(),
         approvalStatus: form.approvalStatus,
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
       }).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== '') body.append(key, value);
+        if (value !== undefined && value !== null && value !== '') body.append(key, String(value));
       });
       const response = await fetch(`${API_URL}/imports/upload`, { method: 'POST', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {}, body });
       const payload = await response.json();
@@ -482,6 +483,7 @@ function ImportDocumentPageContent() {
       if (uploadFile) body.append('file', uploadFile);
       Object.entries({
         ...form,
+        relationshipsJson: relationshipsPayload(),
         approvalStatus: form.approvalStatus || 'APPROVED',
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
@@ -543,6 +545,18 @@ function ImportDocumentPageContent() {
   const removeRelationship = (toDocumentId: string, type?: string) => {
     const next = relationshipRows.filter((row) => !(row.toDocumentId === toDocumentId && (row.type || 'RELATED_TO') === (type || 'RELATED_TO')));
     setForm((current) => ({ ...current, relationshipsJson: JSON.stringify(next) }));
+  };
+
+  const relationshipsPayload = () => {
+    try {
+      const parsed = JSON.parse(form.relationshipsJson || '[]');
+      if (!Array.isArray(parsed)) return '[]';
+      return JSON.stringify(
+        parsed.filter((row: { toDocumentId?: string }) => Boolean(String(row?.toDocumentId || '').trim())),
+      );
+    } catch {
+      return '[]';
+    }
   };
 
   const replaceFile = () => {
@@ -690,7 +704,7 @@ function ImportDocumentPageContent() {
 
     const fromDb = metadataFields
       .filter((field) => field.required && field.active !== false)
-      .filter((field) => !['projectId', 'sourceSystemId', 'file', 'existingDocumentId', 'fileName'].includes(field.key))
+      .filter((field) => !['projectId', 'sourceSystemId', 'file', 'existingDocumentId', 'fileName', 'relationships', 'relationshipsJson'].includes(field.key))
       .map((field) => {
         const value = formValueForMetadataKey(field.key);
         return {
@@ -1332,7 +1346,7 @@ function ImportDocumentPageContent() {
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <h2>5. Relationships</h2>
-              <p>Optional links to other Knowledge Assets in the same project (created during import).</p>
+              <p>Optional. Skip this on the first import — there are no other documents to link yet.</p>
             </div>
             <div className={styles.grid2}>
               <div className="field">

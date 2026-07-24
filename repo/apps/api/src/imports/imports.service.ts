@@ -625,15 +625,25 @@ export class ImportsService {
     let relationships: RelationshipInput[] = [];
     try {
       customMetadata = input.metadataJson ? JSON.parse(input.metadataJson) as Record<string, unknown> : {};
+      if (!customMetadata || typeof customMetadata !== 'object' || Array.isArray(customMetadata)) {
+        customMetadata = {};
+      }
     } catch {
       throw new BadRequestException('metadataJson must be valid JSON');
     }
     try {
-      relationships = input.relationshipsJson ? JSON.parse(input.relationshipsJson) as RelationshipInput[] : [];
-      if (!Array.isArray(relationships)) throw new Error();
+      const rawRelationships = input.relationshipsJson?.trim();
+      if (!rawRelationships || rawRelationships === 'null' || rawRelationships === 'undefined') {
+        relationships = [];
+      } else {
+        const parsed = JSON.parse(rawRelationships) as unknown;
+        relationships = Array.isArray(parsed) ? parsed as RelationshipInput[] : [];
+      }
     } catch {
-      throw new BadRequestException('relationshipsJson must be a valid JSON array');
+      // Relationships are optional — never block a first/solo import on bad/empty payload.
+      relationships = [];
     }
+    relationships = relationships.filter((item) => Boolean(item?.toDocumentId?.trim()));
 
     const approvalStatus = String(input.approvalStatus ?? '').trim().toUpperCase() || ApprovalStatus.APPROVED;
     if (approvalStatus !== ApprovalStatus.APPROVED) {
@@ -655,9 +665,21 @@ export class ImportsService {
       ...input,
       approvalStatus: ApprovalStatus.APPROVED,
       fileName: fileContext.fileName ?? '',
+      relationships,
     };
+    const skipRequiredKeys = new Set([
+      'approvalStatus',
+      'relationships',
+      'relationshipsJson',
+      'metadataJson',
+      'customMetadata',
+      'draftJobId',
+      'mode',
+      'existingDocumentId',
+      'sectionKey',
+    ]);
     for (const field of mandatoryFields) {
-      if (field.key === 'approvalStatus') continue;
+      if (skipRequiredKeys.has(field.key)) continue;
       if (!String(combined[field.key] ?? '').trim()) missing.push(field.label);
     }
     if (missing.length) {
@@ -668,6 +690,7 @@ export class ImportsService {
 
     for (const field of activeFields) {
       if (!field.validationRule?.trim()) continue;
+      if (skipRequiredKeys.has(field.key)) continue;
       const raw = combined[field.key];
       if (raw === undefined || raw === null || String(raw).trim() === '') continue;
       this.assertMetadataValidationRule(field.label, String(raw), field.validationRule.trim());
