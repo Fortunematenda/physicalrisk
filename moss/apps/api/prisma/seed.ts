@@ -146,7 +146,18 @@ async function seedAdmin() {
   const password = process.env.SEED_ADMIN_PASSWORD || 'CHANGE_ME_ADMIN_PASSWORD';
   const passwordHash = await argon2.hash(password);
   const legacy = await prisma.user.findUnique({ where: { email: 'admin@physicalrisk.local' } });
-  if (legacy && legacy.email !== email) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+
+  // Production already has the canonical admin — keep it and retire the legacy local account.
+  if (legacy && existing && legacy.id !== existing.id) {
+    await prisma.user.update({
+      where: { id: legacy.id },
+      data: {
+        email: `legacy-disabled+${legacy.id.slice(0, 8)}@physicalrisk.local`,
+        isActive: false,
+      },
+    });
+  } else if (legacy && !existing && legacy.email !== email) {
     await prisma.user.update({
       where: { id: legacy.id },
       data: {
@@ -160,6 +171,7 @@ async function seedAdmin() {
     });
     return;
   }
+
   await prisma.user.upsert({
     where: { email },
     update: {
