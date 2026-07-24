@@ -583,6 +583,12 @@ function ImportDocumentPageContent() {
 
   const formValueForMetadataKey = (key: string): unknown => {
     const extras = parseMetadataJson(form.metadataJson);
+    const pasteName =
+      contentMode === 'paste' && pasteContent.trim()
+        ? (/\.[a-z0-9]+$/i.test(pasteFileName.trim())
+            ? pasteFileName.trim()
+            : `${(pasteFileName.trim() || 'pasted-content')}.txt`)
+        : '';
     const mapped: Record<string, unknown> = {
       title: form.title,
       documentType: form.documentType,
@@ -595,7 +601,7 @@ function ImportDocumentPageContent() {
       projectId: form.projectId,
       sourceSystemId: form.sourceSystemId,
       sectionKey: form.sectionKey,
-      fileName: file?.name ?? (draftHasFile ? draftFileName : ''),
+      fileName: file?.name || (draftHasFile ? draftFileName : '') || pasteName,
       existingDocumentId: form.existingDocumentId,
       ...extras,
     };
@@ -664,11 +670,13 @@ function ImportDocumentPageContent() {
       },
       {
         key: 'file',
-        label: 'Approved file',
+        label: contentMode === 'paste' ? 'Approved content' : 'Approved file',
         done: hasApprovedFile,
         value: hasApprovedFile
-          ? `${displayFileName}${displayFileSize ? ` (${formatBytes(displayFileSize)})` : ''}${!file && draftHasFile ? ' · kept from draft' : ''}`
-          : 'Upload an approved file',
+          ? `${displayFileName}${displayFileSize ? ` (${formatBytes(displayFileSize)})` : ''}${!file && draftHasFile ? ' · kept from draft' : ''}${contentMode === 'paste' && !file ? ' · pasted' : ''}`
+          : contentMode === 'paste'
+            ? 'Paste approved content'
+            : 'Upload an approved file',
       },
       ...(form.mode === 'NEW_VERSION'
         ? [{
@@ -712,7 +720,7 @@ function ImportDocumentPageContent() {
     const contextFields = [
       { key: 'projectId', label: 'Project', required: true },
       { key: 'sourceSystemId', label: 'Source system', required: true },
-      { key: 'fileName', label: 'Approved file', required: true },
+      { key: 'fileName', label: contentMode === 'paste' ? 'Approved content' : 'Approved file', required: true },
       ...(form.mode === 'NEW_VERSION'
         ? [{ key: 'existingDocumentId', label: 'Existing document', required: true }]
         : []),
@@ -771,7 +779,7 @@ function ImportDocumentPageContent() {
       groups,
       items,
     };
-  }, [activeSections, draftFileName, draftHasFile, file, form, metadataFields, selectedProjectLabel, selectedSource]);
+  }, [activeSections, draftFileName, draftHasFile, file, form, metadataFields, selectedProjectLabel, selectedSource, contentMode, pasteContent, pasteFileName]);
 
   const matchedRoutingRule = useMemo(() => {
     if (!form.projectId) return null;
