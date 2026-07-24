@@ -142,9 +142,14 @@ function ImportDocumentPageContent() {
   const [dragActive, setDragActive] = useState(false);
   const [form, setForm] = useState({
     projectId: '', sourceSystemId: '', title: '', documentCode: '', documentType: '', versionNo: '1.0',
-    approvedBy: '', approvalDate: new Date().toISOString().slice(0, 10), owner: '', description: '',
+    approvedBy: '', approvalDate: new Date().toISOString().slice(0, 10), approvalStatus: 'APPROVED',
+    owner: '', description: '',
     sectionKey: '', metadataJson: '{}', relationshipsJson: '[]', mode: 'NEW' as 'NEW' | 'NEW_VERSION', existingDocumentId: '',
   });
+  const [contentMode, setContentMode] = useState<'file' | 'paste'>('file');
+  const [pasteContent, setPasteContent] = useState('');
+  const [pasteFileName, setPasteFileName] = useState('pasted-content.txt');
+  const [relDraft, setRelDraft] = useState({ toDocumentId: '', type: 'RELATED_TO', description: '' });
 
   useEffect(() => {
     setCanCreate(canCreateConfiguration(getCurrentUser()));
@@ -241,11 +246,12 @@ function ImportDocumentPageContent() {
           versionNo: String(metadata.versionNo || (mode === 'NEW_VERSION' ? '' : '1.0')),
           approvedBy: String(metadata.approvedBy || current.approvedBy || ''),
           approvalDate,
+          approvalStatus: String(metadata.approvalStatus || 'APPROVED').toUpperCase() === 'APPROVED' ? 'APPROVED' : String(metadata.approvalStatus || 'APPROVED').toUpperCase(),
           owner: String(metadata.owner || ''),
           description: String(metadata.description || ''),
           sectionKey: String(metadata.sectionKey || job.resolvedSection?.sectionKey || ''),
           metadataJson: JSON.stringify(custom, null, 2),
-          relationshipsJson: JSON.stringify(relationships, null, 2),
+          relationshipsJson: JSON.stringify(relationships),
           mode,
           existingDocumentId: String(metadata.existingDocumentId || ''),
         }));
@@ -413,7 +419,16 @@ function ImportDocumentPageContent() {
     event.preventDefault();
     setError('');
     setStructuredError(null);
-    if (!file && !draftHasFile) { setError('Select an approved document file.'); return; }
+    const pasteFile = contentMode === 'paste' ? buildPasteFile() : null;
+    const uploadFile = contentMode === 'file' ? file : pasteFile;
+    if (!uploadFile && !draftHasFile) {
+      setError(contentMode === 'paste' ? 'Paste approved content before importing.' : 'Select an approved document file.');
+      return;
+    }
+    if (form.approvalStatus !== 'APPROVED') {
+      setError('Only APPROVED documents may enter the official repository. Set approval status to Approved, or save as draft.');
+      return;
+    }
     if (form.mode === 'NEW_VERSION' && !form.existingDocumentId) {
       setError('Select a project so the existing document can be allocated.');
       return;
@@ -425,10 +440,10 @@ function ImportDocumentPageContent() {
     setSaving(true);
     try {
       const body = new FormData();
-      if (file) body.append('file', file);
+      if (uploadFile) body.append('file', uploadFile);
       Object.entries({
         ...form,
-        approvalStatus: 'APPROVED',
+        approvalStatus: form.approvalStatus,
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
       }).forEach(([key, value]) => {
@@ -459,13 +474,15 @@ function ImportDocumentPageContent() {
       setError('Select a source system before saving a draft.');
       return;
     }
+    const pasteFile = contentMode === 'paste' ? buildPasteFile() : null;
+    const uploadFile = contentMode === 'file' ? file : pasteFile;
     setSavingDraft(true);
     try {
       const body = new FormData();
-      if (file) body.append('file', file);
+      if (uploadFile) body.append('file', uploadFile);
       Object.entries({
         ...form,
-        approvalStatus: 'APPROVED',
+        approvalStatus: form.approvalStatus || 'APPROVED',
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
       }).forEach(([key, value]) => {
@@ -486,6 +503,46 @@ function ImportDocumentPageContent() {
     } finally {
       setSavingDraft(false);
     }
+  };
+
+  const buildPasteFile = (): File | null => {
+    const text = pasteContent.trim();
+    if (!text) return null;
+    const safeName = (pasteFileName.trim() || 'pasted-content.txt').replace(/[<>:"/\\|?*]/g, '-');
+    const withExt = /\.[a-z0-9]+$/i.test(safeName) ? safeName : `${safeName}.txt`;
+    return new File([text], withExt, { type: 'text/plain;charset=utf-8' });
+  };
+
+  const relationshipRows = useMemo(() => {
+    try {
+      const parsed = JSON.parse(form.relationshipsJson || '[]');
+      return Array.isArray(parsed) ? parsed as Array<{ toDocumentId: string; type?: string; description?: string }> : [];
+    } catch {
+      return [];
+    }
+  }, [form.relationshipsJson]);
+
+  const addRelationship = () => {
+    if (!relDraft.toDocumentId) {
+      setError('Select a related document before adding a relationship.');
+      return;
+    }
+    const next = [
+      ...relationshipRows.filter((row) => !(row.toDocumentId === relDraft.toDocumentId && row.type === relDraft.type)),
+      {
+        toDocumentId: relDraft.toDocumentId,
+        type: relDraft.type,
+        description: relDraft.description.trim() || undefined,
+      },
+    ];
+    setForm((current) => ({ ...current, relationshipsJson: JSON.stringify(next) }));
+    setRelDraft({ toDocumentId: '', type: 'RELATED_TO', description: '' });
+    setError('');
+  };
+
+  const removeRelationship = (toDocumentId: string, type?: string) => {
+    const next = relationshipRows.filter((row) => !(row.toDocumentId === toDocumentId && (row.type || 'RELATED_TO') === (type || 'RELATED_TO')));
+    setForm((current) => ({ ...current, relationshipsJson: JSON.stringify(next) }));
   };
 
   const replaceFile = () => {
@@ -530,7 +587,7 @@ function ImportDocumentPageContent() {
       title: form.title,
       documentType: form.documentType,
       versionNo: form.versionNo,
-      approvalStatus: 'APPROVED',
+      approvalStatus: form.approvalStatus || 'APPROVED',
       approvedBy: form.approvedBy,
       approvalDate: form.approvalDate,
       owner: form.owner,
@@ -565,7 +622,7 @@ function ImportDocumentPageContent() {
     return name.split('.').pop()?.toLowerCase() ?? '';
   }, [file, draftHasFile, draftFileName]);
 
-  const hasApprovedFile = Boolean(file) || draftHasFile;
+  const hasApprovedFile = Boolean(file) || draftHasFile || (contentMode === 'paste' && pasteContent.trim().length > 0);
   const displayFileName = file?.name || draftFileName;
   const displayFileSize = file?.size ?? draftFileSize;
 
@@ -629,7 +686,7 @@ function ImportDocumentPageContent() {
     const byKey = new Map<string, { key: string; label: string; done: boolean; value: string }>();
     [...core, ...fromDb].forEach((item) => byKey.set(item.key, item));
     return Array.from(byKey.values());
-  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize]);
+  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize, contentMode, pasteContent]);
 
   const requiredComplete = useMemo(
     () => requiredChecks.length > 0 && requiredChecks.every((item) => item.done),
@@ -1037,9 +1094,50 @@ function ImportDocumentPageContent() {
 
           <section className={styles.section}>
             <div className={styles.sectionHead}>
-              <h2>3. Approved file</h2>
-              <p>Permitted extensions and size limits are controlled from File Types.</p>
+              <h2>3. Approved content</h2>
+              <p>Upload an approved file, or paste text exported from ChatGPT / Word / notes. Source systems are labels — not live AI library connectors.</p>
             </div>
+            <div className={styles.grid2} style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label>Content source</label>
+                <select
+                  value={contentMode}
+                  onChange={(event) => {
+                    const next = event.target.value as 'file' | 'paste';
+                    setContentMode(next);
+                    if (next === 'paste') replaceFile();
+                    else setPasteContent('');
+                  }}
+                  aria-label="Choose file upload or paste"
+                >
+                  <option value="file">File upload</option>
+                  <option value="paste">Paste text content</option>
+                </select>
+              </div>
+              {contentMode === 'paste' ? (
+                <div className="field">
+                  <label>Saved file name</label>
+                  <input
+                    value={pasteFileName}
+                    onChange={(event) => setPasteFileName(event.target.value)}
+                    placeholder="pasted-content.txt"
+                  />
+                </div>
+              ) : null}
+            </div>
+            {contentMode === 'paste' ? (
+              <div className="field">
+                <label>Pasted content <em>*</em></label>
+                <textarea
+                  rows={10}
+                  value={pasteContent}
+                  onChange={(event) => setPasteContent(event.target.value)}
+                  placeholder="Paste the approved document text here…"
+                  required={!draftHasFile}
+                />
+                <small>Stored as a .txt Knowledge Asset representation. Prefer DOCX/PDF upload when the approved source file is available.</small>
+              </div>
+            ) : (
             <div
               className={`${styles.uploadZone} ${dragActive ? styles.uploadZoneActive : ''}`}
               onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
@@ -1106,6 +1204,7 @@ function ImportDocumentPageContent() {
                 </div>
               )}
             </div>
+            )}
           </section>
 
           <section className={styles.section}>
@@ -1171,6 +1270,21 @@ function ImportDocumentPageContent() {
                 <input value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })} placeholder="Optional owner" />
               </div>
               <div className="field">
+                <label>Approval status <em>*</em></label>
+                <select
+                  required
+                  value={form.approvalStatus}
+                  onChange={(e) => setForm({ ...form, approvalStatus: e.target.value })}
+                  aria-label="Approval status"
+                >
+                  <option value="APPROVED">Approved — allowed into repository</option>
+                  <option value="PENDING_REVIEW">Pending review — blocked</option>
+                  <option value="DRAFT">Draft — blocked</option>
+                  <option value="REJECTED">Rejected — blocked</option>
+                </select>
+                <small>Backend enforces APPROVED only. Non-approved values are rejected on import.</small>
+              </div>
+              <div className="field">
                 <label>Approved by <em>*</em></label>
                 <input
                   required
@@ -1195,6 +1309,91 @@ function ImportDocumentPageContent() {
                 <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional summary of the document" />
               </div>
             </div>
+          </section>
+
+          <section className={styles.section}>
+            <div className={styles.sectionHead}>
+              <h2>5. Relationships</h2>
+              <p>Optional links to other Knowledge Assets in the same project (created during import).</p>
+            </div>
+            <div className={styles.grid2}>
+              <div className="field">
+                <label>Related document</label>
+                <select
+                  value={relDraft.toDocumentId}
+                  onChange={(event) => setRelDraft((current) => ({ ...current, toDocumentId: event.target.value }))}
+                  disabled={!form.projectId || documentsLoading}
+                >
+                  <option value="">{documentsLoading ? 'Loading…' : 'Select document…'}</option>
+                  {documents.map((doc: any) => (
+                    <option key={doc.id} value={doc.id}>{doc.code} — {doc.title}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Relationship type</label>
+                <select
+                  value={relDraft.type}
+                  onChange={(event) => setRelDraft((current) => ({ ...current, type: event.target.value }))}
+                >
+                  {['RELATED_TO', 'DEPENDS_ON', 'REFERENCES', 'IMPLEMENTS', 'PARENT_OF', 'CHILD_OF', 'SUPERSEDES', 'SUPPORTS'].map((type) => (
+                    <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>
+                  ))}
+                </select>
+              </div>
+              <div className={`field ${styles.spanFull}`}>
+                <label>Relationship note</label>
+                <input
+                  value={relDraft.description}
+                  onChange={(event) => setRelDraft((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className={styles.actions} style={{ marginTop: 8, justifyContent: 'flex-start' }}>
+              <button type="button" className="button small" onClick={addRelationship} disabled={!form.projectId}>
+                Add relationship
+              </button>
+              {!form.projectId ? <span className="secondary-text">Select a project first.</span> : null}
+              {form.projectId && documents.length === 0 && !documentsLoading ? (
+                <span className="secondary-text">No other documents in this project yet.</span>
+              ) : null}
+            </div>
+            {relationshipRows.length > 0 ? (
+              <div className="table-wrap" style={{ marginTop: 12 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Document</th>
+                      <th>Note</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {relationshipRows.map((row) => {
+                      const target = documents.find((doc: any) => doc.id === row.toDocumentId);
+                      return (
+                        <tr key={`${row.toDocumentId}-${row.type || 'RELATED_TO'}`}>
+                          <td>{(row.type || 'RELATED_TO').replaceAll('_', ' ')}</td>
+                          <td>{target ? `${target.code} — ${target.title}` : row.toDocumentId}</td>
+                          <td>{row.description || '—'}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="button small"
+                              onClick={() => removeRelationship(row.toDocumentId, row.type)}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </section>
 
           {error && !structuredError && <div className="notice error">{error}</div>}

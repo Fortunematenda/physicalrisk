@@ -110,6 +110,7 @@ export class ImportsService {
       hasFile: Boolean(file) || reuseDraftFile,
       fileName: file?.originalname || draftJob?.fileName,
       fileSize: file?.size ?? draftJob?.fileSize,
+      mimeType: file?.mimetype || draftJob?.mimeType,
     });
 
     const { project, source, fileType, approvalDate, customMetadata, relationships } = validated;
@@ -612,7 +613,7 @@ export class ImportsService {
 
   private async assertImportRequirements(
     input: ImportMetadata,
-    fileContext: { hasFile: boolean; fileName?: string; fileSize?: number },
+    fileContext: { hasFile: boolean; fileName?: string; fileSize?: number; mimeType?: string },
   ) {
     const missing: string[] = [];
     if (!input.projectId?.trim()) missing.push('Project');
@@ -634,8 +635,19 @@ export class ImportsService {
       throw new BadRequestException('relationshipsJson must be a valid JSON array');
     }
 
+    const approvalStatus = String(input.approvalStatus ?? '').trim().toUpperCase() || ApprovalStatus.APPROVED;
+    if (approvalStatus !== ApprovalStatus.APPROVED) {
+      throw new BadRequestException(
+        `Only APPROVED documents may enter the official repository (received: ${approvalStatus}). Rejected, draft, or pending assets must be approved before import.`,
+      );
+    }
+
     const mandatoryFields = await this.db.metadataFields.find({
       where: { required: true, active: true },
+      order: { position: 'ASC' },
+    });
+    const activeFields = await this.db.metadataFields.find({
+      where: { active: true },
       order: { position: 'ASC' },
     });
     const combined: Record<string, unknown> = {
@@ -654,11 +666,15 @@ export class ImportsService {
       );
     }
 
+    for (const field of activeFields) {
+      if (!field.validationRule?.trim()) continue;
+      const raw = combined[field.key];
+      if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+      this.assertMetadataValidationRule(field.label, String(raw), field.validationRule.trim());
+    }
+
     const approvalDate = new Date(String(input.approvalDate).trim());
     if (Number.isNaN(approvalDate.getTime())) throw new BadRequestException('Approval date is invalid');
-    if (String(input.approvalStatus ?? ApprovalStatus.APPROVED).toUpperCase() !== ApprovalStatus.APPROVED) {
-      throw new BadRequestException('Only APPROVED documents may enter the official repository');
-    }
 
     const extension = extname(fileContext.fileName || '').replace('.', '').toLowerCase();
     const [project, source, fileType, documentType] = await Promise.all([
@@ -687,7 +703,57 @@ export class ImportsService {
       );
     }
 
+    const declaredMime = String(fileContext.mimeType || '').trim().toLowerCase().split(';')[0].trim();
+    const allowedMimes = (fileType.mimeTypes ?? []).map((item) => String(item).trim().toLowerCase().split(';')[0].trim()).filter(Boolean);
+    if (allowedMimes.length && declaredMime && declaredMime !== 'application/octet-stream') {
+      const mimeAllowed = allowedMimes.some((allowed) => {
+        if (allowed.endsWith('/*')) return declaredMime.startsWith(allowed.slice(0, -1));
+        return allowed === declaredMime;
+      });
+      if (!mimeAllowed) {
+        throw new BadRequestException(
+          `MIME type '${declaredMime}' is not allowed for .${extension} files (allowed: ${allowedMimes.join(', ')})`,
+        );
+      }
+    }
+
     return { project, source, fileType, documentType, approvalDate, customMetadata, relationships };
+  }
+
+  private assertMetadataValidationRule(label: string, value: string, rule: string) {
+    const trimmed = rule.trim();
+    if (trimmed.startsWith('regex:')) {
+      const pattern = trimmed.slice('regex:'.length);
+      try {
+        if (!new RegExp(pattern).test(value)) {
+          throw new BadRequestException(`${label} failed validation rule regex:/${pattern}/`);
+        }
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+        throw new BadRequestException(`${label} has an invalid validation regex configured`);
+      }
+      return;
+    }
+    if (trimmed.startsWith('maxLength:')) {
+      const max = Number(trimmed.slice('maxLength:'.length));
+      if (Number.isFinite(max) && value.length > max) {
+        throw new BadRequestException(`${label} exceeds maximum length of ${max}`);
+      }
+      return;
+    }
+    if (trimmed.startsWith('minLength:')) {
+      const min = Number(trimmed.slice('minLength:'.length));
+      if (Number.isFinite(min) && value.length < min) {
+        throw new BadRequestException(`${label} must be at least ${min} characters`);
+      }
+      return;
+    }
+    if (trimmed.startsWith('enum:')) {
+      const options = trimmed.slice('enum:'.length).split('|').map((item) => item.trim()).filter(Boolean);
+      if (options.length && !options.includes(value)) {
+        throw new BadRequestException(`${label} must be one of: ${options.join(', ')}`);
+      }
+    }
   }
 
   private async resolveSection(projectId: string, sourceSystemId: string, extension: string, metadata: StoredMetadata) {

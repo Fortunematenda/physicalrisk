@@ -523,6 +523,13 @@ export class ConfigurationService {
     return this.db.routingRules.save(entity);
   }
 
+  async deleteRoutingRule(id: string) {
+    const entity = await this.db.routingRules.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Routing rule not found');
+    await this.db.routingRules.remove(entity);
+    return { id, deleted: true };
+  }
+
   listSettings() { return this.db.systemSettings.find({ order: { key: 'ASC' } }); }
   async setSetting(key: string, value: unknown, description?: string) {
     let setting = await this.db.systemSettings.findOne({ where: { key } });

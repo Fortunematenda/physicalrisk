@@ -66,6 +66,7 @@ export class ConfigurationController {
   @Get('routing-rules') listRoutingRules(@Query('projectId') projectId?: string) { return this.service.listRoutingRules(projectId); }
   @Post('routing-rules') createRoutingRule(@Body() body: Record<string, unknown>) { return this.service.createRoutingRule(body); }
   @Patch('routing-rules/:id') updateRoutingRule(@Param('id') id: string, @Body() body: Record<string, unknown>) { return this.service.updateRoutingRule(id, body); }
+  @Delete('routing-rules/:id') deleteRoutingRule(@Param('id') id: string) { return this.service.deleteRoutingRule(id); }
 
   @Get('settings') listSettings() { return this.service.listSettings(); }
   @Post('settings/:key') setSetting(@Param('key') key: string, @Body() body: { value: unknown; description?: string }) { return this.service.setSetting(key, body.value, body.description); }
