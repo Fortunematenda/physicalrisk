@@ -170,15 +170,19 @@
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://moss:change_me_now@moss-db:5432/moss?schema=public
       REDIS_URL: redis://moss-redis:6379
       JWT_SECRET: sso-managed-jwt-secret-for-moss-local
       JWT_EXPIRES_IN: 8h
       CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-http://moss.localhost,http://localhost:3001,http://apps.localhost}
       PORT: 4000
+      # Browser-facing URLs for report links / CRM deep-links (must be public HTTPS in production)
+      PUBLIC_URL: ${MOSS_WEB_URL:-http://moss.localhost}
+      WEB_URL: ${MOSS_WEB_URL:-http://moss.localhost}
       S3_ENDPOINT: http://moss-minio:9000
-      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      # Presigned PDF download host (storage.physicalrisk.com in production — never localhost there)
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       S3_REGION: us-east-1
       S3_ACCESS_KEY: moss-storage
       S3_SECRET_KEY: change_me_storage
