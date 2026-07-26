@@ -272,6 +272,11 @@
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${REPO_KEYCLOAK_CLIENT_ID:-physicalrisk-repo}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+      CONNECTOR_ENCRYPTION_KEY: ${CONNECTOR_ENCRYPTION_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://repo.physicalrisk.com/api/connectors/google-drive/callback}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
     volumes:
       - repo_storage:/app/storage
     depends_on:
