@@ -7,6 +7,8 @@ import { SeedService } from './seed.service';
 import { AddDocumentVersioningConstraints1721337600000 } from './migrations/1721337600000-AddDocumentVersioningConstraints';
 import { CreateDocumentTypes1721400000000 } from './migrations/1721400000000-CreateDocumentTypes';
 import { AddImportDraftStatus1721500000000 } from './migrations/1721500000000-AddImportDraftStatus';
+import { AddConnectorInfrastructure1721600000000 } from './migrations/1721600000000-AddConnectorInfrastructure';
+import { AddFolderMappingReviewFields1721600000001 } from './migrations/1721600000001-AddFolderMappingReviewFields';
 
 @Global()
 @Module({
@@ -23,6 +25,8 @@ import { AddImportDraftStatus1721500000000 } from './migrations/1721500000000-Ad
             AddDocumentVersioningConstraints1721337600000,
             CreateDocumentTypes1721400000000,
             AddImportDraftStatus1721500000000,
+            AddConnectorInfrastructure1721600000000,
+            AddFolderMappingReviewFields1721600000001,
           ],
           migrationsRun: !synchronize,
           synchronize,

@@ -1,0 +1,345 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { In } from 'typeorm';
+import { AuditService } from '../common/audit.service';
+import { ConnectorProvider, McpIntegration, ProjectStatus } from '../database/entities';
+import { DatabaseService } from '../database/database.service';
+import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
+import { McpAuthService } from './mcp-auth.service';
+import {
+  CheckDocumentExistsDto,
+  GetImportStatusDto,
+  ListRepositoryModulesDto,
+  MCP_TOOL_NAMES,
+  McpToolName,
+  SubmitApprovedDocumentDto,
+} from './mcp.dto';
+import { McpForbiddenException } from './mcp.exceptions';
+
+@Injectable()
+export class McpToolsService {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly auth: McpAuthService,
+    private readonly orchestrator: ExternalImportOrchestratorService,
+    private readonly audit: AuditService,
+  ) {}
+
+  listToolDefinitions() {
+    return MCP_TOOL_NAMES.map((name) => ({
+      name,
+      description: this.toolDescription(name),
+      inputSchema: this.toolInputSchema(name),
+    }));
+  }
+
+  async dispatchTool(
+    integration: McpIntegration,
+    toolName: McpToolName,
+    args: Record<string, unknown> = {},
+    ipAddress?: string,
+  ) {
+    await this.audit.record({
+      action: 'MCP_REQUEST_RECEIVED',
+      entityType: 'McpIntegration',
+      entityId: integration.id,
+      message: `MCP tool ${toolName} invoked`,
+      after: { toolName },
+      ipAddress,
+    });
+
+    this.auth.assertToolAllowed(integration, toolName);
+
+    switch (toolName) {
+      case 'list_repository_projects':
+        return this.listRepositoryProjects(integration);
+      case 'list_repository_modules':
+        return this.listRepositoryModules(integration, args as unknown as ListRepositoryModulesDto);
+      case 'list_document_types':
+        return this.listDocumentTypes();
+      case 'check_document_exists':
+        return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
+      case 'submit_approved_document':
+        return this.submitApprovedDocument(integration, args as unknown as SubmitApprovedDocumentDto, ipAddress);
+      case 'get_import_status':
+        return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
+      default:
+        throw new BadRequestException(`Unknown MCP tool: ${toolName}`);
+    }
+  }
+
+  async listRepositoryProjects(integration: McpIntegration) {
+    const allowedIds = integration.allowedProjectIds ?? [];
+    if (!allowedIds.length) return [];
+
+    const projects = await this.db.projects.find({
+      where: { id: In(allowedIds), status: ProjectStatus.ACTIVE },
+      order: { code: 'ASC' },
+    });
+    return projects.map((project) => ({
+      id: project.id,
+      code: project.code,
+      name: project.name,
+      description: project.description,
+      status: project.status,
+    }));
+  }
+
+  async listRepositoryModules(integration: McpIntegration, input: ListRepositoryModulesDto) {
+    this.assertProjectAccess(integration, input.projectId);
+    const sections = await this.db.projectSections.find({
+      where: { project: { id: input.projectId }, active: true },
+      order: { position: 'ASC' },
+    });
+    return sections.map((section) => ({
+      id: section.id,
+      sectionKey: section.sectionKey,
+      code: section.code,
+      name: section.name,
+      slug: section.slug,
+      position: section.position,
+      relativePath: section.relativePath,
+    }));
+  }
+
+  async listDocumentTypes() {
+    const types = await this.db.documentTypes.find({
+      where: { active: true },
+      order: { code: 'ASC' },
+    });
+    return types.map((type) => ({
+      id: type.id,
+      code: type.code,
+      name: type.name,
+      description: type.description,
+    }));
+  }
+
+  async checkDocumentExists(integration: McpIntegration, input: CheckDocumentExistsDto) {
+    this.assertProjectAccess(integration, input.projectId);
+    const title = input.title?.trim();
+    const fileName = input.fileName?.trim();
+    const checksum = input.checksum?.trim();
+    const documentCode = input.documentCode?.trim()?.toUpperCase();
+    if (!title && !fileName && !checksum && !documentCode) {
+      throw new BadRequestException('Provide at least one of title, fileName, checksum, or documentCode');
+    }
+
+    const qb = this.db.documents.createQueryBuilder('document')
+      .leftJoinAndSelect('document.project', 'project')
+      .leftJoinAndSelect('document.versions', 'versions')
+      .where('project.id = :projectId', { projectId: input.projectId });
+
+    const conditions: string[] = [];
+    const params: Record<string, string> = { projectId: input.projectId };
+    if (documentCode) {
+      conditions.push('document.code = :documentCode');
+      params.documentCode = documentCode;
+    }
+    if (title) {
+      conditions.push('document.title ILIKE :title');
+      params.title = `%${title}%`;
+    }
+    if (fileName) {
+      conditions.push('versions.originalFileName ILIKE :fileName');
+      params.fileName = `%${fileName}%`;
+    }
+    if (checksum) {
+      conditions.push('versions.checksum = :checksum');
+      params.checksum = checksum;
+    }
+    qb.andWhere(`(${conditions.join(' OR ')})`, params);
+
+    const matches = await qb.getMany();
+    const filtered = matches.filter((document) => {
+      if (documentCode && document.code === documentCode) return true;
+      if (title && document.title.toLowerCase().includes(title.toLowerCase())) return true;
+      const versions = document.versions ?? [];
+      if (fileName && versions.some((version) => version.originalFileName.toLowerCase().includes(fileName.toLowerCase()))) {
+        return true;
+      }
+      if (checksum && versions.some((version) => version.checksum === checksum)) return true;
+      return false;
+    });
+
+    return {
+      exists: filtered.length > 0,
+      matches: filtered.map((document) => ({
+        id: document.id,
+        code: document.code,
+        title: document.title,
+        documentType: document.documentType,
+        currentVersionNo: document.currentVersionNo,
+        versions: (document.versions ?? []).map((version) => ({
+          id: version.id,
+          versionNo: version.versionNo,
+          originalFileName: version.originalFileName,
+          checksum: version.checksum,
+        })),
+      })),
+    };
+  }
+
+  async submitApprovedDocument(
+    integration: McpIntegration,
+    input: SubmitApprovedDocumentDto,
+    ipAddress?: string,
+  ) {
+    this.assertProjectAccess(integration, input.projectId);
+
+    try {
+      this.orchestrator.assertApprovedStatus(input.approvalStatus);
+      const result = await this.orchestrator.queueMcpApprovedDocument({
+        provider: ConnectorProvider.CHATGPT_MCP,
+        projectId: input.projectId,
+        title: input.title,
+        documentCode: input.documentCode,
+        documentType: input.documentType,
+        description: input.description,
+        owner: input.owner,
+        versionNo: input.versionNo,
+        approvalStatus: input.approvalStatus,
+        approvedBy: input.approvedBy,
+        approvalDate: input.approvalDate,
+        sectionKey: input.sectionKey,
+        metadataJson: input.metadataJson,
+        relationshipsJson: input.relationshipsJson,
+        mode: input.mode,
+        existingDocumentId: input.existingDocumentId,
+        fileName: input.fileName,
+        fileContentBase64: input.fileContentBase64,
+        mimeType: input.mimeType,
+        mcpIntegrationId: integration.id,
+      });
+
+      await this.audit.record({
+        action: 'MCP_SUBMISSION_ACCEPTED',
+        entityType: 'ImportJob',
+        entityId: result.importJobId,
+        message: `MCP submission accepted for ${input.fileName}`,
+        after: { integrationId: integration.id, checksum: result.checksum },
+        ipAddress,
+      });
+
+      return {
+        accepted: true,
+        importJobId: result.importJobId,
+        status: result.status,
+        externalImportStatus: result.externalImportStatus,
+        checksum: result.checksum,
+        fileName: result.fileName,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Submission rejected';
+      await this.audit.record({
+        action: 'MCP_SUBMISSION_REJECTED',
+        entityType: 'McpIntegration',
+        entityId: integration.id,
+        message,
+        after: { projectId: input.projectId, fileName: input.fileName },
+        ipAddress,
+      });
+      throw error;
+    }
+  }
+
+  async getImportStatus(integration: McpIntegration, input: GetImportStatusDto) {
+    const job = await this.db.importJobs.findOne({
+      where: { id: input.importJobId },
+      relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true },
+    });
+    if (!job) throw new NotFoundException('Import job not found');
+    this.assertProjectAccess(integration, job.project.id);
+
+    return {
+      id: job.id,
+      status: job.status,
+      externalImportStatus: job.externalImportStatus,
+      provider: job.provider,
+      fileName: job.fileName,
+      checksum: job.checksum,
+      errorMessage: job.errorMessage,
+      project: { id: job.project.id, code: job.project.code, name: job.project.name },
+      sourceSystem: { id: job.sourceSystem.id, code: job.sourceSystem.code, name: job.sourceSystem.name },
+      resolvedSection: job.resolvedSection
+        ? { id: job.resolvedSection.id, sectionKey: job.resolvedSection.sectionKey, name: job.resolvedSection.name }
+        : null,
+      document: job.document ? { id: job.document.id, code: job.document.code, title: job.document.title } : null,
+      version: job.version ? { id: job.version.id, versionNo: job.version.versionNo } : null,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+    };
+  }
+
+  assertProjectAccess(integration: McpIntegration, projectId: string): void {
+    try {
+      this.auth.assertProjectAllowed(integration, projectId);
+    } catch {
+      throw new McpForbiddenException(`Project '${projectId}' is not allowed for this MCP integration`);
+    }
+  }
+
+  private toolDescription(name: McpToolName): string {
+    const descriptions: Record<McpToolName, string> = {
+      list_repository_projects: 'List active repository projects allowed for this integration',
+      list_repository_modules: 'List active project sections (modules) for a project',
+      list_document_types: 'List active document types configured in the gateway',
+      check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
+      submit_approved_document: 'Submit an APPROVED document into the import queue (not final storage)',
+      get_import_status: 'Get the processing status of an import job by id',
+    };
+    return descriptions[name];
+  }
+
+  private toolInputSchema(name: McpToolName): Record<string, unknown> {
+    const schemas: Record<McpToolName, Record<string, unknown>> = {
+      list_repository_projects: { type: 'object', properties: {}, additionalProperties: false },
+      list_repository_modules: {
+        type: 'object',
+        required: ['projectId'],
+        properties: { projectId: { type: 'string', format: 'uuid' } },
+      },
+      list_document_types: { type: 'object', properties: {}, additionalProperties: false },
+      check_document_exists: {
+        type: 'object',
+        required: ['projectId'],
+        properties: {
+          projectId: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          fileName: { type: 'string' },
+          checksum: { type: 'string' },
+          documentCode: { type: 'string' },
+        },
+      },
+      submit_approved_document: {
+        type: 'object',
+        required: ['projectId', 'title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName', 'fileContentBase64'],
+        properties: {
+          projectId: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          documentCode: { type: 'string' },
+          documentType: { type: 'string' },
+          description: { type: 'string' },
+          owner: { type: 'string' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvedBy: { type: 'string' },
+          approvalDate: { type: 'string' },
+          sectionKey: { type: 'string' },
+          metadataJson: { type: 'string' },
+          relationshipsJson: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          fileName: { type: 'string' },
+          fileContentBase64: { type: 'string' },
+          mimeType: { type: 'string' },
+        },
+      },
+      get_import_status: {
+        type: 'object',
+        required: ['importJobId'],
+        properties: { importJobId: { type: 'string', format: 'uuid' } },
+      },
+    };
+    return schemas[name];
+  }
+}

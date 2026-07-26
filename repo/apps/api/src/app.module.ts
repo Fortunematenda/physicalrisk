@@ -8,10 +8,12 @@ import { ConfigurationModule } from './configuration/configuration.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ImportsModule } from './imports/imports.module';
+import { ConnectorsModule } from './connectors/connectors.module';
 import { StorageModule } from './storage/storage.module';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { SsoUserSyncModule } from './users/sso-user-sync.module';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports: [
@@ -25,7 +27,9 @@ import { SsoUserSyncModule } from './users/sso-user-sync.module';
     DocumentsModule,
     StorageModule,
     ImportsModule,
+    ConnectorsModule,
     UsersModule,
+    McpModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

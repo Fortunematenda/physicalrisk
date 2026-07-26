@@ -6,6 +6,13 @@ import { CurrentUser } from '../common/current-user.decorator';
 import { ImportsService } from './imports.service';
 import { ImportExceptionFilter, ValidationExceptionFilter } from './import-exception.filter';
 import { UploadImportDto, DraftImportDto } from './upload-import.dto';
+import { RejectImportDto } from './reject-import.dto';
+
+const REVIEW_STATUSES = [
+  ImportStatus.READY_FOR_REVIEW,
+  ImportStatus.DUPLICATE_REVIEW,
+  ImportStatus.VERSION_REVIEW,
+] as const;
 
 @ApiTags('imports')
 @Controller('imports')
@@ -13,7 +20,16 @@ import { UploadImportDto, DraftImportDto } from './upload-import.dto';
 export class ImportsController {
   constructor(private readonly imports: ImportsService) {}
 
-  @Get() list(@Query('status', new ParseEnumPipe(ImportStatus, { optional: true })) status?: ImportStatus) { return this.imports.list(status); }
+  @Get()
+  list(
+    @Query('status', new ParseEnumPipe(ImportStatus, { optional: true })) status?: ImportStatus,
+    @Query('review') review?: string,
+  ) {
+    if (review === 'true') {
+      return this.imports.list(undefined, [...REVIEW_STATUSES]);
+    }
+    return this.imports.list(status);
+  }
   @Get(':id') get(@Param('id') id: string) { return this.imports.get(id); }
 
   @Post('upload')
@@ -41,4 +57,7 @@ export class ImportsController {
 
   @Post(':id/retry') retry(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.imports.retry(id, user?.id); }
   @Post(':id/dismiss') dismiss(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.imports.dismiss(id, user?.id); }
+  @Post(':id/reject') reject(@Param('id') id: string, @Body() body: RejectImportDto, @CurrentUser() user: { id?: string } | null) {
+    return this.imports.reject(id, body.reason, user?.id);
+  }
 }

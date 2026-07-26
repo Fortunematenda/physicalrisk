@@ -1,0 +1,175 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.providerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.providerCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 168px;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #dce4ec;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(11, 47, 85, 0.05);
+}
+
+.providerCard.disabled {
+  opacity: 0.72;
+  background: #f8fafc;
+}
+
+.providerCard h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #001b36;
+}
+
+.providerCard p {
+  margin: 0;
+  flex: 1;
+  color: #66778a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.providerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.breadcrumbs button {
+  border: 0;
+  background: transparent;
+  color: #1769aa;
+  font-weight: 650;
+  padding: 0;
+  cursor: pointer;
+}
+
+.breadcrumbs span {
+  color: #8795a5;
+}
+
+.folderList {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.folderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.folderRow strong {
+  display: block;
+  color: #001b36;
+  font-size: 13px;
+}
+
+.folderMeta {
+  color: #8795a5;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.checkboxGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 12px;
+}
+
+.secretBox {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  background: #f7f9fb;
+  border: 1px solid #e2e8ef;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+.secretModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 27, 54, 0.55);
+}
+
+.secretModal {
+  width: min(560px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+}
+
+.secretModal h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #001b36;
+}
+
+.secretModal p {
+  margin: 0 0 12px;
+  color: #4a5d73;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.secretModalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

@@ -26,7 +26,20 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="API health and repository storage status." />
+      <PageHeader title="Settings" description="API health, repository storage, and external source configuration." />
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2>Source Connections</h2>
+        </div>
+        <p style={{ margin: '0 0 12px' }}>
+          Connect Google Drive, manage ChatGPT MCP integrations, and review external imports through the existing Import Queue.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <a className="button primary" href="/settings/source-connections">Source Connections</a>
+          <a className="button" href="/settings/mcp">MCP Integrations</a>
+          <a className="button" href="/imports/queue">Import Queue</a>
+        </div>
+      </div>
       {loading ? (
         <Loading />
       ) : (
