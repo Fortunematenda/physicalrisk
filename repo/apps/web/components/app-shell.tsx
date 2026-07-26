@@ -21,7 +21,7 @@ const groups = [
   { label: 'Configuration', items: [
     ['Project Registry', '/configuration/projects', '▦'],
     ['Directory Templates', '/configuration/templates', '▥'],
-    ['Repository Sections', '/configuration/sections', '☰'],
+    ['Repository Modules', '/configuration/sections', '☰'],
     ['Routing Rules', '/configuration/routing', '⇢'],
     ['Source Systems', '/configuration/sources', '◉'],
     ['Document Types', '/configuration/document-types', '▤'],
@@ -30,6 +30,8 @@ const groups = [
   ]},
   { label: 'Administration', items: [
     ['Users & Roles', '/admin/users', '♙'],
+    ['Source Connections', '/settings/source-connections', '⇄'],
+    ['MCP Integrations', '/settings/mcp', '⬡'],
     ['System Settings', '/settings', '⚙'],
   ]},
 ] as const;
@@ -145,7 +147,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {groups.map((group) => <div className="nav-group" key={group.label}>
             <span className="nav-label">{group.label}</span>
             {group.items.map(([label, href, icon]) => {
-              const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
+              const active = href === '/' || href === '/settings'
+                ? pathname === href
+                : pathname === href || pathname.startsWith(`${href}/`);
               return <Link key={href} href={href} className={active ? 'active' : ''}><b>{icon}</b><span>{label}</span></Link>;
             })}
           </div>)}

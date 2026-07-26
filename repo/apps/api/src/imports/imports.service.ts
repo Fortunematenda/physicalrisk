@@ -1,15 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
-import { Brackets } from 'typeorm';
+import { Brackets, In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { DatabaseService } from '../database/database.service';
 import {
   ApprovalStatus,
+  ConnectorProvider,
   Document,
   DocumentRelationship,
   DocumentStatus,
   DocumentVersion,
+  ExternalImportStatus,
   ImportJob,
   ImportStatus,
   ProjectSection,
@@ -61,10 +63,15 @@ export class ImportsService {
     private readonly storage: VpsStorageService,
   ) {}
 
-  list(status?: ImportStatus) {
+  list(status?: ImportStatus, reviewStatuses?: ImportStatus[]) {
+    const where = reviewStatuses?.length
+      ? { status: In(reviewStatuses) }
+      : status
+        ? { status }
+        : {};
     return this.db.importJobs.find({
-      where: status ? { status } : {},
-      relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true, initiatedBy: true },
+      where,
+      relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true, initiatedBy: true, sourceConnection: true },
       order: { createdAt: 'DESC' },
     });
   }
@@ -159,6 +166,10 @@ export class ImportsService {
       job.storageResult = null;
       job.completedAt = null;
       if (user) job.initiatedBy = user;
+      if (!job.provider) job.provider = ConnectorProvider.MANUAL_UPLOAD;
+      if (job.externalImportStatus && job.externalImportStatus !== ExternalImportStatus.IMPORTED) {
+        job.externalImportStatus = ExternalImportStatus.IMPORTING;
+      }
     } else {
       job = this.db.importJobs.create({
         sourceSystem: source,
@@ -178,6 +189,9 @@ export class ImportsService {
         storageResult: null,
         initiatedBy: user,
         completedAt: null,
+        provider: ConnectorProvider.MANUAL_UPLOAD,
+        externalImportStatus: null,
+        sourceConnection: null,
       });
     }
 
@@ -286,6 +300,7 @@ export class ImportsService {
       job.resolvedSection = null;
       job.completedAt = null;
       if (user) job.initiatedBy = user;
+      job.provider = ConnectorProvider.MANUAL_UPLOAD;
     } else {
       job = this.db.importJobs.create({
         sourceSystem: source,
@@ -305,6 +320,9 @@ export class ImportsService {
         storageResult: null,
         initiatedBy: user,
         completedAt: null,
+        provider: ConnectorProvider.MANUAL_UPLOAD,
+        externalImportStatus: null,
+        sourceConnection: null,
       });
     }
 
@@ -337,6 +355,9 @@ export class ImportsService {
     }
     if (job.incomingPath) {
       await this.storage.remove(job.incomingPath).catch(() => undefined);
+      if (job.incomingPath.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+        await this.storage.cleanupStaging(job.incomingPath).catch(() => undefined);
+      }
     }
     await this.db.importJobs.remove(job);
     await this.audit.record({
@@ -348,6 +369,40 @@ export class ImportsService {
       before: { status: job.status, fileName: job.fileName },
     });
     return { id, dismissed: true };
+  }
+
+  async reject(id: string, reason: string, userId?: string) {
+    const job = await this.get(id);
+    const reviewStatuses = new Set([
+      ImportStatus.READY_FOR_REVIEW,
+      ImportStatus.DUPLICATE_REVIEW,
+      ImportStatus.VERSION_REVIEW,
+      ImportStatus.DRAFT,
+    ]);
+    if (!reviewStatuses.has(job.status)) {
+      throw new BadRequestException('Only imports awaiting review can be rejected');
+    }
+    const previousStatus = job.status;
+    job.status = ImportStatus.REJECTED;
+    job.externalImportStatus = ExternalImportStatus.REJECTED;
+    job.errorMessage = reason.trim();
+    job.completedAt = new Date();
+    await this.db.importJobs.save(job);
+    if (job.incomingPath?.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+      await this.storage.cleanupStaging(job.incomingPath).catch(() => undefined);
+    } else if (job.incomingPath) {
+      await this.storage.remove(job.incomingPath).catch(() => undefined);
+    }
+    await this.audit.record({
+      userId,
+      action: 'EXTERNAL_IMPORT_REJECTED',
+      entityType: 'ImportJob',
+      entityId: id,
+      message: `Rejected import ${job.fileName}: ${reason.trim()}`,
+      before: { status: previousStatus },
+      after: { reason: reason.trim() },
+    });
+    return this.get(id);
   }
 
   async process(id: string, userId?: string) {
@@ -566,12 +621,29 @@ export class ImportsService {
       const finalJob = await this.db.importJobs.findOne({ where: { id }, relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true, initiatedBy: true } });
       if (!finalJob) throw new NotFoundException('Import job not found');
       finalJob.status = ImportStatus.IMPORTED;
+      if (finalJob.provider) {
+        finalJob.externalImportStatus = ExternalImportStatus.IMPORTED;
+      }
       finalJob.completedAt = new Date();
       finalJob.storageResult = storageResult;
       await this.db.importJobs.save(finalJob);
-      await this.storage.remove(job.incomingPath);
+      if (job.incomingPath?.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+        await this.storage.cleanupStaging(job.incomingPath).catch(() => undefined);
+      } else {
+        await this.storage.remove(job.incomingPath);
+      }
 
       const priorVersionNo = currentVersion?.versionNo;
+      if (finalJob.provider) {
+        await this.audit.record({
+          userId,
+          action: 'EXTERNAL_IMPORT_COMPLETED',
+          entityType: 'ImportJob',
+          entityId: finalJob.id,
+          message: `External import completed for ${result.document.code} version ${result.version.versionNo}`,
+          after: { provider: finalJob.provider, repositoryPath },
+        });
+      }
       await this.audit.record({
         userId, action: 'DOCUMENT_VERSION_IMPORTED', entityType: 'DocumentVersion', entityId: result.version.id,
         message: `Imported ${result.document.code} version ${result.version.versionNo} into ${section.name}`,

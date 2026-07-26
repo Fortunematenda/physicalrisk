@@ -32,6 +32,11 @@ services:
       DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@physicalrisk.com}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-CHANGE_ME_DEMO_PASSWORD}
+      CONNECTOR_ENCRYPTION_KEY: ${CONNECTOR_ENCRYPTION_KEY:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8080/api/connectors/google-drive/callback}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
     volumes:
       - ${VPS_REPOSITORY_PATH:-./storage}:/app/storage
     ports:

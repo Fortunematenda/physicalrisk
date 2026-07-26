@@ -17,7 +17,49 @@ export enum UserRole { ADMIN = 'ADMIN', IMPORTER = 'IMPORTER', REVIEWER = 'REVIE
 export enum ProjectStatus { ACTIVE = 'ACTIVE', INACTIVE = 'INACTIVE', ARCHIVED = 'ARCHIVED' }
 export enum ApprovalStatus { DRAFT = 'DRAFT', PENDING_REVIEW = 'PENDING_REVIEW', APPROVED = 'APPROVED', REJECTED = 'REJECTED' }
 export enum DocumentStatus { CURRENT = 'CURRENT', SUPERSEDED = 'SUPERSEDED', ARCHIVED = 'ARCHIVED' }
-export enum ImportStatus { DRAFT = 'DRAFT', RECEIVED = 'RECEIVED', VALIDATING = 'VALIDATING', READY = 'READY', ROUTING = 'ROUTING', IMPORTED = 'IMPORTED', FAILED = 'FAILED' }
+export enum ImportStatus {
+  DRAFT = 'DRAFT',
+  RECEIVED = 'RECEIVED',
+  VALIDATING = 'VALIDATING',
+  READY = 'READY',
+  ROUTING = 'ROUTING',
+  IMPORTED = 'IMPORTED',
+  FAILED = 'FAILED',
+  READY_FOR_REVIEW = 'READY_FOR_REVIEW',
+  DUPLICATE_REVIEW = 'DUPLICATE_REVIEW',
+  VERSION_REVIEW = 'VERSION_REVIEW',
+  REJECTED = 'REJECTED',
+}
+export enum ConnectorProvider {
+  GOOGLE_DRIVE = 'GOOGLE_DRIVE',
+  CHATGPT_MCP = 'CHATGPT_MCP',
+  MANUAL_UPLOAD = 'MANUAL_UPLOAD',
+  SHAREPOINT = 'SHAREPOINT',
+  ONEDRIVE = 'ONEDRIVE',
+  DROPBOX = 'DROPBOX',
+  SFTP = 'SFTP',
+  LOCAL_FOLDER = 'LOCAL_FOLDER',
+}
+export enum SourceConnectionStatus { PENDING = 'PENDING', CONNECTED = 'CONNECTED', ERROR = 'ERROR', DISABLED = 'DISABLED', DISCONNECTED = 'DISCONNECTED' }
+export enum FolderImportMode { NEW_ONLY = 'NEW_ONLY', NEW_AND_CHANGED = 'NEW_AND_CHANGED' }
+export enum SyncTriggerType { MANUAL = 'MANUAL', SCHEDULED = 'SCHEDULED', WEBHOOK = 'WEBHOOK' }
+export enum SyncRunStatus { RUNNING = 'RUNNING', COMPLETED = 'COMPLETED', FAILED = 'FAILED', CANCELLED = 'CANCELLED' }
+export enum SyncSchedule { MANUAL = 'MANUAL', EVERY_15_MINUTES = 'EVERY_15_MINUTES', HOURLY = 'HOURLY', DAILY = 'DAILY' }
+export enum ExternalImportStatus {
+  DETECTED = 'DETECTED',
+  DOWNLOADING = 'DOWNLOADING',
+  STAGED = 'STAGED',
+  PENDING_METADATA = 'PENDING_METADATA',
+  READY_FOR_REVIEW = 'READY_FOR_REVIEW',
+  DUPLICATE_REVIEW = 'DUPLICATE_REVIEW',
+  VERSION_REVIEW = 'VERSION_REVIEW',
+  READY_TO_IMPORT = 'READY_TO_IMPORT',
+  IMPORTING = 'IMPORTING',
+  IMPORTED = 'IMPORTED',
+  REJECTED = 'REJECTED',
+  FAILED = 'FAILED',
+}
+export enum McpIntegrationStatus { ACTIVE = 'ACTIVE', DISABLED = 'DISABLED' }
 export enum RelationshipType { SUPERSEDES = 'SUPERSEDES', RELATED_TO = 'RELATED_TO', DEPENDS_ON = 'DEPENDS_ON', SUPPORTS = 'SUPPORTS', PARENT_OF = 'PARENT_OF', CHILD_OF = 'CHILD_OF', REFERENCES = 'REFERENCES', IMPLEMENTS = 'IMPLEMENTS' }
 
 @Entity('users')
@@ -34,6 +76,8 @@ export class User {
   @OneToMany(() => ImportJob, (job) => job.initiatedBy) imports!: ImportJob[];
   @OneToMany(() => AuditLog, (log) => log.user) auditLogs!: AuditLog[];
   @OneToMany(() => DocumentRelationship, (rel) => rel.createdBy) relationships!: DocumentRelationship[];
+  @OneToMany(() => SourceConnection, (connection) => connection.createdBy) sourceConnections!: SourceConnection[];
+  @OneToMany(() => McpIntegration, (integration) => integration.createdBy) mcpIntegrations!: McpIntegration[];
 }
 
 @Entity('directory_templates')
@@ -82,6 +126,8 @@ export class Project {
   @OneToMany(() => RoutingRule, (rule) => rule.project) routingRules!: RoutingRule[];
   @OneToMany(() => Document, (document) => document.project) documents!: Document[];
   @OneToMany(() => ImportJob, (job) => job.project) importJobs!: ImportJob[];
+  @OneToMany(() => SourceConnection, (connection) => connection.defaultProject) sourceConnections!: SourceConnection[];
+  @OneToMany(() => SourceFolderMapping, (mapping) => mapping.project) folderMappings!: SourceFolderMapping[];
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 }
@@ -102,6 +148,111 @@ export class ProjectSection {
   @Column({ name: 'relative_path' }) relativePath!: string;
   @OneToMany(() => Document, (document) => document.section) documents!: Document[];
   @OneToMany(() => ImportJob, (job) => job.resolvedSection) resolvedImports!: ImportJob[];
+  @OneToMany(() => SourceConnection, (connection) => connection.defaultSection) sourceConnections!: SourceConnection[];
+  @OneToMany(() => SourceFolderMapping, (mapping) => mapping.section) folderMappings!: SourceFolderMapping[];
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('source_connections')
+export class SourceConnection {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ type: 'enum', enum: ConnectorProvider }) provider!: ConnectorProvider;
+  @Column() name!: string;
+  @Column({ type: 'enum', enum: SourceConnectionStatus, default: SourceConnectionStatus.PENDING }) status!: SourceConnectionStatus;
+  @Column({ name: 'credentials_encrypted', type: 'text', nullable: true }) credentialsEncrypted!: string | null;
+  @Column({ type: 'jsonb', default: {} }) settings!: Record<string, unknown>;
+  @Column({ name: 'sync_schedule', type: 'enum', enum: SyncSchedule, default: SyncSchedule.MANUAL }) syncSchedule!: SyncSchedule;
+  @Column({ name: 'external_account_id', type: 'text', nullable: true }) externalAccountId!: string | null;
+  @Column({ name: 'external_account_label', type: 'text', nullable: true }) externalAccountLabel!: string | null;
+  @Column({ name: 'root_external_folder_id', type: 'text', nullable: true }) rootExternalFolderId!: string | null;
+  @Column({ name: 'root_external_folder_name', type: 'text', nullable: true }) rootExternalFolderName!: string | null;
+  @Column({ name: 'last_sync_at', type: 'timestamptz', nullable: true }) lastSyncAt!: Date | null;
+  @Column({ name: 'last_sync_error', type: 'text', nullable: true }) lastSyncError!: string | null;
+  @ManyToOne(() => User, (user) => user.sourceConnections, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'created_by_id' }) createdBy!: User | null;
+  @ManyToOne(() => Project, (project) => project.sourceConnections, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'default_project_id' }) defaultProject!: Project | null;
+  @ManyToOne(() => ProjectSection, (section) => section.sourceConnections, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'default_section_id' }) defaultSection!: ProjectSection | null;
+  @OneToMany(() => SourceFolderMapping, (mapping) => mapping.connection) folderMappings!: SourceFolderMapping[];
+  @OneToMany(() => ConnectorSyncRun, (run) => run.connection) syncRuns!: ConnectorSyncRun[];
+  @OneToMany(() => ExternalImportReference, (ref) => ref.sourceConnection) externalImports!: ExternalImportReference[];
+  @OneToMany(() => ImportJob, (job) => job.sourceConnection) importJobs!: ImportJob[];
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('source_folder_mappings')
+@Unique(['connection', 'externalFolderId'])
+export class SourceFolderMapping {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @ManyToOne(() => SourceConnection, (connection) => connection.folderMappings, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'connection_id' }) connection!: SourceConnection;
+  @Column({ name: 'external_folder_id' }) externalFolderId!: string;
+  @Column({ name: 'external_folder_name' }) externalFolderName!: string;
+  @Column({ name: 'external_folder_path', type: 'text', nullable: true }) externalFolderPath!: string | null;
+  @ManyToOne(() => Project, (project) => project.folderMappings, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'project_id' }) project!: Project | null;
+  @ManyToOne(() => ProjectSection, (section) => section.folderMappings, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'section_id' }) section!: ProjectSection | null;
+  @Column({ name: 'import_mode', type: 'enum', enum: FolderImportMode, default: FolderImportMode.NEW_AND_CHANGED }) importMode!: FolderImportMode;
+  @Column({ name: 'require_manual_review', default: true }) requireManualReview!: boolean;
+  @Column({ name: 'default_document_type', type: 'text', nullable: true }) defaultDocumentType!: string | null;
+  @Column({ default: true }) enabled!: boolean;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('connector_sync_runs')
+export class ConnectorSyncRun {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @ManyToOne(() => SourceConnection, (connection) => connection.syncRuns, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'connection_id' }) connection!: SourceConnection;
+  @Column({ name: 'trigger_type', type: 'enum', enum: SyncTriggerType }) triggerType!: SyncTriggerType;
+  @Column({ type: 'enum', enum: SyncRunStatus, default: SyncRunStatus.RUNNING }) status!: SyncRunStatus;
+  @Column({ name: 'files_detected', default: 0 }) filesDetected!: number;
+  @Column({ name: 'files_queued', default: 0 }) filesQueued!: number;
+  @Column({ name: 'files_skipped', default: 0 }) filesSkipped!: number;
+  @Column({ name: 'files_failed', default: 0 }) filesFailed!: number;
+  @Column({ name: 'error_message', type: 'text', nullable: true }) errorMessage!: string | null;
+  @Column({ type: 'jsonb', nullable: true }) metadata!: Record<string, unknown> | null;
+  @CreateDateColumn({ name: 'started_at' }) startedAt!: Date;
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true }) completedAt!: Date | null;
+}
+
+@Entity('external_import_references')
+@Unique(['provider', 'externalFileId', 'externalRevisionId'])
+export class ExternalImportReference {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ type: 'enum', enum: ConnectorProvider }) provider!: ConnectorProvider;
+  @Column({ name: 'external_file_id' }) externalFileId!: string;
+  @Column({ name: 'external_revision_id', default: '' }) externalRevisionId!: string;
+  @Column({ name: 'external_file_name' }) externalFileName!: string;
+  @Column() checksum!: string;
+  @Column({ name: 'external_modified_at', type: 'timestamptz', nullable: true }) externalModifiedAt!: Date | null;
+  @ManyToOne(() => SourceConnection, (connection) => connection.externalImports, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'source_connection_id' }) sourceConnection!: SourceConnection | null;
+  @ManyToOne(() => ImportJob, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'import_job_id' }) importJob!: ImportJob | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('mcp_integrations')
+export class McpIntegration {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column() name!: string;
+  @Column({ type: 'enum', enum: McpIntegrationStatus, default: McpIntegrationStatus.ACTIVE }) status!: McpIntegrationStatus;
+  @Column({ name: 'api_key_hash' }) apiKeyHash!: string;
+  @Column({ name: 'api_key_prefix' }) apiKeyPrefix!: string;
+  @Column({ name: 'allowed_project_ids', type: 'jsonb', default: [] }) allowedProjectIds!: string[];
+  @Column({ name: 'allowed_tools', type: 'jsonb', default: [] }) allowedTools!: string[];
+  @Column({ name: 'expires_at', type: 'timestamptz', nullable: true }) expiresAt!: Date | null;
+  @Column({ name: 'last_used_at', type: 'timestamptz', nullable: true }) lastUsedAt!: Date | null;
+  @ManyToOne(() => User, (user) => user.mcpIntegrations, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'created_by_id' }) createdBy!: User | null;
+  @Column({ name: 'rotated_at', type: 'timestamptz', nullable: true }) rotatedAt!: Date | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 }
@@ -288,6 +439,10 @@ export class ImportJob {
   @Column({ name: 'storage_result', type: 'jsonb', nullable: true }) storageResult!: Record<string, unknown> | null;
   @ManyToOne(() => User, (user) => user.imports, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'initiated_by_id' }) initiatedBy!: User | null;
+  @Column({ type: 'enum', enum: ConnectorProvider, nullable: true }) provider!: ConnectorProvider | null;
+  @Column({ name: 'external_import_status', type: 'enum', enum: ExternalImportStatus, nullable: true }) externalImportStatus!: ExternalImportStatus | null;
+  @ManyToOne(() => SourceConnection, (connection) => connection.importJobs, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'source_connection_id' }) sourceConnection!: SourceConnection | null;
   @CreateDateColumn({ name: 'started_at' }) startedAt!: Date;
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true }) completedAt!: Date | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
@@ -322,7 +477,8 @@ export class SystemSetting {
 }
 
 export const ENTITIES = [
-  User, DirectoryTemplate, DirectoryTemplateSection, Project, ProjectSection, SourceSystem,
-  DocumentType, FileType, MetadataField, RoutingRule, Document, DocumentVersion, DocumentNote, DocumentRelationship,
+  User, DirectoryTemplate, DirectoryTemplateSection, Project, ProjectSection,
+  SourceConnection, SourceFolderMapping, ConnectorSyncRun, ExternalImportReference, McpIntegration,
+  SourceSystem, DocumentType, FileType, MetadataField, RoutingRule, Document, DocumentVersion, DocumentNote, DocumentRelationship,
   ImportJob, AuditLog, SystemSetting,
 ];

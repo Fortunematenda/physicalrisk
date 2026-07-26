@@ -29,16 +29,19 @@ export class VpsStorageService implements OnApplicationBootstrap {
   readonly storageRoot: string;
   readonly repositoryRoot: string;
   readonly incomingRoot: string;
+  readonly stagingRoot: string;
 
   constructor(private readonly config: ConfigService, private readonly db: DatabaseService) {
     this.storageRoot = resolve(this.config.get<string>('STORAGE_ROOT') ?? '../../storage');
     this.repositoryRoot = join(this.storageRoot, 'repository');
     this.incomingRoot = join(this.storageRoot, 'incoming');
+    this.stagingRoot = join(this.storageRoot, 'staging', 'external-imports');
   }
 
   async onApplicationBootstrap() {
     await mkdir(this.repositoryRoot, { recursive: true });
     await mkdir(this.incomingRoot, { recursive: true });
+    await mkdir(this.stagingRoot, { recursive: true });
     const projects = await this.db.projects.find({ where: { status: ProjectStatus.ACTIVE } });
     for (const project of projects) await this.ensureProjectStructure(project.id);
   }
@@ -84,6 +87,48 @@ export class VpsStorageService implements OnApplicationBootstrap {
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, data);
     return { relativePath, absolutePath };
+  }
+
+  async stageExternalImport(originalFileName: string, data: Buffer) {
+    const safeName = this.safeSegment(originalFileName);
+    const relativePath = join('staging', 'external-imports', `${Date.now()}-${safeName}`).replace(/\\/g, '/');
+    const absolutePath = this.resolveStoragePath(relativePath);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, data);
+    return { relativePath, absolutePath };
+  }
+
+  async cleanupStaging(relativePath: string) {
+    if (!relativePath.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+      throw new BadRequestException('Staging cleanup is limited to external-import staging paths');
+    }
+    await this.remove(relativePath);
+  }
+
+  /**
+   * Deletes abandoned external-import staging files older than `maxAgeMs`
+   * that are not present in `protectedRelativePaths`.
+   */
+  async cleanupAbandonedExternalStaging(protectedRelativePaths: Set<string>, maxAgeMs: number) {
+    await mkdir(this.stagingRoot, { recursive: true });
+    const entries = await readdir(this.stagingRoot, { withFileTypes: true });
+    const cutoff = Date.now() - maxAgeMs;
+    let removed = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const relativePath = join('staging', 'external-imports', entry.name).replace(/\\/g, '/');
+      if (protectedRelativePaths.has(relativePath)) continue;
+      const absolute = join(this.stagingRoot, entry.name);
+      const info = await stat(absolute).catch(() => null);
+      if (!info || info.mtimeMs > cutoff) continue;
+      await unlink(absolute).catch(() => undefined);
+      removed += 1;
+    }
+    return { removed };
+  }
+
+  sanitizeFileName(fileName: string) {
+    return this.safeSegment(fileName);
   }
 
   async copyToRepository(incomingPath: string, repositoryRelativePath: string) {

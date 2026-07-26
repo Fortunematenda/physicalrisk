@@ -2,9 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import {
-  AuditLog, DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote, DocumentRelationship,
-  DocumentType, DocumentVersion, FileType, ImportJob, MetadataField, Project, ProjectSection,
-  RoutingRule, SourceSystem, SystemSetting, User,
+  AuditLog, ConnectorSyncRun, DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote,
+  DocumentRelationship, DocumentType, DocumentVersion, ExternalImportReference, FileType, ImportJob,
+  McpIntegration, MetadataField, Project, ProjectSection, RoutingRule, SourceConnection,
+  SourceFolderMapping, SourceSystem, SystemSetting, User,
 } from './entities';
 
 @Injectable()
@@ -28,5 +29,10 @@ export class DatabaseService {
     @InjectRepository(ImportJob) public readonly importJobs: Repository<ImportJob>,
     @InjectRepository(AuditLog) public readonly auditLogs: Repository<AuditLog>,
     @InjectRepository(SystemSetting) public readonly systemSettings: Repository<SystemSetting>,
+    @InjectRepository(SourceConnection) public readonly sourceConnections: Repository<SourceConnection>,
+    @InjectRepository(SourceFolderMapping) public readonly sourceFolderMappings: Repository<SourceFolderMapping>,
+    @InjectRepository(ConnectorSyncRun) public readonly connectorSyncRuns: Repository<ConnectorSyncRun>,
+    @InjectRepository(ExternalImportReference) public readonly externalImportReferences: Repository<ExternalImportReference>,
+    @InjectRepository(McpIntegration) public readonly mcpIntegrations: Repository<McpIntegration>,
   ) {}
 }

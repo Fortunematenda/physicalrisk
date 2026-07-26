@@ -2,6 +2,12 @@
 
 A lightweight, multi-project middleware application built for **RFP-001 v1.1**. It receives approved documents, validates mandatory metadata, resolves the destination project and configured directory, routes the file into the Physical Risk VPS repository, updates the Master Document Index and Version Register, creates document relationships and writes a complete audit trail.
 
+## External connectors
+
+Provider-neutral intake for **Google Drive**, **ChatGPT via MCP**, and **manual upload** into the existing Import Queue (staging only — never bypasses Repo Gateway validation).
+
+See [docs/CONNECTORS.md](docs/CONNECTORS.md) for architecture, Google Cloud OAuth setup, MCP authentication, environment variables, sync schedules, and troubleshooting.
+
 ## Scope
 
 This MVP is intentionally limited to Wayne's requested gateway function:
@@ -124,9 +130,11 @@ Only relative project and section paths are stored in the Project Registry. Abso
 - Document Relationships
 - Project Registry
 - Directory Templates
-- Repository Sections
+- Repository Modules
 - Routing Rules
 - Source Systems
+- Source Connections
+- MCP Integrations
 - File Types
 - Metadata Fields
 - Users and Roles
