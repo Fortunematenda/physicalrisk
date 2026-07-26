@@ -26,10 +26,27 @@ If WordPress/Apache already owns port 80 on the same server, do **not** bind com
 
 ```bash
 # On the server
-cp .env.sso.production.example .env.sso
+cd /path/to/physicalrisk
+git fetch origin
+git checkout development
+git pull origin development
+
+cp .env.sso.production.example .env.sso   # first time only
 # Edit .env.sso — replace every REPLACE_WITH_* value
+# Also set connector vars for Repo external imports:
+#   CONNECTOR_ENCRYPTION_KEY=   # 64-char hex (32 bytes)
+#   GOOGLE_CLIENT_ID=
+#   GOOGLE_CLIENT_SECRET=
+#   GOOGLE_REDIRECT_URI=https://repo.physicalrisk.com/api/connectors/google-drive/callback
+#   MCP_ENABLED=true
 
 docker compose -f docker-compose.sso.yml --env-file .env.sso up -d --build
+```
+
+Repo MCP public endpoint after deploy:
+
+```text
+https://repo.physicalrisk.com/mcp
 ```
 
 ## TLS
