@@ -75,10 +75,11 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Same-chat: research → generate → user approves → submit with documentContent. '
-        + 'Repo converts Markdown to PDF and queues the PDF. External PDF via fileUrl/uploadUrl. '
+        'Same-chat: research → generate → approve → submit with documentContent. '
+        + 'Repo converts Markdown to PDF, applies routing rules / module, imports into the folder, '
+        + 'and updates the Master Document Index. Queue only if routing or duplicates need a human. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.10.1',
+      version: '1.11.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -244,17 +245,18 @@ SAME-CHAT FLOW
 3) When user says approved / I approve / please import / submit — YOU MUST CALL submit_approved_document IMMEDIATELY.
    Do NOT ask for version, approval date, filename, or MIME type.
    Put the Markdown you already wrote in this chat into documentContent.
-   Repo converts that Markdown to a PDF on the server and places the PDF in the Import Queue.
+   Repo converts Markdown → PDF, applies admin routing rules (or the module you sent), imports into that folder, and updates the Master Document Index. No Import Queue step when routing succeeds.
 
 FORBIDDEN after approval
 - Asking again for Version, Approval date, Original filename, MIME type, or "the document itself" if you already generated it in this chat.
-- Claiming you cannot create a PDF — the repository creates the PDF from documentContent.
+- Claiming a human must always finish Import Queue — only say that when result.needsReview is true.
 
 SUBMIT
 - One argument only: payload (JSON string).
 - Minimum payload: projectCode, module, documentType, title, documentContent, approvedBy (if named).
 - Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvalDate=today, approvedBy=Wayne if omitted.
-- Report importJobId. Say a human must still complete Import Queue review.
+- On success report: imported, documentCode, sectionName, importJobId, and result.message.
+- If needsReview=true, tell the user to open Import Queue (routing/duplicate issue).
 
 Example:
 submit_approved_document with payload =

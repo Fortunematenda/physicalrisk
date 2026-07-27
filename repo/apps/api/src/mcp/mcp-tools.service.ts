@@ -513,6 +513,14 @@ export class McpToolsService {
         externalImportStatus: result.externalImportStatus,
         checksum: result.checksum,
         fileName: result.fileName,
+        imported: result.imported === true,
+        needsReview: result.needsReview === true,
+        documentCode: result.documentCode ?? null,
+        sectionName: result.sectionName ?? null,
+        message: result.message
+          ?? (result.imported
+            ? 'Imported into the repository; Master Document Index updated.'
+            : 'Queued for Import Queue review.'),
         projectId,
         sectionKey: sectionKey ?? null,
         documentType: input.documentType,

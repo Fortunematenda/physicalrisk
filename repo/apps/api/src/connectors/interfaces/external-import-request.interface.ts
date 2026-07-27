@@ -50,4 +50,10 @@ export interface McpExternalImportResult {
   externalImportStatus: ExternalImportStatus;
   checksum: string;
   fileName: string;
+  /** True when process() completed into the repository + Master Document Index. */
+  imported?: boolean;
+  documentCode?: string;
+  sectionName?: string;
+  message?: string;
+  needsReview?: boolean;
 }

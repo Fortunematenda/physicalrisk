@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { AuditService } from '../common/audit.service';
@@ -20,6 +20,7 @@ import {
 } from '../database/entities';
 import { VpsStorageService } from '../storage/vps-storage.service';
 import { determineExternalImportStatuses } from './external-import-dedup.util';
+import { ImportsService } from './imports.service';
 
 @Injectable()
 export class ExternalImportOrchestratorService {
@@ -29,6 +30,8 @@ export class ExternalImportOrchestratorService {
     private readonly db: DatabaseService,
     private readonly storage: VpsStorageService,
     private readonly audit: AuditService,
+    @Inject(forwardRef(() => ImportsService))
+    private readonly imports: ImportsService,
   ) {}
 
   async queueExternalImport(request: ExternalImportRequest): Promise<ImportJob> {
@@ -310,7 +313,7 @@ export class ExternalImportOrchestratorService {
       action: 'IMPORT_READY_FOR_REVIEW',
       entityType: 'ImportJob',
       entityId: saved.id,
-      message: `MCP submission queued for review from ${request.provider}: ${fileName}`,
+      message: `MCP submission received from ${request.provider}: ${fileName}`,
       after: {
         project: project.code,
         source: source.code,
@@ -322,13 +325,68 @@ export class ExternalImportOrchestratorService {
       },
     });
 
-    return {
-      importJobId: saved.id,
-      status: saved.status,
-      externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.READY_FOR_REVIEW,
-      checksum,
-      fileName,
-    };
+    // Duplicates / version conflicts stay in Import Queue for a human.
+    if (saved.status !== ImportStatus.READY_FOR_REVIEW) {
+      return {
+        importJobId: saved.id,
+        status: saved.status,
+        externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.READY_FOR_REVIEW,
+        checksum,
+        fileName,
+        imported: false,
+        needsReview: true,
+        message:
+          'Document needs Import Queue review (duplicate or version conflict). '
+          + 'Routing rules were not auto-applied.',
+      };
+    }
+
+    // Auto-complete: admin routing rules / MCP module place the file and update Master Document Index.
+    try {
+      const completed = await this.imports.process(saved.id);
+      return {
+        importJobId: completed.id,
+        status: completed.status,
+        externalImportStatus: completed.externalImportStatus ?? ExternalImportStatus.IMPORTED,
+        checksum,
+        fileName,
+        imported: completed.status === ImportStatus.IMPORTED,
+        documentCode: completed.document?.code,
+        sectionName: completed.resolvedSection?.name,
+        message:
+          completed.status === ImportStatus.IMPORTED
+            ? `Imported into ${completed.resolvedSection?.name || 'repository'}; Master Document Index updated.`
+            : 'Import did not complete; check Import Queue.',
+        needsReview: completed.status !== ImportStatus.IMPORTED,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Auto-import failed';
+      const failed = await this.db.importJobs.findOne({ where: { id: saved.id } });
+      if (failed && failed.status === ImportStatus.FAILED) {
+        failed.status = ImportStatus.READY_FOR_REVIEW;
+        failed.externalImportStatus = ExternalImportStatus.READY_FOR_REVIEW;
+        failed.errorMessage = message;
+        await this.db.importJobs.save(failed);
+      }
+      await this.audit.record({
+        action: 'MCP_AUTO_IMPORT_FALLBACK',
+        entityType: 'ImportJob',
+        entityId: saved.id,
+        message: `MCP auto-import failed; left in Import Queue (${message})`,
+      });
+      return {
+        importJobId: saved.id,
+        status: ImportStatus.READY_FOR_REVIEW,
+        externalImportStatus: ExternalImportStatus.READY_FOR_REVIEW,
+        checksum,
+        fileName,
+        imported: false,
+        needsReview: true,
+        message:
+          `Could not auto-import (${message}). Confirm routing in Import Queue. `
+          + 'Once routing rules cover this type/module, future ChatGPT approvals import automatically.',
+      };
+    }
   }
 
   private decodeBase64File(content: string): Buffer {
