@@ -4,7 +4,7 @@
  * - only one security scheme
  * - components.schemas must be an object
  * - object schemas need properties
- * - prefer OpenAPI 3.0.x
+ * - prefer OpenAPI 3.1.0 (ChatGPT Actions requires 3.1.0 or 3.1.1)
  * - avoid $ref in multipart request bodies (causes UnrecognizedKwargsError)
  */
 export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
@@ -54,7 +54,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const responses = { '200': ok, '400': err, '401': err, '403': err };
 
   return {
-    openapi: '3.0.1',
+    openapi: '3.1.0',
     info: {
       title: 'Physical Risk Repo MCP',
       description:

@@ -3,7 +3,7 @@ import { buildChatGptActionsOpenApi } from './mcp-openai.openapi';
 describe('buildChatGptActionsOpenApi', () => {
   it('publishes ChatGPT-compatible Actions with a single Bearer scheme', () => {
     const doc = buildChatGptActionsOpenApi('https://repo.physicalrisk.com/');
-    expect(doc.openapi).toBe('3.0.1');
+    expect(doc.openapi).toBe('3.1.0');
     expect(doc.servers[0].url).toBe('https://repo.physicalrisk.com');
     expect(Object.keys(doc.paths)).toEqual([
       '/api/mcp/tools/list_repository_projects',
