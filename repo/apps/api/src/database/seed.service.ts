@@ -183,8 +183,7 @@ export class SeedService implements OnApplicationBootstrap {
       await this.db.documentTypes.save(documentType);
 
       // Migrate documents / routing that still use the old section-cloned type name.
-      for (const legacy of legacyNames) {
-        if (legacy === name) continue;
+      for (const legacy of legacyNames as readonly string[]) {
         await this.db.documents
           .createQueryBuilder()
           .update()

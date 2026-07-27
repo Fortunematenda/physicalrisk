@@ -651,11 +651,18 @@ export class ImportsService {
             createdBy,
           }));
 
-          // Update parent document to point to the new current version
-          documentRecord.title = metadata.title.trim();
-          documentRecord.documentType = metadata.documentType.trim();
-          documentRecord.description = metadata.description?.trim() || null;
-          documentRecord.owner = metadata.owner?.trim() || null;
+          // Update parent document to point to the new current version.
+          // Do not wipe Document Information when MCP omits optional fields on a revision.
+          documentRecord.title = metadata.title.trim() || documentRecord.title;
+          if (metadata.documentType?.trim()) {
+            documentRecord.documentType = metadata.documentType.trim();
+          }
+          if (metadata.description?.trim()) {
+            documentRecord.description = metadata.description.trim();
+          }
+          if (metadata.owner?.trim()) {
+            documentRecord.owner = metadata.owner.trim();
+          }
           documentRecord.section = section;
           documentRecord.status = DocumentStatus.CURRENT;
           documentRecord.currentVersionNo = metadata.versionNo.trim();

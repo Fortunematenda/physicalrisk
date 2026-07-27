@@ -66,9 +66,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           + 'or set documentCode (e.g. MOSS-AR-003). Server bumps versionNo automatically (e.g. Rev 1.0 → Rev 1.1). '
           + 'Optional: versionNo if you already know the next revision. '
           + 'Repo converts Markdown → PDF and imports with Document Information. '
-          + 'Example new: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
+          + 'Example new: {"projectCode":"MOSS","module":"Articles","documentType":"Article",'
           + '"title":"Cow","owner":"Wayne","description":"Overview of cattle.","documentContent":"# Cow\\n\\n...","approvedBy":"Wayne"} '
-          + 'Example next version: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
+          + 'Example next version: {"projectCode":"MOSS","module":"Articles","documentType":"Article",'
           + '"title":"A Cow","mode":"NEW_VERSION","existingDocumentId":"<uuid>","documentCode":"MOSS-AR-003",'
           + '"documentContent":"# The Cow\\n\\n...","approvedBy":"Wayne"}',
       },
@@ -86,7 +86,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.14.0',
+      version: '1.14.1',
     },
     servers: [{ url: baseUrl }],
     paths: {

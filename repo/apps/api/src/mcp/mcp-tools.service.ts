@@ -334,6 +334,8 @@ export class McpToolsService {
             versionNo: suggestedNextVersionNo,
             title: document.title,
             documentType: document.documentType,
+            owner: document.owner ?? undefined,
+            description: document.description ?? undefined,
           },
           versions: (document.versions ?? []).map((version) => ({
             id: version.id,
@@ -438,6 +440,10 @@ export class McpToolsService {
     input: SubmitApprovedDocumentDto,
     ipAddress?: string,
   ) {
+    // Always normalise — browser upload / multipart callers skip dispatchTool defaults.
+    const normalised = await this.normaliseSubmitInput(input);
+    input = { ...input, ...normalised };
+
     const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
     let sectionKey = input.sectionKey?.trim() || undefined;
     if (!sectionKey && input.module?.trim()) {
@@ -446,6 +452,13 @@ export class McpToolsService {
         module: input.module,
       });
       sectionKey = resolved.module?.sectionKey;
+      // If GPT sent a folder name as documentType, map it to the seeded type for that module.
+      if ((!input.documentType || !input.documentType.trim()) && resolved.module) {
+        input.documentType = await this.resolveDocumentTypeName(
+          resolved.module.name,
+          resolved.module.code,
+        ) || input.documentType;
+      }
     }
 
     let fileContentBase64 = input.fileContentBase64?.trim();
@@ -468,6 +481,7 @@ export class McpToolsService {
       if (!content.trim()) {
         throw new BadRequestException('documentContent must not be empty');
       }
+      this.assertDocumentContentUsable(content);
       const maxChars = 500 * 1024;
       if (content.length > maxChars) {
         throw new BadRequestException(
@@ -505,6 +519,11 @@ export class McpToolsService {
     if (!fileName) {
       throw new BadRequestException('fileName is required');
     }
+    if (!input.documentType?.trim()) {
+      throw new BadRequestException(
+        'documentType is required (e.g. Article). Call list_document_types and use a type name — not the folder/module name.',
+      );
+    }
 
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
@@ -514,9 +533,9 @@ export class McpToolsService {
         projectId,
         title: versioned.title,
         documentCode: versioned.documentCode,
-        documentType: input.documentType,
-        description: input.description,
-        owner: input.owner,
+        documentType: versioned.documentType,
+        description: versioned.description,
+        owner: versioned.owner,
         versionNo: versioned.versionNo,
         approvalStatus: input.approvalStatus,
         approvedBy: input.approvedBy,
@@ -558,7 +577,7 @@ export class McpToolsService {
             : 'Queued for Import Queue review.'),
         projectId,
         sectionKey: sectionKey ?? null,
-        documentType: input.documentType,
+        documentType: versioned.documentType,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Submission rejected';
@@ -634,6 +653,7 @@ export class McpToolsService {
   /**
    * When submitting a revision of an existing document, attach existingDocumentId / documentCode
    * and bump versionNo past the current revision (defaults alone would stay at Rev 1.0).
+   * Preserve Document Information when GPT omits owner/description/type on the revision.
    */
   private async resolveNewVersionSubmit(
     projectId: string,
@@ -641,6 +661,9 @@ export class McpToolsService {
   ): Promise<{
     title: string;
     documentCode?: string;
+    documentType: string;
+    description?: string;
+    owner?: string;
     versionNo: string;
     mode?: 'NEW' | 'NEW_VERSION';
     existingDocumentId?: string;
@@ -675,6 +698,9 @@ export class McpToolsService {
       return {
         title: input.title,
         documentCode: input.documentCode,
+        documentType: input.documentType,
+        description: input.description,
+        owner: input.owner,
         versionNo: input.versionNo,
         mode: input.mode,
         existingDocumentId: input.existingDocumentId,
@@ -692,14 +718,117 @@ export class McpToolsService {
     const notNewer = Boolean(submitted) && compareVersions(submitted, current) <= 0;
     const versionNo = treatAsDefault || notNewer ? suggested : submitted;
 
-    // Targeting an existing document always means a new revision.
+    // Targeting an existing document always means a new revision — merge metadata, don't blank it.
     return {
       title: document.title,
       documentCode: document.code,
+      documentType: input.documentType?.trim() || document.documentType || '',
+      description: input.description?.trim() || document.description || undefined,
+      owner: input.owner?.trim() || document.owner || undefined,
       versionNo,
       mode: 'NEW_VERSION',
       existingDocumentId: document.id,
     };
+  }
+
+  /** Apply defaults + resolve documentType aliases for every submit path. */
+  private async normaliseSubmitInput(input: SubmitApprovedDocumentDto): Promise<SubmitApprovedDocumentDto> {
+    const withDefaults = this.applySubmitDefaults(input, input.documentContent);
+    const documentType = await this.resolveDocumentTypeName(
+      withDefaults.documentType,
+      input.module,
+    );
+    const titleFromContent = this.deriveTitleFromContent(input.documentContent);
+    const title = withDefaults.title === 'document' && titleFromContent
+      ? titleFromContent
+      : withDefaults.title;
+    return {
+      ...input,
+      ...withDefaults,
+      title,
+      documentType: documentType || withDefaults.documentType || '',
+      description: withDefaults.description?.trim()
+        || this.deriveDescription(input.documentContent, title)
+        || title,
+      owner: withDefaults.owner?.trim() || withDefaults.approvedBy || 'Wayne',
+    };
+  }
+
+  /** Map folder names / plurals ChatGPT often sends onto seeded document type names. */
+  private async resolveDocumentTypeName(
+    rawType?: string | null,
+    moduleHint?: string | null,
+  ): Promise<string | undefined> {
+    const needle = (rawType || moduleHint || '').trim();
+    if (!needle) return undefined;
+    const types = await this.listDocumentTypes();
+    const lower = needle.toLowerCase();
+    const exact = types.find((type) => type.name.toLowerCase() === lower || type.code.toLowerCase() === lower);
+    if (exact) return exact.name;
+
+    const aliases: Record<string, string> = {
+      articles: 'Article',
+      article: 'Article',
+      'research library': 'Research Note',
+      'research note': 'Research Note',
+      'product architecture': 'Architecture Document',
+      'architecture document': 'Architecture Document',
+      'architecture doc': 'Architecture Doc',
+      'enterprise architecture': 'EA Blueprint',
+      'ea blueprint': 'EA Blueprint',
+      'functional specifications': 'Functional Specification',
+      'technical specifications': 'Technical Specification',
+      'api specifications': 'API Contract',
+      'data models': 'Data Model Definition',
+      'business rules': 'Business Rule',
+      'governance standards': 'Governance Standard',
+      'operating procedures': 'Operating Procedure',
+      'developer packs': 'Developer Pack',
+      'marketing assets': 'Marketing Collateral',
+      templates: 'Template',
+      decisions: 'Decision Record',
+      'meeting records': 'Meeting Minutes',
+      'release notes': 'Release Note',
+    };
+    const aliased = aliases[lower];
+    if (aliased) {
+      const match = types.find((type) => type.name === aliased);
+      if (match) return match.name;
+    }
+
+    // Singularise trailing "s" (Articles → Article) when that type exists.
+    if (lower.endsWith('s')) {
+      const singular = needle.replace(/s$/i, '');
+      const match = types.find((type) => type.name.toLowerCase() === singular.toLowerCase());
+      if (match) return match.name;
+    }
+    return needle;
+  }
+
+  private deriveTitleFromContent(documentContent?: string): string | undefined {
+    const raw = documentContent?.trim();
+    if (!raw) return undefined;
+    const heading = raw.split(/\r?\n/).map((line) => line.trim()).find((line) => /^#\s+\S/.test(line));
+    if (!heading) return undefined;
+    const title = heading.replace(/^#+\s+/, '').replace(/[*_`]+/g, '').trim();
+    return title || undefined;
+  }
+
+  /** Reject placeholder / truncated Markdown that would produce a near-empty PDF. */
+  private assertDocumentContentUsable(content: string) {
+    const trimmed = content.trim();
+    const withoutHeading = trimmed.replace(/^#+\s.*$/m, '').trim();
+    const substantive = withoutHeading
+      .replace(/\.{3,}/g, '')
+      .replace(/…/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (substantive.length < 80) {
+      throw new BadRequestException(
+        'documentContent is too short or looks like a placeholder. '
+        + 'Put the full Markdown article from this chat into documentContent before submitting.',
+      );
+    }
   }
 
   /** Accept flat fields or a single JSON string `payload` (ChatGPT UnrecognizedKwargsError workaround). */
@@ -747,14 +876,22 @@ export class McpToolsService {
     documentContent?: string,
   ): PrepareApprovedDocumentDto {
     const today = new Date().toISOString().slice(0, 10);
-    const title = input.title?.trim() || 'document';
+    const titleFromContent = this.deriveTitleFromContent(documentContent);
+    const title = (input.title?.trim() && input.title.trim() !== 'document'
+      ? input.title.trim()
+      : titleFromContent)
+      || input.title?.trim()
+      || 'document';
     const hasMarkdown = Boolean(documentContent?.trim());
     const approvedBy = input.approvedBy?.trim() || 'Wayne';
+    const description = input.description?.trim()
+      || this.deriveDescription(documentContent, title)
+      || title;
     return {
       ...input,
       title,
       documentType: input.documentType?.trim() || '',
-      description: input.description?.trim() || this.deriveDescription(documentContent, title),
+      description,
       owner: input.owner?.trim() || approvedBy,
       versionNo: input.versionNo?.trim() || 'Rev 1.0',
       approvalStatus: input.approvalStatus?.trim() || 'APPROVED',
