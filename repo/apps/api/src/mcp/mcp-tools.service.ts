@@ -18,6 +18,7 @@ import {
   ResolveImportTargetsDto,
   SubmitApprovedDocumentDto,
   UploadDocumentChunkDto,
+  mcpAllowsAllProjects,
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
@@ -145,10 +146,15 @@ export class McpToolsService {
     const allowedIds = integration.allowedProjectIds ?? [];
     if (!allowedIds.length) return [];
 
-    const projects = await this.db.projects.find({
-      where: { id: In(allowedIds), status: ProjectStatus.ACTIVE },
-      order: { code: 'ASC' },
-    });
+    const projects = mcpAllowsAllProjects(allowedIds)
+      ? await this.db.projects.find({
+        where: { status: ProjectStatus.ACTIVE },
+        order: { code: 'ASC' },
+      })
+      : await this.db.projects.find({
+        where: { id: In(allowedIds), status: ProjectStatus.ACTIVE },
+        order: { code: 'ASC' },
+      });
     return projects.map((project) => ({
       id: project.id,
       code: project.code,

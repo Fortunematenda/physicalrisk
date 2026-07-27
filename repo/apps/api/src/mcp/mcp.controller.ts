@@ -6,6 +6,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Req,
   Res,
@@ -28,6 +29,7 @@ import { McpAuthService } from './mcp-auth.service';
 import {
   CreateMcpIntegrationDto,
   MCP_TOOL_NAMES,
+  UpdateMcpIntegrationProjectsDto,
   McpJsonRpcRequestDto,
   McpToolName,
   SubmitApprovedDocumentDto,
@@ -380,6 +382,18 @@ export class McpController {
     @CurrentUser() user: { id?: string } | null,
   ) {
     return this.auth.rotateIntegration(id, user?.id);
+  }
+
+  @Patch('integrations/:id/projects')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  updateIntegrationProjects(
+    @Param('id') id: string,
+    @Body() body: UpdateMcpIntegrationProjectsDto,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.auth.updateAllowedProjects(id, body.allowedProjectIds, user?.id);
   }
 
   @Post('integrations/:id/disable')

@@ -33,15 +33,29 @@ export const MCP_TOOL_NAMES = [
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
 
+/** Sentinel in allowedProjectIds: one API key may access every repository project (including future ones). */
+export const MCP_ALL_PROJECTS_SCOPE = '*';
+
+export function mcpAllowsAllProjects(allowedProjectIds?: string[] | null): boolean {
+  return (allowedProjectIds ?? []).includes(MCP_ALL_PROJECTS_SCOPE);
+}
+
+export function normalizeMcpAllowedProjectIds(ids: string[]): string[] {
+  const cleaned = [...new Set((ids ?? []).map((id) => String(id).trim()).filter(Boolean))];
+  if (cleaned.includes(MCP_ALL_PROJECTS_SCOPE)) return [MCP_ALL_PROJECTS_SCOPE];
+  return cleaned;
+}
+
 export class CreateMcpIntegrationDto {
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
   name!: string;
 
+  /** Project UUIDs, or ["*"] for every project in the repository. */
   @IsArray()
   @ArrayNotEmpty()
-  @IsUUID('4', { each: true })
+  @IsString({ each: true })
   allowedProjectIds!: string[];
 
   @IsOptional()
@@ -52,6 +66,14 @@ export class CreateMcpIntegrationDto {
   @IsOptional()
   @IsDateString()
   expiresAt?: string;
+}
+
+export class UpdateMcpIntegrationProjectsDto {
+  /** Project UUIDs, or ["*"] for every project in the repository. */
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  allowedProjectIds!: string[];
 }
 
 export class McpJsonRpcRequestDto {

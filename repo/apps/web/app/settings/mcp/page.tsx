@@ -21,6 +21,8 @@ const MCP_TOOLS = [
   'get_import_status',
 ] as const;
 
+const MCP_ALL_PROJECTS = '*';
+
 type ProjectRow = { id: string; code: string; name: string };
 
 type McpIntegration = {
@@ -60,9 +62,11 @@ export default function McpIntegrationsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '',
-    allowedProjectIds: [] as string[],
+    allowedProjectIds: [MCP_ALL_PROJECTS] as string[],
     allowedTools: [...MCP_TOOLS] as string[],
   });
+
+  const allProjectsSelected = form.allowedProjectIds.includes(MCP_ALL_PROJECTS);
 
   const extractApiKey = (payload: McpIntegration | Record<string, unknown> | null | undefined) => {
     if (!payload || typeof payload !== 'object') return '';
@@ -125,11 +129,21 @@ export default function McpIntegrationsPage() {
   }, []);
 
   const toggleProject = (projectId: string) => {
+    setForm((current) => {
+      const withoutAll = current.allowedProjectIds.filter((id) => id !== MCP_ALL_PROJECTS);
+      const next = withoutAll.includes(projectId)
+        ? withoutAll.filter((id) => id !== projectId)
+        : [...withoutAll, projectId];
+      return { ...current, allowedProjectIds: next };
+    });
+  };
+
+  const toggleAllProjects = () => {
     setForm((current) => ({
       ...current,
-      allowedProjectIds: current.allowedProjectIds.includes(projectId)
-        ? current.allowedProjectIds.filter((id) => id !== projectId)
-        : [...current.allowedProjectIds, projectId],
+      allowedProjectIds: current.allowedProjectIds.includes(MCP_ALL_PROJECTS)
+        ? []
+        : [MCP_ALL_PROJECTS],
     }));
   };
 
@@ -145,7 +159,7 @@ export default function McpIntegrationsPage() {
   const createIntegration = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || form.allowedProjectIds.length === 0 || form.allowedTools.length === 0) {
-      setError('Name, at least one project, and at least one tool are required.');
+      setError('Name, project scope (All projects or at least one project), and at least one tool are required.');
       return;
     }
     setSaving(true);
@@ -157,7 +171,9 @@ export default function McpIntegrationsPage() {
         method: 'POST',
         body: JSON.stringify({
           name: form.name.trim(),
-          allowedProjectIds: form.allowedProjectIds,
+          allowedProjectIds: form.allowedProjectIds.includes(MCP_ALL_PROJECTS)
+            ? [MCP_ALL_PROJECTS]
+            : form.allowedProjectIds,
           allowedTools: form.allowedTools,
         }),
       });
@@ -167,7 +183,7 @@ export default function McpIntegrationsPage() {
       } else {
         showApiKey(created.name || form.name.trim(), apiKey);
       }
-      setForm({ name: '', allowedProjectIds: [], allowedTools: [...MCP_TOOLS] });
+      setForm({ name: '', allowedProjectIds: [MCP_ALL_PROJECTS], allowedTools: [...MCP_TOOLS] });
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to create MCP integration.');
@@ -215,7 +231,27 @@ export default function McpIntegrationsPage() {
     }
   };
 
+  const grantAllProjects = async (id: string, name: string) => {
+    if (!confirm(`Allow ${name} to access ALL repository projects (including ones created later)?`)) return;
+    setBusyId(id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/mcp/integrations/${id}/projects`, {
+        method: 'PATCH',
+        body: JSON.stringify({ allowedProjectIds: [MCP_ALL_PROJECTS] }),
+      });
+      setMessage(`${name} can now access all projects.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update project scope.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const projectLabel = (projectId: string) => {
+    if (projectId === MCP_ALL_PROJECTS) return 'All projects';
     const project = projects.find((item) => item.id === projectId);
     return project ? `${project.code}` : projectId.slice(0, 8);
   };
@@ -267,7 +303,7 @@ export default function McpIntegrationsPage() {
         ) : setup ? (
           <>
             <ol style={{ margin: '0 0 16px', paddingLeft: 20, lineHeight: 1.6 }}>
-              <li>Create an integration below with <strong>all tools</strong> and the projects you need.</li>
+              <li>Create an integration below with <strong>all tools</strong> and <strong>All projects</strong> so ChatGPT can see every repository project with one API key.</li>
               <li>Copy the <code className="mono">mcp_…</code> API key when it appears.</li>
               <li>
                 In ChatGPT → Create a GPT → Actions → Import from URL:{' '}
@@ -347,7 +383,8 @@ export default function McpIntegrationsPage() {
           <section className="form-section">
             <h2>Create integration</h2>
             <p>
-              Choose allowed projects and keep <strong>all tools</strong> enabled for ChatGPT Actions.
+              Prefer <strong>All projects</strong> so one API key lists and imports across every repository project
+              (including new ones). Or pick specific projects to restrict the key.
               The API key is displayed once after creation.
             </p>
             <div className="field">
@@ -366,11 +403,20 @@ export default function McpIntegrationsPage() {
                 <EmptyState title="No projects" text="Register a project before creating an MCP integration." />
               ) : (
                 <div className={styles.checkboxGrid}>
+                  <label className="field checkbox">
+                    <input
+                      type="checkbox"
+                      checked={allProjectsSelected}
+                      onChange={toggleAllProjects}
+                    />
+                    <span><strong>All projects</strong> — every active project, including future ones</span>
+                  </label>
                   {projects.map((project) => (
                     <label key={project.id} className="field checkbox">
                       <input
                         type="checkbox"
-                        checked={form.allowedProjectIds.includes(project.id)}
+                        checked={!allProjectsSelected && form.allowedProjectIds.includes(project.id)}
+                        disabled={allProjectsSelected}
                         onChange={() => toggleProject(project.id)}
                       />
                       <span>{project.code} — {project.name}</span>
@@ -458,9 +504,11 @@ export default function McpIntegrationsPage() {
                       <td><StatusBadge value={item.status} /></td>
                       <td className="mono">{item.apiKeyPrefix}…</td>
                       <td>
-                        {(item.allowedProjectIds || []).length
-                          ? item.allowedProjectIds.map(projectLabel).join(', ')
-                          : '—'}
+                        {(item.allowedProjectIds || []).includes(MCP_ALL_PROJECTS)
+                          ? 'All projects'
+                          : (item.allowedProjectIds || []).length
+                            ? item.allowedProjectIds.map(projectLabel).join(', ')
+                            : '—'}
                       </td>
                       <td>
                         <span className="secondary-text">
@@ -471,6 +519,16 @@ export default function McpIntegrationsPage() {
                       <td>{formatDate(item.expiresAt)}</td>
                       <td>
                         <div className={styles.inlineActions}>
+                          {!(item.allowedProjectIds || []).includes(MCP_ALL_PROJECTS) ? (
+                            <button
+                              type="button"
+                              className="button small"
+                              disabled={busy || disabled}
+                              onClick={() => void grantAllProjects(item.id, item.name)}
+                            >
+                              {busy ? '…' : 'Grant all projects'}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="button small"

@@ -96,4 +96,9 @@ describe('McpAuthService project permissions', () => {
   it('blocks disallowed project ids', () => {
     expect(() => service.assertProjectAllowed(integration, 'project-denied')).toThrow('project project-denied not allowed');
   });
+
+  it('permits every project when scope is *', () => {
+    const allProjects: McpIntegration = { ...integration, allowedProjectIds: ['*'] };
+    expect(() => service.assertProjectAllowed(allProjects, 'any-project-id')).not.toThrow();
+  });
 });
