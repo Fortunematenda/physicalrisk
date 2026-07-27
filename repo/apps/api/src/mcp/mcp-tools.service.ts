@@ -73,13 +73,14 @@ export class McpToolsService {
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
       case 'prepare_approved_document': {
-        const { dto: prepared, fileUrl, documentContent } = this.parseSubmitPayload(args);
-        if (fileUrl || documentContent) {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(parsed.dto, parsed.documentContent);
+        if (parsed.fileUrl || parsed.documentContent) {
           return this.submitApprovedDocument(integration, {
             ...prepared,
-            fileName: prepared.fileName?.trim() || (documentContent ? 'document.md' : 'document.pdf'),
-            fileUrl,
-            documentContent,
+            fileName: prepared.fileName!,
+            fileUrl: parsed.fileUrl,
+            documentContent: parsed.documentContent,
           }, ipAddress);
         }
         return this.prepareApprovedDocument(integration, prepared);
@@ -102,20 +103,18 @@ export class McpToolsService {
         );
       }
       case 'submit_approved_document': {
-        // ChatGPT: metadata + documentContent (same-chat) | fileUrl | uploadId/base64
-        // Metadata-only → browser upload link.
-        const { dto: prepared, uploadId, fileContentBase64, fileUrl, documentContent } =
-          this.parseSubmitPayload(args);
-        if (!uploadId && !fileContentBase64 && !fileUrl && !documentContent) {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(parsed.dto, parsed.documentContent);
+        if (!parsed.uploadId && !parsed.fileContentBase64 && !parsed.fileUrl && !parsed.documentContent) {
           return this.prepareApprovedDocument(integration, prepared);
         }
         return this.submitApprovedDocument(integration, {
           ...prepared,
-          fileName: prepared.fileName?.trim() || 'document.md',
-          uploadId,
-          fileContentBase64,
-          fileUrl,
-          documentContent,
+          fileName: prepared.fileName!,
+          uploadId: parsed.uploadId,
+          fileContentBase64: parsed.fileContentBase64,
+          fileUrl: parsed.fileUrl,
+          documentContent: parsed.documentContent,
         }, ipAddress);
       }
       case 'get_import_status':
@@ -578,17 +577,39 @@ export class McpToolsService {
 
     return {
       projectId: str('projectId'),
-      projectCode: str('projectCode') || str('project'),
+      projectCode: str('projectCode') || str('project') || str('repositoryProject'),
       title: str('title') || '',
-      documentType: str('documentType') || '',
+      documentType: str('documentType') || str('repositoryDocumentType') || '',
       versionNo: str('versionNo') || str('version') || '',
       approvalStatus: str('approvalStatus') || 'APPROVED',
-      approvedBy: str('approvedBy') || '',
+      approvedBy: str('approvedBy') || str('approver') || '',
       approvalDate: str('approvalDate') || '',
-      module: str('module') || str('repositoryModule'),
+      module: str('module') || str('repositoryModule') || str('repository_module'),
       sectionKey: str('sectionKey'),
-      fileName: str('fileName'),
+      fileName: str('fileName') || str('originalFilename') || str('original_filename'),
       mimeType: str('mimeType'),
+    };
+  }
+
+  /** Fill ChatGPT-omitted fields so approve→submit works without another questionnaire. */
+  private applySubmitDefaults(
+    input: PrepareApprovedDocumentDto,
+    documentContent?: string,
+  ): PrepareApprovedDocumentDto {
+    const today = new Date().toISOString().slice(0, 10);
+    const title = input.title?.trim() || 'document';
+    const hasMarkdown = Boolean(documentContent?.trim());
+    return {
+      ...input,
+      title,
+      versionNo: input.versionNo?.trim() || 'Rev 1.0',
+      approvalStatus: input.approvalStatus?.trim() || 'APPROVED',
+      approvedBy: input.approvedBy?.trim() || 'Wayne',
+      approvalDate: input.approvalDate?.trim() || today,
+      fileName:
+        input.fileName?.trim()
+        || (hasMarkdown ? this.defaultMarkdownFileName(title) : undefined),
+      mimeType: input.mimeType?.trim() || (hasMarkdown ? 'text/markdown' : undefined),
     };
   }
 

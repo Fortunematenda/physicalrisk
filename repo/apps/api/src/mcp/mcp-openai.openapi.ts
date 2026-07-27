@@ -59,13 +59,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       payload: {
         type: 'string',
         description:
-          'JSON object string. Required: projectCode, module, documentType, title, versionNo, '
-          + 'approvalStatus, approvedBy, approvalDate. '
-          + 'Same-chat submit: include documentContent (full Markdown body) and optional fileName (.md). '
-          + 'PDF alternatives: fileUrl (public URL) or omit both to receive uploadUrl for browser upload. '
-          + 'Example: {"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles",'
-          + '"title":"Research Note","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne",'
-          + '"approvalDate":"2026-07-27","fileName":"Research Note.md","documentContent":"# Research Note\\n\\n..."}',
+          'JSON string. Minimum for same-chat approve: projectCode, module, documentType, title, '
+          + 'documentContent (full Markdown from the chat). '
+          + 'Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvedBy=Wayne, '
+          + 'approvalDate=today, fileName from title.md, mimeType=text/markdown. '
+          + 'Example: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
+          + '"title":"Cow","documentContent":"# Cow\\n\\nA cow is...","approvedBy":"Wayne"}',
       },
     },
   };
@@ -75,10 +74,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Approved Document intake for ChatGPT. Same-chat flow: research → generate → approve → '
-        + 'submit with documentContent (Markdown). PDF via fileUrl or browser uploadUrl. '
+        'Same-chat: research → generate → user approves → submit with documentContent. '
+        + 'Server fills version/date/filename defaults. PDF via fileUrl or uploadUrl. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.9.1',
+      version: '1.9.2',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -162,10 +161,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/submit_approved_document': {
         post: {
           operationId: 'submit_approved_document',
-          summary: 'Submit approved document (documentContent / fileUrl / upload link)',
+          summary: 'Submit approved document to Import Queue',
           description:
-            'Pass ONLY payload (JSON string). Prefer documentContent for same-chat Markdown submit. '
-            + 'fileUrl for public PDF. Without either, returns uploadUrl for browser upload.',
+            'Pass ONLY payload. After user approval, call immediately with documentContent. '
+            + 'Do not ask the user for version/date/filename/mime — server defaults those.',
           security,
           requestBody: {
             required: true,
@@ -182,7 +181,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'prepare_approved_document',
           summary: 'Prepare or submit (alias)',
-          description: 'Same as submit_approved_document. Pass ONLY payload JSON string.',
+          description: 'Same as submit_approved_document.',
           security,
           requestBody: {
             required: true,
@@ -231,40 +230,32 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   };
 }
 
-export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant for Wayne and other reviewers.
+export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant for Wayne.
 
-FIELD MAPPING (never swap these)
+FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS)
-- module = Repository Module / section (e.g. Enterprise Architecture). Call list_repository_modules to validate.
-- documentType = Document Type catalog value (e.g. Articles). Call list_document_types to validate.
-- Do NOT put "Articles" in module or "Enterprise Architecture" in documentType unless list tools confirm that.
+- module = Repository Module (e.g. Research Library, Enterprise Architecture). Validate with list_repository_modules.
+- documentType = Document Type (e.g. Articles). Validate with list_document_types.
 
-SAME-CHAT WORKFLOW (stay in this conversation)
-1) Research — Help with analysis. Do NOT submit yet.
-2) Generate — On "generate a document", write the FULL Markdown deliverable in chat, then show a checklist with defaults already filled (see PREPOPULATE). Ask only for corrections.
-3) Approve — On "I approve" / "approve and submit" / "approved", submit immediately using PREPOPULATE defaults + the Markdown you already generated as documentContent. Do not ask again for version, MIME, filename, or approval fields unless the user wants different values.
-4) After submit — Report importJobId. A human still finishes Import Queue review.
+SAME-CHAT FLOW
+1) Research — help; do not submit.
+2) Generate — write full Markdown in chat.
+3) When user says approved / I approve / please import / submit — YOU MUST CALL submit_approved_document IMMEDIATELY.
+   Do NOT ask for version, approval date, filename, or MIME type. The server fills those defaults.
+   Put the Markdown you already wrote in this chat into documentContent.
 
-PREPOPULATE (required — do not refuse to fill these)
-When generating or submitting, set these yourself unless the user overrides:
-- versionNo: "Rev 1.0"
-- approvalStatus: "APPROVED"
-- approvedBy: the user's name if known (default "Wayne"), else ask once
-- approvalDate: today's date as YYYY-MM-DD
-- fileName: sanitize title + ".md" (e.g. title "cow type" → "cow type.md")
-- mimeType: "text/markdown"
-- documentContent: the full Markdown body you generated in this chat (required for same-chat submit)
+FORBIDDEN after approval
+- Asking again for Version, Approval date, Original filename, MIME type, or "the document itself" if you already generated it in this chat.
+- Saying you "can't invent" those fields — they are defaults, not secrets.
 
-You MAY invent these defaults. You must NOT invent project/module/documentType — use list tools or user confirmation.
+SUBMIT
+- One argument only: payload (JSON string).
+- Minimum payload: projectCode, module, documentType, title, documentContent, approvedBy (if user named an approver).
+- Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvalDate=today, fileName=<title>.md, mimeType=text/markdown, approvedBy=Wayne if omitted.
+- Report importJobId. Say a human must still complete Import Queue review.
 
-SUBMIT RULES
-- Call submit_approved_document with exactly ONE argument: payload (JSON string). No separate kwargs.
-- Include projectCode, module, documentType, title, versionNo, approvalStatus, approvedBy, approvalDate, fileName, mimeType, documentContent.
-- Actions cannot attach PDF bytes. For PDFs use fileUrl or omit documentContent to get uploadUrl.
-- Only APPROVED documents may be submitted.
-
-Example:
+Example for this conversation style:
 submit_approved_document with payload =
-{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles","title":"cow type","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne","approvalDate":"2026-07-27","fileName":"cow type.md","mimeType":"text/markdown","documentContent":"# cow type\\n\\n..."}
+{"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"Cow","approvedBy":"Wayne","documentContent":"# Cow\\n\\nA cow is a domesticated mammal..."}
 
-Also available: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;
+Also: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;
