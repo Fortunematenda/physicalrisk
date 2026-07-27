@@ -152,6 +152,12 @@ export class SubmitApprovedDocumentDto {
   @IsString()
   sectionKey?: string;
 
+  /** Human-readable module/section name — resolved to sectionKey server-side. */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  module?: string;
+
   @IsOptional()
   metadataJson?: string;
 

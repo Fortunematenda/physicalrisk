@@ -262,6 +262,14 @@ export class McpToolsService {
     ipAddress?: string,
   ) {
     const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
+    let sectionKey = input.sectionKey?.trim() || undefined;
+    if (!sectionKey && input.module?.trim()) {
+      const resolved = await this.resolveImportTargets(integration, {
+        project: projectId,
+        module: input.module,
+      });
+      sectionKey = resolved.module?.sectionKey;
+    }
 
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
@@ -277,7 +285,7 @@ export class McpToolsService {
         approvalStatus: input.approvalStatus,
         approvedBy: input.approvedBy,
         approvalDate: input.approvalDate,
-        sectionKey: input.sectionKey,
+        sectionKey,
         metadataJson: input.metadataJson,
         relationshipsJson: input.relationshipsJson,
         mode: input.mode,
@@ -304,6 +312,9 @@ export class McpToolsService {
         externalImportStatus: result.externalImportStatus,
         checksum: result.checksum,
         fileName: result.fileName,
+        projectId,
+        sectionKey: sectionKey ?? null,
+        documentType: input.documentType,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Submission rejected';
@@ -467,6 +478,7 @@ export class McpToolsService {
           fileName: { type: 'string' },
           fileContentBase64: { type: 'string' },
           mimeType: { type: 'string' },
+          module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
         },
       },
       get_import_status: {
