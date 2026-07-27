@@ -99,7 +99,7 @@ export class ImportsService {
     const draftJob = draftJobId
       ? await this.db.importJobs.findOne({
           where: { id: draftJobId },
-          relations: { project: true, sourceSystem: true, initiatedBy: true },
+          relations: { project: true, sourceSystem: true, initiatedBy: true, resolvedSection: true },
         })
       : null;
     if (draftJobId && !draftJob) throw new BadRequestException('Draft import was not found');
@@ -110,6 +110,40 @@ export class ImportsService {
     const user = await this.resolveActor(userId, userEmail);
     if (!input.approvedBy?.trim()) {
       input.approvedBy = user?.name || user?.email || userEmail || '';
+    }
+
+    // Prefill MCP-validated fields before requirement checks so routing-only continues succeed.
+    if (
+      draftJob
+      && (draftJob.provider === ConnectorProvider.CHATGPT_MCP || draftJob.externalImportStatus)
+    ) {
+      const prior = (draftJob.metadata ?? {}) as Record<string, unknown>;
+      const fill = (key: keyof ImportMetadata, priorKey: string = key) => {
+        if (String(input[key] ?? '').trim()) return;
+        const value = prior[priorKey];
+        if (typeof value === 'string' && value.trim()) {
+          (input as Record<string, unknown>)[key] = value.trim();
+        }
+      };
+      fill('title');
+      fill('documentType');
+      fill('versionNo');
+      fill('approvedBy');
+      fill('documentCode');
+      fill('description');
+      fill('owner');
+      fill('sectionKey');
+      if (!input.sectionKey?.trim() && draftJob.resolvedSection?.sectionKey) {
+        input.sectionKey = draftJob.resolvedSection.sectionKey;
+      }
+      if (!input.approvalStatus?.trim()) input.approvalStatus = ApprovalStatus.APPROVED;
+      if (!input.approvalDate?.trim() && typeof prior.approvalDate === 'string') {
+        input.approvalDate = String(prior.approvalDate).slice(0, 10);
+      }
+      if (!input.projectId?.trim() && draftJob.project?.id) input.projectId = draftJob.project.id;
+      if (!input.sourceSystemId?.trim() && draftJob.sourceSystem?.id) {
+        input.sourceSystemId = draftJob.sourceSystem.id;
+      }
     }
 
     const reuseDraftFile = Boolean(!file && draftJob?.incomingPath);
@@ -139,19 +173,67 @@ export class ImportsService {
       checksum = createHash('sha256').update(file.buffer).digest('hex');
     }
 
+    const priorMetadata = (draftJob?.metadata ?? {}) as Record<string, unknown>;
+    const isExternalContinue = Boolean(
+      draftJob
+      && (
+        draftJob.provider === ConnectorProvider.CHATGPT_MCP
+        || draftJob.externalImportStatus
+      ),
+    );
+
+    const pickStr = (next: string | undefined, priorKey: string) => {
+      const trimmed = next?.trim();
+      if (trimmed) return trimmed;
+      const prior = priorMetadata[priorKey];
+      return typeof prior === 'string' ? prior.trim() : '';
+    };
+
+    // MCP / external jobs already validated identity in ChatGPT — keep prior values when the form omits them.
     const metadata: StoredMetadata = {
       ...input,
+      title: isExternalContinue ? pickStr(input.title, 'title') : input.title,
+      documentCode: isExternalContinue
+        ? (pickStr(input.documentCode, 'documentCode') || undefined)
+        : input.documentCode,
+      documentType: isExternalContinue ? pickStr(input.documentType, 'documentType') : input.documentType,
+      description: isExternalContinue
+        ? (pickStr(input.description, 'description') || undefined)
+        : input.description,
+      owner: isExternalContinue ? (pickStr(input.owner, 'owner') || undefined) : input.owner,
+      versionNo: isExternalContinue ? pickStr(input.versionNo, 'versionNo') : input.versionNo,
+      approvedBy: isExternalContinue ? pickStr(input.approvedBy, 'approvedBy') : input.approvedBy,
+      sectionKey: isExternalContinue
+        ? (pickStr(input.sectionKey, 'sectionKey')
+          || draftJob?.resolvedSection?.sectionKey
+          || undefined)
+        : input.sectionKey,
+      mode: input.mode || (priorMetadata.mode === 'NEW_VERSION' ? 'NEW_VERSION' : 'NEW'),
+      existingDocumentId: input.existingDocumentId?.trim()
+        || (typeof priorMetadata.existingDocumentId === 'string' ? priorMetadata.existingDocumentId : undefined),
       approvalStatus: ApprovalStatus.APPROVED,
       approvalDate: approvalDate.toISOString(),
-      customMetadata,
-      relationships,
+      customMetadata: Object.keys(customMetadata).length
+        ? customMetadata
+        : (
+          (isExternalContinue && priorMetadata.customMetadata && typeof priorMetadata.customMetadata === 'object')
+            ? priorMetadata.customMetadata as Record<string, unknown>
+            : customMetadata
+        ),
+      relationships: relationships.length
+        ? relationships
+        : (isExternalContinue && Array.isArray(priorMetadata.relationships) ? priorMetadata.relationships as RelationshipInput[] : relationships),
     };
 
     let job = draftJob;
     if (job) {
       job.sourceSystem = source;
       job.project = project;
-      job.resolvedSection = null;
+      // Keep existing resolved section until process() re-resolves from metadata.sectionKey / routing.
+      // Clearing it forced reviewers to re-pick modules that MCP already validated.
+      if (!isExternalContinue) {
+        job.resolvedSection = null;
+      }
       job.document = null;
       job.version = null;
       job.fileName = fileName;
@@ -856,7 +938,15 @@ export class ImportsService {
     if (!project) throw new NotFoundException('Project not found');
     const activeSections = (project.sections ?? []).filter((section) => section.active).sort((a, b) => a.position - b.position);
     if (metadata.sectionKey) {
-      const explicit = activeSections.find((section) => section.sectionKey === metadata.sectionKey?.trim().toUpperCase());
+      const needle = metadata.sectionKey.trim();
+      const needleUpper = needle.toUpperCase();
+      const needleLower = needle.toLowerCase();
+      const explicit = activeSections.find((section) => (
+        section.sectionKey === needleUpper
+        || section.sectionKey.toLowerCase() === needleLower
+        || section.name.trim().toLowerCase() === needleLower
+        || section.code?.trim().toLowerCase() === needleLower
+      ));
       if (!explicit) throw new BadRequestException(`Configured section ${metadata.sectionKey} was not found for this project`);
       return explicit;
     }

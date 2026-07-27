@@ -137,6 +137,7 @@ function ImportDocumentPageContent() {
   const [draftFileSize, setDraftFileSize] = useState(0);
   const [draftHasFile, setDraftHasFile] = useState(false);
   const [activeContinueJobId, setActiveContinueJobId] = useState(continueJobId);
+  const [routingOnlyContinue, setRoutingOnlyContinue] = useState(false);
   const [structuredError, setStructuredError] = useState<StructuredError | null>(null);
   const [createModal, setCreateModal] = useState<CreateModal>(null);
   const [canCreate, setCanCreate] = useState(false);
@@ -234,6 +235,8 @@ function ImportDocumentPageContent() {
         const stagedName = String(job.fileName ?? '').trim();
         const stagedPath = String(job.incomingPath ?? '').trim();
         const hasStagedFile = Boolean(stagedPath) && stagedName !== '' && stagedName !== 'Untitled draft';
+        const isMcpOrExternal = Boolean(job.provider === 'CHATGPT_MCP' || job.externalImportStatus);
+        setRoutingOnlyContinue(isMcpOrExternal);
         setDraftFileName(hasStagedFile ? stagedName : '');
         setDraftFileSize(Number(job.fileSize) || 0);
         setDraftHasFile(hasStagedFile);
@@ -258,9 +261,11 @@ function ImportDocumentPageContent() {
         }));
         draftLoadedRef.current = continueJobId;
         setNotice(
-          hasStagedFile
-            ? `Continuing draft for ${stagedName}. The previously uploaded file is ready — no need to upload again.`
-            : 'Continuing draft. Upload an approved file to complete the import.',
+          isMcpOrExternal
+            ? `ChatGPT already validated this approved document${hasStagedFile ? ` (${stagedName})` : ''}. Confirm repository routing (module/section), then import.`
+            : hasStagedFile
+              ? `Continuing draft for ${stagedName}. The previously uploaded file is ready — no need to upload again.`
+              : 'Continuing draft. Upload an approved file to complete the import.',
         );
         if (job.errorMessage) setError('');
       })
@@ -667,6 +672,32 @@ function ImportDocumentPageContent() {
   );
 
   const requiredChecks = useMemo(() => {
+    if (routingOnlyContinue) {
+      const sectionName = activeSections.find((section) => section.sectionKey === form.sectionKey)?.name;
+      return [
+        {
+          key: 'projectId',
+          label: 'Project',
+          done: Boolean(form.projectId),
+          value: selectedProjectLabel || 'Select a project',
+        },
+        {
+          key: 'sectionKey',
+          label: 'Repository module',
+          done: Boolean(form.sectionKey),
+          value: sectionName || form.sectionKey || 'Select a module',
+        },
+        {
+          key: 'file',
+          label: 'Approved file',
+          done: draftHasFile || Boolean(file),
+          value: draftHasFile || file
+            ? `${displayFileName}${displayFileSize ? ` (${formatBytes(displayFileSize)})` : ''} · from ChatGPT`
+            : 'Missing staged file',
+        },
+      ];
+    }
+
     const core = [
       {
         key: 'projectId',
@@ -716,7 +747,7 @@ function ImportDocumentPageContent() {
     const byKey = new Map<string, { key: string; label: string; done: boolean; value: string }>();
     [...core, ...fromDb].forEach((item) => byKey.set(item.key, item));
     return Array.from(byKey.values());
-  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize, contentMode, pasteContent]);
+  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize, contentMode, pasteContent, routingOnlyContinue, activeSections]);
 
   const requiredComplete = useMemo(
     () => requiredChecks.length > 0 && requiredChecks.every((item) => item.done),
@@ -906,13 +937,21 @@ function ImportDocumentPageContent() {
         <ArrowLeft size={14} /> Back
       </button>
       <div className={styles.header}>
-        <h1>{activeContinueJobId ? 'Continue import' : 'Import Approved Document'}</h1>
+        <h1>
+          {routingOnlyContinue
+            ? 'Confirm routing'
+            : activeContinueJobId
+              ? 'Continue import'
+              : 'Import Approved Document'}
+        </h1>
         <p>
-          {activeContinueJobId
-            ? (draftHasFile
-              ? 'Review the draft details. The previously uploaded file is kept — replace it only if needed.'
-              : 'Review the draft details, upload an approved file, and complete the import.')
-            : 'Import an approved source file, capture required metadata, and place it in the project repository.'}
+          {routingOnlyContinue
+            ? 'Metadata and approval were validated in ChatGPT. Choose or confirm the repository module, then complete the import into the document index.'
+            : activeContinueJobId
+              ? (draftHasFile
+                ? 'Review the draft details. The previously uploaded file is kept — replace it only if needed.'
+                : 'Review the draft details, upload an approved file, and complete the import.')
+              : 'Import an approved source file, capture required metadata, and place it in the project repository.'}
         </p>
       </div>
 
@@ -932,6 +971,26 @@ function ImportDocumentPageContent() {
             <DuplicateModal error={structuredError} onChooseFile={replaceFile} onViewDocument={viewExistingVersion} onCancel={() => setStructuredError(null)} />
           )}
 
+          {routingOnlyContinue ? (
+            <section className={styles.section}>
+              <div className={styles.sectionHead}>
+                <h2>1. Validated in ChatGPT</h2>
+                <p>These fields were already approved via MCP and cannot be re-edited here.</p>
+              </div>
+              <div className="readonly-box">
+                <div><strong>{form.title || '—'}</strong></div>
+                <div className="secondary-text">Type: {form.documentType || '—'} · Version: {form.versionNo || '—'}</div>
+                <div className="secondary-text">
+                  Approval: {form.approvalStatus || 'APPROVED'} by {form.approvedBy || '—'}
+                  {form.approvalDate ? ` on ${form.approvalDate}` : ''}
+                </div>
+                {draftHasFile ? (
+                  <div className="secondary-text">File: {draftFileName}{draftFileSize ? ` · ${(draftFileSize / 1024).toFixed(1)} KB` : ''}</div>
+                ) : null}
+                {form.description ? <div className="secondary-text">{form.description}</div> : null}
+              </div>
+            </section>
+          ) : (
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <h2>1. Import type</h2>
@@ -961,11 +1020,16 @@ function ImportDocumentPageContent() {
               </button>
             </div>
           </section>
+          )}
 
           <section className={styles.section}>
             <div className={styles.sectionHead}>
-              <h2>2. Source and destination</h2>
-              <p>Select the project and source system for this import.</p>
+              <h2>{routingOnlyContinue ? '2. Confirm routing' : '2. Source and destination'}</h2>
+              <p>
+                {routingOnlyContinue
+                  ? 'Confirm the project and choose the repository module/section for this document.'
+                  : 'Select the project and source system for this import.'}
+              </p>
             </div>
             <div className={styles.grid2}>
               <CreatableSelect
@@ -976,11 +1040,14 @@ function ImportDocumentPageContent() {
                 value={form.projectId}
                 options={projects.map((item) => ({ value: item.id, label: `${item.code} — ${item.name}` }))}
                 placeholder="Select project…"
-                canCreate={canCreate}
+                canCreate={canCreate && !routingOnlyContinue}
                 createLabel="Add New Project"
+                disabled={routingOnlyContinue}
+                hint={routingOnlyContinue ? 'Locked from ChatGPT submission.' : undefined}
                 onChange={(projectId) => setForm((current) => ({ ...current, projectId, sectionKey: '', existingDocumentId: '' }))}
                 onCreateClick={() => setCreateModal('project')}
               />
+              {!routingOnlyContinue ? (
               <CreatableSelect
                 label="Source system"
                 name="sourceSystemId"
@@ -994,6 +1061,12 @@ function ImportDocumentPageContent() {
                 onChange={(sourceSystemId) => setForm((current) => ({ ...current, sourceSystemId }))}
                 onCreateClick={() => setCreateModal('source')}
               />
+              ) : (
+                <div className="field">
+                  <label>Source</label>
+                  <div className="readonly-box">ChatGPT MCP (validated)</div>
+                </div>
+              )}
               {form.mode === 'NEW_VERSION' && (
                 <div className={`field ${styles.spanFull}`}>
                   <label htmlFor="existing-document-select">Existing document <em>*</em></label>
@@ -1105,16 +1178,25 @@ function ImportDocumentPageContent() {
               )}
               <div className={styles.spanFull}>
                 <CreatableSelect
-                  label="Repository section"
+                  label="Repository module / section"
                   name="sectionKey"
+                  required={routingOnlyContinue}
                   value={form.sectionKey}
-                  options={[{ value: '', label: 'Automatic' }, ...sectionOptions]}
-                  placeholder="Automatic"
+                  options={
+                    routingOnlyContinue
+                      ? sectionOptions
+                      : [{ value: '', label: 'Automatic' }, ...sectionOptions]
+                  }
+                  placeholder={routingOnlyContinue ? 'Select module…' : 'Automatic'}
                   canCreate={canCreate}
                   createLabel="Add New Repository Section"
                   createDisabled={!form.projectId}
                   createDisabledReason="Select a project before adding a repository section."
-                  hint="Optional. Leave Automatic unless a specific section is required."
+                  hint={
+                    routingOnlyContinue
+                      ? 'Required. Confirm where this ChatGPT-approved document should land.'
+                      : 'Optional. Leave Automatic unless a specific section is required.'
+                  }
                   onChange={(sectionKey) => setForm((current) => ({ ...current, sectionKey }))}
                   onCreateClick={() => setCreateModal('section')}
                 />
@@ -1122,6 +1204,7 @@ function ImportDocumentPageContent() {
             </div>
           </section>
 
+          {!routingOnlyContinue ? (
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <h2>3. Approved content</h2>
@@ -1425,6 +1508,7 @@ function ImportDocumentPageContent() {
               </div>
             ) : null}
           </section>
+          ) : null}
 
           {error && !structuredError && <div className="notice error">{error}</div>}
 
@@ -1432,6 +1516,7 @@ function ImportDocumentPageContent() {
             <button type="button" className="button" onClick={() => router.back()} disabled={saving || savingDraft}>
               Cancel
             </button>
+            {!routingOnlyContinue ? (
             <button
               type="button"
               className="button"
@@ -1440,10 +1525,11 @@ function ImportDocumentPageContent() {
             >
               {savingDraft ? 'Saving draft…' : 'Save as draft'}
             </button>
+            ) : null}
             <button className="button primary" disabled={saving || savingDraft || !requiredComplete} title={!requiredComplete ? `Complete required fields: ${missingRequiredLabels.join(', ')}` : undefined}>
               {saving
-                ? (activeContinueJobId ? 'Continuing import…' : 'Validating and importing…')
-                : (activeContinueJobId ? 'Validate and reimport' : 'Validate and import')}
+                ? (routingOnlyContinue ? 'Importing…' : activeContinueJobId ? 'Continuing import…' : 'Validating and importing…')
+                : (routingOnlyContinue ? 'Confirm routing and import' : activeContinueJobId ? 'Validate and reimport' : 'Validate and import')}
             </button>
           </div>
         </form>
