@@ -42,6 +42,31 @@ const DEFAULT_SECTIONS = [
   ['MASTER_DOCUMENT_INDEX', 'MDI', 'Master Document Index'],
 ] as const;
 
+/**
+ * Document types are classifications (what the file is), NOT repository folders.
+ * Codes stay stable; names are intentionally distinct from DEFAULT_SECTIONS folder names.
+ * Tuple: [code, name, description, targetSectionKey, legacyNames...]
+ */
+const DEFAULT_DOCUMENT_TYPES = [
+  ['PA', 'Architecture Document', 'Architecture / product design document', 'PRODUCT_ARCHITECTURE', 'Product Architecture'],
+  ['EA', 'EA Blueprint', 'Enterprise architecture blueprint or model', 'ENTERPRISE_ARCHITECTURE', 'Enterprise Architecture'],
+  ['FS', 'Functional Specification', 'Functional requirements or behaviour specification', 'FUNCTIONAL_SPECIFICATIONS', 'Functional Specifications'],
+  ['TS', 'Technical Specification', 'Technical design or implementation specification', 'TECHNICAL_SPECIFICATIONS', 'Technical Specifications'],
+  ['API', 'API Contract', 'API specification or contract document', 'API_SPECIFICATIONS', 'API Specifications'],
+  ['DM', 'Data Model Definition', 'Data model, schema, or entity definition', 'DATA_MODELS', 'Data Models'],
+  ['BR', 'Business Rule', 'Business rule or policy rule definition', 'BUSINESS_RULES', 'Business Rules'],
+  ['GS', 'Governance Standard', 'Governance, compliance, or quality standard', 'GOVERNANCE_STANDARDS', 'Governance Standards'],
+  ['OP', 'Operating Procedure', 'Operating procedure or work instruction', 'OPERATING_PROCEDURES', 'Operating Procedures'],
+  ['DP', 'Developer Pack', 'Developer pack or engineering toolkit', 'DEVELOPER_PACKS', 'Developer Packs'],
+  ['RL', 'Research Note', 'Research note or library research write-up', 'RESEARCH_LIBRARY', 'Research Library'],
+  ['MA', 'Marketing Collateral', 'Marketing or communications asset', 'MARKETING_ASSETS', 'Marketing Assets'],
+  ['AR', 'Article', 'Published or draft article', 'ARTICLES', 'Articles'],
+  ['TP', 'Template', 'Reusable document template', 'TEMPLATES', 'Templates'],
+  ['DC', 'Decision Record', 'Architecture or project decision record', 'DECISIONS', 'Decisions'],
+  ['MR', 'Meeting Minutes', 'Meeting minutes or meeting record', 'MEETING_RECORDS', 'Meeting Records'],
+  ['RN', 'Release Note', 'Product or project release note', 'RELEASE_NOTES', 'Release Notes'],
+] as const;
+
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
 @Injectable()
@@ -143,21 +168,36 @@ export class SeedService implements OnApplicationBootstrap {
       await this.db.sourceSystems.save(source);
     }
 
-    for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
-      const [sectionKey, code, name] = DEFAULT_SECTIONS[index];
-      if (['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(sectionKey)) continue;
+    for (const [code, name, description, , ...legacyNames] of DEFAULT_DOCUMENT_TYPES) {
       let documentType = await this.db.documentTypes.findOne({ where: { code } });
       if (!documentType) {
         documentType = this.db.documentTypes.create({
           code,
           name,
-          description: `${name} documents`,
+          description,
           active: true,
         });
       } else {
-        Object.assign(documentType, { name, active: true });
+        Object.assign(documentType, { name, description, active: true });
       }
       await this.db.documentTypes.save(documentType);
+
+      // Migrate documents / routing that still use the old section-cloned type name.
+      for (const legacy of legacyNames) {
+        if (legacy === name) continue;
+        await this.db.documents
+          .createQueryBuilder()
+          .update()
+          .set({ documentType: name })
+          .where('document_type = :legacy', { legacy })
+          .execute();
+        await this.db.routingRules
+          .createQueryBuilder()
+          .update()
+          .set({ documentType: name })
+          .where('document_type = :legacy', { legacy })
+          .execute();
+      }
     }
 
     // Alias used in demos / Wayne feedback — routes like Product Architecture.
@@ -172,6 +212,7 @@ export class SeedService implements OnApplicationBootstrap {
       await this.db.documentTypes.save(architectureDoc);
     } else {
       architectureDoc.name = 'Architecture Doc';
+      architectureDoc.description = 'Architecture document (alias for Product Architecture routing).';
       architectureDoc.active = true;
       await this.db.documentTypes.save(architectureDoc);
     }
@@ -206,10 +247,9 @@ export class SeedService implements OnApplicationBootstrap {
     }
 
     // Seed default routes only when missing — never wipe admin-customised priorities on restart.
-    for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
-      const [sectionKey, , name] = DEFAULT_SECTIONS[index];
-      if (['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(sectionKey)) continue;
-      const ruleName = `Default route: ${name}`;
+    for (let index = 0; index < DEFAULT_DOCUMENT_TYPES.length; index += 1) {
+      const [, typeName, , targetSectionKey] = DEFAULT_DOCUMENT_TYPES[index];
+      const ruleName = `Default route: ${typeName}`;
       const existing = await this.db.routingRules.findOne({ where: { name: ruleName } });
       if (!existing) {
         const priority = 100 + index;
@@ -218,11 +258,11 @@ export class SeedService implements OnApplicationBootstrap {
           name: ruleName,
           project: null,
           sourceSystem: null,
-          documentType: name,
+          documentType: typeName,
           fileExtension: null,
           metadataKey: null,
           metadataValue: null,
-          targetSectionKey: sectionKey,
+          targetSectionKey,
           priority: conflict ? 1000 + index : priority,
           active: true,
         });

@@ -1194,8 +1194,8 @@ function ImportDocumentPageContent() {
                   createDisabledReason="Select a project before adding a repository section."
                   hint={
                     routingOnlyContinue
-                      ? 'Required. Confirm where this ChatGPT-approved document should land.'
-                      : 'Optional. Leave Automatic unless a specific section is required.'
+                      ? 'Required. Confirm the repository folder where this ChatGPT-approved document should land.'
+                      : 'Repository folder (e.g. Articles, Research Library). Not the same as Document type.'
                   }
                   onChange={(sectionKey) => setForm((current) => ({ ...current, sectionKey }))}
                   onCreateClick={() => setCreateModal('section')}
@@ -1361,7 +1361,7 @@ function ImportDocumentPageContent() {
                 placeholder="Select type…"
                 canCreate={canCreate && form.mode !== 'NEW_VERSION'}
                 createLabel="Add New Document Type"
-                hint={form.mode === 'NEW_VERSION' ? 'Allocated from the existing document.' : 'Required classification for the approved document.'}
+                hint={form.mode === 'NEW_VERSION' ? 'Allocated from the existing document.' : 'Classification of the document (e.g. Article) — not the repository folder name.'}
                 disabled={form.mode === 'NEW_VERSION'}
                 onChange={(documentType) => setForm((current) => ({ ...current, documentType }))}
                 onCreateClick={() => setCreateModal('documentType')}

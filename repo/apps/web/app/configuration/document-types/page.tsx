@@ -6,7 +6,7 @@ export default function DocumentTypesPage() {
   return (
     <SimpleCrud
       title="Document Types"
-      description="Manage document classification types used on Import Document and routing. These are separate from File Types (file extensions)."
+      description="Classify what a document is (Article, Technical Specification, Decision Record). This is not the repository folder — folders are Repository Sections / Modules."
       endpoint="/document-types"
       fields={[
         { key: 'name', label: 'Name', required: true, placeholder: 'Technical Specification' },

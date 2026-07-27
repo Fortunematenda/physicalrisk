@@ -32,10 +32,10 @@ describe('document-types.ts', () => {
     });
 
     it('does not add duplicate type (case-insensitive)', () => {
-      const result = addDocumentType('product architecture', []);
+      const result = addDocumentType('architecture document', []);
       assert.equal(result.success, true);
       assert.deepEqual(result.customTypes, []);
-      assert.equal(result.selectedType, 'Product Architecture');
+      assert.equal(result.selectedType, 'Architecture Document');
     });
 
     it('does not add duplicate from custom types (case-insensitive)', () => {
@@ -61,21 +61,24 @@ describe('document-types.ts', () => {
   describe('getAvailableDocumentTypes', () => {
     it('returns default types when no custom types', () => {
       const result = getAvailableDocumentTypes([]);
-      assert.ok(result.includes('Product Architecture'));
-      assert.ok(result.includes('Release Notes'));
+      assert.ok(result.includes('Architecture Document'));
+      assert.ok(result.includes('Article'));
+      assert.ok(result.includes('Release Note'));
+      assert.ok(!result.includes('Articles'));
+      assert.ok(!result.includes('Research Library'));
       assert.equal(result.length, 18);
     });
 
     it('includes custom types with default types', () => {
       const result = getAvailableDocumentTypes(['Custom Type']);
-      assert.ok(result.includes('Product Architecture'));
+      assert.ok(result.includes('Architecture Document'));
       assert.ok(result.includes('Custom Type'));
     });
 
     it('removes duplicates between default and custom', () => {
-      const result = getAvailableDocumentTypes(['Product Architecture']);
-      const productArchCount = result.filter((t) => t === 'Product Architecture').length;
-      assert.equal(productArchCount, 1);
+      const result = getAvailableDocumentTypes(['Architecture Document']);
+      const count = result.filter((t) => t === 'Architecture Document').length;
+      assert.equal(count, 1);
     });
 
     it('sorts all types alphabetically', () => {

@@ -86,7 +86,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.13.1',
+      version: '1.14.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -258,9 +258,10 @@ When the user says approved / I approve / please import / submit / import to my 
 
 FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). NOT the same as Document Type.
-- module = Repository Module / folder (e.g. Research Library, Enterprise Architecture). Validate with list_repository_modules.
-- documentType = Document Type (e.g. Articles). Validate with list_document_types.
-- "MOSS Articles" means projectCode=MOSS and documentType=Articles — it does NOT mean module=Articles. Look up the real module; if the user named a module, use that; otherwise use the matching module from list_repository_modules (often Research Library for articles).
+- module = Repository Module / folder (e.g. Articles, Research Library, Enterprise Architecture). Validate with list_repository_modules.
+- documentType = Document classification (e.g. Article, Technical Specification, Decision Record) — NOT the folder name. Validate with list_document_types.
+- Example: store an article in the Articles folder → module=Articles, documentType=Article.
+- "MOSS Articles" usually means projectCode=MOSS, module=Articles, documentType=Article.
 - owner / description / approvedBy = Document Information fields YOU set (defaults below). Do not interview the user for them.
 - mode = NEW (default) or NEW_VERSION. existingDocumentId / documentCode when revising.
 
@@ -283,6 +284,6 @@ For next version also: mode=NEW_VERSION, existingDocumentId and/or documentCode 
 On success report: imported, documentCode, sectionName, importJobId, result.message.
 
 Example:
-{"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"The Cow: A Valuable Domestic Animal","owner":"Wayne","description":"Overview of the cow as a domestic animal and its dairy and farm value.","approvedBy":"Wayne","documentContent":"# The Cow...\\n\\n..."}
+{"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Cow: A Valuable Domestic Animal","owner":"Wayne","description":"Overview of the cow as a domestic animal and its dairy and farm value.","approvedBy":"Wayne","documentContent":"# The Cow...\\n\\n..."}
 
 Also available: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;

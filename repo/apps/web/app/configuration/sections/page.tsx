@@ -106,7 +106,7 @@ export default function SectionsPage() {
     <div className={styles.page}>
       <PageHeader
         title="Repository Sections"
-        description="Review the effective VPS directory for each project. Detailed editing is performed in the Project Registry."
+        description="Repository folders (modules) where approved files are stored on the VPS — for example Articles or Research Library. This is not Document Type (classification such as Article or Technical Specification)."
         action={{ label: 'Project Registry', href: '/configuration/projects' }}
       />
 

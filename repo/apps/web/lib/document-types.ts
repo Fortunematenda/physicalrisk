@@ -1,9 +1,22 @@
 const defaultDocumentTypes = [
   'Architecture Doc',
-  'Product Architecture', 'Enterprise Architecture', 'Functional Specifications', 'Technical Specifications',
-  'API Specifications', 'Data Models', 'Business Rules', 'Governance Standards', 'Operating Procedures',
-  'Developer Packs', 'Research Library', 'Marketing Assets', 'Articles', 'Templates', 'Decisions',
-  'Meeting Records', 'Release Notes',
+  'Architecture Document',
+  'EA Blueprint',
+  'Functional Specification',
+  'Technical Specification',
+  'API Contract',
+  'Data Model Definition',
+  'Business Rule',
+  'Governance Standard',
+  'Operating Procedure',
+  'Developer Pack',
+  'Research Note',
+  'Marketing Collateral',
+  'Article',
+  'Template',
+  'Decision Record',
+  'Meeting Minutes',
+  'Release Note',
 ];
 
 export interface AddDocumentTypeResult {
