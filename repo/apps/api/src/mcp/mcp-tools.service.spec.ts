@@ -36,6 +36,7 @@ describe('McpToolsService project permissions', () => {
     {} as any,
     { begin: jest.fn(), addChunk: jest.fn(), takeBase64: jest.fn() } as any,
     { create: jest.fn(), get: jest.fn(), consume: jest.fn(), assertNotExpired: jest.fn() } as any,
+    { fetchApprovedDocument: jest.fn() } as any,
     { get: jest.fn().mockReturnValue('https://repo.physicalrisk.com') } as any,
   );
 

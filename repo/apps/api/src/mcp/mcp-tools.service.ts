@@ -20,6 +20,7 @@ import {
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
+import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 
 @Injectable()
@@ -31,6 +32,7 @@ export class McpToolsService {
     private readonly audit: AuditService,
     private readonly uploads: McpUploadSessionService,
     private readonly browserUploads: McpBrowserUploadService,
+    private readonly remoteFiles: McpRemoteFileService,
     private readonly config: ConfigService,
   ) {}
 
@@ -70,11 +72,17 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
-      case 'prepare_approved_document':
-        return this.prepareApprovedDocument(
-          integration,
-          this.parsePreparePayload(args),
-        );
+      case 'prepare_approved_document': {
+        const { dto: prepared, fileUrl } = this.parseSubmitPayload(args);
+        if (fileUrl) {
+          return this.submitApprovedDocument(integration, {
+            ...prepared,
+            fileName: prepared.fileName?.trim() || 'document.pdf',
+            fileUrl,
+          }, ipAddress);
+        }
+        return this.prepareApprovedDocument(integration, prepared);
+      }
       case 'begin_document_upload': {
         const input = args as unknown as BeginDocumentUploadDto;
         return this.uploads.begin(
@@ -94,20 +102,22 @@ export class McpToolsService {
       }
       case 'submit_approved_document': {
         // ChatGPT often still calls this name. Metadata-only → browser upload link.
+        // fileUrl / uploadId / base64 → full submit into Import Queue.
         // Also accepts a single JSON "payload" string to avoid UnrecognizedKwargsError.
-        const { dto: prepared, uploadId, fileContentBase64 } = this.parseSubmitPayload(args);
-        if (!uploadId && !fileContentBase64) {
+        const { dto: prepared, uploadId, fileContentBase64, fileUrl } = this.parseSubmitPayload(args);
+        if (!uploadId && !fileContentBase64 && !fileUrl) {
           return this.prepareApprovedDocument(integration, prepared);
         }
-        const fileName = prepared.fileName?.trim();
-        if (!fileName) {
+        const fileName = prepared.fileName?.trim() || (fileUrl ? 'document.pdf' : '');
+        if (!fileName && !fileUrl) {
           throw new BadRequestException('fileName is required when submitting file bytes');
         }
         return this.submitApprovedDocument(integration, {
           ...prepared,
-          fileName,
+          fileName: fileName || 'document.pdf',
           uploadId,
           fileContentBase64,
+          fileUrl,
         }, ipAddress);
       }
       case 'get_import_status':
@@ -414,9 +424,15 @@ export class McpToolsService {
       fileName = fileName || staged.fileName;
       mimeType = mimeType || staged.mimeType;
     }
+    if (!fileContentBase64 && input.fileUrl?.trim()) {
+      const remote = await this.remoteFiles.fetchApprovedDocument(input.fileUrl.trim(), fileName);
+      fileContentBase64 = remote.buffer.toString('base64');
+      fileName = fileName || remote.fileName;
+      mimeType = mimeType || remote.mimeType;
+    }
     if (!fileContentBase64) {
       throw new BadRequestException(
-        'Provide uploadId from begin_document_upload/upload_document_chunk (preferred for ChatGPT), or fileContentBase64',
+        'Provide fileUrl (preferred for ChatGPT), uploadId, or fileContentBase64',
       );
     }
     if (!fileName) {
@@ -567,6 +583,7 @@ export class McpToolsService {
     dto: PrepareApprovedDocumentDto;
     uploadId?: string;
     fileContentBase64?: string;
+    fileUrl?: string;
   } {
     const source = this.unwrapPayloadObject(args);
     const outer = args ?? {};
@@ -581,6 +598,7 @@ export class McpToolsService {
       dto: this.parsePreparePayload(args),
       uploadId: pick('uploadId'),
       fileContentBase64: pick('fileContentBase64'),
+      fileUrl: pick('fileUrl') || pick('file_url') || pick('documentUrl'),
     };
   }
 
@@ -637,7 +655,7 @@ export class McpToolsService {
         'Advanced: upload one base64 chunk of the document',
       check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
       submit_approved_document:
-        'Advanced: submit using uploadId from chunked upload (prefer prepare_approved_document for ChatGPT)',
+        'Submit APPROVED document via fileUrl (Repo downloads PDF), uploadId, or base64; without those returns uploadUrl',
       get_import_status: 'Get the processing status of an import job by id',
     };
     return descriptions[name];
@@ -727,7 +745,7 @@ export class McpToolsService {
       },
       submit_approved_document: {
         type: 'object',
-        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName'],
+        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate'],
         properties: {
           projectId: { type: 'string', format: 'uuid' },
           projectCode: { type: 'string', description: 'Alternative to projectId (e.g. MOSS)' },
@@ -746,8 +764,13 @@ export class McpToolsService {
           mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
           existingDocumentId: { type: 'string', format: 'uuid' },
           fileName: { type: 'string' },
+          fileUrl: {
+            type: 'string',
+            format: 'uri',
+            description: 'Public http(s) URL to the PDF. Preferred for ChatGPT (Repo downloads it).',
+          },
           uploadId: { type: 'string', format: 'uuid', description: 'From begin_document_upload' },
-          fileContentBase64: { type: 'string', description: 'Optional if uploadId provided' },
+          fileContentBase64: { type: 'string', description: 'Optional if fileUrl or uploadId provided' },
           mimeType: { type: 'string' },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
         },

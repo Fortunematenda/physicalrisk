@@ -8,9 +8,11 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   Max,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -179,6 +181,7 @@ export class SubmitApprovedDocumentDto {
   @IsUUID('4')
   existingDocumentId?: string;
 
+  @ValidateIf((o: SubmitApprovedDocumentDto) => !o.fileUrl?.trim() && !o.uploadId?.trim())
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
@@ -195,6 +198,12 @@ export class SubmitApprovedDocumentDto {
   @IsString()
   @IsNotEmpty()
   fileContentBase64?: string;
+
+  /** Public http(s) URL to the PDF. Repo downloads it server-side (ChatGPT-friendly). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
+  fileUrl?: string;
 
   @IsOptional()
   @Transform(trimString)

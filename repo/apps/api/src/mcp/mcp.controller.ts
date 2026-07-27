@@ -220,11 +220,12 @@ export class McpController {
     this.auth.assertToolAllowed(integration, 'submit_approved_document');
 
     // ChatGPT Actions often hit this path with JSON/metadata only (no multipart file).
+    // With fileUrl → full submit; without → prepare returns uploadUrl.
     if (!file?.buffer?.length) {
       const prepareArgs: Record<string, unknown> = { ...body };
       const result = await this.tools.dispatchTool(
         integration,
-        'prepare_approved_document',
+        'submit_approved_document',
         prepareArgs,
         request.ip,
       );
@@ -232,7 +233,9 @@ export class McpController {
         tool: 'submit_approved_document',
         result,
         message:
-          'No file attached (expected for ChatGPT). Open result.uploadUrl in a browser and upload the PDF.',
+          (result as { uploadUrl?: string; importJobId?: string })?.importJobId
+            ? 'Document queued in Import Queue'
+            : 'No file attached. Open result.uploadUrl in a browser and upload the PDF, or resubmit with fileUrl.',
       };
     }
 
