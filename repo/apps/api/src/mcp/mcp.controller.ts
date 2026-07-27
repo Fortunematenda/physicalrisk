@@ -131,11 +131,11 @@ export class McpController {
     }
     const required = {
       title: body.title?.trim(),
-      documentType: body.documentType?.trim(),
-      versionNo: (body.versionNo || body.version || '').trim(),
-      approvalStatus: (body.approvalStatus || 'APPROVED').trim(),
-      approvedBy: body.approvedBy?.trim(),
-      approvalDate: body.approvalDate?.trim(),
+      documentType: (body.documentType || body.document_type || '').trim(),
+      versionNo: (body.versionNo || body.version || body.version_no || '').trim(),
+      approvalStatus: (body.approvalStatus || body.approval_status || 'APPROVED').trim(),
+      approvedBy: (body.approvedBy || body.approved_by || '').trim(),
+      approvalDate: (body.approvalDate || body.approval_date || '').trim(),
     };
     const missing = Object.entries(required)
       .filter(([, value]) => !value)
@@ -147,10 +147,10 @@ export class McpController {
     const integration = request[MCP_INTEGRATION_KEY]!;
     this.auth.assertToolAllowed(integration, 'submit_approved_document');
     const payload: SubmitApprovedDocumentDto = {
-      projectId: body.projectId || undefined,
-      projectCode: body.projectCode || body.project || undefined,
+      projectId: body.projectId || body.project_id || undefined,
+      projectCode: body.projectCode || body.project_code || body.project || undefined,
       title: required.title!,
-      documentCode: body.documentCode || undefined,
+      documentCode: body.documentCode || body.document_code || undefined,
       documentType: required.documentType!,
       description: body.description || undefined,
       owner: body.owner || undefined,
@@ -158,15 +158,15 @@ export class McpController {
       approvalStatus: required.approvalStatus!,
       approvedBy: required.approvedBy!,
       approvalDate: required.approvalDate!,
-      sectionKey: body.sectionKey || undefined,
-      module: body.module || undefined,
+      sectionKey: body.sectionKey || body.section_key || undefined,
+      module: body.module || body.repositoryModule || body.repository_module || undefined,
       metadataJson: body.metadataJson || undefined,
       relationshipsJson: body.relationshipsJson || undefined,
       mode: body.mode === 'NEW_VERSION' ? 'NEW_VERSION' : body.mode === 'NEW' ? 'NEW' : undefined,
       existingDocumentId: body.existingDocumentId || undefined,
-      fileName: body.fileName || file.originalname,
+      fileName: body.fileName || body.file_name || file.originalname,
       fileContentBase64: file.buffer.toString('base64'),
-      mimeType: body.mimeType || file.mimetype,
+      mimeType: body.mimeType || body.mime_type || file.mimetype,
     };
 
     const result = await this.tools.submitApprovedDocument(integration, payload, request.ip);
