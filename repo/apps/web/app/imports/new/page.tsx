@@ -11,8 +11,9 @@ import { CreateProjectModal, ProjectRecord } from '@/components/import/CreatePro
 import { CreateRepositorySectionModal, RepositorySectionRecord } from '@/components/import/CreateRepositorySectionModal';
 import { CreateSourceSystemModal, SourceSystemRecord } from '@/components/import/CreateSourceSystemModal';
 import { Loading } from '@/components/loading';
-import { api, API_URL, getToken } from '@/lib/api';
-import { getErrorMessage } from '@/lib/api-error';
+import { api, apiFormData } from '@/lib/api';
+import { ApiError, getErrorMessage } from '@/lib/api-error';
+import { friendlyErrorMessage } from '@/lib/user-errors';
 import { canCreateConfiguration, getCurrentUser } from '@/lib/permissions';
 import { suggestNextVersion, formatBytes } from '@/lib/version';
 import styles from './ImportDocument.module.css';
@@ -450,15 +451,20 @@ function ImportDocumentPageContent() {
       }).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') body.append(key, String(value));
       });
-      const response = await fetch(`${API_URL}/imports/upload`, { method: 'POST', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {}, body });
-      const payload = await response.json();
-      if (!response.ok) {
-        if (payload.code) setStructuredError(payload as StructuredError);
-        throw new Error(Array.isArray(payload.message) ? payload.message.join(', ') : payload.message ?? 'Import failed');
-      }
+      const payload = await apiFormData<{ id: string; code?: string; message?: string; details?: StructuredError['details'] } & StructuredError>(
+        '/imports/upload',
+        body,
+      );
       router.push(`/imports/${payload.id}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Import failed');
+      if (caught instanceof ApiError && caught.code) {
+        setStructuredError({
+          code: caught.code,
+          message: caught.message,
+          details: caught.details as StructuredError['details'],
+        });
+      }
+      setError(friendlyErrorMessage(caught, 'Import failed'));
     } finally {
       setSaving(false);
     }
@@ -490,18 +496,10 @@ function ImportDocumentPageContent() {
       }).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') body.append(key, String(value));
       });
-      const response = await fetch(`${API_URL}/imports/draft`, {
-        method: 'POST',
-        headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
-        body,
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(Array.isArray(payload.message) ? payload.message.join(', ') : payload.message ?? 'Unable to save draft.');
-      }
+      await apiFormData('/imports/draft', body);
       router.push('/imports/queue');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to save draft.');
+      setError(friendlyErrorMessage(caught, 'Unable to save draft.'));
     } finally {
       setSavingDraft(false);
     }
@@ -922,7 +920,7 @@ function ImportDocumentPageContent() {
         <form className={styles.formCard} onSubmit={submit}>
           <div className={styles.banner}>
             <Info className={styles.bannerIcon} size={16} />
-            <div><strong>Approved documents only.</strong> This gateway accepts files that have already been approved and records approval against the importing user.</div>
+            <div><strong>Approved documents only.</strong> This gateway accepts files that have already been approved and records approval against the importing user. Unapproved items are blocked with a clear message.</div>
           </div>
           {activeContinueJobId && draftHasFile ? (
             <div className="notice info">

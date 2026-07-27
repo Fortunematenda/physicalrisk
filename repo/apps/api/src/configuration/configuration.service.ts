@@ -305,32 +305,122 @@ export class ConfigurationService {
     const code = clean(input.code).toUpperCase();
     const name = clean(input.name);
     if (!code || !name) throw new ConfigurationException('VALIDATION_ERROR', 'Template code and name are required');
+    const existing = await this.db.directoryTemplates.findOne({ where: { code } });
+    if (existing) {
+      throw new ConfigurationConflictException('TEMPLATE_CODE_EXISTS', `A directory template with code “${code}” already exists.`, {
+        existingId: existing.id,
+        existingCode: existing.code,
+        existingName: existing.name,
+      });
+    }
     const rawSections = Array.isArray(input.sections) ? input.sections as Array<Record<string, unknown>> : [];
-    const template = await this.db.dataSource.transaction(async (manager) => {
-      const templates = manager.getRepository(DirectoryTemplate);
-      const sections = manager.getRepository(DirectoryTemplateSection);
-      if (boolean(input.isDefault, false)) await templates.update({}, { isDefault: false });
-      const created = await templates.save(templates.create({
-        code, name,
-        description: nullable(input.description) ?? null,
-        isDefault: boolean(input.isDefault, false),
-        active: boolean(input.active),
-      }));
-      if (rawSections.length) {
-        await sections.save(rawSections.map((raw, index) => sections.create({
-          template: created,
-          sectionKey: sectionKey(raw.sectionKey ?? raw.name),
-          code: clean(raw.code || `SEC${index + 1}`).toUpperCase(),
-          name: clean(raw.name),
-          slug: slugify(raw.slug ?? raw.name),
-          position: Number(raw.position ?? index + 1),
-          active: boolean(raw.active),
-        })));
+    try {
+      const template = await this.db.dataSource.transaction(async (manager) => {
+        const templates = manager.getRepository(DirectoryTemplate);
+        const sections = manager.getRepository(DirectoryTemplateSection);
+        if (boolean(input.isDefault, false)) await templates.update({}, { isDefault: false });
+        const created = await templates.save(templates.create({
+          code, name,
+          description: nullable(input.description) ?? null,
+          isDefault: boolean(input.isDefault, false),
+          active: boolean(input.active),
+        }));
+        if (rawSections.length) {
+          await sections.save(rawSections.map((raw, index) => sections.create({
+            template: created,
+            sectionKey: sectionKey(raw.sectionKey ?? raw.name),
+            code: clean(raw.code || `SEC${index + 1}`).toUpperCase(),
+            name: clean(raw.name),
+            slug: slugify(raw.slug ?? raw.name),
+            position: Number(raw.position ?? index + 1),
+            active: boolean(raw.active),
+          })));
+        }
+        return created;
+      });
+      if (template.isDefault) {
+        await this.setSetting('gateway.defaultDirectoryTemplate', template.code, 'Default directory configuration for new projects.');
       }
-      return created;
-    });
-    await this.audit.record({ userId, action: 'CREATE', entityType: 'DirectoryTemplate', entityId: template.id, message: `Created directory template ${template.name}`, after: template });
-    return this.db.directoryTemplates.findOne({ where: { id: template.id }, relations: { sections: true } });
+      await this.audit.record({ userId, action: 'CREATE', entityType: 'DirectoryTemplate', entityId: template.id, message: `Created directory template ${template.name}`, after: template });
+      return this.db.directoryTemplates.findOne({ where: { id: template.id }, relations: { sections: true } });
+    } catch (error) {
+      if (error instanceof ConfigurationException || error instanceof ConfigurationConflictException) throw error;
+      throw new ConfigurationException(
+        'TEMPLATE_CREATE_FAILED',
+        'The directory template could not be created. Check that section positions and keys are unique, then try again.',
+        { cause: error instanceof Error ? error.message : String(error) },
+      );
+    }
+  }
+
+  async setDefaultTemplate(id: string, userId?: string) {
+    const template = await this.db.directoryTemplates.findOne({ where: { id }, relations: { sections: true } });
+    if (!template) throw new NotFoundException('Directory template not found');
+    if (!template.active) {
+      throw new ConfigurationException('TEMPLATE_INACTIVE', 'Only an active directory template can be set as the system default.');
+    }
+    try {
+      await this.db.dataSource.transaction(async (manager) => {
+        const templates = manager.getRepository(DirectoryTemplate);
+        await templates.createQueryBuilder().update().set({ isDefault: false }).execute();
+        await templates.update({ id }, { isDefault: true });
+      });
+      await this.setSetting('gateway.defaultDirectoryTemplate', template.code, 'Default directory configuration for new projects.');
+      await this.audit.record({
+        userId,
+        action: 'CONFIG_CHANGE',
+        entityType: 'DirectoryTemplate',
+        entityId: id,
+        message: `Set directory template ${template.name} as system default`,
+        after: { code: template.code, isDefault: true },
+      });
+      return this.db.directoryTemplates.findOne({ where: { id }, relations: { sections: true } });
+    } catch (error) {
+      throw new ConfigurationException(
+        'TEMPLATE_DEFAULT_FAILED',
+        'The selected directory template could not be updated. Please try again.',
+        { cause: error instanceof Error ? error.message : String(error) },
+      );
+    }
+  }
+
+  async duplicateTemplate(id: string, userId?: string) {
+    const source = await this.db.directoryTemplates.findOne({ where: { id }, relations: { sections: true } });
+    if (!source) throw new NotFoundException('Directory template not found');
+    const baseCode = `${source.code}_COPY`.slice(0, 48);
+    let code = baseCode;
+    let n = 2;
+    while (await this.db.directoryTemplates.findOne({ where: { code } })) {
+      code = `${baseCode}_${n}`.slice(0, 48);
+      n += 1;
+    }
+    return this.createTemplate({
+      code,
+      name: `${source.name} (copy)`,
+      description: source.description,
+      isDefault: false,
+      active: true,
+      sections: (source.sections ?? []).map((section) => ({
+        name: section.name,
+        code: section.code,
+        sectionKey: section.sectionKey,
+        slug: section.slug,
+        position: section.position,
+        active: section.active,
+      })),
+    }, userId);
+  }
+
+  async archiveTemplate(id: string, userId?: string) {
+    const template = await this.db.directoryTemplates.findOne({ where: { id } });
+    if (!template) throw new NotFoundException('Directory template not found');
+    if (template.isDefault) {
+      throw new ConfigurationException('TEMPLATE_DEFAULT_ARCHIVE', 'Set another template as default before archiving this one.');
+    }
+    template.active = false;
+    const saved = await this.db.directoryTemplates.save(template);
+    await this.audit.record({ userId, action: 'CONFIG_CHANGE', entityType: 'DirectoryTemplate', entityId: id, message: `Archived directory template ${template.name}` });
+    return saved;
   }
 
   listSources() { return this.db.sourceSystems.find({ order: { name: 'ASC' } }); }
@@ -489,21 +579,40 @@ export class ConfigurationService {
     const qb = this.db.routingRules.createQueryBuilder('rule')
       .leftJoinAndSelect('rule.project', 'project')
       .leftJoinAndSelect('rule.sourceSystem', 'sourceSystem')
-      .orderBy('rule.priority', 'ASC').addOrderBy('rule.name', 'ASC');
+      .orderBy('rule.priority', 'ASC')
+      .addOrderBy('rule.createdAt', 'ASC')
+      .addOrderBy('rule.id', 'ASC');
     if (projectId) qb.where(new Brackets((where) => where.where('project.id = :projectId', { projectId }).orWhere('project.id IS NULL')));
     const rules = await qb.getMany();
     return rules.map((rule) => ({ ...rule, projectId: rule.project?.id ?? null, sourceSystemId: rule.sourceSystem?.id ?? null }));
   }
+
+  private async assertUniquePriority(priority: number, excludeId?: string) {
+    const qb = this.db.routingRules.createQueryBuilder('rule').where('rule.priority = :priority', { priority });
+    if (excludeId) qb.andWhere('rule.id != :excludeId', { excludeId });
+    const existing = await qb.getOne();
+    if (existing) {
+      throw new ConfigurationConflictException(
+        'ROUTING_PRIORITY_EXISTS',
+        `Priority ${priority} already exists (“${existing.name}”). Please choose another priority.`,
+        { existingId: existing.id, existingName: existing.name, priority },
+      );
+    }
+  }
+
   async createRoutingRule(input: Record<string, unknown>) {
     const [project, sourceSystem] = await Promise.all([
       input.projectId ? this.db.projects.findOne({ where: { id: clean(input.projectId) } }) : Promise.resolve(null),
       input.sourceSystemId ? this.db.sourceSystems.findOne({ where: { id: clean(input.sourceSystemId) } }) : Promise.resolve(null),
     ]);
+    const priority = Number(input.priority ?? 100);
+    if (!Number.isFinite(priority)) throw new ConfigurationException('VALIDATION_ERROR', 'Priority must be a number');
+    await this.assertUniquePriority(priority);
     const entity = this.db.routingRules.create({
       name: clean(input.name), project, sourceSystem,
       documentType: nullable(input.documentType) ?? null, fileExtension: nullable(input.fileExtension)?.replace('.', '').toLowerCase() ?? null,
       metadataKey: nullable(input.metadataKey) ?? null, metadataValue: nullable(input.metadataValue) ?? null,
-      targetSectionKey: sectionKey(input.targetSectionKey), priority: Number(input.priority ?? 100), active: boolean(input.active),
+      targetSectionKey: sectionKey(input.targetSectionKey), priority, active: boolean(input.active),
     });
     return this.db.routingRules.save(entity);
   }
@@ -518,7 +627,12 @@ export class ConfigurationService {
     if (input.metadataKey !== undefined) entity.metadataKey = nullable(input.metadataKey) ?? null;
     if (input.metadataValue !== undefined) entity.metadataValue = nullable(input.metadataValue) ?? null;
     if (input.targetSectionKey !== undefined) entity.targetSectionKey = sectionKey(input.targetSectionKey);
-    if (input.priority !== undefined) entity.priority = Number(input.priority);
+    if (input.priority !== undefined) {
+      const priority = Number(input.priority);
+      if (!Number.isFinite(priority)) throw new ConfigurationException('VALIDATION_ERROR', 'Priority must be a number');
+      await this.assertUniquePriority(priority, id);
+      entity.priority = priority;
+    }
     if (input.active !== undefined) entity.active = boolean(input.active);
     return this.db.routingRules.save(entity);
   }

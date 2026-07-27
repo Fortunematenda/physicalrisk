@@ -63,7 +63,7 @@ describe('document-types.ts', () => {
       const result = getAvailableDocumentTypes([]);
       assert.ok(result.includes('Product Architecture'));
       assert.ok(result.includes('Release Notes'));
-      assert.equal(result.length, 17);
+      assert.equal(result.length, 18);
     });
 
     it('includes custom types with default types', () => {

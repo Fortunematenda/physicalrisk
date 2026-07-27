@@ -30,9 +30,16 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const header = request.headers.authorization as string | undefined;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
-    if (!token) throw new UnauthorizedException('Bearer token required');
+    if (!token) {
+      throw new UnauthorizedException({
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+        message: 'Your session has expired or is no longer valid. Please sign in again.',
+      });
+    }
 
     const keycloakEnabled = this.config.get<string>('KEYCLOAK_ENABLED') === 'true';
+    let keycloakError: unknown;
 
     if (keycloakEnabled) {
       try {
@@ -58,6 +65,7 @@ export class JwtAuthGuard implements CanActivate {
         };
         return true;
       } catch (kcErr) {
+        keycloakError = kcErr;
         // Fall through to local JWT verification
         this.logger.debug(`Keycloak token validation failed, trying local JWT: ${kcErr}`);
       }
@@ -71,7 +79,15 @@ export class JwtAuthGuard implements CanActivate {
       request.user = { id: payload.sub, email: payload.email, role: payload.role };
       return true;
     } catch {
-      throw new UnauthorizedException('Invalid or expired token');
+      const expired =
+        keycloakError instanceof Error && /expired|Token expired/i.test(keycloakError.message);
+      throw new UnauthorizedException({
+        statusCode: 401,
+        code: expired ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+        message: expired
+          ? 'Your session has expired. Refreshing your session…'
+          : 'Your session is no longer valid. Please sign in again.',
+      });
     }
   }
 

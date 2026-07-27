@@ -32,6 +32,9 @@ export function getCachedAccessToken(sub?: string | null): Cached | null {
 }
 
 export function clearCachedAccessToken(sub?: string | null) {
-  if (!sub) return;
+  if (!sub) {
+    store().clear();
+    return;
+  }
   store().delete(sub);
 }

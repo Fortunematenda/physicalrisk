@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 const SESSION_COOKIE = 'repo.next-auth.session-token';
 
-async function resolveBearer(req: NextRequest): Promise<string | null> {
+async function resolveBearer(req: NextRequest): Promise<{ bearer: string | null; refreshed: boolean }> {
   const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
   const token = await getToken({
     req,
@@ -19,7 +19,7 @@ async function resolveBearer(req: NextRequest): Promise<string | null> {
 
   if (token?.error !== 'RefreshTokenError') {
     const cached = getCachedAccessToken(token?.sub);
-    if (cached?.accessToken) return cached.accessToken;
+    if (cached?.accessToken) return { bearer: cached.accessToken, refreshed: false };
 
     if (typeof token?.refreshToken === 'string' && token.refreshToken) {
       const refreshed = await refreshKeycloakToken(token.refreshToken);
@@ -30,13 +30,19 @@ async function resolveBearer(req: NextRequest): Promise<string | null> {
           token.refreshToken,
           Math.floor(Date.now() / 1000) + 300,
         );
-        return refreshed;
+        return { bearer: refreshed, refreshed: true };
       }
     }
   }
 
+  // Do not fall back to a client-supplied Authorization header when an SSO session exists
+  // but refresh failed — that stale JWT caused intermittent import failures.
+  if (token?.sub || token?.refreshToken) {
+    return { bearer: null, refreshed: false };
+  }
+
   const headerToken = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
-  return headerToken || null;
+  return { bearer: headerToken || null, refreshed: false };
 }
 
 async function refreshKeycloakToken(refreshToken: string): Promise<string | null> {
@@ -67,11 +73,15 @@ async function refreshKeycloakToken(refreshToken: string): Promise<string | null
 }
 
 async function proxy(req: NextRequest, pathSegments: string[]) {
-  const bearer = await resolveBearer(req);
+  const { bearer } = await resolveBearer(req);
 
   if (!bearer) {
     return NextResponse.json(
-      { statusCode: 401, message: 'Authentication required' },
+      {
+        statusCode: 401,
+        code: 'SESSION_EXPIRED',
+        message: 'Your session has expired. Refreshing your session…',
+      },
       { status: 401 },
     );
   }
@@ -86,6 +96,8 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   if (contentType) headers.set('Content-Type', contentType);
   const accept = req.headers.get('accept');
   if (accept) headers.set('Accept', accept);
+  const requestId = req.headers.get('x-request-id') || crypto.randomUUID();
+  headers.set('x-request-id', requestId);
 
   const init: RequestInit = {
     method: req.method,
@@ -101,10 +113,23 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   let upstream: Response;
   try {
     upstream = await fetch(url, init);
+    // One automatic retry after forcing a refresh when API says token expired.
+    if (upstream.status === 401) {
+      const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+      const token = await getToken({ req, secret, cookieName: SESSION_COOKIE, secureCookie: false });
+      if (typeof token?.refreshToken === 'string' && token.refreshToken && token.sub) {
+        const refreshed = await refreshKeycloakToken(token.refreshToken);
+        if (refreshed) {
+          cacheAccessToken(token.sub, refreshed, token.refreshToken, Math.floor(Date.now() / 1000) + 300);
+          headers.set('Authorization', `Bearer ${refreshed}`);
+          upstream = await fetch(url, { ...init, headers });
+        }
+      }
+    }
   } catch (err) {
     console.error('[repo-gw] upstream fetch failed', err);
     return NextResponse.json(
-      { statusCode: 502, message: 'Upstream API unreachable' },
+      { statusCode: 502, message: 'The repository service is temporarily unreachable. Please try again.' },
       { status: 502 },
     );
   }
@@ -114,6 +139,7 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   if (upstreamType) outHeaders.set('content-type', upstreamType);
   const disposition = upstream.headers.get('content-disposition');
   if (disposition) outHeaders.set('content-disposition', disposition);
+  outHeaders.set('x-request-id', requestId);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

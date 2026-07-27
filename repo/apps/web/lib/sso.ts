@@ -9,6 +9,7 @@
  */
 
 import { signIn, signOut } from 'next-auth/react';
+import { clearCachedAccessToken } from './token-cache';
 
 export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || 'https://apps.physicalrisk.com';
 
@@ -144,6 +145,7 @@ export async function ssoLogout() {
   signInInFlight = null;
   window.localStorage.removeItem('gateway_token');
   window.localStorage.removeItem('gateway_user');
+  clearCachedAccessToken();
 
   if (await isSsoEnabled()) {
     await signOut({ redirect: false });

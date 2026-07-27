@@ -648,7 +648,7 @@ export class ImportsService {
     const approvalStatus = String(input.approvalStatus ?? '').trim().toUpperCase() || ApprovalStatus.APPROVED;
     if (approvalStatus !== ApprovalStatus.APPROVED) {
       throw new BadRequestException(
-        `Only APPROVED documents may enter the official repository (received: ${approvalStatus}). Rejected, draft, or pending assets must be approved before import.`,
+        'This document cannot be imported because it has not yet been approved. Set approval status to Approved before importing.',
       );
     }
 
@@ -795,18 +795,31 @@ export class ImportsService {
       .where('rule.active = true')
       .andWhere(new Brackets((where) => where.where('project.id = :projectId', { projectId }).orWhere('project.id IS NULL')))
       .orderBy('rule.priority', 'ASC')
+      .addOrderBy('rule.createdAt', 'ASC')
+      .addOrderBy('rule.id', 'ASC')
       .getMany();
     const normalizedType = metadata.documentType.trim().toLowerCase();
+    const typeAliases: Record<string, string[]> = {
+      'architecture doc': ['architecture doc', 'product architecture'],
+      'product architecture': ['product architecture', 'architecture doc'],
+    };
     const selected = rules.find((rule) => {
       if (rule.sourceSystem && getId(rule.sourceSystem) !== sourceSystemId) return false;
       if (rule.fileExtension && rule.fileExtension.toLowerCase() !== extension) return false;
-      if (rule.documentType && rule.documentType.trim().toLowerCase() !== normalizedType) return false;
+      if (rule.documentType) {
+        const ruleType = rule.documentType.trim().toLowerCase();
+        const aliases = typeAliases[normalizedType] || [normalizedType];
+        if (!aliases.includes(ruleType) && ruleType !== normalizedType) return false;
+      }
       if (rule.metadataKey && String(metadata.customMetadata?.[rule.metadataKey] ?? '') !== String(rule.metadataValue ?? '')) return false;
       return true;
     });
     const targetKey = selected?.targetSectionKey ?? metadata.documentType.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
     const section = activeSections.find((item) => item.sectionKey === targetKey)
-      ?? activeSections.find((item) => item.name.trim().toLowerCase() === normalizedType);
+      ?? activeSections.find((item) => item.name.trim().toLowerCase() === normalizedType)
+      ?? (normalizedType === 'architecture doc'
+        ? activeSections.find((item) => item.sectionKey === 'PRODUCT_ARCHITECTURE' || item.name.trim().toLowerCase() === 'product architecture')
+        : undefined);
     if (!section) {
       throw new BadRequestException(`No routing rule resolved '${metadata.documentType}' to an active section. Configure a routing rule or choose a section explicitly.`);
     }

@@ -120,11 +120,57 @@ export default function TemplatesPage() {
     }
   };
 
+  const setDefault = async (id: string, name: string) => {
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/directory-templates/${encodeURIComponent(id)}/set-default`, { method: 'POST', body: JSON.stringify({}) });
+      setMessage(`“${name}” is now the system default for new projects and future imports.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The selected directory template could not be updated. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const duplicate = async (id: string) => {
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/directory-templates/${encodeURIComponent(id)}/duplicate`, { method: 'POST', body: JSON.stringify({}) });
+      setMessage('Template duplicated.');
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to duplicate template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const archive = async (id: string, name: string) => {
+    if (!window.confirm(`Archive template “${name}”? It will no longer be offered for new projects.`)) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/directory-templates/${encodeURIComponent(id)}/archive`, { method: 'POST', body: JSON.stringify({}) });
+      setMessage('Template archived.');
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to archive template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <PageHeader
         title="Directory Templates"
-        description="Maintain one standard default directory and create controlled exceptions only where a project has a genuine business need."
+        description="Administrators choose which template is the system default. RFP is only a seeded blueprint — it is not hard-coded as the permanent default."
         action={{ label: 'Project Registry', href: '/configuration/projects' }}
       />
 
@@ -269,6 +315,21 @@ export default function TemplatesPage() {
                     {item.isDefault ? <StatusBadge value="DEFAULT" /> : null}
                   </div>
                   {item.description ? <p className="secondary-text">{item.description}</p> : null}
+                  <div className={styles.createActions} style={{ marginBottom: 12, justifyContent: 'flex-start', gap: 8 }}>
+                    {!item.isDefault ? (
+                      <button type="button" className="button small" disabled={saving} onClick={() => void setDefault(item.id, item.name)}>
+                        Set as default
+                      </button>
+                    ) : null}
+                    <button type="button" className="button small" disabled={saving} onClick={() => void duplicate(item.id)}>
+                      Duplicate
+                    </button>
+                    {!item.isDefault ? (
+                      <button type="button" className="button small" disabled={saving} onClick={() => void archive(item.id, item.name)}>
+                        Archive
+                      </button>
+                    ) : null}
+                  </div>
                   <ol className={styles.sectionTree}>
                     {[...(item.sections ?? [])]
                       .sort((a, b) => a.position - b.position)

@@ -1,4 +1,5 @@
 const defaultDocumentTypes = [
+  'Architecture Doc',
   'Product Architecture', 'Enterprise Architecture', 'Functional Specifications', 'Technical Specifications',
   'API Specifications', 'Data Models', 'Business Rules', 'Governance Standards', 'Operating Procedures',
   'Developer Packs', 'Research Library', 'Marketing Assets', 'Articles', 'Templates', 'Decisions',

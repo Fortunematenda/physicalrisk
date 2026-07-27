@@ -98,7 +98,7 @@ export default function RoutingRulesPage() {
     <>
       <PageHeader
         title="Routing Rules"
-        description="Configuration-based routing replaces hard-coded project logic. Rules can be global or project-specific and are evaluated by priority."
+        description="Configuration-based routing replaces hard-coded project logic. Priority must be unique — lowest number wins. If two rules somehow share a priority, oldest rule then lowest ID wins (deterministic, never random)."
       />
       <div className="grid two">
         <form className="form-card" onSubmit={submit}>
@@ -184,7 +184,7 @@ export default function RoutingRulesPage() {
         <div className="panel">
           <div className="panel-header">
             <h2>Configured rules</h2>
-            <span className="secondary-text">Lowest priority number is evaluated first</span>
+            <span className="secondary-text">Priority must be unique. Lowest number is evaluated first; then oldest rule; then lowest ID.</span>
           </div>
           {loading ? (
             <Loading />

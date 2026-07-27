@@ -34,6 +34,24 @@ export class ConfigurationController {
 
   @Get('directory-templates') listTemplates() { return this.service.listTemplates(); }
   @Post('directory-templates') createTemplate(@Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) { return this.service.createTemplate(body, user?.id); }
+  @Post('directory-templates/:id/set-default')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  setDefaultTemplate(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.setDefaultTemplate(id, user?.id);
+  }
+  @Post('directory-templates/:id/duplicate')
+  @UseGuards(RolesGuard)
+  @Roles(...CONFIG_CREATE_ROLES)
+  duplicateTemplate(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.duplicateTemplate(id, user?.id);
+  }
+  @Post('directory-templates/:id/archive')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  archiveTemplate(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.archiveTemplate(id, user?.id);
+  }
 
   @Get('source-systems') listSources() { return this.service.listSources(); }
   @Post('source-systems')

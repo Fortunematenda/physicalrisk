@@ -78,15 +78,34 @@ export class SeedService implements OnApplicationBootstrap {
 
     let template = await this.db.directoryTemplates.findOne({ where: { code: 'RFP001_DEFAULT' }, relations: { sections: true } });
     if (!template) {
-      template = this.db.directoryTemplates.create({ code: 'RFP001_DEFAULT', name: 'RFP-001 Default Repository Directory', description: 'The standard multi-project directory approved in RFP-001 v1.1.', isDefault: true, active: true });
+      const existingDefault = await this.db.directoryTemplates.findOne({ where: { isDefault: true } });
+      template = this.db.directoryTemplates.create({
+        code: 'RFP001_DEFAULT',
+        name: 'Standard Repository Directory',
+        description: 'Seeded multi-project directory blueprint. Administrators may set any template as the system default.',
+        isDefault: !existingDefault,
+        active: true,
+      });
       template = await this.db.directoryTemplates.save(template);
     } else {
-      template.name = 'RFP-001 Default Repository Directory';
-      template.description = 'The standard multi-project directory approved in RFP-001 v1.1.';
-      template.isDefault = true; template.active = true;
+      // Do NOT force isDefault=true on every boot — admins own the default in Settings.
+      template.name = template.name || 'Standard Repository Directory';
+      template.description = template.description || 'Seeded multi-project directory blueprint.';
+      template.active = true;
       template = await this.db.directoryTemplates.save(template);
     }
-    await this.db.directoryTemplates.createQueryBuilder().update().set({ isDefault: false }).where('id != :id', { id: template.id }).execute();
+    const defaultCount = await this.db.directoryTemplates.count({ where: { isDefault: true } });
+    if (defaultCount === 0) {
+      template.isDefault = true;
+      template = await this.db.directoryTemplates.save(template);
+    } else if (defaultCount > 1) {
+      // Repair multiple defaults: keep the earliest-created default.
+      const defaults = await this.db.directoryTemplates.find({ where: { isDefault: true }, order: { createdAt: 'ASC' } });
+      for (let i = 1; i < defaults.length; i += 1) {
+        defaults[i].isDefault = false;
+        await this.db.directoryTemplates.save(defaults[i]);
+      }
+    }
 
     for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
       const [sectionKey, code, name] = DEFAULT_SECTIONS[index];
@@ -138,6 +157,22 @@ export class SeedService implements OnApplicationBootstrap {
       await this.db.documentTypes.save(documentType);
     }
 
+    // Alias used in demos / Wayne feedback — routes like Product Architecture.
+    let architectureDoc = await this.db.documentTypes.findOne({ where: { code: 'ARCH_DOC' } });
+    if (!architectureDoc) {
+      architectureDoc = this.db.documentTypes.create({
+        code: 'ARCH_DOC',
+        name: 'Architecture Doc',
+        description: 'Architecture document (alias for Product Architecture routing).',
+        active: true,
+      });
+      await this.db.documentTypes.save(architectureDoc);
+    } else {
+      architectureDoc.name = 'Architecture Doc';
+      architectureDoc.active = true;
+      await this.db.documentTypes.save(architectureDoc);
+    }
+
     const fileTypes: Array<[string, string, string[], number, boolean]> = [
       ['docx', 'Microsoft Word Document', ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 50, true],
       ['pdf', 'PDF Document', ['application/pdf'], 50, true],
@@ -167,26 +202,68 @@ export class SeedService implements OnApplicationBootstrap {
       await this.db.metadataFields.save(row);
     }
 
-    await this.db.routingRules.createQueryBuilder().delete().where('name LIKE :name', { name: 'Default route:%' }).execute();
+    // Seed default routes only when missing — never wipe admin-customised priorities on restart.
     for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
       const [sectionKey, , name] = DEFAULT_SECTIONS[index];
       if (['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(sectionKey)) continue;
-      const rule = this.db.routingRules.create({ name: `Default route: ${name}`, project: null, sourceSystem: null, documentType: name, fileExtension: null, metadataKey: null, metadataValue: null, targetSectionKey: sectionKey, priority: 100 + index, active: true });
-      await this.db.routingRules.save(rule);
+      const ruleName = `Default route: ${name}`;
+      const existing = await this.db.routingRules.findOne({ where: { name: ruleName } });
+      if (!existing) {
+        const priority = 100 + index;
+        const conflict = await this.db.routingRules.findOne({ where: { priority } });
+        const rule = this.db.routingRules.create({
+          name: ruleName,
+          project: null,
+          sourceSystem: null,
+          documentType: name,
+          fileExtension: null,
+          metadataKey: null,
+          metadataValue: null,
+          targetSectionKey: sectionKey,
+          priority: conflict ? 1000 + index : priority,
+          active: true,
+        });
+        await this.db.routingRules.save(rule);
+      }
+    }
+
+    const archRuleName = 'Default route: Architecture Doc';
+    if (!(await this.db.routingRules.findOne({ where: { name: archRuleName } }))) {
+      const priority = 90;
+      const conflict = await this.db.routingRules.findOne({ where: { priority } });
+      await this.db.routingRules.save(this.db.routingRules.create({
+        name: archRuleName,
+        project: null,
+        sourceSystem: null,
+        documentType: 'Architecture Doc',
+        fileExtension: null,
+        metadataKey: null,
+        metadataValue: null,
+        targetSectionKey: 'PRODUCT_ARCHITECTURE',
+        priority: conflict ? 89 : priority,
+        active: true,
+      }));
     }
 
     const settings: Array<[string, unknown, string]> = [
       ['gateway.designPrinciple', 'Lightweight approved-document import middleware; not a DMS, CMS or KMS.', 'RFP-001 design boundary.'],
       ['gateway.requireApprovedOnly', true, 'Reject non-approved documents.'],
-      ['gateway.defaultDirectoryTemplate', template.code, 'Default directory configuration for new projects.'],
+      ['gateway.defaultDirectoryTemplate', template.code, 'Default directory configuration for new projects. Change via Directory Templates → Set as default.'],
       ['gateway.storageMode', 'VPS_LOCAL_FILESYSTEM', 'Approved files and generated registers are stored on the mounted VPS filesystem.'],
     ];
     for (const [key, value, description] of settings) {
       let row = await this.db.systemSettings.findOne({ where: { key } });
       if (!row) row = this.db.systemSettings.create({ key, value, description });
-      else Object.assign(row, { value, description });
+      else if (key !== 'gateway.defaultDirectoryTemplate') {
+        // Preserve admin-chosen default template code across restarts.
+        Object.assign(row, { value, description });
+      } else {
+        const currentDefault = await this.db.directoryTemplates.findOne({ where: { isDefault: true } });
+        row.value = currentDefault?.code ?? value;
+        row.description = description;
+      }
       await this.db.systemSettings.save(row);
     }
-    this.logger.log('RFP-001 default configuration is ready.');
+    this.logger.log('Repository gateway default configuration is ready.');
   }
 }
