@@ -99,8 +99,13 @@ export class McpToolsService {
         if (!uploadId && !fileContentBase64) {
           return this.prepareApprovedDocument(integration, prepared);
         }
+        const fileName = prepared.fileName?.trim();
+        if (!fileName) {
+          throw new BadRequestException('fileName is required when submitting file bytes');
+        }
         return this.submitApprovedDocument(integration, {
           ...prepared,
+          fileName,
           uploadId,
           fileContentBase64,
         }, ipAddress);
