@@ -19,6 +19,20 @@
 .header { display: flex; justify-content: space-between; gap: 20px; padding: 18px 20px; }
 .header h1 { margin: 0 0 5px; color: #001b36; font-size: 24px; }
 .header p, .muted { margin: 0; color: #64748b; font-size: 13px; line-height: 1.45; }
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.backLink:hover { color: #001b36; }
 .headerActions, .toolbar, .actions, .registerActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .syncMeta { color: #64748b; font-size: 11px; text-align: right; }
 .menuWrap { position: relative; }

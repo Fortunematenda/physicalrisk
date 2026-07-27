@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown, ChevronRight, Download, ExternalLink, File, FileJson, FileSpreadsheet,
@@ -95,6 +95,7 @@ function TreeRow({ entry, level, selectedPath, expanded, onToggle, onSelect }: {
 }
 
 export default function RepositoryExplorerPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [projectId, setProjectId] = useState(searchParams.get('projectId') ?? '');
@@ -211,7 +212,15 @@ export default function RepositoryExplorerPage() {
   }, [selectedFolderDocuments, statusFilter, sort]);
 
   return <main className={styles.explorer}>
-    <section className={styles.header}><div><h1>VPS Repository Explorer</h1><p>Browse approved project documents stored in the configured Physical Risk VPS repository.</p></div><div className={styles.headerActions}>
+    <section className={styles.header}>
+      <div>
+        <button type="button" className={styles.backLink} onClick={() => router.back()} aria-label="Go back">
+          ← Back
+        </button>
+        <h1>VPS Repository Explorer</h1>
+        <p>Browse approved project documents stored in the configured Physical Risk VPS repository.</p>
+      </div>
+      <div className={styles.headerActions}>
         <span className={styles.syncMeta}>Last synchronised<br />{repository?.lastSynchronisedAt ? formatDate(repository.lastSynchronisedAt) : 'Not available'}</span>
         <button type="button" className={styles.iconButton} aria-label="Refresh repository" title="Refresh repository" onClick={() => void load(projectId)} disabled={loading || !projectId}>
           <RefreshCw size={16} className={loading ? styles.spinning : undefined} />
