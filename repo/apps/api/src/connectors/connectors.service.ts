@@ -416,37 +416,74 @@ export class ConnectorsService {
       throw new BadRequestException('This connector does not support selective import');
     }
     const folderId = dto.folderId || connection.rootExternalFolderId;
-    if (!folderId) throw new BadRequestException('folderId is required when no root folder is configured');
+    if (!folderId) {
+      throw new BadRequestException('Set a root folder (or pass folderId) before importing files.');
+    }
+    if (!dto.fileIds?.length) {
+      throw new BadRequestException('Select at least one file to import.');
+    }
+
+    const mapping = await this.db.sourceFolderMappings.findOne({
+      where: { connection: { id: connection.id }, externalFolderId: folderId, enabled: true },
+      relations: { project: true, section: true },
+    });
+    const projectId = mapping?.project?.id || connection.defaultProject?.id;
+    const sectionId = mapping?.section?.id || connection.defaultSection?.id;
+    if (!projectId) {
+      throw new BadRequestException(
+        'A target project is required. Create a Folder Mapping with a Project for this folder, '
+        + 'or set a default project on the Source Connection, then try again.',
+      );
+    }
 
     const jobs = [];
+    const failures: string[] = [];
     let pageToken: string | undefined;
     const selected = new Set(dto.fileIds);
     do {
       const page = await connector.listFiles(connection, folderId, pageToken);
       for (const file of page.files.filter((item) => selected.has(item.id))) {
-        const downloaded = await connector.downloadFile(connection, file);
-        const job = await this.orchestrator.queueExternalImport({
-          provider: connection.provider,
-          sourceConnectionId: connection.id,
-          externalFileId: file.id,
-          externalRevisionId: downloaded.revisionId || file.revisionId,
-          externalFileName: downloaded.fileName,
-          mimeType: downloaded.mimeType,
-          fileSize: downloaded.data.length,
-          externalModifiedAt: file.modifiedAt,
-          folderId,
-          projectId: connection.defaultProject?.id,
-          sectionId: connection.defaultSection?.id,
-          initiatedByUserId: userId,
-          data: downloaded.data,
-        });
-        jobs.push(job);
+        try {
+          const downloaded = await connector.downloadFile(connection, file);
+          const job = await this.orchestrator.queueExternalImport({
+            provider: connection.provider,
+            sourceConnectionId: connection.id,
+            externalFileId: file.id,
+            externalRevisionId: downloaded.revisionId || file.revisionId,
+            externalFileName: downloaded.fileName,
+            mimeType: downloaded.mimeType,
+            fileSize: downloaded.data.length,
+            externalModifiedAt: file.modifiedAt,
+            folderId,
+            folderMappingId: mapping?.id,
+            projectId,
+            sectionId,
+            initiatedByUserId: userId,
+            data: downloaded.data,
+          });
+          jobs.push(job);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'Import failed';
+          failures.push(`${file.name}: ${reason}`);
+        }
       }
       pageToken = page.nextPageToken;
-    } while (pageToken && jobs.length < dto.fileIds.length);
+    } while (pageToken && jobs.length + failures.length < dto.fileIds.length);
 
-    if (!jobs.length) throw new NotFoundException('None of the selected files were found in the configured folder');
-    return jobs;
+    if (!jobs.length) {
+      throw new BadRequestException(
+        failures.length
+          ? `Unable to queue selected files. ${failures.join(' | ')}`
+          : 'None of the selected files were found in the configured folder.',
+      );
+    }
+
+    return {
+      queued: jobs.length,
+      failed: failures.length,
+      failures,
+      jobs,
+    };
   }
 
   listSyncRuns(id: string) {

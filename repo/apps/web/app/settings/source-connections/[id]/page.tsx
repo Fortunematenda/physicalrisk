@@ -120,6 +120,7 @@ export default function SourceConnectionDetailPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [schedule, setSchedule] = useState('MANUAL');
+  const [defaultProjectId, setDefaultProjectId] = useState('');
   const [savingSchedule, setSavingSchedule] = useState(false);
 
   const [folderCrumbs, setFolderCrumbs] = useState<Breadcrumb[]>([{ id: null, name: 'My Drive' }]);
@@ -153,6 +154,7 @@ export default function SourceConnectionDetailPage() {
       ]);
       setConnection(conn);
       setSchedule(conn.syncSchedule || 'MANUAL');
+      setDefaultProjectId(conn.defaultProject?.id || '');
       setProjects(projectList);
       setSyncRuns(runs);
       if (conn.rootExternalFolderId) setFileFolderId(conn.rootExternalFolderId);
@@ -221,15 +223,19 @@ export default function SourceConnectionDetailPage() {
     try {
       const updated = await api<Connection>(`/connectors/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ syncSchedule: schedule }),
+        body: JSON.stringify({
+          syncSchedule: schedule,
+          defaultProjectId: defaultProjectId || null,
+        }),
       });
       setConnection(updated);
-      setMessage('Sync schedule saved.');
+      setDefaultProjectId(updated.defaultProject?.id || '');
+      setMessage('Connection settings saved.');
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 404) {
         setMessage('Sync schedule UI is ready, but the update endpoint is not available yet (404).');
       } else {
-        setError(caught instanceof Error ? caught.message : 'Unable to save sync schedule.');
+        setError(caught instanceof Error ? caught.message : 'Unable to save connection settings.');
       }
     } finally {
       setSavingSchedule(false);
@@ -302,6 +308,10 @@ export default function SourceConnectionDetailPage() {
     event.preventDefault();
     if (!mappingForm.externalFolderId || !mappingForm.externalFolderName) {
       setError('Select an external folder for the Folder Mapping.');
+      return;
+    }
+    if (!mappingForm.projectId) {
+      setError('Select a Project for the Folder Mapping (required for import).');
       return;
     }
     setSavingMapping(true);
@@ -388,7 +398,7 @@ export default function SourceConnectionDetailPage() {
           folderId: fileFolderId || connection?.rootExternalFolderId || undefined,
         }),
       });
-      setMessage(`${selectedFileIds.length} file(s) queued for External Import review.`);
+      setMessage(`${selectedFileIds.length} file(s) queued. Open Import Queue to continue review/import.`);
       setSelectedFileIds([]);
       await loadFiles();
     } catch (caught) {
@@ -447,9 +457,9 @@ export default function SourceConnectionDetailPage() {
         </div>
 
         <form className="detail-card" onSubmit={saveSchedule}>
-          <h2>Sync schedule</h2>
+          <h2>Sync &amp; routing defaults</h2>
           <p className="secondary-text" style={{ marginBottom: 14 }}>
-            Choose how often this Source Connection should sync mapped folders.
+            Imports need a target project. Set a default here and/or create a Folder Mapping with a project.
           </p>
           <div className="field">
             <label htmlFor="sync-schedule">Schedule</label>
@@ -463,9 +473,24 @@ export default function SourceConnectionDetailPage() {
               ))}
             </select>
           </div>
+          <div className="field" style={{ marginTop: 12 }}>
+            <label htmlFor="default-project">Default project</label>
+            <select
+              id="default-project"
+              value={defaultProjectId}
+              onChange={(event) => setDefaultProjectId(event.target.value)}
+            >
+              <option value="">Select project…</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} — {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="form-actions" style={{ marginTop: 14 }}>
             <button type="submit" className="button primary" disabled={savingSchedule}>
-              {savingSchedule ? 'Saving…' : 'Save schedule'}
+              {savingSchedule ? 'Saving…' : 'Save settings'}
             </button>
           </div>
         </form>
