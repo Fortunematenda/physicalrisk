@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { google, drive_v3 } from 'googleapis';
 import { ConnectorProvider, SourceConnection, SourceConnectionStatus } from '../../database/entities';
 import { CredentialEncryptionService } from '../credential-encryption.service';
+import { GoogleOAuthSettingsService } from '../google-oauth-settings.service';
 import { ConnectorConfigurationError, ConnectorNotConnectedError } from '../connector-errors';
 import { ConnectorDownloadResult, ConnectorOAuthStartResult, ConnectorTestResult } from '../interfaces/connector-result.interface';
 import { ExternalFile } from '../interfaces/external-file.interface';
@@ -40,12 +40,12 @@ export class GoogleDriveConnector implements OAuthConnector {
   readonly supportsFolders = true as const;
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly googleOAuth: GoogleOAuthSettingsService,
     private readonly encryption: CredentialEncryptionService,
   ) {}
 
   async buildOAuthStart(connection: SourceConnection, redirectUri: string): Promise<ConnectorOAuthStartResult> {
-    const oauth2 = this.createOAuthClient(redirectUri);
+    const oauth2 = await this.createOAuthClient(redirectUri);
     const state = connection.id;
     const authUrl = oauth2.generateAuthUrl({
       access_type: 'offline',
@@ -57,7 +57,7 @@ export class GoogleDriveConnector implements OAuthConnector {
   }
 
   async completeOAuth(connection: SourceConnection, code: string, redirectUri: string): Promise<SourceConnection> {
-    const oauth2 = this.createOAuthClient(redirectUri);
+    const oauth2 = await this.createOAuthClient(redirectUri);
     const { tokens } = await oauth2.getToken(code);
     if (!tokens.access_token) throw new ConnectorConfigurationError('Google OAuth did not return an access token');
     const payload: GoogleDriveCredentials = {
@@ -66,6 +66,7 @@ export class GoogleDriveConnector implements OAuthConnector {
       expiryDate: tokens.expiry_date ?? undefined,
       tokenType: tokens.token_type ?? 'Bearer',
     };
+    await this.encryption.ensureKey();
     connection.credentialsEncrypted = this.encryption.encrypt(JSON.stringify(payload));
     connection.status = SourceConnectionStatus.CONNECTED;
     connection.lastSyncError = null;
@@ -81,7 +82,7 @@ export class GoogleDriveConnector implements OAuthConnector {
   }
 
   async testConnection(connection: SourceConnection): Promise<ConnectorTestResult> {
-    const redirectUri = this.getRedirectUri();
+    const redirectUri = await this.getRedirectUri();
     const drive = await this.getDriveClient(connection, redirectUri);
     const about = await drive.about.get({ fields: 'user(displayName,emailAddress)' });
     return {
@@ -92,7 +93,7 @@ export class GoogleDriveConnector implements OAuthConnector {
   }
 
   async listFolders(connection: SourceConnection, parentFolderId?: string): Promise<ExternalFolder[]> {
-    const drive = await this.getDriveClient(connection, this.getRedirectUri());
+    const drive = await this.getDriveClient(connection, await this.getRedirectUri());
     const parent = parentFolderId ?? connection.rootExternalFolderId ?? 'root';
     const response = await drive.files.list({
       q: `'${parent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -109,7 +110,7 @@ export class GoogleDriveConnector implements OAuthConnector {
   }
 
   async listFiles(connection: SourceConnection, folderId: string, pageToken?: string) {
-    const drive = await this.getDriveClient(connection, this.getRedirectUri());
+    const drive = await this.getDriveClient(connection, await this.getRedirectUri());
     const response = await drive.files.list({
       q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
       fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,parents,version,md5Checksum)',
@@ -122,7 +123,7 @@ export class GoogleDriveConnector implements OAuthConnector {
   }
 
   async downloadFile(connection: SourceConnection, file: ExternalFile): Promise<ConnectorDownloadResult> {
-    const drive = await this.getDriveClient(connection, this.getRedirectUri());
+    const drive = await this.getDriveClient(connection, await this.getRedirectUri());
     const meta = await drive.files.get({ fileId: file.id, fields: 'id,name,mimeType,modifiedTime,version,md5Checksum' });
     const mimeType = meta.data.mimeType ?? file.mimeType;
     const exportConfig = GOOGLE_EXPORT_MIME[mimeType];
@@ -159,18 +160,14 @@ export class GoogleDriveConnector implements OAuthConnector {
     };
   }
 
-  private createOAuthClient(redirectUri: string) {
-    const clientId = this.config.get<string>('GOOGLE_CLIENT_ID')?.trim();
-    const clientSecret = this.config.get<string>('GOOGLE_CLIENT_SECRET')?.trim();
-    if (!clientId || !clientSecret) {
-      throw new ConnectorConfigurationError('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured');
-    }
-    return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  private async createOAuthClient(redirectUri: string) {
+    const credentials = await this.googleOAuth.requireCredentials();
+    return new google.auth.OAuth2(credentials.clientId, credentials.clientSecret, redirectUri);
   }
 
-  private getRedirectUri() {
-    return this.config.get<string>('GOOGLE_REDIRECT_URI')?.trim()
-      ?? 'http://localhost:8080/api/connectors/google-drive/callback';
+  private async getRedirectUri() {
+    const credentials = await this.googleOAuth.requireCredentials();
+    return credentials.redirectUri;
   }
 
   private readCredentials(connection: SourceConnection): GoogleDriveCredentials {
@@ -180,7 +177,7 @@ export class GoogleDriveConnector implements OAuthConnector {
 
   private async getDriveClient(connection: SourceConnection, redirectUri: string) {
     const stored = this.readCredentials(connection);
-    const oauth2 = this.createOAuthClient(redirectUri);
+    const oauth2 = await this.createOAuthClient(redirectUri);
     oauth2.setCredentials({
       access_token: stored.accessToken,
       refresh_token: stored.refreshToken || undefined,
@@ -195,7 +192,9 @@ export class GoogleDriveConnector implements OAuthConnector {
         expiryDate: tokens.expiry_date ?? stored.expiryDate,
         tokenType: tokens.token_type ?? stored.tokenType,
       };
-      connection.credentialsEncrypted = this.encryption.encrypt(JSON.stringify(next));
+      void this.encryption.ensureKey().then(() => {
+        connection.credentialsEncrypted = this.encryption.encrypt(JSON.stringify(next));
+      });
     });
     return google.drive({ version: 'v3', auth: oauth2 });
   }

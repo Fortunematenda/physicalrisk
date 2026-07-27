@@ -15,6 +15,7 @@ import {
   SelectRootFolderDto,
   UpdateConnectionDto,
   UpdateFolderMappingDto,
+  UpdateGoogleOAuthSettingsDto,
 } from './dto/connector.dto';
 
 const VIEW_ROLES = [UserRole.ADMIN, UserRole.IMPORTER] as const;
@@ -45,6 +46,21 @@ export class ConnectorsController {
   @Roles(...VIEW_ROLES)
   list() {
     return this.connectors.listConnections();
+  }
+
+  @Get('google-oauth/settings')
+  @Roles(...MANAGE_ROLES)
+  getGoogleOAuthSettings() {
+    return this.connectors.getGoogleOAuthSettings();
+  }
+
+  @Put('google-oauth/settings')
+  @Roles(...MANAGE_ROLES)
+  updateGoogleOAuthSettings(
+    @Body() body: UpdateGoogleOAuthSettingsDto,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.connectors.updateGoogleOAuthSettings(body, user?.id);
   }
 
   @Post('google-drive/connect')

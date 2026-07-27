@@ -14,6 +14,8 @@ import {
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorNotConnectedError } from './connector-errors';
+import { CredentialEncryptionService } from './credential-encryption.service';
+import { GoogleOAuthSettingsService, UpdateGoogleOAuthInput } from './google-oauth-settings.service';
 import {
   CreateFolderMappingDto,
   GoogleDriveConnectDto,
@@ -37,6 +39,8 @@ export class ConnectorsService {
     private readonly orchestrator: ExternalImportOrchestratorService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    private readonly googleOAuth: GoogleOAuthSettingsService,
+    private readonly encryption: CredentialEncryptionService,
   ) {}
 
   listConnections() {
@@ -56,6 +60,8 @@ export class ConnectorsService {
   }
 
   async startGoogleDriveConnect(dto: GoogleDriveConnectDto, userId?: string) {
+    await this.googleOAuth.requireCredentials();
+    await this.encryption.ensureKey();
     const user = userId ? await this.db.users.findOne({ where: { id: userId } }) : null;
     const defaultProject = dto.defaultProjectId
       ? await this.db.projects.findOne({ where: { id: dto.defaultProjectId } })
@@ -86,7 +92,7 @@ export class ConnectorsService {
 
     const connector = this.registry.get(ConnectorProvider.GOOGLE_DRIVE);
     if (!isOAuthConnector(connector)) throw new BadRequestException('Google Drive OAuth is unavailable');
-    const redirectUri = this.getGoogleRedirectUri();
+    const redirectUri = await this.getGoogleRedirectUri();
     const start = await connector.buildOAuthStart(connection, redirectUri);
     await this.audit.record({
       userId,
@@ -105,7 +111,7 @@ export class ConnectorsService {
     if (!connection) throw new NotFoundException('OAuth connection was not found');
     const connector = this.registry.get(ConnectorProvider.GOOGLE_DRIVE);
     if (!isOAuthConnector(connector)) throw new BadRequestException('Google Drive OAuth is unavailable');
-    const updated = await connector.completeOAuth(connection, code, this.getGoogleRedirectUri());
+    const updated = await connector.completeOAuth(connection, code, await this.getGoogleRedirectUri());
     await this.db.sourceConnections.save(updated);
     await this.audit.record({
       action: 'SOURCE_CONNECTED',
@@ -466,14 +472,6 @@ export class ConnectorsService {
     return { id, disconnected: true };
   }
 
-  health() {
-    return {
-      status: 'ok',
-      providers: this.registry.listProviders(),
-      mcpEnabled: this.config.get<string>('MCP_ENABLED', 'true') === 'true',
-    };
-  }
-
   private async queueFileIfNeeded(
     connection: SourceConnection,
     connector: ReturnType<ConnectorRegistryService['get']>,
@@ -554,8 +552,37 @@ export class ConnectorsService {
     return mapping;
   }
 
-  private getGoogleRedirectUri() {
-    return this.config.get<string>('GOOGLE_REDIRECT_URI')?.trim()
-      ?? 'http://localhost:8080/api/connectors/google-drive/callback';
+  health() {
+    return this.googleOAuth.getPublicView().then((google) => ({
+      status: 'ok',
+      providers: this.registry.listProviders(),
+      mcpEnabled: this.config.get<string>('MCP_ENABLED', 'true') === 'true',
+      googleOAuthConfigured: google.configured,
+      googleOAuthSource: google.source,
+    }));
+  }
+
+  getGoogleOAuthSettings() {
+    return this.googleOAuth.getPublicView();
+  }
+
+  async updateGoogleOAuthSettings(input: UpdateGoogleOAuthInput, userId?: string) {
+    await this.encryption.ensureKey();
+    const view = await this.googleOAuth.update(input, userId);
+    await this.audit.record({
+      userId,
+      action: 'GOOGLE_OAUTH_SETTINGS_UPDATED',
+      entityType: 'SystemSetting',
+      entityId: 'connectors.googleOAuth',
+      message: 'Updated Google Drive OAuth settings from admin UI',
+    });
+    return view;
+  }
+
+  private async getGoogleRedirectUri() {
+    const { config } = await this.googleOAuth.resolve();
+    return config.redirectUri.trim()
+      || this.config.get<string>('GOOGLE_REDIRECT_URI')?.trim()
+      || 'https://repo.physicalrisk.com/api/connectors/google-drive/callback';
   }
 }

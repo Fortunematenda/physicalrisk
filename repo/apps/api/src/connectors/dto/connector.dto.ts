@@ -132,3 +132,21 @@ export class UpdateConnectionDto {
   @IsUUID()
   sourceSystemId?: string;
 }
+
+/** Admin UI: Google Drive OAuth app credentials (like SMTP settings). */
+export class UpdateGoogleOAuthSettingsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  clientId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  clientSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  redirectUri?: string;
+}
