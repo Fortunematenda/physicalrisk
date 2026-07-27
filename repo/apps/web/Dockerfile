@@ -15,10 +15,17 @@ ARG KEYCLOAK_CLIENT_SECRET=build-time-placeholder
 ENV KEYCLOAK_CLIENT_ID=$KEYCLOAK_CLIENT_ID
 ENV KEYCLOAK_CLIENT_SECRET=$KEYCLOAK_CLIENT_SECRET
 COPY . .
-RUN npm install --no-save nanoid && \
-  for i in 1 2 3 4 5; do \
-    npm run build -w @gateway/web -- --webpack && break || sleep 10; \
-  done
+# Fail the image build if Next never produces standalone output (old loop hid failures).
+RUN npm install --no-save nanoid \
+  && success=0 \
+  && for i in 1 2 3 4 5; do \
+       if npm run build -w @gateway/web -- --webpack; then success=1; break; fi; \
+       echo "repo-web build attempt $i failed; retrying…"; \
+       sleep 10; \
+     done \
+  && [ "$success" = "1" ] \
+  && test -d apps/web/.next/standalone \
+  && test -d apps/web/.next/static
 
 FROM node:22-alpine AS runner
 WORKDIR /app
