@@ -12,7 +12,7 @@
       </#if>
     </div>
     <p style="margin-top:1.25rem;text-align:center;">
-      <a class="pr-link" href="${client.baseUrl!''}">Back to application</a>
+      <a class="pr-link" href="https://repo.physicalrisk.com">Back to application</a>
     </p>
   </#if>
 </@layout.registrationLayout>

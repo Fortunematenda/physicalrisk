@@ -23,15 +23,16 @@ export async function GET(req: NextRequest) {
     process.env.KEYCLOAK_ISSUER ||
     process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ||
     'https://auth.physicalrisk.com/realms/physicalrisk';
-  const clientId = process.env.KEYCLOAK_CLIENT_ID || 'physicalrisk-portal';
+  const clientId = (process.env.KEYCLOAK_CLIENT_ID || 'physicalrisk-portal').trim();
   const portalUrl = (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'https://apps.physicalrisk.com').replace(
     /\/$/,
     '',
   );
 
+  // Land on the apps home page (signed-out). Home skips auto Keycloak when ?signedOut=1.
   const params = new URLSearchParams({
     client_id: clientId,
-    post_logout_redirect_uri: `${portalUrl}/auth/signin?signedOut=1`,
+    post_logout_redirect_uri: `${portalUrl}/?signedOut=1`,
   });
 
   const idToken =

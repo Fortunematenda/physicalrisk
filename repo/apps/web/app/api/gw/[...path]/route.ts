@@ -46,10 +46,11 @@ async function resolveBearer(req: NextRequest): Promise<{ bearer: string | null;
 }
 
 async function refreshKeycloakToken(refreshToken: string): Promise<string | null> {
-  const issuer =
-    process.env.KEYCLOAK_ISSUER || 'https://auth.physicalrisk.com/realms/physicalrisk';
-  const clientId = process.env.KEYCLOAK_CLIENT_ID || '';
-  const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || '';
+  const issuer = (
+    process.env.KEYCLOAK_ISSUER || 'https://auth.physicalrisk.com/realms/physicalrisk'
+  ).trim();
+  const clientId = (process.env.KEYCLOAK_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.KEYCLOAK_CLIENT_SECRET || '').trim();
   if (!clientId || !clientSecret) return null;
 
   try {

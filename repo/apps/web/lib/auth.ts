@@ -4,11 +4,12 @@ import type { JWT } from 'next-auth/jwt';
 import { cacheAccessToken, getCachedAccessToken } from './token-cache';
 
 const keycloakIssuer =
-  process.env.KEYCLOAK_ISSUER || 'https://auth.physicalrisk.com/realms/physicalrisk';
-const publicAuthUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'https://repo.physicalrisk.com';
+  (process.env.KEYCLOAK_ISSUER || 'https://auth.physicalrisk.com/realms/physicalrisk').trim();
+const publicAuthUrl = (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'https://repo.physicalrisk.com').trim();
 const secureCookies = publicAuthUrl.startsWith('https://');
-const clientId = process.env.KEYCLOAK_CLIENT_ID || '';
-const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || '';
+// Strip CRLF — Windows-edited .env.sso values become client_id=...%0D and break Keycloak.
+const clientId = (process.env.KEYCLOAK_CLIENT_ID || '').trim();
+const clientSecret = (process.env.KEYCLOAK_CLIENT_SECRET || '').trim();
 
 export const SSO_CONFIGURED = Boolean(clientId && clientSecret);
 

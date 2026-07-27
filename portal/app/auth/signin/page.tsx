@@ -8,7 +8,6 @@ function SignInInner() {
   const params = useSearchParams();
   const oauthError = params.get('error');
   const stale = params.get('stale') === '1';
-  const signedOut = params.get('signedOut') === '1';
   const [started, setStarted] = useState(false);
 
   useEffect(() => {
@@ -16,7 +15,8 @@ function SignInInner() {
       window.location.replace('/auth/signin?stale=1');
       return;
     }
-    if (stale || signedOut || started) return;
+    // After SSO logout, auto-start Keycloak login (no confirmation screen).
+    if (stale || started) return;
     setStarted(true);
     void signIn('keycloak', {
       callbackUrl: '/auth/complete?next=%2F',
@@ -24,13 +24,13 @@ function SignInInner() {
     }).then((result) => {
       if (result?.url) window.location.replace(result.url);
     });
-  }, [oauthError, signedOut, stale, started]);
+  }, [oauthError, stale, started]);
 
   if (oauthError) {
     return null;
   }
 
-  if (stale || signedOut) {
+  if (stale) {
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#121820] px-4">
         <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-[#c41230]/50 blur-3xl" />
@@ -39,12 +39,10 @@ function SignInInner() {
             PR
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {signedOut ? 'Signed out' : 'Sign in again'}
+            Sign in again
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            {signedOut
-              ? 'Your Physical Risk SSO session has ended.'
-              : 'The previous sign-in link is no longer valid. Start a fresh secure sign-in.'}
+            The previous sign-in link is no longer valid. Start a fresh secure sign-in.
           </p>
           <button
             type="button"

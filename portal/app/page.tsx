@@ -1,17 +1,22 @@
 'use client';
 
 import { useSession, signIn } from 'next-auth/react';
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Shield, LogOut, ArrowUpRight, Database } from 'lucide-react';
 
 const MOSS_URL = process.env.NEXT_PUBLIC_MOSS_URL || 'https://moss.physicalrisk.com';
 const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL || 'https://repo.physicalrisk.com';
 
-export default function HomePage() {
+function HomeInner() {
   const { data: session, status } = useSession();
+  const params = useSearchParams();
+  const signedOut = params.get('signedOut') === '1';
   const startedSignIn = useRef(false);
 
   useEffect(() => {
+    // After SSO logout, stay on the apps home page until the user clicks Sign in.
+    if (signedOut) return;
     if (status !== 'unauthenticated' || startedSignIn.current) return;
     startedSignIn.current = true;
     void signIn('keycloak', { callbackUrl: '/auth/complete?next=%2F', redirect: false }).then(
@@ -19,13 +24,17 @@ export default function HomePage() {
         if (result?.url) window.location.replace(result.url);
       },
     );
-  }, [status]);
+  }, [status, signedOut]);
 
   function handleSignOut() {
     window.location.replace('/api/auth/federated-logout');
   }
 
-  if (status === 'loading' || status === 'unauthenticated') {
+  function handleSignIn() {
+    window.location.replace('/auth/signin');
+  }
+
+  if (status === 'loading' || (status === 'unauthenticated' && !signedOut)) {
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#121820]">
         <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-[#c41230]/45 blur-3xl pr-glow" />
@@ -39,6 +48,92 @@ export default function HomePage() {
           <p className="mt-2 text-sm text-white/60">Redirecting to secure sign-in…</p>
           <div className="mx-auto mt-6 h-8 w-8 animate-spin rounded-full border-[3px] border-white/20 border-t-[#c41230]" />
         </div>
+      </div>
+    );
+  }
+
+  if (status === 'unauthenticated' && signedOut) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-[#121820] text-[#f7f3ef]">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.35] pr-grid-drift"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+            maskImage: 'radial-gradient(ellipse 90% 70% at 50% 0%, black, transparent)',
+          }}
+        />
+        <div className="pointer-events-none absolute -left-32 -top-28 h-[28rem] w-[28rem] rounded-full bg-[#c41230]/40 blur-3xl pr-glow" />
+
+        <header className="relative z-10 border-b border-white/10 bg-[#121820]/70 backdrop-blur-md">
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+            <img
+              src="/physical_risk_logo_main.png"
+              alt="Physical Risk"
+              className="max-w-[160px]"
+            />
+            <button
+              type="button"
+              onClick={handleSignIn}
+              className="rounded-lg bg-[#c41230] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
+            >
+              Sign in
+            </button>
+          </div>
+        </header>
+
+        <main className="relative z-10 mx-auto max-w-6xl px-6 pb-16 pt-12 sm:pt-16">
+          <section className="mx-auto mb-10 max-w-2xl text-center">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-[#f3a3b0]">
+              Signed out
+            </p>
+            <h1 className="font-display text-[clamp(2.4rem,5vw,3.6rem)] leading-[1.05] tracking-[-0.02em] text-white">
+              Physical Risk Platform
+            </h1>
+            <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/60">
+              Your SSO session has ended. Sign in again to open MOSS or the enterprise repository.
+            </p>
+            <button
+              type="button"
+              onClick={handleSignIn}
+              className="mt-8 rounded-xl bg-[#c41230] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:brightness-110"
+            >
+              Sign in
+            </button>
+          </section>
+
+          <div className="grid gap-5 opacity-50 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-[#c41230] text-white">
+                <Shield className="h-6 w-6" />
+              </div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                Assessments & reporting
+              </p>
+              <h2 className="mb-3 text-2xl font-semibold tracking-tight text-white">MOSS</h2>
+              <p className="text-sm leading-relaxed text-white/55">
+                Management Operating Security System — assessments, evidence, risk scoring, and
+                executive reporting.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-[#1e3a5f] text-white">
+                <Database className="h-6 w-6" />
+              </div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                Documents & control
+              </p>
+              <h2 className="mb-3 text-2xl font-semibold tracking-tight text-white">
+                Enterprise Repository
+              </h2>
+              <p className="text-sm leading-relaxed text-white/55">
+                Approved-document gateway — imports, version control, metadata indexing, and project
+                routing.
+              </p>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -197,5 +292,19 @@ export default function HomePage() {
         </footer>
       </main>
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#121820]">
+          <p className="text-sm text-white/60">Loading…</p>
+        </div>
+      }
+    >
+      <HomeInner />
+    </Suspense>
   );
 }
