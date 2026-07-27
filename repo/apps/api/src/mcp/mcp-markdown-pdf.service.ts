@@ -79,7 +79,9 @@ export class McpMarkdownPdfService {
         doc.moveDown(1.2);
         doc.fillColor('#111111');
 
-        const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+        // Title is already printed above; drop a leading H1 that duplicates it.
+        const bodyMarkdown = this.stripDuplicateLeadingTitle(markdown, title);
+        const lines = String(bodyMarkdown || '').replace(/\r\n/g, '\n').split('\n');
         let paragraph: string[] = [];
 
         const flushParagraph = () => {
@@ -148,6 +150,16 @@ export class McpMarkdownPdfService {
       } catch (error) {
         reject(error);
       }
+    });
+  }
+
+  /** Remove a leading `# Title` when it matches the PDF cover title (avoids "Chickens" twice). */
+  private stripDuplicateLeadingTitle(markdown: string, title: string): string {
+    const normalizedTitle = title.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!normalizedTitle) return markdown;
+    return String(markdown || '').replace(/^\s*#\s+([^\n]+)\n+/, (full, headingText: string) => {
+      const normalizedHeading = String(headingText).trim().toLowerCase().replace(/\s+/g, ' ');
+      return normalizedHeading === normalizedTitle ? '' : full;
     });
   }
 

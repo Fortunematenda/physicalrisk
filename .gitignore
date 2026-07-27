@@ -51,8 +51,8 @@ repo/storage/**
 !repo/storage/**/.gitkeep
 tmp/
 **/tmp/
-cache/
-**/cache/
+# Never ignore **/cache/ globally — Elementor/Yoast ship PHP under */cache/
+# directories. Runtime WordPress cache is covered below.
 
 # WordPress runtime/private content
 wordpress/.git/
