@@ -34,6 +34,7 @@ describe('McpToolsService project permissions', () => {
     auth as unknown as McpAuthService,
     {} as any,
     {} as any,
+    { begin: jest.fn(), addChunk: jest.fn(), takeBase64: jest.fn() } as any,
   );
 
   beforeEach(() => {

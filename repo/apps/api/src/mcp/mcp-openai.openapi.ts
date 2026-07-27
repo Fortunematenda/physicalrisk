@@ -1,11 +1,7 @@
 /**
  * OpenAPI for ChatGPT Custom GPT Actions.
- * Constraints from ChatGPT Actions validator:
- * - only one security scheme
- * - components.schemas must be an object
- * - object schemas need properties
- * - prefer OpenAPI 3.1.0 (ChatGPT Actions requires 3.1.0 or 3.1.1)
- * - avoid $ref in multipart request bodies (causes UnrecognizedKwargsError)
+ * Custom GPTs cannot reliably send multipart/binary files, so document upload
+ * uses a JSON chunked base64 flow: begin_document_upload → upload_document_chunk → submit_approved_document.
  */
 export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const baseUrl = publicBaseUrl.replace(/\/+$/, '') || 'https://repo.physicalrisk.com';
@@ -25,6 +21,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                 importJobId: { type: 'string' },
                 status: { type: 'string' },
                 exists: { type: 'boolean' },
+                uploadId: { type: 'string' },
+                received: { type: 'integer' },
+                complete: { type: 'boolean' },
                 message: { type: 'string' },
               },
             },
@@ -52,16 +51,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   };
 
   const responses = { '200': ok, '400': err, '401': err, '403': err };
+  const security = [{ McpBearer: [] }];
 
   return {
     openapi: '3.1.0',
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Submit APPROVED documents to the Physical Risk Import Queue. '
-        + 'Use human-readable projectCode/module/documentType. '
+        'Submit APPROVED documents to the Import Queue using JSON Actions. '
+        + 'Upload files via begin_document_upload + upload_document_chunk (base64 chunks), then submit_approved_document with uploadId. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.4.0',
+      version: '1.5.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -69,16 +69,14 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'list_repository_projects',
           summary: 'List repository projects',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: {
-                    unused: { type: 'boolean', description: 'Send false or omit' },
-                  },
+                  properties: { unused: { type: 'boolean' } },
                 },
               },
             },
@@ -90,16 +88,14 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'list_document_types',
           summary: 'List document types',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: {
-                    unused: { type: 'boolean', description: 'Send false or omit' },
-                  },
+                  properties: { unused: { type: 'boolean' } },
                 },
               },
             },
@@ -111,7 +107,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'list_repository_modules',
           summary: 'List project modules',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
@@ -120,7 +116,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                   type: 'object',
                   properties: {
                     projectCode: { type: 'string', description: 'e.g. MOSS' },
-                    projectId: { type: 'string', description: 'Optional UUID' },
+                    projectId: { type: 'string' },
                   },
                 },
               },
@@ -133,7 +129,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'resolve_import_targets',
           summary: 'Resolve project/module/document type names',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
@@ -157,7 +153,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'check_document_exists',
           summary: 'Check for duplicate documents',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
@@ -165,7 +161,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                 schema: {
                   type: 'object',
                   properties: {
-                    projectCode: { type: 'string', description: 'e.g. MOSS' },
+                    projectCode: { type: 'string' },
                     projectId: { type: 'string' },
                     title: { type: 'string' },
                     fileName: { type: 'string' },
@@ -179,22 +175,73 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           responses,
         },
       },
-      '/api/mcp/submit-approved-document': {
+      '/api/mcp/tools/begin_document_upload': {
         post: {
-          operationId: 'submit_approved_document',
-          summary: 'Submit APPROVED document with uploaded file',
-          description:
-            'Attach the chat PDF as form field "file". '
-            + 'Pass projectCode, module, documentType as plain strings (not UUIDs).',
-          security: [{ McpBearer: [] }],
+          operationId: 'begin_document_upload',
+          summary: 'Start chunked base64 upload',
+          description: 'ChatGPT cannot send multipart files. Split the PDF into base64 chunks of max 3500 characters.',
+          security,
           requestBody: {
             required: true,
             content: {
-              'multipart/form-data': {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['fileName', 'totalChunks'],
+                  properties: {
+                    fileName: { type: 'string' },
+                    totalChunks: { type: 'integer', minimum: 1, maximum: 500 },
+                    mimeType: { type: 'string', description: 'e.g. application/pdf' },
+                  },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/upload_document_chunk': {
+        post: {
+          operationId: 'upload_document_chunk',
+          summary: 'Upload one base64 chunk',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['uploadId', 'index', 'total', 'data'],
+                  properties: {
+                    uploadId: { type: 'string' },
+                    index: { type: 'integer', minimum: 0 },
+                    total: { type: 'integer', minimum: 1 },
+                    data: {
+                      type: 'string',
+                      description: 'Base64 chunk, max ~3500 characters',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/submit_approved_document': {
+        post: {
+          operationId: 'submit_approved_document',
+          summary: 'Submit APPROVED document after chunked upload',
+          description: 'Pass uploadId from begin_document_upload after all chunks are uploaded. JSON only — no multipart.',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
                 schema: {
                   type: 'object',
                   required: [
-                    'file',
+                    'uploadId',
                     'projectCode',
                     'module',
                     'documentType',
@@ -203,40 +250,22 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                     'approvalStatus',
                     'approvedBy',
                     'approvalDate',
+                    'fileName',
                   ],
                   properties: {
-                    file: {
-                      type: 'string',
-                      format: 'binary',
-                      description: 'Uploaded PDF from the conversation',
-                    },
-                    projectCode: {
-                      type: 'string',
-                      description: 'Project code e.g. MOSS',
-                    },
-                    module: {
-                      type: 'string',
-                      description: 'Module name e.g. Enterprise Architecture',
-                    },
-                    documentType: {
-                      type: 'string',
-                      description: 'Document type name/code e.g. Articles',
-                    },
+                    uploadId: { type: 'string', description: 'From begin_document_upload' },
+                    projectCode: { type: 'string', description: 'e.g. MOSS' },
+                    module: { type: 'string', description: 'e.g. Enterprise Architecture' },
+                    documentType: { type: 'string', description: 'e.g. Articles' },
                     title: { type: 'string' },
-                    versionNo: { type: 'string', description: 'e.g. Rev 1.0' },
-                    approvalStatus: {
-                      type: 'string',
-                      enum: ['APPROVED'],
-                    },
+                    versionNo: { type: 'string' },
+                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
                     approvedBy: { type: 'string' },
-                    approvalDate: {
-                      type: 'string',
-                      description: 'YYYY-MM-DD',
-                    },
+                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
                     fileName: { type: 'string' },
+                    mimeType: { type: 'string' },
                     projectId: { type: 'string' },
                     sectionKey: { type: 'string' },
-                    mimeType: { type: 'string' },
                   },
                 },
               },
@@ -249,7 +278,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'get_import_status',
           summary: 'Get import job status',
-          security: [{ McpBearer: [] }],
+          security,
           requestBody: {
             required: true,
             content: {
@@ -272,9 +301,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       schemas: {
         Placeholder: {
           type: 'object',
-          properties: {
-            ok: { type: 'boolean' },
-          },
+          properties: { ok: { type: 'boolean' } },
         },
       },
       securitySchemes: {
@@ -290,26 +317,25 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
-When submitting an APPROVED document, call submit_approved_document with ONLY these fields:
-- file = the uploaded PDF from the chat (multipart file field)
-- projectCode (e.g. MOSS)
-- module (e.g. Enterprise Architecture)
-- documentType (e.g. Articles)  // NAME/CODE string, never a UUID
-- title
-- versionNo
-- approvalStatus = APPROVED
-- approvedBy
-- approvalDate (YYYY-MM-DD)
-- fileName (optional)
+IMPORTANT LIMITATION
+Custom GPT Actions cannot send multipart/binary PDF uploads. Always use the chunked JSON upload flow.
 
-Do not pass any other kwargs. Do not pass fileContentBase64. Do not pass UUIDs unless the user gave them.
-Do not invent parameters.
+FILE SUBMIT FLOW (required)
+1) Read the uploaded PDF and convert it to base64.
+2) Split the base64 string into chunks of at most 3500 characters.
+3) Call begin_document_upload with fileName, totalChunks, mimeType=application/pdf. Save uploadId.
+4) For each chunk i in 0..totalChunks-1 call upload_document_chunk with uploadId, index=i, total=totalChunks, data=chunk.
+5) Call check_document_exists with projectCode + title/fileName.
+6) Call submit_approved_document with ONLY:
+   uploadId, projectCode, module, documentType, title, versionNo, approvalStatus=APPROVED, approvedBy, approvalDate, fileName
+   Do not pass other kwargs. Do not use multipart. Do not invent UUIDs.
 
-Workflow:
-1) Auto-fill metadata from the PDF when possible.
-2) Ask only for missing project/module/documentType/approver/date.
-3) check_document_exists with projectCode + title/fileName.
-4) submit_approved_document with the file attached.
-5) Return importJobId and remind that a human must finish Import Queue review.
+DEFINITIONS
+- projectCode e.g. MOSS
+- module e.g. Enterprise Architecture (NOT document type)
+- documentType e.g. Articles (NAME/CODE string)
 
-Module ≠ Document Type. "Articles" is Document Type. "Enterprise Architecture" is Module.`;
+AUTO-POPULATE from PDF when possible; ask only for missing project/module/documentType/approver/date.
+After submit, return importJobId and remind a human must finish Import Queue review.
+
+If upload fails, report the API error message exactly.`;

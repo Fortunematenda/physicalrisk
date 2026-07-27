@@ -4,10 +4,13 @@ import {
   IsArray,
   IsDateString,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -19,6 +22,8 @@ export const MCP_TOOL_NAMES = [
   'list_document_types',
   'resolve_import_targets',
   'check_document_exists',
+  'begin_document_upload',
+  'upload_document_chunk',
   'submit_approved_document',
   'get_import_status',
 ] as const;
@@ -178,6 +183,12 @@ export class SubmitApprovedDocumentDto {
   @IsNotEmpty()
   fileName!: string;
 
+  /** Optional staged upload from begin_document_upload / upload_document_chunk. */
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  uploadId?: string;
+
   @IsOptional()
   @Transform(trimString)
   @IsString()
@@ -217,6 +228,46 @@ export class ResolveImportTargetsDto {
   @Transform(trimString)
   @IsString()
   documentType?: string;
+}
+
+export class BeginDocumentUploadDto {
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  fileName!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  totalChunks!: number;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  mimeType?: string;
+}
+
+export class UploadDocumentChunkDto {
+  @Transform(trimString)
+  @IsUUID('4')
+  uploadId!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  index!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  total!: number;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  data!: string;
 }
 
 export class GetImportStatusDto {

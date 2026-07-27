@@ -143,8 +143,14 @@ export class McpAuthService {
   }
 
   assertToolAllowed(integration: McpIntegration, toolName: McpToolName): void {
-    // Metadata resolver is always available so ChatGPT can map names → IDs.
-    if (toolName === 'resolve_import_targets') return;
+    // Always available helpers for ChatGPT Actions name→ID mapping and chunked uploads.
+    if (
+      toolName === 'resolve_import_targets'
+      || toolName === 'begin_document_upload'
+      || toolName === 'upload_document_chunk'
+    ) {
+      return;
+    }
 
     const allowed = integration.allowedTools?.length ? integration.allowedTools : [...MCP_TOOL_NAMES];
     if (!allowed.includes(toolName)) {

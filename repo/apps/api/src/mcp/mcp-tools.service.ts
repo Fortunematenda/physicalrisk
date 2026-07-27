@@ -6,6 +6,7 @@ import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
 import { McpAuthService } from './mcp-auth.service';
 import {
+  BeginDocumentUploadDto,
   CheckDocumentExistsDto,
   GetImportStatusDto,
   ListRepositoryModulesDto,
@@ -13,8 +14,10 @@ import {
   McpToolName,
   ResolveImportTargetsDto,
   SubmitApprovedDocumentDto,
+  UploadDocumentChunkDto,
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
+import { McpUploadSessionService } from './mcp-upload-session.service';
 
 @Injectable()
 export class McpToolsService {
@@ -23,6 +26,7 @@ export class McpToolsService {
     private readonly auth: McpAuthService,
     private readonly orchestrator: ExternalImportOrchestratorService,
     private readonly audit: AuditService,
+    private readonly uploads: McpUploadSessionService,
   ) {}
 
   listToolDefinitions() {
@@ -61,6 +65,21 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
+      case 'begin_document_upload':
+        return this.uploads.begin(
+          String((args as BeginDocumentUploadDto).fileName ?? ''),
+          Number((args as BeginDocumentUploadDto).totalChunks),
+          (args as BeginDocumentUploadDto).mimeType,
+        );
+      case 'upload_document_chunk': {
+        const input = args as unknown as UploadDocumentChunkDto;
+        return this.uploads.addChunk(
+          String(input.uploadId ?? ''),
+          Number(input.index),
+          Number(input.total),
+          String(input.data ?? ''),
+        );
+      }
       case 'submit_approved_document':
         return this.submitApprovedDocument(integration, args as unknown as SubmitApprovedDocumentDto, ipAddress);
       case 'get_import_status':
@@ -271,11 +290,22 @@ export class McpToolsService {
       sectionKey = resolved.module?.sectionKey;
     }
 
-    const fileContentBase64 = input.fileContentBase64?.trim();
+    let fileContentBase64 = input.fileContentBase64?.trim();
+    let fileName = input.fileName?.trim();
+    let mimeType = input.mimeType?.trim();
+    if (input.uploadId?.trim()) {
+      const staged = this.uploads.takeBase64(input.uploadId.trim());
+      fileContentBase64 = staged.fileContentBase64;
+      fileName = fileName || staged.fileName;
+      mimeType = mimeType || staged.mimeType;
+    }
     if (!fileContentBase64) {
       throw new BadRequestException(
-        'fileContentBase64 is required (or upload the file via the multipart submit_approved_document action)',
+        'Provide uploadId from begin_document_upload/upload_document_chunk (preferred for ChatGPT), or fileContentBase64',
       );
+    }
+    if (!fileName) {
+      throw new BadRequestException('fileName is required');
     }
 
     try {
@@ -297,9 +327,9 @@ export class McpToolsService {
         relationshipsJson: input.relationshipsJson,
         mode: input.mode,
         existingDocumentId: input.existingDocumentId,
-        fileName: input.fileName,
+        fileName,
         fileContentBase64,
-        mimeType: input.mimeType,
+        mimeType,
         mcpIntegrationId: integration.id,
       });
 
@@ -410,8 +440,13 @@ export class McpToolsService {
       list_document_types: 'List active document types configured in the gateway',
       resolve_import_targets:
         'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType values for submission',
+      begin_document_upload:
+        'Start a chunked file upload session (ChatGPT cannot send multipart files; use this then upload_document_chunk)',
+      upload_document_chunk:
+        'Upload one base64 chunk of the document (keep each chunk under ~3500 characters)',
       check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
-      submit_approved_document: 'Submit an APPROVED document into the import queue (not final storage)',
+      submit_approved_document:
+        'Submit an APPROVED document into the import queue using uploadId from the chunked upload flow',
       get_import_status: 'Get the processing status of an import job by id',
     };
     return descriptions[name];
@@ -451,6 +486,25 @@ export class McpToolsService {
           documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
         },
       },
+      begin_document_upload: {
+        type: 'object',
+        required: ['fileName', 'totalChunks'],
+        properties: {
+          fileName: { type: 'string' },
+          totalChunks: { type: 'integer', minimum: 1, maximum: 500 },
+          mimeType: { type: 'string' },
+        },
+      },
+      upload_document_chunk: {
+        type: 'object',
+        required: ['uploadId', 'index', 'total', 'data'],
+        properties: {
+          uploadId: { type: 'string', format: 'uuid' },
+          index: { type: 'integer', minimum: 0 },
+          total: { type: 'integer', minimum: 1 },
+          data: { type: 'string', description: 'Base64 chunk (keep under ~3500 chars)' },
+        },
+      },
       check_document_exists: {
         type: 'object',
         properties: {
@@ -483,7 +537,8 @@ export class McpToolsService {
           mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
           existingDocumentId: { type: 'string', format: 'uuid' },
           fileName: { type: 'string' },
-          fileContentBase64: { type: 'string', description: 'Optional when using multipart file upload Action' },
+          uploadId: { type: 'string', format: 'uuid', description: 'From begin_document_upload' },
+          fileContentBase64: { type: 'string', description: 'Optional if uploadId provided' },
           mimeType: { type: 'string' },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
         },
