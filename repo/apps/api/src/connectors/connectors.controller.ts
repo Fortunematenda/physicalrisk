@@ -79,7 +79,7 @@ export class ConnectorsController {
     @Query('state') state: string | undefined,
     @Res() res: Response,
   ) {
-    const webBase = (this.config.get<string>('CORS_ORIGIN') || 'http://localhost:8080').replace(/\/$/, '');
+    const webBase = this.resolveWebBase();
     if (!code || !state) {
       return res.redirect(`${webBase}/settings/source-connections?oauth=error&reason=missing_params`);
     }
@@ -203,5 +203,21 @@ export class ConnectorsController {
   @Roles(...MANAGE_ROLES)
   delete(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
     return this.connectors.deleteConnection(id, user?.id);
+  }
+
+  /** Prefer a dedicated public web URL; never use a full comma-separated CORS list. */
+  private resolveWebBase(): string {
+    const candidates = [
+      this.config.get<string>('REPO_WEB_URL'),
+      this.config.get<string>('WEB_URL'),
+      this.config.get<string>('PUBLIC_URL'),
+      this.config.get<string>('CORS_ORIGIN'),
+    ];
+    for (const raw of candidates) {
+      if (!raw?.trim()) continue;
+      const first = raw.split(',')[0]?.trim().replace(/\/$/, '');
+      if (first) return first;
+    }
+    return 'http://localhost:8080';
   }
 }

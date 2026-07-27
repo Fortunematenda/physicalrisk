@@ -263,6 +263,7 @@
       JWT_SECRET: sso-managed-jwt-secret-for-repo-local
       AUTH_DISABLED: "false"
       CORS_ORIGIN: ${REPO_CORS_ORIGINS:-http://repo.localhost,http://localhost:3002,http://apps.localhost}
+      REPO_WEB_URL: ${REPO_WEB_URL:-http://repo.localhost}
       STORAGE_ROOT: /app/storage
       MAX_UPLOAD_MB: 100
       DB_SYNCHRONIZE: "true"
