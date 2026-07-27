@@ -383,6 +383,7 @@ export default function McpIntegrationsPage() {
       <PageHeader
         title="MCP Integrations"
         description="Issue API keys and wire ChatGPT Custom GPT Actions to the Repository Import Queue."
+        action={{ label: 'Back to Source Connections', href: '/settings/source-connections' }}
       />
 
       {error ? <div className="notice error">{error}</div> : null}

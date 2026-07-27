@@ -30,8 +30,6 @@ const groups = [
   ]},
   { label: 'Administration', items: [
     ['Users & Roles', '/admin/users', '♙'],
-    ['Source Connections', '/settings/source-connections', '⇄'],
-    ['MCP Integrations', '/settings/mcp', '⬡'],
     ['System Settings', '/settings', '⚙'],
   ]},
 ] as const;

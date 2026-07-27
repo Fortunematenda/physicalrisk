@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
@@ -22,58 +21,16 @@ type Connection = {
   lastSyncError?: string | null;
 };
 
-type GoogleOAuthSettings = {
-  clientId: string;
-  redirectUri: string;
-  clientSecretSet: boolean;
-  source: 'database' | 'environment' | 'none';
-  configured: boolean;
-};
-
-const COMING_SOON = [
-  { id: 'sharepoint', name: 'SharePoint', description: 'Microsoft SharePoint document libraries.' },
-  { id: 'onedrive', name: 'OneDrive', description: 'Personal and business OneDrive folders.' },
-  { id: 'dropbox', name: 'Dropbox', description: 'Dropbox team and shared folders.' },
-  { id: 'sftp', name: 'SFTP', description: 'Secure file transfer from remote servers.' },
-  { id: 'local-vps', name: 'Local VPS Folder', description: 'Watch a folder on the repository VPS volume.' },
-] as const;
-
 function providerLabel(provider?: string) {
   return (provider ?? 'UNKNOWN').replaceAll('_', ' ');
 }
 
 export default function SourceConnectionsPage() {
-  const searchParams = useSearchParams();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  const [oauth, setOauth] = useState<GoogleOAuthSettings | null>(null);
-  const [oauthForm, setOauthForm] = useState({
-    clientId: '',
-    clientSecret: '',
-    redirectUri: 'https://repo.physicalrisk.com/api/connectors/google-drive/callback',
-  });
-  const [oauthSaving, setOauthSaving] = useState(false);
-  const [oauthError, setOauthError] = useState('');
-  const [oauthMessage, setOauthMessage] = useState('');
-
-  const loadOauth = async () => {
-    try {
-      const settings = await api<GoogleOAuthSettings>('/connectors/google-oauth/settings');
-      setOauth(settings);
-      setOauthForm({
-        clientId: settings.clientId || '',
-        clientSecret: '',
-        redirectUri: settings.redirectUri
-          || 'https://repo.physicalrisk.com/api/connectors/google-drive/callback',
-      });
-    } catch (caught) {
-      setOauthError(caught instanceof Error ? caught.message : 'Unable to load Google API settings.');
-    }
-  };
 
   const load = async () => {
     setLoading(true);
@@ -90,46 +47,7 @@ export default function SourceConnectionsPage() {
 
   useEffect(() => {
     void load();
-    void loadOauth();
   }, []);
-
-  useEffect(() => {
-    const oauthResult = searchParams.get('oauth');
-    if (oauthResult === 'success') {
-      setMessage('Google Drive connected. Open the connection below to set a root folder and sync — you do not need to Connect again.');
-    } else if (oauthResult === 'error') {
-      setError(`Google authorization failed (${searchParams.get('reason') || 'unknown'}). Try Connect again.`);
-    }
-  }, [searchParams]);
-
-  const saveOauth = async (event: FormEvent) => {
-    event.preventDefault();
-    setOauthSaving(true);
-    setOauthError('');
-    setOauthMessage('');
-    try {
-      const payload: Record<string, string> = {
-        clientId: oauthForm.clientId.trim(),
-        redirectUri: oauthForm.redirectUri.trim(),
-      };
-      if (oauthForm.clientSecret.trim()) payload.clientSecret = oauthForm.clientSecret.trim();
-      const updated = await api<GoogleOAuthSettings>('/connectors/google-oauth/settings', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      setOauth(updated);
-      setOauthForm((current) => ({ ...current, clientSecret: '' }));
-      setOauthMessage(
-        updated.source === 'database'
-          ? 'Google API settings saved. You can connect Google Drive now.'
-          : 'Google API settings updated.',
-      );
-    } catch (caught) {
-      setOauthError(caught instanceof Error ? caught.message : 'Unable to save Google API settings.');
-    } finally {
-      setOauthSaving(false);
-    }
-  };
 
   const runAction = async (id: string, action: 'test' | 'sync' | 'disconnect') => {
     setBusyId(id);
@@ -159,73 +77,11 @@ export default function SourceConnectionsPage() {
     <div className={styles.page}>
       <PageHeader
         title="Source Connections"
-        description="Connect external repositories and sync Approved Documents into the Import Queue."
+        description="Manage ChatGPT MCP integrations and review connected sources."
       />
 
       {error ? <div className="notice error">{error}</div> : null}
       {message ? <div className="notice success">{message}</div> : null}
-
-      <div className="panel">
-        <div className="panel-header">
-          <h2>Google API settings</h2>
-          <span className="secondary-text">
-            {oauth?.configured
-              ? `Configured (${oauth.source})`
-              : 'Not configured — required before Connect Google Drive'}
-          </span>
-        </div>
-        <form className="panel-body" onSubmit={saveOauth}>
-          <p className="secondary-text" style={{ marginTop: 0 }}>
-            Same pattern as SMTP: save Client ID and Client Secret here (from Google Cloud Console).
-            Add authorized redirect URI in Google Cloud to match the value below.
-          </p>
-          <div className="form-grid two">
-            <div className="field">
-              <label htmlFor="google-client-id">Client ID</label>
-              <input
-                id="google-client-id"
-                value={oauthForm.clientId}
-                onChange={(e) => setOauthForm((f) => ({ ...f, clientId: e.target.value }))}
-                placeholder="xxxx.apps.googleusercontent.com"
-                autoComplete="off"
-                disabled={oauthSaving}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="google-client-secret">
-                Client Secret{oauth?.clientSecretSet ? ' (leave blank to keep current)' : ''}
-              </label>
-              <input
-                id="google-client-secret"
-                type="password"
-                value={oauthForm.clientSecret}
-                onChange={(e) => setOauthForm((f) => ({ ...f, clientSecret: e.target.value }))}
-                placeholder={oauth?.clientSecretSet ? '••••••••' : 'Enter client secret'}
-                autoComplete="new-password"
-                disabled={oauthSaving}
-              />
-            </div>
-            <div className="field full">
-              <label htmlFor="google-redirect-uri">Redirect URI</label>
-              <input
-                id="google-redirect-uri"
-                value={oauthForm.redirectUri}
-                onChange={(e) => setOauthForm((f) => ({ ...f, redirectUri: e.target.value }))}
-                placeholder="https://repo.physicalrisk.com/api/connectors/google-drive/callback"
-                autoComplete="off"
-                disabled={oauthSaving}
-              />
-            </div>
-          </div>
-          {oauthError ? <div className="notice error">{oauthError}</div> : null}
-          {oauthMessage ? <div className="notice success">{oauthMessage}</div> : null}
-          <div className="form-actions">
-            <button type="submit" className="button primary" disabled={oauthSaving || !oauthForm.clientId.trim()}>
-              {oauthSaving ? 'Saving…' : 'Save Google API settings'}
-            </button>
-          </div>
-        </form>
-      </div>
 
       <div className="panel">
         <div className="panel-header">
