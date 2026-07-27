@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MoreVertical } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useConfirm } from './confirm-dialog';
 import { EmptyState } from './empty-state';
 import { Loading } from './loading';
 import { PageHeader } from './page-header';
@@ -143,6 +144,7 @@ export function SimpleCrud({
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
   const openItem = openMenuId ? items.find((item) => item.id === openMenuId) : null;
+  const confirm = useConfirm();
 
   const load = async () => {
     setLoading(true);
@@ -229,7 +231,13 @@ export function SimpleCrud({
     const confirmText = item.active === false
       ? `Delete “${label}”? This cannot be undone.`
       : `Remove “${label}”? If it is linked to import history it will be deactivated instead of deleted.`;
-    if (!window.confirm(confirmText)) return;
+    const ok = await confirm({
+      title: 'Delete record',
+      message: confirmText,
+      confirmLabel: item.active === false ? 'Delete' : 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusyId(item.id);
     setError('');
     setMessage('');

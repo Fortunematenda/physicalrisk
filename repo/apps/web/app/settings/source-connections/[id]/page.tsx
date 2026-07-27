@@ -9,6 +9,7 @@ import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatBytes, formatDate } from '@/lib/api';
 import { ApiError } from '@/lib/api-error';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from '../SourceConnections.module.css';
 
 type ProjectRow = {
@@ -111,6 +112,7 @@ function providerLabel(provider?: string) {
 }
 
 export default function SourceConnectionDetailPage() {
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const [connection, setConnection] = useState<Connection | null>(null);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -350,7 +352,13 @@ export default function SourceConnectionDetailPage() {
   };
 
   const deleteMapping = async (mappingId: string) => {
-    if (!confirm('Delete this Folder Mapping?')) return;
+    const ok = await confirm({
+      title: 'Delete folder mapping',
+      message: 'Delete this Folder Mapping?',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError('');
     setMessage('');
     try {

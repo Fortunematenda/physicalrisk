@@ -8,9 +8,11 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from './MasterDocumentIndex.module.css';
 
 function MasterDocumentIndexPageInner() {
+  const confirm = useConfirm();
   const router = useRouter();
   const searchParams = useSearchParams();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -90,10 +92,13 @@ function MasterDocumentIndexPageInner() {
 
   const deleteDocument = async (item: { id: string; code: string; title: string }) => {
     setOpenMenuId(null);
-    const confirmed = window.confirm(
-      `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the document, all versions, relationships, and VPS files.`,
-    );
-    if (!confirmed) return;
+    const ok = await confirm({
+      title: 'Delete document',
+      message: `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the document, all versions, relationships, and VPS files.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     setDeletingId(item.id);

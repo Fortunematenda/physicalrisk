@@ -133,6 +133,16 @@ tbody tr:hover { background: #fbfcfd; }
 tbody tr.clickable-row { cursor: pointer; }
 tbody tr.clickable-row:hover { background: #eef5fb; }
 tbody tr.clickable-row:focus-visible { outline: 2px solid rgba(23, 105, 170, 0.35); outline-offset: -2px; }
+.logs-table tbody tr,
+.logs-table tbody tr:hover,
+.logs-table .logs-row {
+  cursor: default;
+  background: transparent;
+  pointer-events: none;
+}
+.logs-table tbody tr:hover {
+  background: transparent;
+}
 .primary-text { color: var(--navy); font-weight: 750; }
 .secondary-text { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
@@ -231,6 +241,18 @@ tbody tr.clickable-row:focus-visible { outline: 2px solid rgba(23, 105, 170, 0.3
 .select-card span { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .readonly-box { background: #f7f9fb; border: 1px solid #e2e8ef; border-radius: 8px; padding: 10px 12px; min-height: 40px; display: flex; flex-direction: column; gap: 4px; }
 .modal-backdrop { position: fixed; inset: 0; background: rgba(8, 28, 52, .45); z-index: 100; display: grid; place-items: center; padding: 20px; }
+.confirm-dialog-overlay {
+  z-index: 2147483000;
+}
+.confirm-dialog-content {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2147483001;
+  max-height: min(90vh, 520px);
+  outline: none;
+}
 .modal { background: #fff; border-radius: 12px; box-shadow: 0 25px 60px rgba(0,0,0,.25); max-width: 680px; width: 100%; overflow: hidden; }
 .modal-header { padding: 18px 22px; border-bottom: 1px solid var(--line); background: #2c2c2c; color: #fff; }
 .modal-header h3 { margin: 0; font-size: 16px; }

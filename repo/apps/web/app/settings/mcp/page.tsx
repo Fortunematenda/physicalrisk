@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from '../source-connections/SourceConnections.module.css';
 
 const MCP_TOOLS = [
@@ -38,22 +39,10 @@ type McpIntegration = {
   apiKey?: string;
 };
 
-type ChatGptSetup = {
-  baseUrl: string;
-  openApiUrl: string;
-  privacyPolicyUrl: string;
-  auth: { preferred: string; alternativeHeader: string };
-  tools: string[];
-  instructions: string;
-};
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
-
 export default function McpIntegrationsPage() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<McpIntegration[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
-  const [setup, setSetup] = useState<ChatGptSetup | null>(null);
-  const [openApiText, setOpenApiText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -113,22 +102,12 @@ export default function McpIntegrationsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [integrations, projectList, setupPayload, openApi] = await Promise.all([
+      const [integrations, projectList] = await Promise.all([
         api<McpIntegration[]>('/mcp/integrations'),
         api<ProjectRow[]>('/projects'),
-        fetch(`${API_BASE}/mcp/openai/setup`).then(async (response) => {
-          if (!response.ok) throw new Error('Unable to load ChatGPT setup helpers.');
-          return response.json() as Promise<ChatGptSetup>;
-        }),
-        fetch(`${API_BASE}/mcp/openai/openapi.json`).then(async (response) => {
-          if (!response.ok) throw new Error('Unable to load OpenAPI schema.');
-          return JSON.stringify(await response.json(), null, 2);
-        }),
       ]);
       setItems(integrations);
       setProjects(projectList);
-      setSetup(setupPayload);
-      setOpenApiText(openApi);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load MCP Integrations.');
     } finally {
@@ -221,7 +200,13 @@ export default function McpIntegrationsPage() {
   };
 
   const rotate = async (id: string, name: string) => {
-    if (!confirm(`Rotate the API key for ${name}? The previous key stops working immediately.`)) return;
+    const ok = await confirm({
+      title: 'Rotate API key',
+      message: `Rotate the API key for ${name}? The previous key stops working immediately.`,
+      confirmLabel: 'Rotate',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setOpenMenuId(null);
     setBusyId(id);
     setError('');
@@ -232,7 +217,7 @@ export default function McpIntegrationsPage() {
       const updated = await api<McpIntegration>(`/mcp/integrations/${id}/rotate`, { method: 'POST' });
       const apiKey = extractApiKey(updated);
       if (!apiKey) {
-        setError('Rotate succeeded but no API key was returned. Check the Network tab for /rotate, then try again.');
+        setError('Rotate succeeded but no API key was returned. Try again.');
       } else {
         showApiKey(updated.name || name, apiKey);
       }
@@ -245,7 +230,13 @@ export default function McpIntegrationsPage() {
   };
 
   const disable = async (id: string, name: string) => {
-    if (!confirm(`Disable MCP integration ${name}?`)) return;
+    const ok = await confirm({
+      title: 'Disable integration',
+      message: `Disable MCP integration ${name}?`,
+      confirmLabel: 'Disable',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setOpenMenuId(null);
     setBusyId(id);
     setError('');
@@ -262,7 +253,13 @@ export default function McpIntegrationsPage() {
   };
 
   const grantAllProjects = async (id: string, name: string) => {
-    if (!confirm(`Allow ${name} to access ALL repository projects (including ones created later)?`)) return;
+    const ok = await confirm({
+      title: 'Grant all projects',
+      message: `Allow ${name} to access ALL repository projects (including ones created later)?`,
+      confirmLabel: 'Grant access',
+      tone: 'default',
+    });
+    if (!ok) return;
     setOpenMenuId(null);
     setBusyId(id);
     setError('');
@@ -355,7 +352,13 @@ export default function McpIntegrationsPage() {
   };
 
   const removeIntegration = async (id: string, name: string) => {
-    if (!confirm(`Permanently delete MCP integration ${name}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete integration',
+      message: `Permanently delete MCP integration ${name}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setOpenMenuId(null);
     setBusyId(id);
     setError('');
@@ -382,7 +385,7 @@ export default function McpIntegrationsPage() {
     <div className={styles.page}>
       <PageHeader
         title="MCP Integrations"
-        description="Issue API keys and wire ChatGPT Custom GPT Actions to the Repository Import Queue."
+        description="Create API keys for ChatGPT to import approved documents into the repository."
         action={{ label: 'Back to Source Connections', href: '/settings/source-connections' }}
       />
 
@@ -417,102 +420,11 @@ export default function McpIntegrationsPage() {
         </div>
       ) : null}
 
-      <details className="panel" style={{ marginBottom: 16 }}>
-        <summary className="panel-header" style={{ cursor: 'pointer', listStyle: 'none' }}>
-          <h2 style={{ display: 'inline' }}>ChatGPT Custom GPT setup</h2>
-          <span className="secondary-text" style={{ marginLeft: 10, fontSize: 12 }}>
-            click to expand
-          </span>
-        </summary>
-        <div style={{ paddingTop: 4 }}>
-        {loading && !setup ? (
-          <Loading />
-        ) : setup ? (
-          <>
-            <ol style={{ margin: '0 0 16px', paddingLeft: 20, lineHeight: 1.6 }}>
-              <li>Create an integration below with <strong>all tools</strong> and <strong>All projects</strong> so ChatGPT can see every repository project with one API key.</li>
-              <li>Copy the <code className="mono">mcp_…</code> API key when it appears.</li>
-              <li>
-                In ChatGPT → Create a GPT → Actions → Import from URL:{' '}
-                <span className="mono">{setup.openApiUrl}</span>
-              </li>
-              <li>
-                Authentication: <strong>API Key</strong> → Auth Type <strong>Bearer</strong> → paste the full key.
-                Alternative header: <span className="mono">{setup.auth.alternativeHeader}</span>
-              </li>
-              <li>
-                Privacy policy URL: <span className="mono">{setup.privacyPolicyUrl}</span>
-              </li>
-              <li>Paste the Instructions below into the GPT Instructions field, then Update and start a <strong>new</strong> chat.</li>
-              <li>When ChatGPT asks to allow an action, choose Allow / Always allow.</li>
-            </ol>
-            <div className={styles.inlineActions} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="button small primary"
-                onClick={() => void copyText(setup.openApiUrl, 'OpenAPI URL')}
-              >
-                Copy OpenAPI URL
-              </button>
-              <button
-                type="button"
-                className="button small"
-                onClick={() => void copyText(setup.privacyPolicyUrl, 'privacy URL')}
-              >
-                Copy privacy URL
-              </button>
-              <button
-                type="button"
-                className="button small"
-                onClick={() => void copyText(setup.instructions, 'GPT instructions')}
-              >
-                Copy instructions
-              </button>
-              <button
-                type="button"
-                className="button small"
-                disabled={!openApiText}
-                onClick={() => void copyText(openApiText, 'OpenAPI JSON')}
-              >
-                Copy OpenAPI JSON
-              </button>
-              <a className="button small" href={setup.openApiUrl} target="_blank" rel="noreferrer">
-                Open schema
-              </a>
-              <a className="button small" href={setup.privacyPolicyUrl} target="_blank" rel="noreferrer">
-                Privacy page
-              </a>
-            </div>
-            <div className="field">
-              <label htmlFor="gpt-instructions">GPT Instructions</label>
-              <textarea
-                id="gpt-instructions"
-                readOnly
-                rows={12}
-                value={setup.instructions}
-                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
-              />
-            </div>
-          </>
-        ) : (
-          <p className="secondary-text">ChatGPT setup helpers unavailable.</p>
-        )}
-        </div>
-      </details>
-
-      <div className="notice info">
-        MCP HTTP endpoint: <span className="mono">/api/mcp</span>
-        {' '}(externally also available as <span className="mono">/mcp</span> via nginx).
-        {' '}Expand <strong>ChatGPT Custom GPT setup</strong> above when you need OpenAPI URLs or GPT instructions.
-      </div>
-
-      <div className="grid two">
-        <form className="form-card" onSubmit={createIntegration}>
+      <form className="form-card" onSubmit={createIntegration} style={{ marginBottom: 16 }}>
           <section className="form-section">
             <h2>Create integration</h2>
             <p>
-              Prefer <strong>All projects</strong> so one API key lists and imports across every repository project
-              (including new ones). Or pick specific projects to restrict the key.
+              Prefer <strong>All projects</strong> so one API key works across every repository project.
               The API key is displayed once after creation.
             </p>
             <div className="field">
@@ -522,7 +434,7 @@ export default function McpIntegrationsPage() {
                 required
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-                placeholder="ChatGPT Production"
+                placeholder="ChatGPT"
               />
             </div>
             <div className="field">
@@ -575,23 +487,6 @@ export default function McpIntegrationsPage() {
             </button>
           </div>
         </form>
-
-        <div className="detail-card">
-          <h2>Endpoint usage</h2>
-          <dl className="detail-list">
-            <dt>ChatGPT OpenAPI</dt>
-            <dd className="mono">GET /mcp/openai/openapi.json</dd>
-            <dt>JSON-RPC</dt>
-            <dd className="mono">POST /api/mcp</dd>
-            <dt>Tool call (Actions)</dt>
-            <dd className="mono">POST /mcp/tools/:toolName</dd>
-            <dt>Auth</dt>
-            <dd>Bearer mcp_… key, or X-MCP-API-Key</dd>
-            <dt>Approved Document</dt>
-            <dd>submit_approved_document</dd>
-          </dl>
-        </div>
-      </div>
 
       <div className="panel">
         <div className="panel-header">

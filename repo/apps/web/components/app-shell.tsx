@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import TopNavigation from './layout/TopNavigation';
+import { ConfirmProvider } from './confirm-dialog';
 import { hasSsoSession, isLoggingOut, isSsoEnabled, clearLogoutGuard, redirectToLogin, ssoLogout } from '@/lib/sso';
 
 const groups = [
@@ -11,7 +12,6 @@ const groups = [
     ['Dashboard', '/', '⌂'],
     ['Master Document Index', '/repository/index', '▤'],
     ['Import Queue', '/imports/queue', '≡'],
-    ['Import Logs', '/imports/logs', '☷'],
   ]},
   { label: 'Repository', items: [
     ['VPS Repository Explorer', '/repository/explorer', '▣'],
@@ -118,12 +118,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [pathname]);
 
-  if (pathname === '/login' || pathname === '/privacy') return <>{children}</>;
+  if (pathname === '/login' || pathname === '/privacy') {
+    return <ConfirmProvider>{children}</ConfirmProvider>;
+  }
   if (!ready) return null;
 
   const displayUser = storedUser || sessionUser;
 
-  return <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
+  return (
+    <ConfirmProvider>
+      <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
     <TopNavigation
       organisationName="Physical Risk Consultancy"
       userName={displayUser?.name || "User"}
@@ -133,7 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         router.push("/settings");
       }}
       onNotificationsClick={() => {
-        router.push("/imports/logs");
+        router.push("/settings/audit");
       }}
       onLogout={() => {
         void ssoLogout();
@@ -156,5 +160,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
       <main>{children}</main>
     </div>
-  </div>;
+      </div>
+    </ConfirmProvider>
+  );
 }

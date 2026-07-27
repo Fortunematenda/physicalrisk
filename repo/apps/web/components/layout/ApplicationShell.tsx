@@ -26,7 +26,7 @@ export default function ApplicationShell({
           router.push("/settings");
         }}
         onNotificationsClick={() => {
-          router.push("/imports/logs");
+          router.push("/settings/audit");
         }}
         onLogout={() => {
           void ssoLogout();

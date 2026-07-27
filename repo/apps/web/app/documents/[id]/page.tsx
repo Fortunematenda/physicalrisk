@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api, API_URL, formatBytes, formatDate, getToken } from '@/lib/api';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from './DocumentDetails.module.css';
 
 type DocumentTypeRecord = { id: string; name: string; code: string; active: boolean };
@@ -118,6 +119,7 @@ const toDateInput = (value?: string | null) => {
 };
 
 export default function DocumentPage() {
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -392,8 +394,13 @@ export default function DocumentPage() {
   };
 
   const removeRelationship = async (relationshipId: string) => {
-    const confirmed = window.confirm('Remove this document relationship?');
-    if (!confirmed) return;
+    const ok = await confirm({
+      title: 'Remove relationship',
+      message: 'Remove this document relationship?',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     try {
@@ -433,10 +440,13 @@ export default function DocumentPage() {
 
   const deleteDocument = async () => {
     if (!item) return;
-    const confirmed = window.confirm(
-      `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the logical document, all versions, relationships, and VPS files.`,
-    );
-    if (!confirmed) return;
+    const ok = await confirm({
+      title: 'Delete document',
+      message: `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the logical document, all versions, relationships, and VPS files.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     setDeleting(true);

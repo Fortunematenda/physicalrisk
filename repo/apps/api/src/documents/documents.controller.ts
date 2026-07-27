@@ -72,7 +72,15 @@ export class DocumentsController {
   @Get('relationships') relationships(@Query('projectId') projectId?: string) { return this.documents.relationships(projectId); }
   @Post('relationships') createRelationship(@Body() body: { fromDocumentId: string; toDocumentId: string; type?: RelationshipType; description?: string }, @CurrentUser() user: { id?: string } | null) { return this.documents.createRelationship(body, user?.id); }
   @Delete('relationships/:id') deleteRelationship(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.documents.deleteRelationship(id, user?.id); }
-  @Get('audit-logs') auditLogs(@Query('entityType') entityType?: string, @Query('entityId') entityId?: string) { return this.documents.auditLogs(entityType, entityId); }
+  @Get('audit-logs')
+  auditLogs(
+    @Query('entityType') entityType?: string,
+    @Query('entityId') entityId?: string,
+    @Query('scope') scope?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.documents.auditLogs(entityType, entityId, scope, limit);
+  }
 
   @Get('versions/:id/view')
   async view(@Param('id') id: string, @Res() response: Response) {

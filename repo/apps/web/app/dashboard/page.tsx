@@ -1374,7 +1374,7 @@ export default function DashboardPage() {
               <p>Latest repository and system events</p>
             </div>
 
-            <Link href="/imports/logs" className={styles.viewButton}>
+            <Link href="/settings/audit" className={styles.viewButton}>
               View all activity
               <ChevronRight size={15} />
             </Link>

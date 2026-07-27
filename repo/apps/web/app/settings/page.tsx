@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { api, formatBytes } from '@/lib/api';
+import { SettingsTabs } from './settings-tabs';
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -26,7 +27,9 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="API health, repository storage, and external source configuration." />
+      <PageHeader title="Settings" description="System health, storage, integrations, and administrator logs." />
+      <SettingsTabs />
+
       <div className="panel" style={{ marginBottom: 16 }}>
         <div className="panel-header">
           <h2>Source Connections</h2>
@@ -37,6 +40,7 @@ export default function SettingsPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <a className="button primary" href="/settings/source-connections">Source Connections</a>
           <a className="button" href="/imports/queue">Import Queue</a>
+          <a className="button" href="/settings/audit">System logs</a>
         </div>
       </div>
       {loading ? (

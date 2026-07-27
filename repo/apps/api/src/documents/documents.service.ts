@@ -489,13 +489,29 @@ export class DocumentsService {
     return { deleted: true };
   }
 
-  auditLogs(entityType?: string, entityId?: string) {
-    return this.db.auditLogs.find({
-      where: { entityType: entityType || undefined, entityId: entityId || undefined },
-      relations: { user: true },
-      order: { createdAt: 'DESC' },
-      take: 500,
-    });
+  auditLogs(entityType?: string, entityId?: string, scope?: string, limit?: string) {
+    const take = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const qb = this.db.auditLogs.createQueryBuilder('log')
+      .leftJoinAndSelect('log.user', 'user')
+      .orderBy('log.createdAt', 'DESC')
+      .take(take);
+
+    if (entityType) qb.andWhere('log.entityType = :entityType', { entityType });
+    if (entityId) qb.andWhere('log.entityId = :entityId', { entityId });
+
+    if (scope === 'system') {
+      qb.andWhere(`log.action NOT LIKE 'IMPORT_%'`)
+        .andWhere(`log.action NOT LIKE 'MCP_REQUEST%'`)
+        .andWhere(`log.action NOT IN (:...noisy)`, {
+          noisy: ['MCP_PDF_FALLBACK', 'MCP_AUTO_IMPORT_FALLBACK'],
+        });
+    } else if (scope === 'imports') {
+      qb.andWhere(`(log.action LIKE 'IMPORT_%' OR log.entityType = :importEntity)`, {
+        importEntity: 'ImportJob',
+      });
+    }
+
+    return qb.getMany();
   }
 
   async versionFile(versionId: string) {

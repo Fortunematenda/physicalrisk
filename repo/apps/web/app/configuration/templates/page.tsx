@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { RowActionsMenu } from '@/components/row-actions-menu';
+import { useConfirm } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
 import actionStyles from '@/components/row-actions.module.css';
 import styles from '../Configuration.module.css';
@@ -53,6 +54,7 @@ const blankForm = (): TemplateForm => ({
 });
 
 export default function TemplatesPage() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -250,7 +252,13 @@ export default function TemplatesPage() {
       setError('Set another template as default before deleting this one.');
       return;
     }
-    if (!window.confirm(`Delete template “${name}”? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete template',
+      message: `Delete template “${name}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusyId(id);
     setError('');
     setMessage('');

@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from './SourceConnections.module.css';
 
 type Connection = {
@@ -26,6 +27,7 @@ function providerLabel(provider?: string) {
 }
 
 export default function SourceConnectionsPage() {
+  const confirm = useConfirm();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,7 +57,13 @@ export default function SourceConnectionsPage() {
     setMessage('');
     try {
       if (action === 'disconnect') {
-        if (!confirm('Disconnect this Source Connection? Credentials will be removed.')) return;
+        const ok = await confirm({
+          title: 'Disconnect source',
+          message: 'Disconnect this Source Connection? Credentials will be removed.',
+          confirmLabel: 'Disconnect',
+          tone: 'danger',
+        });
+        if (!ok) return;
         await api(`/connectors/${id}`, { method: 'DELETE' });
         setMessage('Source Connection disconnected.');
       } else if (action === 'test') {

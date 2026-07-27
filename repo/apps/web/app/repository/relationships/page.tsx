@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
+import { useConfirm } from '@/components/confirm-dialog';
 import styles from './Relationships.module.css';
 
 const RELATIONSHIP_TYPES = [
@@ -41,6 +42,7 @@ type RelationshipRow = {
 };
 
 export default function RelationshipsPage() {
+  const confirm = useConfirm();
   const router = useRouter();
   const [items, setItems] = useState<RelationshipRow[]>([]);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
@@ -167,10 +169,13 @@ export default function RelationshipsPage() {
   };
 
   const remove = async (item: RelationshipRow) => {
-    const confirmed = window.confirm(
-      `Remove relationship ${item.fromDocument.code} → ${item.toDocument.code} (${item.type})?`,
-    );
-    if (!confirmed) return;
+    const ok = await confirm({
+      title: 'Remove relationship',
+      message: `Remove relationship ${item.fromDocument.code} → ${item.toDocument.code} (${item.type})?`,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setDeletingId(item.id);
     setError('');
     setMessage('');

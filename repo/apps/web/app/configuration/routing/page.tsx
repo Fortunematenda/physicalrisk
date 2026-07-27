@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { RowActionsMenu } from '@/components/row-actions-menu';
+import { useConfirm } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
 import styles from '@/components/row-actions.module.css';
 
@@ -39,6 +40,7 @@ const blankForm = (): RuleForm => ({
 });
 
 export default function RoutingRulesPage() {
+  const confirm = useConfirm();
   const [rules, setRules] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
@@ -185,7 +187,13 @@ export default function RoutingRulesPage() {
 
   const removeRule = async (id: string, name: string) => {
     setOpenMenuId(null);
-    if (!window.confirm(`Delete routing rule “${name}”? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete routing rule',
+      message: `Delete routing rule “${name}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusyId(id);
     setError('');
     setMessage('');
