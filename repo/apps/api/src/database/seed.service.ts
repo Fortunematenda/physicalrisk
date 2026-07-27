@@ -3,9 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { hash } from 'bcryptjs';
 import { DatabaseService } from './database.service';
 import {
+  ConnectorProvider,
   DirectoryTemplate,
   DirectoryTemplateSection,
+  ExternalImportStatus,
   FileType,
+  ImportStatus,
   MetadataField,
   Project,
   ProjectSection,
@@ -264,6 +267,22 @@ export class SeedService implements OnApplicationBootstrap {
       }
       await this.db.systemSettings.save(row);
     }
+
+    // Promote older ChatGPT MCP jobs stuck in RECEIVED so they appear in Import Queue.
+    const promoted = await this.db.importJobs
+      .createQueryBuilder()
+      .update()
+      .set({
+        status: ImportStatus.READY_FOR_REVIEW,
+        externalImportStatus: ExternalImportStatus.READY_FOR_REVIEW,
+      })
+      .where('provider = :provider', { provider: ConnectorProvider.CHATGPT_MCP })
+      .andWhere('status = :status', { status: ImportStatus.RECEIVED })
+      .execute();
+    if (promoted.affected) {
+      this.logger.log(`Promoted ${promoted.affected} ChatGPT MCP import job(s) to READY_FOR_REVIEW`);
+    }
+
     this.logger.log('Repository gateway default configuration is ready.');
   }
 }

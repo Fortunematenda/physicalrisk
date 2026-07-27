@@ -233,6 +233,32 @@ export class ExternalImportOrchestratorService {
       relationships = [];
     }
 
+    const matchingVersion = await this.db.documentVersions.findOne({
+      where: { checksum },
+      relations: { document: true },
+    });
+    const sameDocumentVersions = matchingVersion
+      ? await this.db.documentVersions.find({
+          where: { document: { id: matchingVersion.document.id } },
+          relations: { document: true },
+        })
+      : [];
+    const dedup = determineExternalImportStatuses({
+      existingReferenceImported: false,
+      matchingVersionChecksum: Boolean(matchingVersion),
+      matchingVersionDifferentRevision: false,
+      sameDocumentDifferentChecksum: sameDocumentVersions.some((version) => version.checksum !== checksum),
+    });
+
+    let resolvedSection: ProjectSection | null = null;
+    const sectionKey = request.sectionKey?.trim();
+    if (sectionKey) {
+      resolvedSection = await this.db.projectSections.findOne({
+        where: { project: { id: project.id }, sectionKey, active: true },
+        relations: { project: true },
+      });
+    }
+
     const metadata: Record<string, unknown> = {
       projectId: request.projectId.trim(),
       sourceSystemId: source.id,
@@ -245,19 +271,20 @@ export class ExternalImportOrchestratorService {
       approvalStatus: ApprovalStatus.APPROVED,
       approvedBy: request.approvedBy.trim(),
       approvalDate: approvalDate.toISOString(),
-      sectionKey: request.sectionKey?.trim(),
+      sectionKey: sectionKey || null,
       mode: request.mode,
       existingDocumentId: request.existingDocumentId?.trim(),
       provider: request.provider,
       mcpIntegrationId: request.mcpIntegrationId,
       customMetadata,
       relationships,
+      dedupReason: dedup.reason,
     };
 
     const job = this.db.importJobs.create({
       sourceSystem: source,
       project,
-      resolvedSection: null,
+      resolvedSection,
       document: null,
       version: null,
       fileName,
@@ -265,7 +292,8 @@ export class ExternalImportOrchestratorService {
       mimeType,
       fileSize: fileBuffer.length,
       checksum,
-      status: ImportStatus.RECEIVED,
+      // Must match Import Queue "External Imports" filter (READY_FOR_REVIEW / DUPLICATE / VERSION).
+      status: dedup.importStatus,
       metadata,
       errorMessage: null,
       routingDecision: null,
@@ -273,22 +301,23 @@ export class ExternalImportOrchestratorService {
       initiatedBy: null,
       completedAt: null,
       provider: request.provider,
-      externalImportStatus: ExternalImportStatus.STAGED,
+      externalImportStatus: dedup.externalImportStatus as ExternalImportStatus,
       sourceConnection: null,
     });
 
     const saved = await this.db.importJobs.save(job);
     await this.audit.record({
-      action: 'IMPORT_RECEIVED',
+      action: 'IMPORT_READY_FOR_REVIEW',
       entityType: 'ImportJob',
       entityId: saved.id,
-      message: `MCP submission queued from ${request.provider}: ${fileName}`,
+      message: `MCP submission queued for review from ${request.provider}: ${fileName}`,
       after: {
         project: project.code,
         source: source.code,
         provider: request.provider,
         checksum,
-        queuedOnly: true,
+        status: saved.status,
+        externalImportStatus: saved.externalImportStatus,
         mcpIntegrationId: request.mcpIntegrationId,
       },
     });
@@ -296,7 +325,7 @@ export class ExternalImportOrchestratorService {
     return {
       importJobId: saved.id,
       status: saved.status,
-      externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.STAGED,
+      externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.READY_FOR_REVIEW,
       checksum,
       fileName,
     };
