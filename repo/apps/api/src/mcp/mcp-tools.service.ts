@@ -11,6 +11,7 @@ import {
   ListRepositoryModulesDto,
   MCP_TOOL_NAMES,
   McpToolName,
+  ResolveImportTargetsDto,
   SubmitApprovedDocumentDto,
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
@@ -56,6 +57,8 @@ export class McpToolsService {
         return this.listRepositoryModules(integration, args as unknown as ListRepositoryModulesDto);
       case 'list_document_types':
         return this.listDocumentTypes();
+      case 'resolve_import_targets':
+        return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
       case 'submit_approved_document':
@@ -85,9 +88,9 @@ export class McpToolsService {
   }
 
   async listRepositoryModules(integration: McpIntegration, input: ListRepositoryModulesDto) {
-    this.assertProjectAccess(integration, input.projectId);
+    const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
     const sections = await this.db.projectSections.find({
-      where: { project: { id: input.projectId }, active: true },
+      where: { project: { id: projectId }, active: true },
       order: { position: 'ASC' },
     });
     return sections.map((section) => ({
@@ -114,8 +117,81 @@ export class McpToolsService {
     }));
   }
 
+  /**
+   * Resolve human-readable project / module / document-type labels to the IDs
+   * and keys required by check_document_exists and submit_approved_document.
+   */
+  async resolveImportTargets(integration: McpIntegration, input: ResolveImportTargetsDto) {
+    const projectId = await this.resolveProjectId(integration, undefined, input.project);
+    const projects = await this.listRepositoryProjects(integration);
+    const project = projects.find((item) => item.id === projectId)!;
+    const modules = await this.listRepositoryModules(integration, { projectId });
+    const documentTypes = await this.listDocumentTypes();
+
+    const moduleNeedle = input.module?.trim().toLowerCase();
+    const module = moduleNeedle
+      ? modules.find((item) =>
+        item.name.toLowerCase() === moduleNeedle
+        || item.code.toLowerCase() === moduleNeedle
+        || item.sectionKey.toLowerCase() === moduleNeedle
+        || item.slug?.toLowerCase() === moduleNeedle)
+      ?? null
+      : null;
+
+    const typeNeedle = input.documentType?.trim().toLowerCase();
+    const documentType = typeNeedle
+      ? documentTypes.find((item) =>
+        item.name.toLowerCase() === typeNeedle || item.code.toLowerCase() === typeNeedle)
+      ?? null
+      : null;
+
+    if (input.module && !module) {
+      throw new NotFoundException(
+        `Module '${input.module}' was not found for project ${project.code}. `
+        + `Available: ${modules.map((item) => item.name).join(', ') || '(none)'}`,
+      );
+    }
+    if (input.documentType && !documentType) {
+      throw new NotFoundException(
+        `Document type '${input.documentType}' was not found. `
+        + `Available: ${documentTypes.map((item) => item.name).join(', ') || '(none)'}`,
+      );
+    }
+
+    return {
+      project: {
+        projectId: project.id,
+        projectCode: project.code,
+        name: project.name,
+      },
+      module: module
+        ? {
+          id: module.id,
+          sectionKey: module.sectionKey,
+          code: module.code,
+          name: module.name,
+        }
+        : null,
+      documentType: documentType
+        ? {
+          id: documentType.id,
+          code: documentType.code,
+          name: documentType.name,
+          /** Use this string for submit_approved_document.documentType */
+          value: documentType.code || documentType.name,
+        }
+        : null,
+      submitHints: {
+        projectId: project.id,
+        projectCode: project.code,
+        sectionKey: module?.sectionKey ?? null,
+        documentType: documentType?.code || documentType?.name || null,
+      },
+    };
+  }
+
   async checkDocumentExists(integration: McpIntegration, input: CheckDocumentExistsDto) {
-    this.assertProjectAccess(integration, input.projectId);
+    const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
     const title = input.title?.trim();
     const fileName = input.fileName?.trim();
     const checksum = input.checksum?.trim();
@@ -127,10 +203,10 @@ export class McpToolsService {
     const qb = this.db.documents.createQueryBuilder('document')
       .leftJoinAndSelect('document.project', 'project')
       .leftJoinAndSelect('document.versions', 'versions')
-      .where('project.id = :projectId', { projectId: input.projectId });
+      .where('project.id = :projectId', { projectId });
 
     const conditions: string[] = [];
-    const params: Record<string, string> = { projectId: input.projectId };
+    const params: Record<string, string> = { projectId };
     if (documentCode) {
       conditions.push('document.code = :documentCode');
       params.documentCode = documentCode;
@@ -163,6 +239,7 @@ export class McpToolsService {
 
     return {
       exists: filtered.length > 0,
+      projectId,
       matches: filtered.map((document) => ({
         id: document.id,
         code: document.code,
@@ -184,13 +261,13 @@ export class McpToolsService {
     input: SubmitApprovedDocumentDto,
     ipAddress?: string,
   ) {
-    this.assertProjectAccess(integration, input.projectId);
+    const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
 
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
       const result = await this.orchestrator.queueMcpApprovedDocument({
         provider: ConnectorProvider.CHATGPT_MCP,
-        projectId: input.projectId,
+        projectId,
         title: input.title,
         documentCode: input.documentCode,
         documentType: input.documentType,
@@ -235,7 +312,7 @@ export class McpToolsService {
         entityType: 'McpIntegration',
         entityId: integration.id,
         message,
-        after: { projectId: input.projectId, fileName: input.fileName },
+        after: { projectId, fileName: input.fileName },
         ipAddress,
       });
       throw error;
@@ -278,11 +355,43 @@ export class McpToolsService {
     }
   }
 
+  /** Accept project UUID, code, or name (case-insensitive). */
+  async resolveProjectId(
+    integration: McpIntegration,
+    projectId?: string,
+    projectCode?: string,
+  ): Promise<string> {
+    const needle = (projectId || projectCode || '').trim();
+    if (!needle) {
+      throw new BadRequestException('Provide projectId (UUID) or projectCode / project name');
+    }
+
+    const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(needle);
+    if (uuidLike) {
+      this.assertProjectAccess(integration, needle);
+      return needle;
+    }
+
+    const projects = await this.listRepositoryProjects(integration);
+    const match = projects.find((project) =>
+      project.code.toLowerCase() === needle.toLowerCase()
+      || project.name.toLowerCase() === needle.toLowerCase());
+    if (!match) {
+      throw new NotFoundException(
+        `Project '${needle}' was not found or is not allowed for this MCP integration. `
+        + `Available: ${projects.map((item) => `${item.code} (${item.name})`).join(', ') || '(none)'}`,
+      );
+    }
+    return match.id;
+  }
+
   private toolDescription(name: McpToolName): string {
     const descriptions: Record<McpToolName, string> = {
       list_repository_projects: 'List active repository projects allowed for this integration',
-      list_repository_modules: 'List active project sections (modules) for a project',
+      list_repository_modules: 'List active project sections (modules) for a project (projectId UUID or projectCode)',
       list_document_types: 'List active document types configured in the gateway',
+      resolve_import_targets:
+        'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType values for submission',
       check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
       submit_approved_document: 'Submit an APPROVED document into the import queue (not final storage)',
       get_import_status: 'Get the processing status of an import job by id',
@@ -302,8 +411,10 @@ export class McpToolsService {
       },
       list_repository_modules: {
         type: 'object',
-        required: ['projectId'],
-        properties: { projectId: { type: 'string', format: 'uuid' } },
+        properties: {
+          projectId: { type: 'string', format: 'uuid' },
+          projectCode: { type: 'string', description: 'Project code or name if UUID unknown' },
+        },
       },
       list_document_types: {
         type: 'object',
@@ -313,11 +424,20 @@ export class McpToolsService {
         },
         additionalProperties: false,
       },
+      resolve_import_targets: {
+        type: 'object',
+        required: ['project'],
+        properties: {
+          project: { type: 'string', description: 'Project code, name, or UUID (e.g. MOSS)' },
+          module: { type: 'string', description: 'Module/section name, code, or sectionKey (e.g. Enterprise Architecture)' },
+          documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
+        },
+      },
       check_document_exists: {
         type: 'object',
-        required: ['projectId'],
         properties: {
           projectId: { type: 'string', format: 'uuid' },
+          projectCode: { type: 'string' },
           title: { type: 'string' },
           fileName: { type: 'string' },
           checksum: { type: 'string' },
@@ -326,9 +446,10 @@ export class McpToolsService {
       },
       submit_approved_document: {
         type: 'object',
-        required: ['projectId', 'title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName', 'fileContentBase64'],
+        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName', 'fileContentBase64'],
         properties: {
           projectId: { type: 'string', format: 'uuid' },
+          projectCode: { type: 'string', description: 'Alternative to projectId (e.g. MOSS)' },
           title: { type: 'string' },
           documentCode: { type: 'string' },
           documentType: { type: 'string' },

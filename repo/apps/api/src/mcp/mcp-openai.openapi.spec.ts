@@ -8,6 +8,7 @@ describe('buildChatGptActionsOpenApi', () => {
       '/api/mcp/tools/list_repository_projects',
       '/api/mcp/tools/list_document_types',
       '/api/mcp/tools/list_repository_modules',
+      '/api/mcp/tools/resolve_import_targets',
       '/api/mcp/tools/check_document_exists',
       '/api/mcp/tools/submit_approved_document',
       '/api/mcp/tools/get_import_status',

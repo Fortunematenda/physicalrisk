@@ -18,6 +18,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     '403': { description: 'Tool or project not allowed for this integration' },
   };
 
+  const mcpSecurity = [{ McpBearer: [] }, { McpApiKey: [] }];
+
   return {
     openapi: '3.1.0',
     info: {
@@ -25,8 +27,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       description:
         'Repository tools for Custom GPT Actions. Use only APPROVED documents with submit_approved_document. '
         + 'Files are queued for human review — never written straight to final storage. '
+        + 'Prefer resolve_import_targets with human-readable names (e.g. project=MOSS, module=Enterprise Architecture, documentType=Articles). '
         + `Privacy policy: ${baseUrl}/privacy`,
-      version: '1.1.0',
+      version: '1.2.0',
     },
     servers: [{ url: baseUrl }],
     tags: [{ name: 'MCP', description: 'Physical Risk Repository MCP tools' }],
@@ -36,21 +39,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'list_repository_projects',
           tags: ['MCP'],
           summary: 'List repository projects',
-          description:
-            'List active repository projects allowed for this MCP integration. Call with an empty JSON body {}.',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+          description: 'List active repository projects allowed for this MCP integration. Call with {}.',
+          security: mcpSecurity,
           requestBody: {
             required: false,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  description: 'No parameters. Send {}.',
                   properties: {
-                    unused: {
-                      type: 'boolean',
-                      description: 'Optional unused field so schema validators accept the object.',
-                    },
+                    unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
                   },
                   additionalProperties: false,
                 },
@@ -65,20 +63,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'list_document_types',
           tags: ['MCP'],
           summary: 'List document types',
-          description: 'List active document types. Call with an empty JSON body {}.',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+          description: 'List active document types. Call with {}.',
+          security: mcpSecurity,
           requestBody: {
             required: false,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  description: 'No parameters. Send {}.',
                   properties: {
-                    unused: {
-                      type: 'boolean',
-                      description: 'Optional unused field so schema validators accept the object.',
-                    },
+                    unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
                   },
                   additionalProperties: false,
                 },
@@ -93,22 +87,47 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'list_repository_modules',
           tags: ['MCP'],
           summary: 'List project modules',
-          description: 'List active repository modules (sections) for a project.',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+          description: 'List active modules for a project. Pass projectId UUID or projectCode/name (e.g. MOSS).',
+          security: mcpSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['projectId'],
                   additionalProperties: false,
                   properties: {
-                    projectId: {
-                      type: 'string',
-                      format: 'uuid',
-                      description: 'Repository project UUID from list_repository_projects',
-                    },
+                    projectId: { type: 'string', format: 'uuid' },
+                    projectCode: { type: 'string', description: 'Project code or name if UUID unknown' },
+                  },
+                },
+              },
+            },
+          },
+          responses: emptyOk,
+        },
+      },
+      '/api/mcp/tools/resolve_import_targets': {
+        post: {
+          operationId: 'resolve_import_targets',
+          tags: ['MCP'],
+          summary: 'Resolve names to submission IDs',
+          description:
+            'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType. '
+            + 'Call this before check_document_exists and submit_approved_document when the user gives names like MOSS / Enterprise Architecture / Articles.',
+          security: mcpSecurity,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['project'],
+                  additionalProperties: false,
+                  properties: {
+                    project: { type: 'string', description: 'Project code, name, or UUID (e.g. MOSS)' },
+                    module: { type: 'string', description: 'Module name, code, or sectionKey' },
+                    documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
                   },
                 },
               },
@@ -122,17 +141,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'check_document_exists',
           tags: ['MCP'],
           summary: 'Check whether a document already exists',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+          security: mcpSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['projectId'],
                   additionalProperties: false,
                   properties: {
                     projectId: { type: 'string', format: 'uuid' },
+                    projectCode: { type: 'string' },
                     title: { type: 'string' },
                     fileName: { type: 'string' },
                     checksum: { type: 'string' },
@@ -151,9 +170,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           tags: ['MCP'],
           summary: 'Submit an APPROVED document into the Import Queue',
           description:
-            'Queues an APPROVED document for human review in the Import Queue. '
-            + 'approvalStatus must be APPROVED. Do not submit drafts or unapproved content.',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+            'Queues an APPROVED document for human review. Provide projectId OR projectCode. '
+            + 'documentType accepts name or code. sectionKey comes from resolve_import_targets / list_repository_modules.',
+          security: mcpSecurity,
           requestBody: {
             required: true,
             content: {
@@ -161,7 +180,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                 schema: {
                   type: 'object',
                   required: [
-                    'projectId',
                     'title',
                     'documentType',
                     'versionNo',
@@ -174,15 +192,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                   additionalProperties: false,
                   properties: {
                     projectId: { type: 'string', format: 'uuid' },
+                    projectCode: { type: 'string', description: 'e.g. MOSS' },
                     title: { type: 'string' },
                     documentCode: { type: 'string' },
-                    documentType: { type: 'string', description: 'Document type code or name' },
+                    documentType: { type: 'string', description: 'Name or code, e.g. Articles' },
                     description: { type: 'string' },
                     owner: { type: 'string' },
                     versionNo: { type: 'string' },
                     approvalStatus: { type: 'string', enum: ['APPROVED'] },
                     approvedBy: { type: 'string' },
-                    approvalDate: { type: 'string', description: 'ISO date or date-time' },
+                    approvalDate: { type: 'string' },
                     sectionKey: { type: 'string' },
                     metadataJson: { type: 'string' },
                     relationshipsJson: { type: 'string' },
@@ -191,7 +210,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                     fileName: { type: 'string' },
                     fileContentBase64: {
                       type: 'string',
-                      description: 'Base64-encoded file bytes (keep files reasonably small for ChatGPT Actions)',
+                      description: 'Base64-encoded file bytes',
                     },
                     mimeType: { type: 'string' },
                   },
@@ -207,7 +226,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'get_import_status',
           tags: ['MCP'],
           summary: 'Get import job status',
-          security: [{ McpBearer: [] }, { McpApiKey: [] }],
+          security: mcpSecurity,
           requestBody: {
             required: true,
             content: {
@@ -248,15 +267,21 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
-You have Actions that call the Repository MCP API. For any question about projects, modules, document types, whether a document exists, submitting approved documents, or import status, you MUST call the matching Action immediately. Never say you lack tools if Actions are configured. Never invent project IDs, module IDs, or document type codes.
+You have Actions that call the Repository MCP API. Always call Actions — never say you lack tools or cannot get IDs.
 
-Workflow:
-1. When asked which projects are available, call list_repository_projects with body {}.
-2. When asked for document types, call list_document_types with body {}.
-3. Before submitting a file, call list_repository_projects (and list_repository_modules / list_document_types as needed) so the user picks valid IDs.
-4. Only call submit_approved_document when approvalStatus is APPROVED and the user confirms the metadata.
-5. After submit, return the import job id and offer to call get_import_status.
+When the user gives human-readable names (e.g. Project MOSS, Module Enterprise Architecture, Document Type Articles):
+1. Call resolve_import_targets with those names. Use the returned submitHints (projectId/projectCode, sectionKey, documentType).
+2. Call check_document_exists with projectCode or projectId plus title/fileName.
+3. If approvalStatus is APPROVED and the user wants to submit, call submit_approved_document using:
+   - projectCode or projectId from resolve_import_targets
+   - sectionKey from resolve_import_targets
+   - documentType from resolve_import_targets (code or name)
+   - fileContentBase64 for the file bytes
+4. Return the importJobId and remind the user a human must finish import from the Import Queue.
 
-If an Action returns 401, tell the user the MCP API key in the GPT is missing or wrong.
-If an Action returns 403, tell the user the integration does not allow that tool or project.
-If the project list is empty, tell the user to allow projects on the MCP integration in Repo → Settings → MCP Integrations.`;
+Other rules:
+- Never invent UUIDs. Always resolve via Actions.
+- list_repository_projects / list_document_types / list_repository_modules remain available for browsing.
+- If Actions return 401, the MCP API key is missing/wrong.
+- If 403, the integration does not allow that tool/project — fix Allowed projects/tools in Repo → Settings → MCP Integrations.
+- If resolve_import_targets cannot find a module or document type, show the available values from the error/result.`;

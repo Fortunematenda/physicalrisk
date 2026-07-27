@@ -143,6 +143,9 @@ export class McpAuthService {
   }
 
   assertToolAllowed(integration: McpIntegration, toolName: McpToolName): void {
+    // Metadata resolver is always available so ChatGPT can map names → IDs.
+    if (toolName === 'resolve_import_targets') return;
+
     const allowed = integration.allowedTools?.length ? integration.allowedTools : [...MCP_TOOL_NAMES];
     if (!allowed.includes(toolName)) {
       throw new Error(`tool ${toolName} not allowed`);

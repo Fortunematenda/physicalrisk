@@ -12,6 +12,7 @@ const MCP_TOOLS = [
   'list_repository_projects',
   'list_repository_modules',
   'list_document_types',
+  'resolve_import_targets',
   'check_document_exists',
   'submit_approved_document',
   'get_import_status',

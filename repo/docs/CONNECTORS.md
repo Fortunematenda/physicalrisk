@@ -99,6 +99,7 @@ MCP is hosted inside the NestJS API (not a separate service):
 - `list_repository_projects`
 - `list_repository_modules`
 - `list_document_types`
+- `resolve_import_targets` (map names like MOSS / Enterprise Architecture / Articles → IDs)
 - `check_document_exists`
 - `submit_approved_document` (APPROVED only)
 - `get_import_status`

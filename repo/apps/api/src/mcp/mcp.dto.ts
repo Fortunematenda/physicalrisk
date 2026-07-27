@@ -17,6 +17,7 @@ export const MCP_TOOL_NAMES = [
   'list_repository_projects',
   'list_repository_modules',
   'list_document_types',
+  'resolve_import_targets',
   'check_document_exists',
   'submit_approved_document',
   'get_import_status',
@@ -59,9 +60,15 @@ export class McpJsonRpcRequestDto {
 }
 
 export class CheckDocumentExistsDto {
+  @IsOptional()
   @Transform(trimString)
   @IsUUID('4')
-  projectId!: string;
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  projectCode?: string;
 
   @IsOptional()
   @Transform(trimString)
@@ -85,9 +92,15 @@ export class CheckDocumentExistsDto {
 }
 
 export class SubmitApprovedDocumentDto {
+  @IsOptional()
   @Transform(trimString)
   @IsUUID('4')
-  projectId!: string;
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  projectCode?: string;
 
   @Transform(trimString)
   @IsString()
@@ -171,9 +184,32 @@ export class SubmitApprovedDocumentDto {
 }
 
 export class ListRepositoryModulesDto {
+  @IsOptional()
   @Transform(trimString)
   @IsUUID('4')
-  projectId!: string;
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  projectCode?: string;
+}
+
+export class ResolveImportTargetsDto {
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  project!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  module?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  documentType?: string;
 }
 
 export class GetImportStatusDto {
