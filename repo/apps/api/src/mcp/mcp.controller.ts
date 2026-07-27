@@ -202,22 +202,40 @@ export class McpController {
   }
 
   /**
-   * ChatGPT Actions preferred path: multipart file upload (no manual Base64).
-   * Kept for non-ChatGPT clients; ChatGPT should use prepare_approved_document + /upload/:token.
+   * Legacy multipart submit. ChatGPT cannot attach files here.
+   * Without a file → prepareApprovedDocument (returns uploadUrl for browser upload).
+   * With a file → queue into Import Queue (non-ChatGPT clients).
    */
   @Public()
   @UseGuards(McpAuthGuard)
   @Post('submit-approved-document')
-  @ApiConsumes('multipart/form-data')
+  @ApiConsumes('multipart/form-data', 'application/json')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
   async submitApprovedDocumentMultipart(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() body: Record<string, string>,
     @Req() request: McpRequest,
   ) {
+    const integration = request[MCP_INTEGRATION_KEY]!;
+    this.auth.assertToolAllowed(integration, 'submit_approved_document');
+
+    // ChatGPT Actions often hit this path with JSON/metadata only (no multipart file).
     if (!file?.buffer?.length) {
-      throw new BadRequestException('Attach the PDF/file in the multipart "file" field');
+      const prepareArgs: Record<string, unknown> = { ...body };
+      const result = await this.tools.dispatchTool(
+        integration,
+        'prepare_approved_document',
+        prepareArgs,
+        request.ip,
+      );
+      return {
+        tool: 'submit_approved_document',
+        result,
+        message:
+          'No file attached (expected for ChatGPT). Open result.uploadUrl in a browser and upload the PDF.',
+      };
     }
+
     const required = {
       title: body.title?.trim(),
       documentType: (body.documentType || body.document_type || '').trim(),
@@ -233,8 +251,6 @@ export class McpController {
       throw new BadRequestException(`Missing required fields: ${missing.join(', ')}`);
     }
 
-    const integration = request[MCP_INTEGRATION_KEY]!;
-    this.auth.assertToolAllowed(integration, 'submit_approved_document');
     const payload: SubmitApprovedDocumentDto = {
       projectId: body.projectId || body.project_id || undefined,
       projectCode: body.projectCode || body.project_code || body.project || undefined,

@@ -76,7 +76,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Approved Document intake for ChatGPT. Actions cannot send PDF bytes. '
         + 'Call submit_approved_document with a single payload JSON string; then open uploadUrl in a browser. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.7.0',
+      version: '1.7.1',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -231,15 +231,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
 CRITICAL
-- Custom GPT Actions cannot send PDF bytes.
-- For submit_approved_document / prepare_approved_document you MUST pass exactly ONE argument: payload
-- payload is a JSON string. Do not pass projectCode/module/file as separate kwargs (causes UnrecognizedKwargsError).
+- Custom GPT Actions cannot send PDF bytes. Never claim you attached a file.
+- Call submit_approved_document with exactly ONE argument: payload (a JSON string).
+- Do NOT pass projectCode/module/file as separate kwargs (UnrecognizedKwargsError).
+- Do NOT try multipart uploads. Success means you receive result.uploadUrl — give that link to the user.
 
-Example call:
+Example:
 submit_approved_document with payload =
 {"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles","title":"MOSS Lean Revenue MVP – Timeline, Deliverables and Payment Milestones","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne","approvalDate":"2026-07-27","fileName":"MOSS Lean Revenue MVP Timeline Deliverables Payment Milestones Signed Contract.pdf"}
 
-Then give the user result.uploadUrl and tell them to open it and upload the PDF.
-After upload they get an Import Job ID.
+Then tell the user to open result.uploadUrl in a browser and upload the PDF.
+After they upload they get an Import Job ID. A human still completes import from the Import Queue.
 
 Also available: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;
