@@ -122,7 +122,7 @@ export class ImportsService {
         if (String(input[key] ?? '').trim()) return;
         const value = prior[priorKey];
         if (typeof value === 'string' && value.trim()) {
-          (input as Record<string, unknown>)[key] = value.trim();
+          (input as unknown as Record<string, unknown>)[key] = value.trim();
         }
       };
       fill('title');
