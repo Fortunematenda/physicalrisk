@@ -61,8 +61,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         description:
           'JSON string. Minimum for same-chat approve: projectCode, module, documentType, title, '
           + 'documentContent (full Markdown from the chat). '
+          + 'Repo converts Markdown → PDF and queues the PDF. '
           + 'Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvedBy=Wayne, '
-          + 'approvalDate=today, fileName from title.md, mimeType=text/markdown. '
+          + 'approvalDate=today, fileName from title.pdf. '
           + 'Example: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
           + '"title":"Cow","documentContent":"# Cow\\n\\nA cow is...","approvedBy":"Wayne"}',
       },
@@ -75,9 +76,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       title: 'Physical Risk Repo MCP',
       description:
         'Same-chat: research → generate → user approves → submit with documentContent. '
-        + 'Server fills version/date/filename defaults. PDF via fileUrl or uploadUrl. '
+        + 'Repo converts Markdown to PDF and queues the PDF. External PDF via fileUrl/uploadUrl. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.9.2',
+      version: '1.10.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -241,20 +242,21 @@ SAME-CHAT FLOW
 1) Research — help; do not submit.
 2) Generate — write full Markdown in chat.
 3) When user says approved / I approve / please import / submit — YOU MUST CALL submit_approved_document IMMEDIATELY.
-   Do NOT ask for version, approval date, filename, or MIME type. The server fills those defaults.
+   Do NOT ask for version, approval date, filename, or MIME type.
    Put the Markdown you already wrote in this chat into documentContent.
+   Repo converts that Markdown to a PDF on the server and places the PDF in the Import Queue.
 
 FORBIDDEN after approval
 - Asking again for Version, Approval date, Original filename, MIME type, or "the document itself" if you already generated it in this chat.
-- Saying you "can't invent" those fields — they are defaults, not secrets.
+- Claiming you cannot create a PDF — the repository creates the PDF from documentContent.
 
 SUBMIT
 - One argument only: payload (JSON string).
-- Minimum payload: projectCode, module, documentType, title, documentContent, approvedBy (if user named an approver).
-- Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvalDate=today, fileName=<title>.md, mimeType=text/markdown, approvedBy=Wayne if omitted.
+- Minimum payload: projectCode, module, documentType, title, documentContent, approvedBy (if named).
+- Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvalDate=today, approvedBy=Wayne if omitted.
 - Report importJobId. Say a human must still complete Import Queue review.
 
-Example for this conversation style:
+Example:
 submit_approved_document with payload =
 {"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"Cow","approvedBy":"Wayne","documentContent":"# Cow\\n\\nA cow is a domesticated mammal..."}
 

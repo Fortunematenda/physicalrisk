@@ -20,6 +20,7 @@ import {
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
+import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 
@@ -33,6 +34,7 @@ export class McpToolsService {
     private readonly uploads: McpUploadSessionService,
     private readonly browserUploads: McpBrowserUploadService,
     private readonly remoteFiles: McpRemoteFileService,
+    private readonly markdownPdf: McpMarkdownPdfService,
     private readonly config: ConfigService,
   ) {}
 
@@ -438,9 +440,13 @@ export class McpToolsService {
           `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
         );
       }
-      fileContentBase64 = Buffer.from(content, 'utf8').toString('base64');
-      fileName = fileName || this.defaultMarkdownFileName(input.title);
-      mimeType = mimeType || 'text/markdown';
+      const pdfBuffer = await this.markdownPdf.render(content, {
+        title: input.title,
+        author: input.approvedBy || 'Physical Risk Repository',
+      });
+      fileContentBase64 = pdfBuffer.toString('base64');
+      fileName = this.defaultPdfFileName(fileName || input.title);
+      mimeType = 'application/pdf';
     }
     if (!fileContentBase64) {
       throw new BadRequestException(
@@ -608,8 +614,8 @@ export class McpToolsService {
       approvalDate: input.approvalDate?.trim() || today,
       fileName:
         input.fileName?.trim()
-        || (hasMarkdown ? this.defaultMarkdownFileName(title) : undefined),
-      mimeType: input.mimeType?.trim() || (hasMarkdown ? 'text/markdown' : undefined),
+        || (hasMarkdown ? this.defaultPdfFileName(title) : undefined),
+      mimeType: input.mimeType?.trim() || (hasMarkdown ? 'application/pdf' : undefined),
     };
   }
 
@@ -657,6 +663,17 @@ export class McpToolsService {
       .slice(0, 120)
       .trim() || 'document';
     return base.toLowerCase().endsWith('.md') ? base : `${base}.md`;
+  }
+
+  private defaultPdfFileName(titleOrName?: string): string {
+    const raw = String(titleOrName || 'document').trim();
+    const withoutExt = raw.replace(/\.(md|markdown|txt|pdf)$/i, '');
+    const base = withoutExt
+      .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '')
+      .replace(/\s+/g, ' ')
+      .slice(0, 120)
+      .trim() || 'document';
+    return `${base}.pdf`;
   }
 
   assertProjectAccess(integration: McpIntegration, projectId: string): void {
@@ -712,7 +729,7 @@ export class McpToolsService {
         'Advanced: upload one base64 chunk of the document',
       check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
       submit_approved_document:
-        'Submit APPROVED document via documentContent (same-chat Markdown), fileUrl, uploadId, or base64; without those returns uploadUrl',
+        'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64; without those returns uploadUrl',
       get_import_status: 'Get the processing status of an import job by id',
     };
     return descriptions[name];
@@ -831,7 +848,7 @@ export class McpToolsService {
           documentContent: {
             type: 'string',
             description:
-              'Full Markdown/text body generated in chat (same-chat research → approve → submit). Max ~500KB.',
+              'Full Markdown body from chat. Repo converts it to PDF and queues the PDF. Max ~500KB.',
           },
           uploadId: { type: 'string', format: 'uuid', description: 'From begin_document_upload' },
           fileContentBase64: { type: 'string', description: 'Optional if documentContent, fileUrl, or uploadId provided' },
