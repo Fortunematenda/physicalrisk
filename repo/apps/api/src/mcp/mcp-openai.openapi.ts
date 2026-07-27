@@ -59,18 +59,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       payload: {
         type: 'string',
         description:
-          'JSON string. Same-chat approve fields: projectCode, module, documentType, title, documentContent, '
-          + 'plus Document Information: owner, description (short summary), approvedBy. '
-          + 'NEW DOCUMENT: omit mode/documentCode (server allocates code, versionNo defaults to Rev 1.0). '
-          + 'NEW VERSION of an existing document: set mode=NEW_VERSION and existingDocumentId (from check_document_exists), '
-          + 'or set documentCode (e.g. MOSS-AR-003). Server bumps versionNo automatically (e.g. Rev 1.0 → Rev 1.1). '
-          + 'Optional: versionNo if you already know the next revision. '
-          + 'Repo converts Markdown → PDF and imports with Document Information. '
-          + 'Example new: {"projectCode":"MOSS","module":"Articles","documentType":"Article",'
-          + '"title":"Cow","owner":"Wayne","description":"Overview of cattle.","documentContent":"# Cow\\n\\n...","approvedBy":"Wayne"} '
-          + 'Example next version: {"projectCode":"MOSS","module":"Articles","documentType":"Article",'
-          + '"title":"A Cow","mode":"NEW_VERSION","existingDocumentId":"<uuid>","documentCode":"MOSS-AR-003",'
-          + '"documentContent":"# The Cow\\n\\n...","approvedBy":"Wayne"}',
+          'JSON with projectCode, module, documentType, title, documentContent; optional owner, description, approvedBy. '
+          + 'For revisions add mode=NEW_VERSION and existingDocumentId or documentCode. '
+          + 'Server defaults date, MIME, filename, Rev.',
       },
     },
   };
@@ -86,7 +77,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.15.0',
+      version: '1.15.1',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -147,10 +138,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/check_document_exists': {
         post: {
           operationId: 'check_document_exists',
-          summary: 'Check for duplicates; returns newVersionSubmitHints for the next revision',
+          summary: 'Check duplicates; returns newVersionSubmitHints',
           description:
-            'If exists=true, use matches[].newVersionSubmitHints (mode, existingDocumentId, documentCode, versionNo) '
-            + 'inside submit_approved_document payload when the user wants another version of that document.',
+            'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
           security,
           requestBody: {
             required: true,
@@ -176,12 +166,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'submit_approved_document',
           summary: 'Submit approved document (new or next version)',
           description:
-            'Pass ONLY payload. After the user approves: list projects/types/modules, present numbered selections, '
-            + 'then submit as soon as project+documentType+module are chosen. '
-            + 'NEVER ask for approvedBy, approvalDate, fileName, mimeType, owner, or version — server/auto defaults those. '
-            + 'Put full chat Markdown in documentContent. '
-            + 'For a new revision include mode=NEW_VERSION + existingDocumentId/documentCode. '
-            + 'Do not claim versioning is unsupported or that Import Queue is always required.',
+            'Pass only payload. After approve: list project/type/module, then submit. '
+            + 'Do not ask date/MIME/filename/version. Put full Markdown in documentContent. '
+            + 'NEW_VERSION needs mode + existingDocumentId or documentCode.',
           security,
           requestBody: {
             required: true,
