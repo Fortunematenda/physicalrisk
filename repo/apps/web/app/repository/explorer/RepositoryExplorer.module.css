@@ -290,12 +290,13 @@
 }
 
 .previewSection {
-  margin-top: 14px;
+  margin-top: 18px;
   border: 1px solid #d7e2ee;
   border-radius: 10px;
   background: #f4f7fb;
   overflow: hidden;
 }
+.detailGrid { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 10px 16px; margin-top: 14px; margin-bottom: 0; }
 .previewHeader {
   display: flex;
   align-items: baseline;
