@@ -80,6 +80,13 @@ export class McpToolsService {
         if (parsed.fileUrl || parsed.documentContent) {
           return this.submitApprovedDocument(integration, {
             ...prepared,
+            documentCode: prepared.documentCode,
+            description: prepared.description,
+            owner: prepared.owner,
+            metadataJson: prepared.metadataJson,
+            relationshipsJson: prepared.relationshipsJson,
+            mode: prepared.mode,
+            existingDocumentId: prepared.existingDocumentId,
             fileName: prepared.fileName!,
             fileUrl: parsed.fileUrl,
             documentContent: parsed.documentContent,
@@ -112,6 +119,13 @@ export class McpToolsService {
         }
         return this.submitApprovedDocument(integration, {
           ...prepared,
+          documentCode: prepared.documentCode,
+          description: prepared.description,
+          owner: prepared.owner,
+          metadataJson: prepared.metadataJson,
+          relationshipsJson: prepared.relationshipsJson,
+          mode: prepared.mode,
+          existingDocumentId: prepared.existingDocumentId,
           fileName: prepared.fileName!,
           uploadId: parsed.uploadId,
           fileContentBase64: parsed.fileContentBase64,
@@ -603,12 +617,17 @@ export class McpToolsService {
       const value = source[key];
       return typeof value === 'string' ? value.trim() : undefined;
     };
+    const modeRaw = str('mode');
+    const mode = modeRaw === 'NEW' || modeRaw === 'NEW_VERSION' ? modeRaw : undefined;
 
     return {
       projectId: str('projectId'),
       projectCode: str('projectCode') || str('project') || str('repositoryProject'),
       title: str('title') || '',
+      documentCode: str('documentCode') || str('code') || str('document_code'),
       documentType: str('documentType') || str('repositoryDocumentType') || '',
+      description: str('description') || str('summary') || str('abstract'),
+      owner: str('owner') || str('author') || str('documentOwner'),
       versionNo: str('versionNo') || str('version') || '',
       approvalStatus: str('approvalStatus') || 'APPROVED',
       approvedBy: str('approvedBy') || str('approver') || '',
@@ -617,6 +636,10 @@ export class McpToolsService {
       sectionKey: str('sectionKey'),
       fileName: str('fileName') || str('originalFilename') || str('original_filename'),
       mimeType: str('mimeType'),
+      metadataJson: str('metadataJson'),
+      relationshipsJson: str('relationshipsJson'),
+      mode,
+      existingDocumentId: str('existingDocumentId'),
     };
   }
 
@@ -628,18 +651,43 @@ export class McpToolsService {
     const today = new Date().toISOString().slice(0, 10);
     const title = input.title?.trim() || 'document';
     const hasMarkdown = Boolean(documentContent?.trim());
+    const approvedBy = input.approvedBy?.trim() || 'Wayne';
     return {
       ...input,
       title,
+      documentType: input.documentType?.trim() || '',
+      description: input.description?.trim() || this.deriveDescription(documentContent, title),
+      owner: input.owner?.trim() || approvedBy,
       versionNo: input.versionNo?.trim() || 'Rev 1.0',
       approvalStatus: input.approvalStatus?.trim() || 'APPROVED',
-      approvedBy: input.approvedBy?.trim() || 'Wayne',
+      approvedBy,
       approvalDate: input.approvalDate?.trim() || today,
       fileName:
         input.fileName?.trim()
         || (hasMarkdown ? this.defaultPdfFileName(title) : undefined),
       mimeType: input.mimeType?.trim() || (hasMarkdown ? 'application/pdf' : undefined),
     };
+  }
+
+  /** Short Document Information description from Markdown when GPT omits description. */
+  private deriveDescription(documentContent: string | undefined, title: string): string | undefined {
+    const raw = documentContent?.trim();
+    if (!raw) return undefined;
+    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const paragraph = lines.find((line) => {
+      if (line.startsWith('#')) return false;
+      if (line.startsWith('```')) return false;
+      if (line.startsWith('|')) return false;
+      if (/^[-*+]\s/.test(line)) return false;
+      if (/^\d+\.\s/.test(line)) return false;
+      return line.length > 20;
+    });
+    const text = (paragraph || lines.find((line) => !line.startsWith('#')) || title)
+      .replace(/[*_`>#]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!text) return undefined;
+    return text.length > 400 ? `${text.slice(0, 397).trimEnd()}…` : text;
   }
 
   private parseSubmitPayload(args: Record<string, unknown>): {

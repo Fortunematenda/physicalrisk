@@ -283,10 +283,25 @@ export class PrepareApprovedDocumentDto {
   @IsNotEmpty()
   title!: string;
 
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  documentCode?: string;
+
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
   documentType!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  owner?: string;
 
   @Transform(trimString)
   @IsString()
@@ -327,6 +342,21 @@ export class PrepareApprovedDocumentDto {
   @Transform(trimString)
   @IsString()
   mimeType?: string;
+
+  @IsOptional()
+  metadataJson?: string;
+
+  @IsOptional()
+  relationshipsJson?: string;
+
+  @IsOptional()
+  @IsIn(['NEW', 'NEW_VERSION'])
+  mode?: 'NEW' | 'NEW_VERSION';
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  existingDocumentId?: string;
 }
 
 export class UploadDocumentChunkDto {
