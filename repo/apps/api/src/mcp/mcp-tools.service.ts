@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
-import { ConnectorProvider, McpIntegration, ProjectStatus } from '../database/entities';
+import { ConnectorProvider, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
+import { ConfigService } from '@nestjs/config';
 import { McpAuthService } from './mcp-auth.service';
 import {
   BeginDocumentUploadDto,
@@ -12,11 +13,13 @@ import {
   ListRepositoryModulesDto,
   MCP_TOOL_NAMES,
   McpToolName,
+  PrepareApprovedDocumentDto,
   ResolveImportTargetsDto,
   SubmitApprovedDocumentDto,
   UploadDocumentChunkDto,
 } from './mcp.dto';
 import { McpForbiddenException } from './mcp.exceptions';
+import { McpBrowserUploadService } from './mcp-browser-upload.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 
 @Injectable()
@@ -27,6 +30,8 @@ export class McpToolsService {
     private readonly orchestrator: ExternalImportOrchestratorService,
     private readonly audit: AuditService,
     private readonly uploads: McpUploadSessionService,
+    private readonly browserUploads: McpBrowserUploadService,
+    private readonly config: ConfigService,
   ) {}
 
   listToolDefinitions() {
@@ -65,6 +70,8 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
+      case 'prepare_approved_document':
+        return this.prepareApprovedDocument(integration, args as unknown as PrepareApprovedDocumentDto);
       case 'begin_document_upload': {
         const input = args as unknown as BeginDocumentUploadDto;
         return this.uploads.begin(
@@ -277,6 +284,93 @@ export class McpToolsService {
     };
   }
 
+  /**
+   * ChatGPT-friendly path: collect metadata, return a one-time browser upload URL.
+   * Custom GPT Actions cannot transmit PDF bytes reliably.
+   */
+  async prepareApprovedDocument(integration: McpIntegration, input: PrepareApprovedDocumentDto) {
+    this.orchestrator.assertApprovedStatus(input.approvalStatus);
+    const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
+    const projects = await this.listRepositoryProjects(integration);
+    const project = projects.find((item) => item.id === projectId)!;
+    let sectionKey = input.sectionKey?.trim() || undefined;
+    if (!sectionKey && input.module?.trim()) {
+      const resolved = await this.resolveImportTargets(integration, {
+        project: projectId,
+        module: input.module,
+      });
+      sectionKey = resolved.module?.sectionKey;
+    }
+
+    const pending = this.browserUploads.create({
+      integrationId: integration.id,
+      projectId,
+      projectCode: project.code,
+      module: input.module,
+      sectionKey,
+      documentType: input.documentType,
+      title: input.title,
+      versionNo: input.versionNo,
+      approvalStatus: input.approvalStatus,
+      approvedBy: input.approvedBy,
+      approvalDate: input.approvalDate,
+      fileName: input.fileName,
+      mimeType: input.mimeType || 'application/pdf',
+    });
+
+    const baseUrl = this.publicBaseUrl();
+    const uploadUrl = `${baseUrl}/api/mcp/upload/${pending.token}`;
+    return {
+      ready: true,
+      uploadUrl,
+      expiresAt: new Date(pending.expiresAt).toISOString(),
+      project: { id: project.id, code: project.code, name: project.name },
+      module: input.module ?? null,
+      sectionKey: sectionKey ?? null,
+      documentType: input.documentType,
+      title: input.title,
+      instructions:
+        'Open uploadUrl in a browser, choose the PDF, and click Upload. '
+        + 'That queues the Approved Document into the Import Queue. '
+        + 'Then call get_import_status after the user confirms upload completed, or ask them for the import job id shown on the success page.',
+    };
+  }
+
+  async completeBrowserUpload(
+    token: string,
+    file: { buffer: Buffer; originalname: string; mimetype?: string },
+    ipAddress?: string,
+  ) {
+    const pending = this.browserUploads.get(token);
+    this.browserUploads.assertNotExpired(pending);
+    const integration = await this.db.mcpIntegrations.findOne({ where: { id: pending.integrationId } });
+    if (!integration || integration.status !== McpIntegrationStatus.ACTIVE) {
+      throw new BadRequestException('MCP integration for this upload link is not active');
+    }
+
+    const consumed = this.browserUploads.consume(token);
+    const result = await this.submitApprovedDocument(
+      integration,
+      {
+        projectId: consumed.projectId,
+        projectCode: consumed.projectCode,
+        title: consumed.title,
+        documentType: consumed.documentType,
+        versionNo: consumed.versionNo,
+        approvalStatus: consumed.approvalStatus,
+        approvedBy: consumed.approvedBy,
+        approvalDate: consumed.approvalDate,
+        module: consumed.module,
+        sectionKey: consumed.sectionKey,
+        fileName: consumed.fileName || file.originalname,
+        mimeType: consumed.mimeType || file.mimetype,
+        fileContentBase64: file.buffer.toString('base64'),
+      },
+      ipAddress,
+    );
+    return result;
+  }
+
   async submitApprovedDocument(
     integration: McpIntegration,
     input: SubmitApprovedDocumentDto,
@@ -397,6 +491,16 @@ export class McpToolsService {
     };
   }
 
+  private publicBaseUrl(): string {
+    const configured =
+      this.config.get<string>('REPO_WEB_URL')
+      || this.config.get<string>('PUBLIC_WEB_URL')
+      || this.config.get<string>('CORS_ORIGIN')
+      || 'https://repo.physicalrisk.com';
+    const first = configured.split(',')[0]?.trim() || 'https://repo.physicalrisk.com';
+    return first.replace(/\/+$/, '');
+  }
+
   assertProjectAccess(integration: McpIntegration, projectId: string): void {
     try {
       this.auth.assertProjectAllowed(integration, projectId);
@@ -442,13 +546,15 @@ export class McpToolsService {
       list_document_types: 'List active document types configured in the gateway',
       resolve_import_targets:
         'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType values for submission',
+      prepare_approved_document:
+        'PREFERRED for ChatGPT: create a one-time browser upload URL for an APPROVED document (Custom GPTs cannot send PDF bytes)',
       begin_document_upload:
-        'Start a chunked file upload session (ChatGPT cannot send multipart files; use this then upload_document_chunk)',
+        'Advanced: start a chunked file upload session',
       upload_document_chunk:
-        'Upload one base64 chunk of the document (keep each chunk under ~3500 characters)',
+        'Advanced: upload one base64 chunk of the document',
       check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
       submit_approved_document:
-        'Submit an APPROVED document into the import queue using uploadId from the chunked upload flow',
+        'Advanced: submit using uploadId from chunked upload (prefer prepare_approved_document for ChatGPT)',
       get_import_status: 'Get the processing status of an import job by id',
     };
     return descriptions[name];
@@ -486,6 +592,24 @@ export class McpToolsService {
           project: { type: 'string', description: 'Project code, name, or UUID (e.g. MOSS)' },
           module: { type: 'string', description: 'Module/section name, code, or sectionKey (e.g. Enterprise Architecture)' },
           documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
+        },
+      },
+      prepare_approved_document: {
+        type: 'object',
+        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate'],
+        properties: {
+          projectCode: { type: 'string' },
+          projectId: { type: 'string' },
+          module: { type: 'string' },
+          sectionKey: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvedBy: { type: 'string' },
+          approvalDate: { type: 'string' },
+          fileName: { type: 'string' },
+          mimeType: { type: 'string' },
         },
       },
       begin_document_upload: {

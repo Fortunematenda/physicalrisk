@@ -146,6 +146,7 @@ export class McpAuthService {
     // Always available helpers for ChatGPT Actions name→ID mapping and chunked uploads.
     if (
       toolName === 'resolve_import_targets'
+      || toolName === 'prepare_approved_document'
       || toolName === 'begin_document_upload'
       || toolName === 'upload_document_chunk'
     ) {

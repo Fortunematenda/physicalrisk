@@ -22,6 +22,7 @@ export const MCP_TOOL_NAMES = [
   'list_document_types',
   'resolve_import_targets',
   'check_document_exists',
+  'prepare_approved_document',
   'begin_document_upload',
   'upload_document_chunk',
   'submit_approved_document',
@@ -241,6 +242,68 @@ export class BeginDocumentUploadDto {
   @Min(1)
   @Max(500)
   totalChunks!: number;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  mimeType?: string;
+}
+
+export class PrepareApprovedDocumentDto {
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  projectCode?: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  documentType!: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  versionNo!: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  approvalStatus!: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  approvedBy!: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  approvalDate!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  module?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  sectionKey?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  fileName?: string;
 
   @IsOptional()
   @Transform(trimString)

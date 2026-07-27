@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -15,7 +16,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { McpIntegration } from '../database/entities';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Public } from '../common/public.decorator';
@@ -32,6 +33,7 @@ import {
   SubmitApprovedDocumentDto,
 } from './mcp.dto';
 import { buildChatGptActionsOpenApi, CHATGPT_GPT_INSTRUCTIONS } from './mcp-openai.openapi';
+import { McpBrowserUploadService } from './mcp-browser-upload.service';
 import { McpToolsService } from './mcp-tools.service';
 
 type McpRequest = Request & { [MCP_INTEGRATION_KEY]?: McpIntegration };
@@ -47,6 +49,7 @@ export class McpController {
     private readonly auth: McpAuthService,
     private readonly tools: McpToolsService,
     private readonly config: ConfigService,
+    private readonly browserUploads: McpBrowserUploadService,
   ) {}
 
   /** Public OpenAPI for ChatGPT Custom GPT Actions (no auth). */
@@ -113,8 +116,94 @@ export class McpController {
   }
 
   /**
+   * One-time browser upload page (token is the secret; no MCP key required).
+   * Used because Custom GPT Actions cannot transmit PDF bytes.
+   */
+  @Public()
+  @Get('upload/:token')
+  uploadPage(@Param('token') token: string, @Res() res: Response) {
+    const pending = this.browserUploads.get(token);
+    this.browserUploads.assertNotExpired(pending);
+    const title = pending.title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const project = (pending.projectCode || pending.projectId || '').replace(/</g, '&lt;');
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Upload Approved Document</title>
+  <style>
+    body { font-family: "IBM Plex Sans", Segoe UI, sans-serif; margin: 0; background: #eef3f8; color: #0f172a; }
+    main { max-width: 560px; margin: 48px auto; padding: 28px; background: #fff; border: 1px solid #d6dee8; }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p { line-height: 1.5; }
+    .meta { font-size: 0.92rem; color: #334155; }
+    input[type=file] { display: block; margin: 18px 0; }
+    button { background: #0b1f33; color: #fff; border: 0; padding: 10px 16px; cursor: pointer; }
+    .ok { color: #166534; }
+    .err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Upload Approved Document</h1>
+  <p class="meta"><strong>${title}</strong><br/>Project: ${project}<br/>Type: ${pending.documentType}</p>
+  <p>Select the PDF and upload. This queues it into the Repository Import Queue for human review.</p>
+  <form id="f" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept="application/pdf,.pdf" required />
+    <button type="submit">Upload to Import Queue</button>
+  </form>
+  <p id="msg"></p>
+</main>
+<script>
+  const form = document.getElementById('f');
+  const msg = document.getElementById('msg');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.textContent = 'Uploading…';
+    msg.className = '';
+    try {
+      const body = new FormData(form);
+      const res = await fetch(window.location.pathname, { method: 'POST', body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || 'Upload failed');
+      msg.className = 'ok';
+      msg.textContent = 'Queued. Import Job ID: ' + (data.result?.importJobId || data.importJobId || 'created');
+      form.remove();
+    } catch (err) {
+      msg.className = 'err';
+      msg.textContent = err.message || String(err);
+    }
+  });
+</script>
+</body>
+</html>`;
+    res.status(200).type('html').send(html);
+  }
+
+  @Public()
+  @Post('upload/:token')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
+  async uploadPageSubmit(
+    @Param('token') token: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Req() request: Request,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Choose a PDF file to upload');
+    }
+    const result = await this.tools.completeBrowserUpload(token, file, request.ip);
+    return {
+      accepted: true,
+      result,
+      importJobId: result.importJobId,
+      message: 'Document queued in Import Queue',
+    };
+  }
+
+  /**
    * ChatGPT Actions preferred path: multipart file upload (no manual Base64).
-   * Accepts projectCode / module / documentType as human-readable strings.
+   * Kept for non-ChatGPT clients; ChatGPT should use prepare_approved_document + /upload/:token.
    */
   @Public()
   @UseGuards(McpAuthGuard)

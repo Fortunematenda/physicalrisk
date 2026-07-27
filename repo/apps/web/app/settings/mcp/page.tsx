@@ -14,6 +14,7 @@ const MCP_TOOLS = [
   'list_document_types',
   'resolve_import_targets',
   'check_document_exists',
+  'prepare_approved_document',
   'begin_document_upload',
   'upload_document_chunk',
   'submit_approved_document',
