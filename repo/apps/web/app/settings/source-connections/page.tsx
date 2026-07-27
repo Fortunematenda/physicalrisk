@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
@@ -43,6 +44,7 @@ function providerLabel(provider?: string) {
 }
 
 export default function SourceConnectionsPage() {
+  const searchParams = useSearchParams();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -62,6 +64,11 @@ export default function SourceConnectionsPage() {
   const [oauthSaving, setOauthSaving] = useState(false);
   const [oauthError, setOauthError] = useState('');
   const [oauthMessage, setOauthMessage] = useState('');
+
+  const connectedDrive = useMemo(
+    () => connections.find((item) => item.provider === 'GOOGLE_DRIVE' && item.status === 'CONNECTED'),
+    [connections],
+  );
 
   const loadOauth = async () => {
     try {
@@ -95,6 +102,15 @@ export default function SourceConnectionsPage() {
     void load();
     void loadOauth();
   }, []);
+
+  useEffect(() => {
+    const oauthResult = searchParams.get('oauth');
+    if (oauthResult === 'success') {
+      setMessage('Google Drive connected. Open the connection below to set a root folder and sync — you do not need to Connect again.');
+    } else if (oauthResult === 'error') {
+      setError(`Google authorization failed (${searchParams.get('reason') || 'unknown'}). Try Connect again.`);
+    }
+  }, [searchParams]);
 
   const saveOauth = async (event: FormEvent) => {
     event.preventDefault();
@@ -147,6 +163,20 @@ export default function SourceConnectionsPage() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const startNewGoogleConnect = () => {
+    if (connectedDrive) {
+      const ok = window.confirm(
+        `Google Drive is already connected as “${connectedDrive.name}”.\n\n`
+        + 'Click OK only if you want to link a different Google account (Google will ask you to sign in again).\n\n'
+        + 'Click Cancel and open the existing connection instead.',
+      );
+      if (!ok) return;
+    }
+    setConnectName(connectedDrive ? 'Google Drive (additional)' : 'Google Drive');
+    setConnectError('');
+    setShowConnect(true);
   };
 
   const connectGoogleDrive = async (event: FormEvent) => {
@@ -254,19 +284,26 @@ export default function SourceConnectionsPage() {
           <div className={styles.providerGrid}>
             <div className={styles.providerCard}>
               <h3>Google Drive</h3>
-              <p>OAuth connection with folder mapping, sync, and selective import.</p>
+              <p>
+                {connectedDrive
+                  ? `Connected as ${connectedDrive.externalAccountLabel || connectedDrive.name}. Open it to sync — do not Connect again unless you need another Google account.`
+                  : 'OAuth connection with folder mapping, sync, and selective import.'}
+              </p>
               <div className={styles.providerActions}>
-                <button
-                  type="button"
-                  className="button primary small"
-                  onClick={() => {
-                    setConnectName('Google Drive');
-                    setConnectError('');
-                    setShowConnect(true);
-                  }}
-                >
-                  Connect Google Drive
-                </button>
+                {connectedDrive ? (
+                  <>
+                    <Link href={`/settings/source-connections/${connectedDrive.id}`} className="button primary small">
+                      Open connected Drive
+                    </Link>
+                    <button type="button" className="button small" onClick={startNewGoogleConnect}>
+                      Connect another account
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="button primary small" onClick={startNewGoogleConnect}>
+                    Connect Google Drive
+                  </button>
+                )}
               </div>
             </div>
 
@@ -404,7 +441,10 @@ export default function SourceConnectionsPage() {
                 <h3 id="gdrive-connect-title">Connect Google Drive</h3>
               </div>
               <div className="modal-body">
-                <p>Choose a display name, then continue to Google to authorise access.</p>
+                <p>
+                  This starts a <strong>new</strong> Google authorization. After it succeeds, use that connection
+                  from the list — you should not need to authorize again for day-to-day sync.
+                </p>
                 <div className="field">
                   <label htmlFor="gdrive-name">Connection name</label>
                   <input
@@ -422,7 +462,7 @@ export default function SourceConnectionsPage() {
                   Cancel
                 </button>
                 <button type="submit" className="button primary" disabled={connecting || !connectName.trim()}>
-                  {connecting ? 'Connecting…' : 'Connect'}
+                  {connecting ? 'Connecting…' : 'Continue to Google'}
                 </button>
               </div>
             </form>
