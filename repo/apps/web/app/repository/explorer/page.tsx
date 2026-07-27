@@ -57,6 +57,96 @@ function downloadText(fileName: string, contents: string, type: string) {
   link.href = url; link.download = fileName; link.click(); URL.revokeObjectURL(url);
 }
 
+function useVersionPreview(version: VersionItem | null | undefined) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    const load = async () => {
+      if (!version?.id || !isInlineType(version.mimeType)) {
+        setPreviewUrl(null);
+        setError('');
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      setError('');
+      setPreviewUrl(null);
+      try {
+        const response = await fetch(`${API_URL}/versions/${version.id}/view`, {
+          headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+        });
+        if (!response.ok) throw new Error('Preview could not be loaded.');
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setPreviewUrl(objectUrl);
+      } catch (caught) {
+        if (!cancelled) {
+          setPreviewUrl(null);
+          setError(caught instanceof Error ? caught.message : 'Preview could not be loaded.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [version?.id, version?.mimeType]);
+
+  return { previewUrl, loading, error };
+}
+
+function DocumentPreview({
+  version,
+  previewUrl,
+  loading,
+  error,
+}: {
+  version: VersionItem;
+  previewUrl: string | null;
+  loading: boolean;
+  error: string;
+}) {
+  if (!isInlineType(version.mimeType)) {
+    return (
+      <div className={styles.previewUnavailable}>
+        <FileText size={22} />
+        <span>Inline preview is available for PDF and image files. Use View or Download for this file type.</span>
+      </div>
+    );
+  }
+  if (loading) {
+    return <div className={styles.previewLoading} aria-busy="true">Loading first-page preview…</div>;
+  }
+  if (error || !previewUrl) {
+    return <div className={styles.previewUnavailable}><span>{error || 'Preview is not available.'}</span></div>;
+  }
+  if (version.mimeType.startsWith('image/')) {
+    return (
+      <div className={styles.previewFrame}>
+        <img src={previewUrl} alt={`Preview of ${version.originalFileName}`} className={styles.previewImage} />
+      </div>
+    );
+  }
+  return (
+    <div className={styles.previewFrame}>
+      <iframe
+        title={`Preview of ${version.originalFileName}`}
+        src={`${previewUrl}#page=1&view=FitH&toolbar=0&navpanes=0`}
+        className={styles.previewIframe}
+      />
+    </div>
+  );
+}
+
 function TreeRow({ entry, level, selectedPath, expanded, onToggle, onSelect }: {
   entry: TreeEntry; level: number; selectedPath?: string; expanded: Set<string>;
   onToggle: (entry: TreeEntry) => void; onSelect: (entry: TreeEntry) => void;
@@ -199,6 +289,8 @@ export default function RepositoryExplorerPage() {
   };
 
   const currentVersion = selectedDocument?.versions?.find((version: VersionItem) => version.isCurrent) ?? selectedDocument?.versions?.[0];
+  const previewVersion = selected?.kind === 'file' || selected?.kind === 'document' ? currentVersion : null;
+  const { previewUrl, loading: previewLoading, error: previewError } = useVersionPreview(previewVersion);
   const displayedFolderDocs = useMemo(() => {
     const filtered = selectedFolderDocuments.filter((document) => {
       if (!statusFilter) return true;
@@ -324,7 +416,7 @@ export default function RepositoryExplorerPage() {
                     </div>
                   </div>
                 </article>
-              </div><div className={styles.empty}><Folder size={32} color="#2563eb" /><strong>Select a repository item</strong><span>Choose a module, document or file from the repository tree to inspect its approved records and secure actions.</span></div></> : selected.kind === 'folder' ? <><div className={styles.summary}><div><h2>{selected.entry.name}</h2><div className={styles.breadcrumb}>{selected.entry.path}</div></div><div className={styles.summaryStats}><span><strong>{displayedFolderDocs.length}</strong>Documents</span><span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span><span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span></div></div>{displayedFolderDocs.length === 0 ? <div className={styles.empty}><Folder size={30} color="#64748b" /><strong>This repository module does not contain any imported documents yet.</strong></div> : view === 'grid' ? <div className={styles.grid}>{displayedFolderDocs.map((document) => <button type="button" key={document.id} className={styles.gridItem} onClick={() => void selectEntry({ name: document.title, path: document.section.relativePath, type: 'directory', nodeType: 'document', documentId: document.id, documentCode: document.code })}><strong>{document.title}</strong><span>{document.code} · v{document.currentVersionNo}</span><span>{document.documentType} · {formatDate(document.updatedAt)}</span></button>)}</div> : <div className={styles.tableWrap}><table><thead><tr><th>Document</th><th>Document code</th><th>Current version</th><th>File type</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{displayedFolderDocs.map((document) => <tr key={document.id}><td><Link href={`/repository/documents/${document.id}`} className={styles.docLink}>{document.title}</Link></td><td>{document.code}</td><td>v{document.currentVersionNo}</td><td>{document.documentType}</td><td><StatusBadge value={document.status} /></td><td>{formatDate(document.updatedAt)}</td><td><button type="button" className={styles.buttonLink} onClick={() => void selectEntry({ name: document.title, path: document.section.relativePath, type: 'directory', nodeType: 'document', documentId: document.id, documentCode: document.code })}>Open Details</button></td></tr>)}</tbody></table></div>}</> : selected.kind === 'document' && selectedDocument ? <><div className={styles.summary}><div><h2>{selectedDocument.title}</h2><div className={styles.breadcrumb}>{selectedDocument.code} · {selectedDocument.project.name} / {selectedDocument.section.name}</div></div><StatusBadge value={selectedDocument.status} /></div>{currentVersion && <div className={styles.actions}>{isInlineType(currentVersion.mimeType) && <button type="button" className={`${styles.button} ${styles.buttonPrimary}`} onClick={() => void viewFile(currentVersion)}><ExternalLink size={15} />View Document</button>}<button type="button" className={styles.button} onClick={() => void download(currentVersion)}><Download size={15} />Download</button><Link href={`/repository/documents/${selectedDocument.id}`} className={styles.button}>Open Document Details</Link><Link href={`/documents/${selectedDocument.id}#versions`} className={styles.button}>View Version History</Link></div>}<dl className={styles.detailGrid}><dt>Document title</dt><dd>{selectedDocument.title}</dd><dt>Document code</dt><dd>{selectedDocument.code}</dd><dt>Current version</dt><dd>{selectedDocument.currentVersionNo}</dd><dt>Status</dt><dd><StatusBadge value={selectedDocument.status} /></dd><dt>Project</dt><dd>{selectedDocument.project.code} — {selectedDocument.project.name}</dd><dt>Repository module</dt><dd>{selectedDocument.section.name}</dd><dt>Source system</dt><dd>{selectedDocument.importJobs?.[0]?.sourceSystem?.name ?? '—'}</dd><dt>Approval status</dt><dd>{currentVersion?.approvalStatus ?? '—'}</dd><dt>Approved by</dt><dd>{currentVersion?.approvedBy ?? '—'}</dd><dt>Approval date</dt><dd>{formatDate(currentVersion?.approvalDate)}</dd><dt>Current filename</dt><dd>{currentVersion?.originalFileName ?? '—'}</dd><dt>File type</dt><dd>{currentVersion?.mimeType ?? '—'}</dd><dt>File size</dt><dd>{formatBytes(currentVersion?.fileSize)}</dd><dt>Imported by</dt><dd>{currentVersion?.createdBy?.name ?? 'System'}</dd><dt>Imported date</dt><dd>{formatDate(currentVersion?.createdAt)}</dd><dt>Repository location</dt><dd>{currentVersion?.storagePath ?? selected.entry.path}</dd></dl></> : selected.kind === 'file' ? <><div className={styles.fileHero}>{iconFor(selected.entry)}<div><b>{selected.entry.name}</b><div className={styles.muted}>{selected.entry.mimeType ?? extensionOf(selected.entry.name).toUpperCase()} · {formatBytes(selected.entry.size)}</div></div></div>{selectedDocument && currentVersion && <><div className={styles.actions} style={{ marginTop: 15 }}>{isInlineType(currentVersion.mimeType) ? <button type="button" className={`${styles.button} ${styles.buttonPrimary}`} onClick={() => void viewFile(currentVersion)}><ExternalLink size={15} />View</button> : null}<button type="button" className={styles.button} onClick={() => void download(currentVersion)}><Download size={15} />Download</button><Link href={`/repository/documents/${selectedDocument.id}`} className={styles.button}>Open parent Document Details</Link></div><dl className={styles.detailGrid}><dt>Filename</dt><dd>{currentVersion.originalFileName}</dd><dt>File type</dt><dd>{currentVersion.mimeType}</dd><dt>File size</dt><dd>{formatBytes(currentVersion.fileSize)}</dd><dt>Version</dt><dd>{currentVersion.versionNo}</dd><dt>Modified date</dt><dd>{formatDate(currentVersion.createdAt)}</dd><dt>Parent document</dt><dd>{selectedDocument.code} — {selectedDocument.title}</dd><dt>Repository location</dt><dd>{currentVersion.storagePath}</dd></dl></>} {!selectedDocument && <div className={styles.empty}><File size={30} /><strong>File record is not mapped to an imported document.</strong><span>Only mapped logical document versions expose secure document actions.</span></div>}</> : <div className={styles.empty}><strong>Loading selected document…</strong></div>}</div></section>
+              </div><div className={styles.empty}><Folder size={32} color="#2563eb" /><strong>Select a repository item</strong><span>Choose a module, document or file from the repository tree to inspect its approved records and secure actions.</span></div></> : selected.kind === 'folder' ? <><div className={styles.summary}><div><h2>{selected.entry.name}</h2><div className={styles.breadcrumb}>{selected.entry.path}</div></div><div className={styles.summaryStats}><span><strong>{displayedFolderDocs.length}</strong>Documents</span><span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span><span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span></div></div>{displayedFolderDocs.length === 0 ? <div className={styles.empty}><Folder size={30} color="#64748b" /><strong>This repository module does not contain any imported documents yet.</strong></div> : view === 'grid' ? <div className={styles.grid}>{displayedFolderDocs.map((document) => <button type="button" key={document.id} className={styles.gridItem} onClick={() => void selectEntry({ name: document.title, path: document.section.relativePath, type: 'directory', nodeType: 'document', documentId: document.id, documentCode: document.code })}><strong>{document.title}</strong><span>{document.code} · v{document.currentVersionNo}</span><span>{document.documentType} · {formatDate(document.updatedAt)}</span></button>)}</div> : <div className={styles.tableWrap}><table><thead><tr><th>Document</th><th>Document code</th><th>Current version</th><th>File type</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{displayedFolderDocs.map((document) => <tr key={document.id}><td><Link href={`/repository/documents/${document.id}`} className={styles.docLink}>{document.title}</Link></td><td>{document.code}</td><td>v{document.currentVersionNo}</td><td>{document.documentType}</td><td><StatusBadge value={document.status} /></td><td>{formatDate(document.updatedAt)}</td><td><button type="button" className={styles.buttonLink} onClick={() => void selectEntry({ name: document.title, path: document.section.relativePath, type: 'directory', nodeType: 'document', documentId: document.id, documentCode: document.code })}>Open Details</button></td></tr>)}</tbody></table></div>}</> : selected.kind === 'document' && selectedDocument ? <><div className={styles.summary}><div><h2>{selectedDocument.title}</h2><div className={styles.breadcrumb}>{selectedDocument.code} · {selectedDocument.project.name} / {selectedDocument.section.name}</div></div><StatusBadge value={selectedDocument.status} /></div>{currentVersion && <div className={styles.previewSection}><div className={styles.previewHeader}><strong>Document preview</strong><span>First page · PDF and images</span></div><DocumentPreview version={currentVersion} previewUrl={previewUrl} loading={previewLoading} error={previewError} /></div>}{currentVersion && <div className={styles.actions}>{isInlineType(currentVersion.mimeType) && <button type="button" className={`${styles.button} ${styles.buttonPrimary}`} onClick={() => void viewFile(currentVersion)}><ExternalLink size={15} />View Document</button>}<button type="button" className={styles.button} onClick={() => void download(currentVersion)}><Download size={15} />Download</button><Link href={`/repository/documents/${selectedDocument.id}`} className={styles.button}>Open Document Details</Link><Link href={`/documents/${selectedDocument.id}#versions`} className={styles.button}>View Version History</Link></div>}<dl className={styles.detailGrid}><dt>Document title</dt><dd>{selectedDocument.title}</dd><dt>Document code</dt><dd>{selectedDocument.code}</dd><dt>Current version</dt><dd>{selectedDocument.currentVersionNo}</dd><dt>Status</dt><dd><StatusBadge value={selectedDocument.status} /></dd><dt>Project</dt><dd>{selectedDocument.project.code} — {selectedDocument.project.name}</dd><dt>Repository module</dt><dd>{selectedDocument.section.name}</dd><dt>Source system</dt><dd>{selectedDocument.importJobs?.[0]?.sourceSystem?.name ?? '—'}</dd><dt>Approval status</dt><dd>{currentVersion?.approvalStatus ?? '—'}</dd><dt>Approved by</dt><dd>{currentVersion?.approvedBy ?? '—'}</dd><dt>Approval date</dt><dd>{formatDate(currentVersion?.approvalDate)}</dd><dt>Current filename</dt><dd>{currentVersion?.originalFileName ?? '—'}</dd><dt>File type</dt><dd>{currentVersion?.mimeType ?? '—'}</dd><dt>File size</dt><dd>{formatBytes(currentVersion?.fileSize)}</dd><dt>Imported by</dt><dd>{currentVersion?.createdBy?.name ?? 'System'}</dd><dt>Imported date</dt><dd>{formatDate(currentVersion?.createdAt)}</dd><dt>Repository location</dt><dd>{currentVersion?.storagePath ?? selected.entry.path}</dd></dl></> : selected.kind === 'file' ? <><div className={styles.fileHero}>{iconFor(selected.entry)}<div><b>{selected.entry.name}</b><div className={styles.muted}>{selected.entry.mimeType ?? extensionOf(selected.entry.name).toUpperCase()} · {formatBytes(selected.entry.size)}</div></div></div>{selectedDocument && currentVersion && <><div className={styles.previewSection}><div className={styles.previewHeader}><strong>Document preview</strong><span>First page · PDF and images</span></div><DocumentPreview version={currentVersion} previewUrl={previewUrl} loading={previewLoading} error={previewError} /></div><div className={styles.actions} style={{ marginTop: 15 }}>{isInlineType(currentVersion.mimeType) ? <button type="button" className={`${styles.button} ${styles.buttonPrimary}`} onClick={() => void viewFile(currentVersion)}><ExternalLink size={15} />View</button> : null}<button type="button" className={styles.button} onClick={() => void download(currentVersion)}><Download size={15} />Download</button><Link href={`/repository/documents/${selectedDocument.id}`} className={styles.button}>Open parent Document Details</Link></div><dl className={styles.detailGrid}><dt>Filename</dt><dd>{currentVersion.originalFileName}</dd><dt>File type</dt><dd>{currentVersion.mimeType}</dd><dt>File size</dt><dd>{formatBytes(currentVersion.fileSize)}</dd><dt>Version</dt><dd>{currentVersion.versionNo}</dd><dt>Modified date</dt><dd>{formatDate(currentVersion.createdAt)}</dd><dt>Parent document</dt><dd>{selectedDocument.code} — {selectedDocument.title}</dd><dt>Repository location</dt><dd>{currentVersion.storagePath}</dd></dl></>} {!selectedDocument && <div className={styles.empty}><File size={30} /><strong>File record is not mapped to an imported document.</strong><span>Only mapped logical document versions expose secure document actions.</span></div>}</> : <div className={styles.empty}><strong>Loading selected document…</strong></div>}</div></section>
     </section>
   </main>;
 }

@@ -288,7 +288,71 @@
   font-size: 12px;
   font-weight: 700;
 }
+
+.previewSection {
+  margin-top: 14px;
+  border: 1px solid #d7e2ee;
+  border-radius: 10px;
+  background: #f4f7fb;
+  overflow: hidden;
+}
+.previewHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8ef;
+  background: #fff;
+}
+.previewHeader strong {
+  color: #001b36;
+  font-size: 13px;
+}
+.previewHeader span {
+  color: #64748b;
+  font-size: 11px;
+}
+.previewFrame {
+  position: relative;
+  width: 100%;
+  min-height: 320px;
+  max-height: min(52vh, 560px);
+  background: #e8eef5;
+}
+.previewIframe {
+  display: block;
+  width: 100%;
+  height: min(52vh, 560px);
+  min-height: 320px;
+  border: 0;
+  background: #fff;
+}
+.previewImage {
+  display: block;
+  width: 100%;
+  max-height: min(52vh, 560px);
+  object-fit: contain;
+  background: #fff;
+}
+.previewLoading,
+.previewUnavailable {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 20px;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+}
+.previewUnavailable {
+  grid-auto-flow: column;
+  justify-content: center;
+  align-items: center;
+}
+
 .detailGrid { display: grid; grid-template-columns: 145px minmax(0, 1fr); gap: 10px 16px; margin-top: 18px; }.detailGrid dt { color: #64748b; font-size: 12px; }.detailGrid dd { margin: 0; color: #26384b; font-size: 13px; overflow-wrap: anywhere; }.fileHero { display: flex; align-items: center; gap: 13px; padding: 14px; border: 1px solid #e2e8ef; border-radius: 8px; background: #f8fafc; }.fileHero b { color: #001b36; font-size: 15px; }.notice { padding: 13px 15px; color: #8a2a1e; border-color: #f2cac4; background: #fff5f3; }.empty { display: grid; min-height: 260px; place-items: center; align-content: center; gap: 7px; color: #64748b; text-align: center; }.empty strong { color: #001b36; font-size: 15px; }.skeleton { min-height: 18px; border-radius: 5px; background: linear-gradient(90deg, #edf1f5 25%, #f7f9fb 37%, #edf1f5 63%); background-size: 400% 100%; animation: shimmer 1.3s infinite; }.skeletonRow { height: 37px; margin: 6px; }.skeletonDetails { height: 20px; margin: 14px 0; }@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }.spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
 .mobileBack { display: none; }
 @media (max-width: 900px) { .explorer { padding: 16px; }.workspace { grid-template-columns: minmax(230px, 40%) minmax(0, 60%); }.header { flex-direction: column; }.syncMeta { text-align: left; } }
-@media (max-width: 680px) { .explorer { height: auto; min-height: calc(100vh - 64px); overflow: visible; padding: 12px; }.workspace { display: block; }.hiddenOnMobile { display: none; }.detailsPanel { min-height: 65vh; }.mobileBack { display: inline-flex; margin-bottom: 12px; }.headerActions { width: 100%; }.toolbar { align-items: stretch; }.search { min-width: 0; }.registers { grid-template-columns: 1fr; }.registerActions { width: 100%; }.registerPrimary, .registerExport { flex: 1 1 auto; }.detailGrid { grid-template-columns: 1fr; gap: 4px; }.detailGrid dt { margin-top: 9px; }.summary { flex-direction: column; }.tableWrap { margin-inline: -4px; } }
+@media (max-width: 680px) { .explorer { height: auto; min-height: calc(100vh - 64px); overflow: visible; padding: 12px; }.workspace { display: block; }.hiddenOnMobile { display: none; }.detailsPanel { min-height: 65vh; }.mobileBack { display: inline-flex; margin-bottom: 12px; }.headerActions { width: 100%; }.toolbar { align-items: stretch; }.search { min-width: 0; }.registers { grid-template-columns: 1fr; }.registerActions { width: 100%; }.registerPrimary, .registerExport { flex: 1 1 auto; }.detailGrid { grid-template-columns: 1fr; gap: 4px; }.detailGrid dt { margin-top: 9px; }.summary { flex-direction: column; }.tableWrap { margin-inline: -4px; }.previewFrame, .previewIframe, .previewImage { max-height: 42vh; min-height: 220px; }.previewIframe { height: 42vh; } }
