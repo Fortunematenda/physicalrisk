@@ -1,13 +1,28 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import PDFKit from 'pdfkit';
 
 export type MarkdownPdfOptions = {
   title?: string;
   author?: string;
 };
 
-// Nest compiles without esModuleInterop; pdfkit's CJS export shape varies.
-const PDFDocument = (PDFKit as unknown as { default?: typeof PDFKit }).default ?? PDFKit;
+type PdfDocCtor = new (options?: Record<string, unknown>) => {
+  on(event: 'data', cb: (chunk: Buffer) => void): void;
+  on(event: 'end', cb: () => void): void;
+  on(event: 'error', cb: (err: Error) => void): void;
+  page: { width: number };
+  y: number;
+  rect(x: number, y: number, w: number, h: number): { fill(color: string): void };
+  fillColor(color: string): unknown;
+  font(name: string): unknown;
+  fontSize(size: number): unknown;
+  text(text: string, xOrOptions?: number | Record<string, unknown>, y?: number, options?: Record<string, unknown>): unknown;
+  moveDown(n?: number): unknown;
+  end(): void;
+};
+
+/** Avoid TS default-import rewriting (`pdfkit_1.default.default`) which crashes Nest CJS. */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PDFDocument = require('pdfkit') as PdfDocCtor;
 
 /**
  * Lightweight Markdown → PDF for MCP same-chat submissions.
@@ -44,16 +59,25 @@ export class McpMarkdownPdfService {
         doc.on('error', reject);
 
         doc.rect(0, 0, doc.page.width, 72).fill('#0b1f33');
-        doc.fillColor('#ffffff').font('Helvetica').fontSize(10).text('PHYSICAL RISK', 56, 22);
-        doc.fontSize(16).text('Repository', 56, 38);
+        doc.fillColor('#ffffff');
+        doc.font('Helvetica');
+        doc.fontSize(10);
+        doc.text('PHYSICAL RISK', 56, 22);
+        doc.fontSize(16);
+        doc.text('Repository', 56, 38);
         doc.fillColor('#111111');
 
         doc.y = 96;
-        doc.fontSize(18).font('Helvetica-Bold').text(title, { align: 'left' });
+        doc.fontSize(18);
+        doc.font('Helvetica-Bold');
+        doc.text(title, { align: 'left' });
         doc.moveDown(0.4);
-        doc.fontSize(9).font('Helvetica').fillColor('#555555')
-          .text(`Generated ${new Date().toISOString().slice(0, 10)} · Approved Document`);
-        doc.moveDown(1.2).fillColor('#111111');
+        doc.fontSize(9);
+        doc.font('Helvetica');
+        doc.fillColor('#555555');
+        doc.text(`Generated ${new Date().toISOString().slice(0, 10)} · Approved Document`);
+        doc.moveDown(1.2);
+        doc.fillColor('#111111');
 
         const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
         let paragraph: string[] = [];
@@ -82,10 +106,12 @@ export class McpMarkdownPdfService {
             const level = heading[1].length;
             const text = this.toPdfSafe(heading[2].trim());
             doc.moveDown(level === 1 ? 0.6 : 0.35);
-            doc.font('Helvetica-Bold').fontSize(level === 1 ? 16 : level === 2 ? 13 : 12)
-              .fillColor('#111111')
-              .text(text, { paragraphGap: 4 });
-            doc.font('Helvetica').fontSize(11);
+            doc.font('Helvetica-Bold');
+            doc.fontSize(level === 1 ? 16 : level === 2 ? 13 : 12);
+            doc.fillColor('#111111');
+            doc.text(text, { paragraphGap: 4 });
+            doc.font('Helvetica');
+            doc.fontSize(11);
             doc.moveDown(0.35);
             continue;
           }
@@ -93,7 +119,8 @@ export class McpMarkdownPdfService {
           const bullet = trimmed.match(/^[-*+]\s+(.+)$/);
           if (bullet) {
             flushParagraph();
-            doc.font('Helvetica').fontSize(11);
+            doc.font('Helvetica');
+            doc.fontSize(11);
             doc.text(`-  ${this.stripInlineMarkers(bullet[1])}`, {
               indent: 12,
               paragraphGap: 2,
@@ -104,7 +131,8 @@ export class McpMarkdownPdfService {
           const numbered = trimmed.match(/^\d+[.)]\s+(.+)$/);
           if (numbered) {
             flushParagraph();
-            doc.font('Helvetica').fontSize(11);
+            doc.font('Helvetica');
+            doc.fontSize(11);
             doc.text(`${trimmed.match(/^\d+/)?.[0]}.  ${this.stripInlineMarkers(numbered[1])}`, {
               indent: 12,
               paragraphGap: 2,
@@ -123,9 +151,11 @@ export class McpMarkdownPdfService {
     });
   }
 
-  private writeInline(doc: InstanceType<typeof PDFDocument>, text: string, size: number): void {
-    doc.font('Helvetica').fontSize(size).fillColor('#222222')
-      .text(this.stripInlineMarkers(text), { align: 'left', paragraphGap: 2, lineGap: 2 });
+  private writeInline(doc: InstanceType<PdfDocCtor>, text: string, size: number): void {
+    doc.font('Helvetica');
+    doc.fontSize(size);
+    doc.fillColor('#222222');
+    doc.text(this.stripInlineMarkers(text), { align: 'left', paragraphGap: 2, lineGap: 2 });
   }
 
   private stripInlineMarkers(text: string): string {
