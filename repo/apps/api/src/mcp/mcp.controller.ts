@@ -8,10 +8,13 @@ import {
   Param,
   Post,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { McpIntegration } from '../database/entities';
 import { CurrentUser } from '../common/current-user.decorator';
@@ -26,6 +29,7 @@ import {
   MCP_TOOL_NAMES,
   McpJsonRpcRequestDto,
   McpToolName,
+  SubmitApprovedDocumentDto,
 } from './mcp.dto';
 import { buildChatGptActionsOpenApi, CHATGPT_GPT_INSTRUCTIONS } from './mcp-openai.openapi';
 import { McpToolsService } from './mcp-tools.service';
@@ -106,6 +110,52 @@ export class McpController {
   @Get('tools')
   listTools() {
     return { tools: this.tools.listToolDefinitions() };
+  }
+
+  /**
+   * ChatGPT Actions preferred path: multipart file upload (no manual Base64).
+   * Accepts projectCode / module / documentType as human-readable strings.
+   */
+  @Public()
+  @UseGuards(McpAuthGuard)
+  @Post('submit-approved-document')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
+  async submitApprovedDocumentMultipart(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: Record<string, string>,
+    @Req() request: McpRequest,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Attach the PDF/file in the multipart "file" field');
+    }
+    const integration = request[MCP_INTEGRATION_KEY]!;
+    this.auth.assertToolAllowed(integration, 'submit_approved_document');
+    const payload: SubmitApprovedDocumentDto = {
+      projectId: body.projectId || undefined,
+      projectCode: body.projectCode || body.project || undefined,
+      title: body.title,
+      documentCode: body.documentCode || undefined,
+      documentType: body.documentType,
+      description: body.description || undefined,
+      owner: body.owner || undefined,
+      versionNo: body.versionNo || body.version || undefined,
+      approvalStatus: body.approvalStatus || 'APPROVED',
+      approvedBy: body.approvedBy,
+      approvalDate: body.approvalDate,
+      sectionKey: body.sectionKey || undefined,
+      module: body.module || undefined,
+      metadataJson: body.metadataJson || undefined,
+      relationshipsJson: body.relationshipsJson || undefined,
+      mode: body.mode === 'NEW_VERSION' ? 'NEW_VERSION' : body.mode === 'NEW' ? 'NEW' : undefined,
+      existingDocumentId: body.existingDocumentId || undefined,
+      fileName: body.fileName || file.originalname,
+      fileContentBase64: file.buffer.toString('base64'),
+      mimeType: body.mimeType || file.mimetype,
+    };
+
+    const result = await this.tools.submitApprovedDocument(integration, payload, request.ip);
+    return { tool: 'submit_approved_document', result };
   }
 
   @Public()

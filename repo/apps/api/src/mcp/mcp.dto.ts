@@ -178,10 +178,11 @@ export class SubmitApprovedDocumentDto {
   @IsNotEmpty()
   fileName!: string;
 
+  @IsOptional()
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
-  fileContentBase64!: string;
+  fileContentBase64?: string;
 
   @IsOptional()
   @Transform(trimString)

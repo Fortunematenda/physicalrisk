@@ -271,6 +271,13 @@ export class McpToolsService {
       sectionKey = resolved.module?.sectionKey;
     }
 
+    const fileContentBase64 = input.fileContentBase64?.trim();
+    if (!fileContentBase64) {
+      throw new BadRequestException(
+        'fileContentBase64 is required (or upload the file via the multipart submit_approved_document action)',
+      );
+    }
+
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
       const result = await this.orchestrator.queueMcpApprovedDocument({
@@ -291,7 +298,7 @@ export class McpToolsService {
         mode: input.mode,
         existingDocumentId: input.existingDocumentId,
         fileName: input.fileName,
-        fileContentBase64: input.fileContentBase64,
+        fileContentBase64,
         mimeType: input.mimeType,
         mcpIntegrationId: integration.id,
       });
@@ -457,7 +464,7 @@ export class McpToolsService {
       },
       submit_approved_document: {
         type: 'object',
-        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName', 'fileContentBase64'],
+        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate', 'fileName'],
         properties: {
           projectId: { type: 'string', format: 'uuid' },
           projectCode: { type: 'string', description: 'Alternative to projectId (e.g. MOSS)' },
@@ -476,7 +483,7 @@ export class McpToolsService {
           mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
           existingDocumentId: { type: 'string', format: 'uuid' },
           fileName: { type: 'string' },
-          fileContentBase64: { type: 'string' },
+          fileContentBase64: { type: 'string', description: 'Optional when using multipart file upload Action' },
           mimeType: { type: 'string' },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
         },

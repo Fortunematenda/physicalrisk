@@ -10,9 +10,12 @@ describe('buildChatGptActionsOpenApi', () => {
       '/api/mcp/tools/list_repository_modules',
       '/api/mcp/tools/resolve_import_targets',
       '/api/mcp/tools/check_document_exists',
-      '/api/mcp/tools/submit_approved_document',
+      '/api/mcp/submit-approved-document',
       '/api/mcp/tools/get_import_status',
     ]);
+    const submit = (doc.paths as any)['/api/mcp/submit-approved-document'].post;
+    expect(submit.requestBody.content['multipart/form-data']).toBeTruthy();
+    expect(submit.requestBody.content['multipart/form-data'].schema.properties.file.format).toBe('binary');
     for (const path of Object.keys(doc.paths)) {
       const post = (doc.paths as Record<string, { post: { operationId: string; requestBody?: { content: { 'application/json': { schema: { properties?: Record<string, unknown> } } } } } }>)[path].post;
       expect(post.operationId).toBeTruthy();

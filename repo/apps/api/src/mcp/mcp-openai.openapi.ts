@@ -164,59 +164,65 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           responses: emptyOk,
         },
       },
-      '/api/mcp/tools/submit_approved_document': {
+      '/api/mcp/submit-approved-document': {
         post: {
           operationId: 'submit_approved_document',
           tags: ['MCP'],
-          summary: 'Submit an APPROVED document into the Import Queue',
+          summary: 'Submit an APPROVED document (multipart file upload)',
           description:
-            'Queues an APPROVED document for human review. Provide projectId OR projectCode. '
-            + 'documentType accepts name or code. sectionKey comes from resolve_import_targets / list_repository_modules.',
+            'PREFERRED for ChatGPT. Attach the user-uploaded PDF as multipart field "file". '
+            + 'Use projectCode (e.g. MOSS), module name (e.g. Enterprise Architecture), and documentType name/code (e.g. Articles). '
+            + 'Do NOT require UUIDs. Do NOT invent Base64 — attach the uploaded file.',
           security: mcpSecurity,
           requestBody: {
             required: true,
             content: {
-              'application/json': {
+              'multipart/form-data': {
                 schema: {
                   type: 'object',
                   required: [
+                    'file',
                     'title',
                     'documentType',
                     'versionNo',
                     'approvalStatus',
                     'approvedBy',
                     'approvalDate',
-                    'fileName',
-                    'fileContentBase64',
                   ],
-                  additionalProperties: false,
                   properties: {
-                    projectId: { type: 'string', format: 'uuid' },
-                    projectCode: { type: 'string', description: 'e.g. MOSS' },
-                    title: { type: 'string' },
-                    documentCode: { type: 'string' },
-                    documentType: { type: 'string', description: 'Name or code, e.g. Articles' },
-                    description: { type: 'string' },
-                    owner: { type: 'string' },
-                    versionNo: { type: 'string' },
-                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
-                    approvedBy: { type: 'string' },
-                    approvalDate: { type: 'string' },
-                    sectionKey: { type: 'string' },
+                    file: {
+                      type: 'string',
+                      format: 'binary',
+                      description: 'The uploaded PDF/document from the chat',
+                    },
+                    projectCode: {
+                      type: 'string',
+                      description: 'Project code or name (preferred). Example: MOSS',
+                    },
+                    projectId: {
+                      type: 'string',
+                      description: 'Optional UUID if already known',
+                    },
                     module: {
                       type: 'string',
-                      description: 'Module/section name (e.g. Enterprise Architecture). Resolved server-side to sectionKey.',
+                      description: 'Repository module/section name. Example: Enterprise Architecture',
                     },
-                    metadataJson: { type: 'string' },
-                    relationshipsJson: { type: 'string' },
-                    mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
-                    existingDocumentId: { type: 'string', format: 'uuid' },
-                    fileName: { type: 'string' },
-                    fileContentBase64: {
+                    sectionKey: {
                       type: 'string',
-                      description: 'Base64-encoded file bytes',
+                      description: 'Optional section key if already known',
                     },
+                    documentType: {
+                      type: 'string',
+                      description: 'Document type NAME or CODE — not a UUID. Example: Articles or AR',
+                    },
+                    title: { type: 'string' },
+                    versionNo: { type: 'string', description: 'Example: Rev 1.0' },
+                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
+                    approvedBy: { type: 'string' },
+                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
+                    fileName: { type: 'string' },
                     mimeType: { type: 'string' },
+                    mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
                   },
                 },
               },
@@ -271,71 +277,41 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant for submitting APPROVED documents to the Import Queue.
 
-DEFINITIONS (do not confuse these)
-- Repository Project = project code/name (e.g. MOSS)
-- Repository Module = project section/folder (e.g. Enterprise Architecture). NOT a document type.
-- Document Type = classification (e.g. Articles / AR). NOT a module.
-If the user says "Articles", that is almost always Document Type, not Module.
+DEFINITIONS (do not confuse)
+- Repository Project = e.g. MOSS (use projectCode="MOSS"; UUID optional)
+- Repository Module = e.g. Enterprise Architecture (NOT a document type)
+- Document Type = e.g. Articles / AR (a NAME or CODE string — NOT a UUID, NOT a module)
 
-CRITICAL BEHAVIOR
-- Always use Actions. Never say you lack IDs or cannot submit when Actions are configured.
-- You do NOT need UUIDs. Submit with human-readable values:
-  projectCode (or project name), module (module name), documentType (name or code).
-- Never invent UUIDs. Names/codes are enough.
-- NEVER re-ask for a field already provided in this conversation or clearly present in the uploaded PDF.
-- When approvalStatus is APPROVED (or user says approved/signed) AND you have project + module + documentType + title + version + approvedBy + approvalDate + the file, you MUST call check_document_exists then submit_approved_document in the same turn.
+CRITICAL — FILE UPLOAD
+- Use the Action submit_approved_document with multipart field "file".
+- Attach the user-uploaded PDF directly to "file". NEVER say you cannot get Base64.
+- Do not ask the user for Base64.
 
-AUTO-POPULATE FROM THE UPLOADED PDF (do this first, silently)
-Prefill without asking if present in the file:
-- title
-- versionNo (e.g. Rev 1.0 → use "Rev 1.0" or "1.0")
-- fileName (exact uploaded filename)
-- approvalDate (prefer latest signature/approval date as YYYY-MM-DD)
-- approvedBy (if one clear approver; if multiple, ask ONCE which name to store)
-- approvalStatus = APPROVED when user indicates approved/signed
+CRITICAL — IDENTIFIERS
+- Prefer projectCode + module + documentType strings. UUIDs are optional.
+- documentType is "Articles" (string), not a document type UUID.
+- Never invent UUIDs. Never claim the API requires UUIDs when projectCode/module/documentType are available.
 
-ASK AT MOST ONCE, AND ONLY FOR TRUE GAPS
-Only ask for fields still unknown after PDF + chat history:
-1) Project (if multiple allowed and unspecified)
-2) Module (section name)
-3) Document Type
-4) Approved by (only if multiple signatories)
-5) Approval date (only if unclear)
+AUTO-POPULATE FROM PDF + CHAT
+Prefill title, versionNo, fileName, approvalDate, approvedBy from the PDF when present.
+Never re-ask fields already confirmed in the conversation.
+When user says APPROVED / signed and required fields are known, immediately:
+1) check_document_exists (projectCode + title/fileName)
+2) submit_approved_document with multipart file + metadata
+Return importJobId and remind a human must finish Import Queue review.
 
-Do not ask for "repository metadata identifiers", section UUIDs, or document type IDs.
+EXAMPLE SUBMIT (multipart)
+- file: <the uploaded PDF>
+- projectCode: MOSS
+- module: Enterprise Architecture
+- documentType: Articles
+- title: MOSS Lean Revenue MVP – Timeline, Deliverables and Payment Milestones
+- versionNo: Rev 1.0
+- approvalStatus: APPROVED
+- approvedBy: Wayne Hermanson
+- approvalDate: 2026-07-03
+- fileName: MOSS Lean Revenue MVP Timeline Deliverables Payment Milestones Signed Contract.pdf
 
-KNOWN EXAMPLE — do not block on this pattern
-If the user already confirmed something like:
-- Project MOSS
-- Module Enterprise Architecture
-- Document Type Articles
-- Title from PDF
-- Version Rev 1.0
-- APPROVED
-- Approved by Wayne Hermanson
-- Date 2026-07-03
-→ immediately duplicate-check and submit. Do not ask again.
+ASK ONLY FOR TRUE GAPS (project/module/document type/approver/date) — at most once each.
 
-SUBMISSION CALL SHAPE
-submit_approved_document body may look like:
-{
-  "projectCode": "MOSS",
-  "module": "Enterprise Architecture",
-  "documentType": "Articles",
-  "title": "...",
-  "versionNo": "Rev 1.0",
-  "approvalStatus": "APPROVED",
-  "approvedBy": "Wayne Hermanson",
-  "approvalDate": "2026-07-03",
-  "fileName": "...pdf",
-  "fileContentBase64": "<from upload>"
-}
-
-Optional: call resolve_import_targets first with { "project":"MOSS", "module":"Enterprise Architecture", "documentType":"Articles" }.
-
-After submit: return importJobId/status and remind that a human must finish import in the Import Queue.
-
-Errors:
-- 401 → MCP API key missing/wrong
-- 403 → allow project/tools on MCP integration
-- 404 → show available modules/types from the error and ask user to pick one`;
+Errors: 401=bad MCP key; 403=project/tool not allowed; 404=show available modules/types.`;
