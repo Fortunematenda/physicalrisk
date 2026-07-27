@@ -1,6 +1,8 @@
 /**
  * OpenAPI for ChatGPT Custom GPT Actions.
- * Custom GPTs cannot send PDF bytes. Primary flow: prepare_approved_document → browser uploadUrl.
+ *
+ * UnrecognizedKwargsError workaround: submit/prepare take a single string field `payload`
+ * (JSON object as string) so the model cannot invent extra kwargs.
  */
 export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const baseUrl = publicBaseUrl.replace(/\/+$/, '') || 'https://repo.physicalrisk.com';
@@ -50,15 +52,31 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const responses = { '200': ok, '400': err, '401': err, '403': err };
   const security = [{ McpBearer: [] }];
 
+  const payloadSchema = {
+    type: 'object',
+    required: ['payload'],
+    properties: {
+      payload: {
+        type: 'string',
+        description:
+          'JSON object string with keys: projectCode, module, documentType, title, versionNo, '
+          + 'approvalStatus, approvedBy, approvalDate, fileName. Example: '
+          + '{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles",'
+          + '"title":"...","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne",'
+          + '"approvalDate":"2026-07-27","fileName":"doc.pdf"}',
+      },
+    },
+  };
+
   return {
     openapi: '3.1.0',
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Approved Document intake for ChatGPT. Because Custom GPT Actions cannot send PDF bytes, '
-        + 'call prepare_approved_document then give the user the uploadUrl to upload the PDF in a browser. '
+        'Approved Document intake for ChatGPT. Actions cannot send PDF bytes. '
+        + 'Call submit_approved_document with a single payload JSON string; then open uploadUrl in a browser. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.6.0',
+      version: '1.7.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -116,30 +134,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           responses,
         },
       },
-      '/api/mcp/tools/resolve_import_targets': {
-        post: {
-          operationId: 'resolve_import_targets',
-          summary: 'Resolve project/module/document type names',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['project'],
-                  properties: {
-                    project: { type: 'string' },
-                    module: { type: 'string' },
-                    documentType: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
       '/api/mcp/tools/check_document_exists': {
         post: {
           operationId: 'check_document_exists',
@@ -153,54 +147,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                   type: 'object',
                   properties: {
                     projectCode: { type: 'string' },
-                    projectId: { type: 'string' },
                     title: { type: 'string' },
                     fileName: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/prepare_approved_document': {
-        post: {
-          operationId: 'prepare_approved_document',
-          summary: 'Create browser upload link for APPROVED document',
-          description:
-            'PREFERRED. Returns uploadUrl. Tell the user to open it and upload the PDF. '
-            + 'Do not attempt multipart or base64 file transfer from ChatGPT.',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: [
-                    'projectCode',
-                    'module',
-                    'documentType',
-                    'title',
-                    'versionNo',
-                    'approvalStatus',
-                    'approvedBy',
-                    'approvalDate',
-                  ],
-                  properties: {
-                    projectCode: { type: 'string', description: 'e.g. MOSS' },
-                    module: { type: 'string', description: 'e.g. Enterprise Architecture' },
-                    documentType: { type: 'string', description: 'e.g. Articles' },
-                    title: { type: 'string' },
-                    versionNo: { type: 'string' },
-                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
-                    approvedBy: { type: 'string' },
-                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
-                    fileName: { type: 'string' },
-                    mimeType: { type: 'string' },
-                    projectId: { type: 'string' },
-                    sectionKey: { type: 'string' },
                   },
                 },
               },
@@ -212,42 +160,32 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/submit_approved_document': {
         post: {
           operationId: 'submit_approved_document',
-          summary: 'Alias: create browser upload link (same as prepare_approved_document)',
+          summary: 'Create browser upload link (single payload string)',
           description:
-            'Same as prepare_approved_document. Returns uploadUrl for browser PDF upload. '
-            + 'Do not pass file, fileContentBase64, or uploadId from ChatGPT.',
+            'Pass ONLY payload (a JSON string). Returns uploadUrl. User opens uploadUrl and uploads the PDF.',
           security,
           requestBody: {
             required: true,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: [
-                    'projectCode',
-                    'module',
-                    'documentType',
-                    'title',
-                    'versionNo',
-                    'approvalStatus',
-                    'approvedBy',
-                    'approvalDate',
-                  ],
-                  properties: {
-                    projectCode: { type: 'string', description: 'e.g. MOSS' },
-                    module: { type: 'string', description: 'e.g. Enterprise Architecture' },
-                    documentType: { type: 'string', description: 'e.g. Articles' },
-                    title: { type: 'string' },
-                    versionNo: { type: 'string' },
-                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
-                    approvedBy: { type: 'string' },
-                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
-                    fileName: { type: 'string' },
-                    mimeType: { type: 'string' },
-                    projectId: { type: 'string' },
-                    sectionKey: { type: 'string' },
-                  },
-                },
+                schema: payloadSchema,
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/prepare_approved_document': {
+        post: {
+          operationId: 'prepare_approved_document',
+          summary: 'Create browser upload link (alias)',
+          description: 'Same as submit_approved_document. Pass ONLY payload JSON string.',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: payloadSchema,
               },
             },
           },
@@ -293,16 +231,15 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
 CRITICAL
-Custom GPT Actions cannot send PDF bytes. Never pass file/fileContentBase64/uploadId.
+- Custom GPT Actions cannot send PDF bytes.
+- For submit_approved_document / prepare_approved_document you MUST pass exactly ONE argument: payload
+- payload is a JSON string. Do not pass projectCode/module/file as separate kwargs (causes UnrecognizedKwargsError).
 
-SUBMIT FLOW
-1) Confirm metadata (auto-fill from PDF text when possible).
-2) check_document_exists with projectCode + title/fileName.
-3) Call prepare_approved_document OR submit_approved_document with ONLY these JSON fields:
-   projectCode, module, documentType, title, versionNo, approvalStatus=APPROVED, approvedBy, approvalDate, fileName
-4) The tool returns uploadUrl. Give that link to the user and tell them to open it, choose the PDF, and click Upload.
-5) After upload, they get an Import Job ID on the success page / Import Queue.
+Example call:
+submit_approved_document with payload =
+{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles","title":"MOSS Lean Revenue MVP – Timeline, Deliverables and Payment Milestones","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne","approvalDate":"2026-07-27","fileName":"MOSS Lean Revenue MVP Timeline Deliverables Payment Milestones Signed Contract.pdf"}
 
-Do not pass any other kwargs (no file, no Base64, no multipart).
-Module = Enterprise Architecture. Document Type = Articles.
-Never invent UUIDs.`;
+Then give the user result.uploadUrl and tell them to open it and upload the PDF.
+After upload they get an Import Job ID.
+
+Also available: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;

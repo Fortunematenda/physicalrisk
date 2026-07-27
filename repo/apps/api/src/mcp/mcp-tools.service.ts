@@ -71,7 +71,10 @@ export class McpToolsService {
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
       case 'prepare_approved_document':
-        return this.prepareApprovedDocument(integration, args as unknown as PrepareApprovedDocumentDto);
+        return this.prepareApprovedDocument(
+          integration,
+          this.parsePreparePayload(args),
+        );
       case 'begin_document_upload': {
         const input = args as unknown as BeginDocumentUploadDto;
         return this.uploads.begin(
@@ -90,25 +93,18 @@ export class McpToolsService {
         );
       }
       case 'submit_approved_document': {
-        // ChatGPT often still calls this name. Without file bytes/uploadId, return a browser upload link.
-        const input = args as unknown as SubmitApprovedDocumentDto;
-        if (!input.uploadId && !input.fileContentBase64) {
-          return this.prepareApprovedDocument(integration, {
-            projectId: input.projectId,
-            projectCode: input.projectCode,
-            title: input.title,
-            documentType: input.documentType,
-            versionNo: input.versionNo,
-            approvalStatus: input.approvalStatus,
-            approvedBy: input.approvedBy,
-            approvalDate: input.approvalDate,
-            module: input.module,
-            sectionKey: input.sectionKey,
-            fileName: input.fileName,
-            mimeType: input.mimeType,
-          });
+        // ChatGPT often still calls this name. Metadata-only → browser upload link.
+        // Also accepts a single JSON "payload" string to avoid UnrecognizedKwargsError.
+        const prepared = this.parsePreparePayload(args);
+        const raw = args as Record<string, unknown>;
+        if (!raw.uploadId && !raw.fileContentBase64) {
+          return this.prepareApprovedDocument(integration, prepared);
         }
-        return this.submitApprovedDocument(integration, input, ipAddress);
+        return this.submitApprovedDocument(integration, {
+          ...prepared,
+          uploadId: typeof raw.uploadId === 'string' ? raw.uploadId : undefined,
+          fileContentBase64: typeof raw.fileContentBase64 === 'string' ? raw.fileContentBase64 : undefined,
+        }, ipAddress);
       }
       case 'get_import_status':
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
@@ -518,6 +514,44 @@ export class McpToolsService {
       || 'https://repo.physicalrisk.com';
     const first = configured.split(',')[0]?.trim() || 'https://repo.physicalrisk.com';
     return first.replace(/\/+$/, '');
+  }
+
+  /** Accept flat fields or a single JSON string `payload` (ChatGPT UnrecognizedKwargsError workaround). */
+  private parsePreparePayload(args: Record<string, unknown>): PrepareApprovedDocumentDto {
+    let source: Record<string, unknown> = args ?? {};
+    const rawPayload = source.payload;
+    if (typeof rawPayload === 'string' && rawPayload.trim()) {
+      try {
+        const parsed = JSON.parse(rawPayload) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new BadRequestException('payload must be a JSON object string');
+        }
+        source = parsed as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+        throw new BadRequestException('payload must be valid JSON');
+      }
+    }
+
+    const str = (key: string) => {
+      const value = source[key];
+      return typeof value === 'string' ? value.trim() : undefined;
+    };
+
+    return {
+      projectId: str('projectId'),
+      projectCode: str('projectCode') || str('project'),
+      title: str('title') || '',
+      documentType: str('documentType') || '',
+      versionNo: str('versionNo') || str('version') || '',
+      approvalStatus: str('approvalStatus') || 'APPROVED',
+      approvedBy: str('approvedBy') || '',
+      approvalDate: str('approvalDate') || '',
+      module: str('module') || str('repositoryModule'),
+      sectionKey: str('sectionKey'),
+      fileName: str('fileName'),
+      mimeType: str('mimeType'),
+    };
   }
 
   assertProjectAccess(integration: McpIntegration, projectId: string): void {
