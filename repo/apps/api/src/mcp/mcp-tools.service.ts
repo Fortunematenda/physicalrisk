@@ -292,13 +292,27 @@ export class McpToolsService {
 
   private toolInputSchema(name: McpToolName): Record<string, unknown> {
     const schemas: Record<McpToolName, Record<string, unknown>> = {
-      list_repository_projects: { type: 'object', properties: {}, additionalProperties: false },
+      list_repository_projects: {
+        type: 'object',
+        description: 'No parameters required. Send an empty object.',
+        properties: {
+          unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
+        },
+        additionalProperties: false,
+      },
       list_repository_modules: {
         type: 'object',
         required: ['projectId'],
         properties: { projectId: { type: 'string', format: 'uuid' } },
       },
-      list_document_types: { type: 'object', properties: {}, additionalProperties: false },
+      list_document_types: {
+        type: 'object',
+        description: 'No parameters required. Send an empty object.',
+        properties: {
+          unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
+        },
+        additionalProperties: false,
+      },
       check_document_exists: {
         type: 'object',
         required: ['projectId'],

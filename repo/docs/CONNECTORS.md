@@ -112,9 +112,31 @@ MCP is hosted inside the NestJS API (not a separate service):
 
 `submit_approved_document` rejects `DRAFT`, `PENDING`, `IN_REVIEW`, `REJECTED`, and missing approval status. Files are staged and queued for human review — never written straight to final storage.
 
-### ChatGPT connection
+### ChatGPT Custom GPT (Actions)
 
-Point a custom GPT / MCP client at `https://repo.physicalrisk.com/mcp` (or local `http://localhost:8080/mcp`) with the integration API key. Use `submit_approved_document` only for approved deliverables.
+1. Repo → **Settings → MCP Integrations** → create an integration with all tools + allowed projects.
+2. Copy the `mcp_…` API key (shown once).
+3. In ChatGPT GPT builder → **Actions**:
+   - Import from URL: `https://repo.physicalrisk.com/api/mcp/openai/openapi.json`
+   - Or paste the JSON from that URL / from the MCP Integrations page.
+4. Authentication: **API Key** → **Bearer** → paste the full `mcp_…` key  
+   (alternative header: `X-MCP-API-Key`).
+5. Privacy policy URL: `https://repo.physicalrisk.com/privacy`
+6. Paste the GPT Instructions from the MCP Integrations page.
+7. Update the GPT, start a **new** chat, and Allow actions when prompted.
+
+Verify with:
+
+```bash
+curl -s -X POST "https://repo.physicalrisk.com/api/mcp/tools/list_repository_projects" \
+  -H "Authorization: Bearer mcp_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{}"
+```
+
+### ChatGPT / MCP connection (JSON-RPC)
+
+Point advanced MCP clients at `https://repo.physicalrisk.com/mcp` with the integration API key. Custom GPT Actions should use the OpenAPI schema above, not JSON-RPC alone. Use `submit_approved_document` only for approved deliverables.
 
 ## Manual upload
 

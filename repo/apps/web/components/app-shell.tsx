@@ -60,7 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       // Logout sets a one-shot flag; clear it on re-entry or login stays blocked.
       if (isLoggingOut()) clearLogoutGuard();
 
-      if (pathname === '/login') {
+      if (pathname === '/login' || pathname === '/privacy') {
         if (!cancelled) setReady(true);
         return;
       }
@@ -120,7 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [pathname]);
 
-  if (pathname === '/login') return <>{children}</>;
+  if (pathname === '/login' || pathname === '/privacy') return <>{children}</>;
   if (!ready) return null;
 
   const displayUser = storedUser || sessionUser;

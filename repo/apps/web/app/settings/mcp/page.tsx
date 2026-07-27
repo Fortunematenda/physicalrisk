@@ -31,9 +31,22 @@ type McpIntegration = {
   apiKey?: string;
 };
 
+type ChatGptSetup = {
+  baseUrl: string;
+  openApiUrl: string;
+  privacyPolicyUrl: string;
+  auth: { preferred: string; alternativeHeader: string };
+  tools: string[];
+  instructions: string;
+};
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '/api';
+
 export default function McpIntegrationsPage() {
   const [items, setItems] = useState<McpIntegration[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [setup, setSetup] = useState<ChatGptSetup | null>(null);
+  const [openApiText, setOpenApiText] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -62,25 +75,40 @@ export default function McpIntegrationsPage() {
     setMessage(`API key for ${name} is ready. Copy it now — it will not be shown again.`);
   };
 
-  const copyApiKey = async () => {
-    if (!revealedKey?.apiKey) return;
+  const copyText = async (value: string, label: string) => {
     try {
-      await navigator.clipboard.writeText(revealedKey.apiKey);
+      await navigator.clipboard.writeText(value);
+      setMessage(`Copied ${label}.`);
       setCopied(true);
     } catch {
-      setError('Could not copy automatically. Select the key and copy it manually.');
+      setError(`Could not copy ${label}. Select the text and copy it manually.`);
     }
+  };
+
+  const copyApiKey = async () => {
+    if (!revealedKey?.apiKey) return;
+    await copyText(revealedKey.apiKey, 'API key');
   };
 
   const load = async () => {
     setLoading(true);
     try {
-      const [integrations, projectList] = await Promise.all([
+      const [integrations, projectList, setupPayload, openApi] = await Promise.all([
         api<McpIntegration[]>('/mcp/integrations'),
         api<ProjectRow[]>('/projects'),
+        fetch(`${API_BASE}/mcp/openai/setup`).then(async (response) => {
+          if (!response.ok) throw new Error('Unable to load ChatGPT setup helpers.');
+          return response.json() as Promise<ChatGptSetup>;
+        }),
+        fetch(`${API_BASE}/mcp/openai/openapi.json`).then(async (response) => {
+          if (!response.ok) throw new Error('Unable to load OpenAPI schema.');
+          return JSON.stringify(await response.json(), null, 2);
+        }),
       ]);
       setItems(integrations);
       setProjects(projectList);
+      setSetup(setupPayload);
+      setOpenApiText(openApi);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load MCP Integrations.');
     } finally {
@@ -192,7 +220,7 @@ export default function McpIntegrationsPage() {
     <div className={styles.page}>
       <PageHeader
         title="MCP Integrations"
-        description="Issue API keys for ChatGPT and other MCP clients to submit Approved Documents."
+        description="Issue API keys and wire ChatGPT Custom GPT Actions to the Repository Import Queue."
       />
 
       {error ? <div className="notice error">{error}</div> : null}
@@ -226,16 +254,98 @@ export default function McpIntegrationsPage() {
         </div>
       ) : null}
 
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-header">
+          <h2>ChatGPT Custom GPT setup</h2>
+        </div>
+        {loading && !setup ? (
+          <Loading />
+        ) : setup ? (
+          <>
+            <ol style={{ margin: '0 0 16px', paddingLeft: 20, lineHeight: 1.6 }}>
+              <li>Create an integration below with <strong>all tools</strong> and the projects you need.</li>
+              <li>Copy the <code className="mono">mcp_…</code> API key when it appears.</li>
+              <li>
+                In ChatGPT → Create a GPT → Actions → Import from URL:{' '}
+                <span className="mono">{setup.openApiUrl}</span>
+              </li>
+              <li>
+                Authentication: <strong>API Key</strong> → Auth Type <strong>Bearer</strong> → paste the full key.
+                Alternative header: <span className="mono">{setup.auth.alternativeHeader}</span>
+              </li>
+              <li>
+                Privacy policy URL: <span className="mono">{setup.privacyPolicyUrl}</span>
+              </li>
+              <li>Paste the Instructions below into the GPT Instructions field, then Update and start a <strong>new</strong> chat.</li>
+              <li>When ChatGPT asks to allow an action, choose Allow / Always allow.</li>
+            </ol>
+            <div className={styles.inlineActions} style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="button small primary"
+                onClick={() => void copyText(setup.openApiUrl, 'OpenAPI URL')}
+              >
+                Copy OpenAPI URL
+              </button>
+              <button
+                type="button"
+                className="button small"
+                onClick={() => void copyText(setup.privacyPolicyUrl, 'privacy URL')}
+              >
+                Copy privacy URL
+              </button>
+              <button
+                type="button"
+                className="button small"
+                onClick={() => void copyText(setup.instructions, 'GPT instructions')}
+              >
+                Copy instructions
+              </button>
+              <button
+                type="button"
+                className="button small"
+                disabled={!openApiText}
+                onClick={() => void copyText(openApiText, 'OpenAPI JSON')}
+              >
+                Copy OpenAPI JSON
+              </button>
+              <a className="button small" href={setup.openApiUrl} target="_blank" rel="noreferrer">
+                Open schema
+              </a>
+              <a className="button small" href={setup.privacyPolicyUrl} target="_blank" rel="noreferrer">
+                Privacy page
+              </a>
+            </div>
+            <div className="field">
+              <label htmlFor="gpt-instructions">GPT Instructions</label>
+              <textarea
+                id="gpt-instructions"
+                readOnly
+                rows={12}
+                value={setup.instructions}
+                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="secondary-text">ChatGPT setup helpers unavailable.</p>
+        )}
+      </div>
+
       <div className="notice info">
         MCP HTTP endpoint: <span className="mono">/api/mcp</span>
         {' '}(externally also available as <span className="mono">/mcp</span> via nginx).
+        {' '}Use Custom GPT Actions with the OpenAPI schema above — not the raw JSON-RPC endpoint alone.
       </div>
 
       <div className="grid two">
         <form className="form-card" onSubmit={createIntegration}>
           <section className="form-section">
             <h2>Create integration</h2>
-            <p>Choose allowed projects and tools. The API key is displayed once after creation.</p>
+            <p>
+              Choose allowed projects and keep <strong>all tools</strong> enabled for ChatGPT Actions.
+              The API key is displayed once after creation.
+            </p>
             <div className="field">
               <label htmlFor="mcp-name">Name <em>*</em></label>
               <input
@@ -291,12 +401,14 @@ export default function McpIntegrationsPage() {
         <div className="detail-card">
           <h2>Endpoint usage</h2>
           <dl className="detail-list">
+            <dt>ChatGPT OpenAPI</dt>
+            <dd className="mono">GET /mcp/openai/openapi.json</dd>
             <dt>JSON-RPC</dt>
             <dd className="mono">POST /api/mcp</dd>
-            <dt>Tool list</dt>
-            <dd className="mono">GET /api/mcp/tools</dd>
+            <dt>Tool call (Actions)</dt>
+            <dd className="mono">POST /mcp/tools/:toolName</dd>
             <dt>Auth</dt>
-            <dd>Bearer API key from an active integration</dd>
+            <dd>Bearer mcp_… key, or X-MCP-API-Key</dd>
             <dt>Approved Document</dt>
             <dd>submit_approved_document</dd>
           </dl>
@@ -315,7 +427,7 @@ export default function McpIntegrationsPage() {
         ) : items.length === 0 ? (
           <EmptyState
             title="No MCP integrations"
-            text="Create an integration to issue an API key for ChatGPT MCP clients."
+            text="Create an integration to issue an API key for ChatGPT Actions."
           />
         ) : (
           <div className="table-wrap">

@@ -4,11 +4,13 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { McpIntegration } from '../database/entities';
@@ -25,6 +27,7 @@ import {
   McpJsonRpcRequestDto,
   McpToolName,
 } from './mcp.dto';
+import { buildChatGptActionsOpenApi, CHATGPT_GPT_INSTRUCTIONS } from './mcp-openai.openapi';
 import { McpToolsService } from './mcp-tools.service';
 
 type McpRequest = Request & { [MCP_INTEGRATION_KEY]?: McpIntegration };
@@ -39,22 +42,61 @@ export class McpController {
   constructor(
     private readonly auth: McpAuthService,
     private readonly tools: McpToolsService,
+    private readonly config: ConfigService,
   ) {}
+
+  /** Public OpenAPI for ChatGPT Custom GPT Actions (no auth). */
+  @Public()
+  @Get('openai/openapi.json')
+  @Header('Cache-Control', 'public, max-age=60')
+  chatGptOpenApi() {
+    return buildChatGptActionsOpenApi(this.publicBaseUrl());
+  }
+
+  /** Setup helpers for the admin UI / GPT builder. */
+  @Public()
+  @Get('openai/setup')
+  chatGptSetup() {
+    const baseUrl = this.publicBaseUrl();
+    return {
+      baseUrl,
+      openApiUrl: `${baseUrl}/api/mcp/openai/openapi.json`,
+      privacyPolicyUrl: `${baseUrl}/privacy`,
+      auth: {
+        preferred: 'API Key → Bearer → paste full mcp_… key',
+        alternativeHeader: 'X-MCP-API-Key',
+      },
+      tools: [...MCP_TOOL_NAMES],
+      instructions: CHATGPT_GPT_INSTRUCTIONS,
+      endpoints: {
+        jsonRpc: `${baseUrl}/api/mcp`,
+        tools: `${baseUrl}/api/mcp/tools`,
+        toolCall: `${baseUrl}/api/mcp/tools/:toolName`,
+        mcpAlias: `${baseUrl}/mcp`,
+      },
+    };
+  }
 
   @Public()
   @UseGuards(McpAuthGuard)
   @Get()
   mcpInfo(@Req() request: McpRequest) {
     const integration = request[MCP_INTEGRATION_KEY];
+    const baseUrl = this.publicBaseUrl();
     return {
       protocol: 'physicalrisk-mcp-http/1.0',
       transport: 'json-rpc-over-http',
       integration: integration ? { id: integration.id, name: integration.name } : null,
       tools: this.tools.listToolDefinitions(),
+      chatgptActions: {
+        openApiUrl: `${baseUrl}/api/mcp/openai/openapi.json`,
+        privacyPolicyUrl: `${baseUrl}/privacy`,
+      },
       endpoints: {
         jsonRpc: 'POST /api/mcp',
         tools: 'GET /api/mcp/tools',
         toolCall: 'POST /api/mcp/tools/:toolName',
+        openApi: 'GET /api/mcp/openai/openapi.json',
       },
     };
   }
@@ -76,10 +118,11 @@ export class McpController {
   ) {
     this.assertKnownTool(toolName);
     const integration = request[MCP_INTEGRATION_KEY]!;
+    const args = this.normalizeToolArgs(body);
     const result = await this.tools.dispatchTool(
       integration,
       toolName,
-      body ?? {},
+      args,
       request.ip,
     );
     return { tool: toolName, result };
@@ -124,12 +167,14 @@ export class McpController {
     }
   }
 
+  @Public()
   @Get('health')
   health() {
     return {
       status: 'ok',
       service: 'physicalrisk-mcp',
       tools: MCP_TOOL_NAMES.length,
+      chatgptOpenApi: '/api/mcp/openai/openapi.json',
     };
   }
 
@@ -186,6 +231,16 @@ export class McpController {
     return this.auth.disableIntegration(id, user?.id);
   }
 
+  private publicBaseUrl(): string {
+    const configured =
+      this.config.get<string>('REPO_WEB_URL')
+      || this.config.get<string>('PUBLIC_WEB_URL')
+      || this.config.get<string>('CORS_ORIGIN')
+      || 'https://repo.physicalrisk.com';
+    const first = configured.split(',')[0]?.trim() || 'https://repo.physicalrisk.com';
+    return first.replace(/\/+$/, '');
+  }
+
   private assertKnownTool(toolName: string): asserts toolName is McpToolName {
     if (!MCP_TOOL_NAMES.includes(toolName as McpToolName)) {
       throw new BadRequestException(`Unknown MCP tool: ${toolName}`);
@@ -206,9 +261,16 @@ export class McpController {
     if (method === 'tools/call') {
       const args = params?.arguments;
       return args && typeof args === 'object' && !Array.isArray(args)
-        ? args as Record<string, unknown>
+        ? this.normalizeToolArgs(args as Record<string, unknown>)
         : {};
     }
-    return params ?? {};
+    return this.normalizeToolArgs(params ?? {});
+  }
+
+  /** Drop ChatGPT placeholder fields like `unused` from empty-body tools. */
+  private normalizeToolArgs(body: Record<string, unknown> | undefined): Record<string, unknown> {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    const { unused: _unused, ...rest } = body;
+    return rest;
   }
 }

@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { McpAuthService } from './mcp-auth.service';
-import { McpAuthException, McpRateLimitException } from './mcp.exceptions';
+import { McpAuthException, McpRateLimitException, McpToolException } from './mcp.exceptions';
 import { McpToolName } from './mcp.dto';
 
 export const MCP_INTEGRATION_KEY = 'mcpIntegration';
@@ -17,7 +17,7 @@ interface RateWindow {
 export class McpAuthGuard implements CanActivate {
   private readonly windows = new Map<string, RateWindow>();
   private readonly windowMs = 60_000;
-  private readonly maxRequests = 60;
+  private readonly maxRequests = 120;
 
   constructor(
     private readonly auth: McpAuthService,
@@ -44,7 +44,7 @@ export class McpAuthGuard implements CanActivate {
       try {
         this.auth.assertToolAllowed(integration, toolName);
       } catch {
-        throw new McpAuthException(`Tool '${toolName}' is not allowed for this integration`);
+        throw new McpToolException(toolName);
       }
     }
 
@@ -56,11 +56,18 @@ export class McpAuthGuard implements CanActivate {
   private extractApiKey(request: { headers?: Record<string, string | string[] | undefined> }): string | undefined {
     const headerKey = request.headers?.['x-mcp-api-key'];
     if (typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
+    if (Array.isArray(headerKey) && headerKey[0]?.trim()) return headerKey[0].trim();
 
     const authorization = request.headers?.authorization;
-    if (typeof authorization === 'string') {
-      const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
-      if (bearer.startsWith('mcp_')) return bearer;
+    const authValue = Array.isArray(authorization) ? authorization[0] : authorization;
+    if (typeof authValue === 'string') {
+      const value = authValue.trim();
+      if (/^bearer\s+/i.test(value)) {
+        const bearer = value.replace(/^bearer\s+/i, '').trim();
+        if (bearer.startsWith('mcp_')) return bearer;
+      }
+      // Some Action clients send the raw key in Authorization without Bearer.
+      if (value.startsWith('mcp_')) return value;
     }
     return undefined;
   }
