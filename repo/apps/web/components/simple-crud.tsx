@@ -1,11 +1,13 @@
 'use client';
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreVertical } from 'lucide-react';
 import { api } from '@/lib/api';
 import { EmptyState } from './empty-state';
 import { Loading } from './loading';
 import { PageHeader } from './page-header';
+import { RowActionsMenu } from './row-actions-menu';
 import { StatusBadge } from './status-badge';
 import styles from './row-actions.module.css';
 
@@ -137,7 +139,10 @@ export function SimpleCrud({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editing, setEditing] = useState<any | null>(null);
   const [editForm, setEditForm] = useState<Record<string, any>>(() => blankForm(fields));
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
+  const openItem = openMenuId ? items.find((item) => item.id === openMenuId) : null;
 
   const load = async () => {
     setLoading(true);
@@ -152,27 +157,25 @@ export function SimpleCrud({
   };
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     void load();
   }, [endpoint]);
 
   useEffect(() => {
-    if (!openMenuId) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
-    };
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (!editing) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpenMenuId(null);
-        if (!saving) setEditing(null);
-      }
+      if (event.key === 'Escape' && !saving) setEditing(null);
     };
-    document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [openMenuId, saving]);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [editing, saving]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -223,13 +226,23 @@ export function SimpleCrud({
   const removeItem = async (item: any) => {
     setOpenMenuId(null);
     const label = item.name || item.code || singular;
-    if (!window.confirm(`Delete “${label}”? This cannot be undone.`)) return;
+    const confirmText = item.active === false
+      ? `Delete “${label}”? This cannot be undone.`
+      : `Remove “${label}”? If it is linked to import history it will be deactivated instead of deleted.`;
+    if (!window.confirm(confirmText)) return;
     setBusyId(item.id);
     setError('');
     setMessage('');
     try {
-      await api(`${endpoint}/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
-      setMessage(`${singular} deleted.`);
+      const result = await api<{ deleted?: boolean; deactivated?: boolean }>(
+        `${endpoint}/${encodeURIComponent(item.id)}`,
+        { method: 'DELETE' },
+      );
+      if (result?.deactivated) {
+        setMessage(`${singular} deactivated because it is linked to import history.`);
+      } else {
+        setMessage(`${singular} deleted.`);
+      }
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete record');
@@ -289,13 +302,14 @@ export function SimpleCrud({
                                   : String(item[column.key] ?? '—')}
                           </td>
                         ))}
-                        <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
-                          <div
-                            className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}
-                            ref={menuOpen ? menuRef : undefined}
-                          >
+                        <td className={styles.actionsCell}>
+                          <div className={styles.menuWrap}>
                             <button
                               type="button"
+                              ref={(node) => {
+                                menuButtonRefs.current[item.id] = node;
+                                if (menuOpen) activeMenuAnchor.current = node;
+                              }}
                               className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
                               aria-label={`Actions for ${item.name || item.code || singular}`}
                               aria-haspopup="menu"
@@ -305,22 +319,6 @@ export function SimpleCrud({
                             >
                               <MoreVertical size={16} />
                             </button>
-                            {menuOpen ? (
-                              <div className={styles.menu} role="menu">
-                                <button type="button" role="menuitem" disabled={busy} onClick={() => openEdit(item)}>
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  className={styles.dangerItem}
-                                  disabled={busy}
-                                  onClick={() => void removeItem(item)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -333,20 +331,47 @@ export function SimpleCrud({
         </div>
       </div>
 
-      {editing ? (
-        <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="crud-edit-title">
-          <form className={styles.editModalCard} onSubmit={saveEdit}>
-            <h3 id="crud-edit-title">Edit {singular.toLowerCase()}</h3>
-            <p>Update configuration for {editing.name || editing.code || singular}.</p>
-            <FieldInputs fields={fields} form={editForm} setForm={setEditForm} idPrefix="edit" />
-            {error ? <div className="notice error">{error}</div> : null}
-            <div className={styles.editModalActions}>
-              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <RowActionsMenu
+        open={Boolean(openItem)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openItem?.id}
+          onClick={() => openItem && openEdit(openItem)}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={styles.dangerItem}
+          disabled={busyId === openItem?.id}
+          onClick={() => openItem && void removeItem(openItem)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
+
+      {mounted && editing
+        ? createPortal(
+            <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="crud-edit-title">
+              <form className={styles.editModalCard} onSubmit={saveEdit}>
+                <h3 id="crud-edit-title">Edit {singular.toLowerCase()}</h3>
+                <p>Update configuration for {editing.name || editing.code || singular}.</p>
+                <FieldInputs fields={fields} form={editForm} setForm={setEditForm} idPrefix="edit" />
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={styles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

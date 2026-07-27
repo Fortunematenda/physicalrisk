@@ -60,6 +60,14 @@
   gap: 2px;
 }
 
+.menuFixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  z-index: 2147483000;
+}
+
 .menu button {
   display: block;
   width: 100%;
@@ -97,7 +105,7 @@
 .editModal {
   position: fixed;
   inset: 0;
-  z-index: 12000;
+  z-index: 2147483000;
   display: grid;
   place-items: center;
   padding: 20px;

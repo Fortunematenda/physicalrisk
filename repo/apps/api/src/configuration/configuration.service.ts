@@ -565,11 +565,19 @@ export class ConfigurationService {
     if (!entity) throw new NotFoundException('Source system not found');
     const importJobs = await this.db.importJobs.count({ where: { sourceSystem: { id } } });
     if (importJobs > 0) {
-      throw new ConfigurationConflictException(
-        'SOURCE_SYSTEM_IN_USE',
-        `Source system “${entity.name}” is linked to ${importJobs} import job${importJobs === 1 ? '' : 's'} and cannot be deleted. Deactivate it instead.`,
-        { existingId: entity.id, existingName: entity.name, importJobs },
-      );
+      if (!entity.active) {
+        return { id, deleted: false, deactivated: true, alreadyInactive: true };
+      }
+      entity.active = false;
+      await this.db.sourceSystems.save(entity);
+      await this.audit.record({
+        userId,
+        action: 'CONFIG_CHANGE',
+        entityType: 'SourceSystem',
+        entityId: id,
+        message: `Deactivated source system ${entity.name} (linked to ${importJobs} import job${importJobs === 1 ? '' : 's'})`,
+      });
+      return { id, deleted: false, deactivated: true, importJobs };
     }
     await this.db.sourceSystems.remove(entity);
     await this.audit.record({ userId, action: 'DELETE', entityType: 'SourceSystem', entityId: id, message: `Deleted source system ${entity.name}` });

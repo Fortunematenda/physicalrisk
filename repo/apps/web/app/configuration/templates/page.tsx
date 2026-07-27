@@ -1,11 +1,13 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FolderTree, LayoutTemplate, MoreVertical, RefreshCw, Search, Star } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import actionStyles from '@/components/row-actions.module.css';
 import styles from '../Configuration.module.css';
@@ -62,7 +64,10 @@ export default function TemplatesPage() {
   const [editing, setEditing] = useState<TemplateRow | null>(null);
   const [form, setForm] = useState<TemplateForm>(blankForm);
   const [editForm, setEditForm] = useState<TemplateForm>(blankForm);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
+  const openTemplate = openMenuId ? items.find((item) => item.id === openMenuId) : null;
+  const [mounted, setMounted] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -81,23 +86,21 @@ export default function TemplatesPage() {
   }, []);
 
   useEffect(() => {
-    if (!openMenuId) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
-    };
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (!editing) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpenMenuId(null);
-        if (!saving) setEditing(null);
-      }
+      if (event.key === 'Escape' && !saving) setEditing(null);
     };
-    document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [openMenuId, saving]);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [editing, saving]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -423,12 +426,13 @@ export default function TemplatesPage() {
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {item.isDefault ? <StatusBadge value="DEFAULT" /> : null}
-                        <div
-                          className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}
-                          ref={menuOpen ? menuRef : undefined}
-                        >
+                        <div className={actionStyles.menuWrap}>
                           <button
                             type="button"
+                            ref={(node) => {
+                              menuButtonRefs.current[item.id] = node;
+                              if (menuOpen) activeMenuAnchor.current = node;
+                            }}
                             className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
                             aria-label={`Actions for ${item.name}`}
                             aria-haspopup="menu"
@@ -438,40 +442,6 @@ export default function TemplatesPage() {
                           >
                             <MoreVertical size={16} />
                           </button>
-                          {menuOpen ? (
-                            <div className={actionStyles.menu} role="menu">
-                              <button type="button" role="menuitem" disabled={busy} onClick={() => openEdit(item)}>
-                                Edit
-                              </button>
-                              {!item.isDefault ? (
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  disabled={busy}
-                                  onClick={() => void setDefault(item.id, item.name)}
-                                >
-                                  Set as default
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                role="menuitem"
-                                disabled={busy}
-                                onClick={() => void duplicate(item.id)}
-                              >
-                                Duplicate
-                              </button>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className={actionStyles.dangerItem}
-                                disabled={busy || Boolean(item.isDefault)}
-                                onClick={() => void removeTemplate(item.id, item.name, item.isDefault)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -498,22 +468,67 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {editing ? (
-        <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
-          <form className={actionStyles.editModalCard} onSubmit={saveEdit}>
-            <h3 id="template-edit-title">Edit directory template</h3>
-            <p>Update code, name, description, or sections for {editing.name}.</p>
-            <div className={styles.createBody}>
-              {renderTemplateFields(editForm, setEditForm, 'edit')}
-            </div>
-            {error ? <div className="notice error">{error}</div> : null}
-            <div className={actionStyles.editModalActions}>
-              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <RowActionsMenu
+        open={Boolean(openTemplate)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openTemplate?.id}
+          onClick={() => openTemplate && openEdit(openTemplate)}
+        >
+          Edit
+        </button>
+        {!openTemplate?.isDefault ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busyId === openTemplate?.id}
+            onClick={() => openTemplate && void setDefault(openTemplate.id, openTemplate.name)}
+          >
+            Set as default
+          </button>
+        ) : null}
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openTemplate?.id}
+          onClick={() => openTemplate && void duplicate(openTemplate.id)}
+        >
+          Duplicate
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={actionStyles.dangerItem}
+          disabled={busyId === openTemplate?.id || Boolean(openTemplate?.isDefault)}
+          onClick={() => openTemplate && void removeTemplate(openTemplate.id, openTemplate.name, openTemplate.isDefault)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
+
+      {mounted && editing
+        ? createPortal(
+            <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
+              <form className={actionStyles.editModalCard} onSubmit={saveEdit}>
+                <h3 id="template-edit-title">Edit directory template</h3>
+                <p>Update code, name, description, or sections for {editing.name}.</p>
+                <div className={styles.createBody}>
+                  {renderTemplateFields(editForm, setEditForm, 'edit')}
+                </div>
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

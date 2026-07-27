@@ -1,9 +1,11 @@
 'use client';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import styles from '@/components/row-actions.module.css';
 
@@ -50,7 +52,10 @@ export default function RoutingRulesPage() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<RuleForm>(blankForm);
   const [editForm, setEditForm] = useState<RuleForm>(blankForm);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
+  const openRule = openMenuId ? rules.find((rule) => rule.id === openMenuId) : null;
+  const [mounted, setMounted] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === form.projectId),
@@ -93,23 +98,21 @@ export default function RoutingRulesPage() {
   }, []);
 
   useEffect(() => {
-    if (!openMenuId) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
-    };
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (!editing) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpenMenuId(null);
-        if (!saving) setEditing(null);
-      }
+      if (event.key === 'Escape' && !saving) setEditing(null);
     };
-    document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [openMenuId, saving]);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [editing, saving]);
 
   const toPayload = (values: RuleForm) => ({
     ...values,
@@ -357,13 +360,14 @@ export default function RoutingRulesPage() {
                         </td>
                         <td className="mono">{r.targetSectionKey}</td>
                         <td><StatusBadge value={r.active ? 'ACTIVE' : 'INACTIVE'} /></td>
-                        <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
-                          <div
-                            className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}
-                            ref={menuOpen ? menuRef : undefined}
-                          >
+                        <td className={styles.actionsCell}>
+                          <div className={styles.menuWrap}>
                             <button
                               type="button"
+                              ref={(node) => {
+                                menuButtonRefs.current[r.id] = node;
+                                if (menuOpen) activeMenuAnchor.current = node;
+                              }}
                               className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
                               aria-label={`Actions for ${r.name}`}
                               aria-haspopup="menu"
@@ -373,22 +377,6 @@ export default function RoutingRulesPage() {
                             >
                               <MoreVertical size={16} />
                             </button>
-                            {menuOpen ? (
-                              <div className={styles.menu} role="menu">
-                                <button type="button" role="menuitem" disabled={busy} onClick={() => openEdit(r)}>
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  className={styles.dangerItem}
-                                  disabled={busy}
-                                  onClick={() => void removeRule(r.id, r.name)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -401,20 +389,47 @@ export default function RoutingRulesPage() {
         </div>
       </div>
 
-      {editing ? (
-        <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="routing-edit-title">
-          <form className={styles.editModalCard} onSubmit={saveEdit}>
-            <h3 id="routing-edit-title">Edit routing rule</h3>
-            <p>Update conditions and target for {editing.name}.</p>
-            {renderRuleFields(editForm, setEditForm, editSections, 'edit')}
-            {error ? <div className="notice error">{error}</div> : null}
-            <div className={styles.editModalActions}>
-              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <RowActionsMenu
+        open={Boolean(openRule)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openRule?.id}
+          onClick={() => openRule && openEdit(openRule)}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={styles.dangerItem}
+          disabled={busyId === openRule?.id}
+          onClick={() => openRule && void removeRule(openRule.id, openRule.name)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
+
+      {mounted && editing
+        ? createPortal(
+            <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="routing-edit-title">
+              <form className={styles.editModalCard} onSubmit={saveEdit}>
+                <h3 id="routing-edit-title">Edit routing rule</h3>
+                <p>Update conditions and target for {editing.name}.</p>
+                {renderRuleFields(editForm, setEditForm, editSections, 'edit')}
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={styles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
