@@ -65,12 +65,14 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
-      case 'begin_document_upload':
+      case 'begin_document_upload': {
+        const input = args as unknown as BeginDocumentUploadDto;
         return this.uploads.begin(
-          String((args as BeginDocumentUploadDto).fileName ?? ''),
-          Number((args as BeginDocumentUploadDto).totalChunks),
-          (args as BeginDocumentUploadDto).mimeType,
+          String(input.fileName ?? ''),
+          Number(input.totalChunks),
+          input.mimeType,
         );
+      }
       case 'upload_document_chunk': {
         const input = args as unknown as UploadDocumentChunkDto;
         return this.uploads.addChunk(
