@@ -5,10 +5,18 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api } from '@/lib/api';
 
+type DocumentTypeOption = {
+  id: string;
+  name: string;
+  code?: string;
+  active?: boolean;
+};
+
 export default function RoutingRulesPage() {
   const [rules, setRules] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
+  const [documentTypes, setDocumentTypes] = useState<DocumentTypeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -28,18 +36,24 @@ export default function RoutingRulesPage() {
     [projects, form.projectId],
   );
   const sections = selectedProject?.sections ?? projects[0]?.sections ?? [];
+  const activeDocumentTypes = useMemo(
+    () => documentTypes.filter((item) => item.active !== false),
+    [documentTypes],
+  );
 
   const load = async () => {
     setLoading(true);
     try {
-      const [r, p, s] = await Promise.all([
+      const [r, p, s, types] = await Promise.all([
         api('/routing-rules'),
         api('/projects'),
         api('/source-systems'),
+        api('/document-types'),
       ]);
       setRules(r);
       setProjects(p);
       setSources(s);
+      setDocumentTypes(Array.isArray(types) ? types : []);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load routing rules');
     } finally {
@@ -135,11 +149,17 @@ export default function RoutingRulesPage() {
               </div>
               <div className="field">
                 <label>Document type</label>
-                <input
+                <select
                   value={form.documentType}
                   onChange={(e) => setForm({ ...form, documentType: e.target.value })}
-                  placeholder="Technical Specifications"
-                />
+                >
+                  <option value="">Any type</option>
+                  {activeDocumentTypes.map((item) => (
+                    <option key={item.id} value={item.name}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="field">
                 <label>File extension</label>
