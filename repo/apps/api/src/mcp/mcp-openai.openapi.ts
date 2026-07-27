@@ -209,6 +209,51 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           responses,
         },
       },
+      '/api/mcp/tools/submit_approved_document': {
+        post: {
+          operationId: 'submit_approved_document',
+          summary: 'Alias: create browser upload link (same as prepare_approved_document)',
+          description:
+            'Same as prepare_approved_document. Returns uploadUrl for browser PDF upload. '
+            + 'Do not pass file, fileContentBase64, or uploadId from ChatGPT.',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: [
+                    'projectCode',
+                    'module',
+                    'documentType',
+                    'title',
+                    'versionNo',
+                    'approvalStatus',
+                    'approvedBy',
+                    'approvalDate',
+                  ],
+                  properties: {
+                    projectCode: { type: 'string', description: 'e.g. MOSS' },
+                    module: { type: 'string', description: 'e.g. Enterprise Architecture' },
+                    documentType: { type: 'string', description: 'e.g. Articles' },
+                    title: { type: 'string' },
+                    versionNo: { type: 'string' },
+                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
+                    approvedBy: { type: 'string' },
+                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
+                    fileName: { type: 'string' },
+                    mimeType: { type: 'string' },
+                    projectId: { type: 'string' },
+                    sectionKey: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
       '/api/mcp/tools/get_import_status': {
         post: {
           operationId: 'get_import_status',
@@ -247,22 +292,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
-CRITICAL LIMITATION
-Custom GPT Actions cannot send PDF file bytes (multipart and base64 both fail). Never claim you will submit the file directly from chat.
+CRITICAL
+Custom GPT Actions cannot send PDF bytes. Never pass file/fileContentBase64/uploadId.
 
-REQUIRED SUBMIT FLOW
-1) Collect/confirm metadata (auto-fill from PDF text when possible).
+SUBMIT FLOW
+1) Confirm metadata (auto-fill from PDF text when possible).
 2) check_document_exists with projectCode + title/fileName.
-3) Call prepare_approved_document with:
+3) Call prepare_approved_document OR submit_approved_document with ONLY these JSON fields:
    projectCode, module, documentType, title, versionNo, approvalStatus=APPROVED, approvedBy, approvalDate, fileName
-4) Return the uploadUrl to the user and tell them to open it, select the PDF, and click Upload.
-5) After they confirm upload, ask for the Import Job ID from the success page (or they can check Import Queue). Optionally call get_import_status if they provide importJobId.
+4) The tool returns uploadUrl. Give that link to the user and tell them to open it, choose the PDF, and click Upload.
+5) After upload, they get an Import Job ID on the success page / Import Queue.
 
-DEFINITIONS
-- projectCode = MOSS
-- module = Enterprise Architecture (NOT document type)
-- documentType = Articles (NAME/CODE string)
-
-Do not call submit_approved_document from ChatGPT for file transfer.
-Do not invent UUIDs.
-Ask only for missing fields; never re-ask confirmed ones.`;
+Do not pass any other kwargs (no file, no Base64, no multipart).
+Module = Enterprise Architecture. Document Type = Articles.
+Never invent UUIDs.`;

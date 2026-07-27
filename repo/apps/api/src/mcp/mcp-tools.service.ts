@@ -89,8 +89,27 @@ export class McpToolsService {
           String(input.data ?? ''),
         );
       }
-      case 'submit_approved_document':
-        return this.submitApprovedDocument(integration, args as unknown as SubmitApprovedDocumentDto, ipAddress);
+      case 'submit_approved_document': {
+        // ChatGPT often still calls this name. Without file bytes/uploadId, return a browser upload link.
+        const input = args as unknown as SubmitApprovedDocumentDto;
+        if (!input.uploadId && !input.fileContentBase64) {
+          return this.prepareApprovedDocument(integration, {
+            projectId: input.projectId,
+            projectCode: input.projectCode,
+            title: input.title,
+            documentType: input.documentType,
+            versionNo: input.versionNo,
+            approvalStatus: input.approvalStatus,
+            approvedBy: input.approvedBy,
+            approvalDate: input.approvalDate,
+            module: input.module,
+            sectionKey: input.sectionKey,
+            fileName: input.fileName,
+            mimeType: input.mimeType,
+          });
+        }
+        return this.submitApprovedDocument(integration, input, ipAddress);
+      }
       case 'get_import_status':
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
       default:
