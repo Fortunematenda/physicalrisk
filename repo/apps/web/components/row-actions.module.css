@@ -1,0 +1,134 @@
+.actionsCell {
+  width: 48px;
+  text-align: right;
+  overflow: visible;
+}
+
+.actionsCellOpen {
+  position: relative;
+  z-index: 10040;
+}
+
+.menuWrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+  z-index: 1;
+}
+
+.menuWrapOpen {
+  z-index: 10050;
+}
+
+.menuButton {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #536577;
+  cursor: pointer;
+}
+
+.menuButton:hover,
+.menuButtonActive {
+  border-color: #c9d7e6;
+  background: #eef5fb;
+  color: #0d3a68;
+}
+
+.menuButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10060;
+  min-width: 168px;
+  padding: 6px;
+  border: 1px solid #d7e2ee;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(8, 42, 77, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #26384b;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: left;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.menu button:hover:not(:disabled) {
+  background: #eef5fb;
+  color: #0d3a68;
+}
+
+.menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dangerItem {
+  color: #c41212 !important;
+}
+
+.dangerItem:hover:not(:disabled) {
+  background: #fff0ef !important;
+  color: #a10f0f !important;
+}
+
+.editModal {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 24, 42, 0.45);
+}
+
+.editModalCard {
+  width: min(560px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(8, 42, 77, 0.28);
+}
+
+.editModalCard h3 {
+  margin: 0 0 6px;
+  color: #001b36;
+  font-size: 17px;
+}
+
+.editModalCard > p {
+  margin: 0 0 16px;
+  color: #66778a;
+  font-size: 13px;
+}
+
+.editModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

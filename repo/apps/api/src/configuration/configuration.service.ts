@@ -423,6 +423,88 @@ export class ConfigurationService {
     return saved;
   }
 
+  async updateTemplate(id: string, input: Record<string, unknown>, userId?: string) {
+    const template = await this.db.directoryTemplates.findOne({ where: { id }, relations: { sections: true } });
+    if (!template) throw new NotFoundException('Directory template not found');
+    const nextCode = input.code !== undefined ? clean(input.code).toUpperCase() : template.code;
+    const nextName = input.name !== undefined ? clean(input.name) : template.name;
+    if (!nextCode || !nextName) throw new ConfigurationException('VALIDATION_ERROR', 'Template code and name are required');
+    if (nextCode !== template.code) {
+      const existing = await this.db.directoryTemplates.findOne({ where: { code: nextCode } });
+      if (existing && existing.id !== id) {
+        throw new ConfigurationConflictException('TEMPLATE_CODE_EXISTS', `A directory template with code “${nextCode}” already exists.`, {
+          existingId: existing.id,
+          existingCode: existing.code,
+          existingName: existing.name,
+        });
+      }
+    }
+    const rawSections = input.sections !== undefined
+      ? (Array.isArray(input.sections) ? input.sections as Array<Record<string, unknown>> : null)
+      : undefined;
+    if (rawSections === null) throw new ConfigurationException('VALIDATION_ERROR', 'Sections must be an array');
+
+    try {
+      await this.db.dataSource.transaction(async (manager) => {
+        const templates = manager.getRepository(DirectoryTemplate);
+        const sections = manager.getRepository(DirectoryTemplateSection);
+        if (input.isDefault !== undefined && boolean(input.isDefault, false)) {
+          await templates.createQueryBuilder().update().set({ isDefault: false }).execute();
+        }
+        template.code = nextCode;
+        template.name = nextName;
+        if (input.description !== undefined) template.description = nullable(input.description) ?? null;
+        if (input.active !== undefined) template.active = boolean(input.active);
+        if (input.isDefault !== undefined) template.isDefault = boolean(input.isDefault, false);
+        await templates.save(template);
+
+        if (rawSections) {
+          await sections.delete({ template: { id } });
+          if (rawSections.length) {
+            await sections.save(rawSections.map((raw, index) => sections.create({
+              template,
+              sectionKey: sectionKey(raw.sectionKey ?? raw.name),
+              code: clean(raw.code || `SEC${index + 1}`).toUpperCase(),
+              name: clean(raw.name),
+              slug: slugify(raw.slug ?? raw.name),
+              position: Number(raw.position ?? index + 1),
+              active: boolean(raw.active),
+            })));
+          }
+        }
+      });
+      if (template.isDefault) {
+        await this.setSetting('gateway.defaultDirectoryTemplate', template.code, 'Default directory configuration for new projects.');
+      }
+      await this.audit.record({
+        userId,
+        action: 'CONFIG_CHANGE',
+        entityType: 'DirectoryTemplate',
+        entityId: id,
+        message: `Updated directory template ${template.name}`,
+      });
+      return this.db.directoryTemplates.findOne({ where: { id }, relations: { sections: true } });
+    } catch (error) {
+      if (error instanceof ConfigurationException || error instanceof ConfigurationConflictException) throw error;
+      throw new ConfigurationException(
+        'TEMPLATE_UPDATE_FAILED',
+        'The directory template could not be updated. Check that section positions and keys are unique, then try again.',
+        { cause: error instanceof Error ? error.message : String(error) },
+      );
+    }
+  }
+
+  async deleteTemplate(id: string, userId?: string) {
+    const template = await this.db.directoryTemplates.findOne({ where: { id } });
+    if (!template) throw new NotFoundException('Directory template not found');
+    if (template.isDefault) {
+      throw new ConfigurationException('TEMPLATE_DEFAULT_DELETE', 'Set another template as default before deleting this one.');
+    }
+    await this.db.directoryTemplates.remove(template);
+    await this.audit.record({ userId, action: 'DELETE', entityType: 'DirectoryTemplate', entityId: id, message: `Deleted directory template ${template.name}` });
+    return { id, deleted: true };
+  }
+
   listSources() { return this.db.sourceSystems.find({ order: { name: 'ASC' } }); }
   async createSource(input: Record<string, unknown>, userId?: string) {
     const name = clean(input.name);
@@ -478,6 +560,22 @@ export class ConfigurationService {
     return this.db.sourceSystems.save(entity);
   }
 
+  async deleteSource(id: string, userId?: string) {
+    const entity = await this.db.sourceSystems.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Source system not found');
+    const importJobs = await this.db.importJobs.count({ where: { sourceSystem: { id } } });
+    if (importJobs > 0) {
+      throw new ConfigurationConflictException(
+        'SOURCE_SYSTEM_IN_USE',
+        `Source system “${entity.name}” is linked to ${importJobs} import job${importJobs === 1 ? '' : 's'} and cannot be deleted. Deactivate it instead.`,
+        { existingId: entity.id, existingName: entity.name, importJobs },
+      );
+    }
+    await this.db.sourceSystems.remove(entity);
+    await this.audit.record({ userId, action: 'DELETE', entityType: 'SourceSystem', entityId: id, message: `Deleted source system ${entity.name}` });
+    return { id, deleted: true };
+  }
+
   listDocumentTypes() { return this.db.documentTypes.find({ order: { name: 'ASC' } }); }
   async createDocumentType(input: Record<string, unknown>, userId?: string) {
     const name = clean(input.name);
@@ -527,6 +625,14 @@ export class ConfigurationService {
     if (input.description !== undefined) entity.description = nullable(input.description) ?? null;
     if (input.active !== undefined) entity.active = boolean(input.active);
     return this.db.documentTypes.save(entity);
+  }
+
+  async deleteDocumentType(id: string, userId?: string) {
+    const entity = await this.db.documentTypes.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Document type not found');
+    await this.db.documentTypes.remove(entity);
+    await this.audit.record({ userId, action: 'DELETE', entityType: 'DocumentType', entityId: id, message: `Deleted document type ${entity.name}` });
+    return { id, deleted: true };
   }
 
   listFileTypes() { return this.db.fileTypes.find({ order: { extension: 'ASC' } }); }

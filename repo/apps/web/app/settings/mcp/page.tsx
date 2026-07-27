@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
@@ -60,6 +61,16 @@ export default function McpIntegrationsPage() {
   const [copied, setCopied] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<McpIntegration | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    allowedProjectIds: [MCP_ALL_PROJECTS] as string[],
+    allowedTools: [...MCP_TOOLS] as string[],
+    status: 'ACTIVE',
+  });
+  const [editSaving, setEditSaving] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState({
     name: '',
     allowedProjectIds: [MCP_ALL_PROJECTS] as string[],
@@ -67,6 +78,7 @@ export default function McpIntegrationsPage() {
   });
 
   const allProjectsSelected = form.allowedProjectIds.includes(MCP_ALL_PROJECTS);
+  const editAllProjectsSelected = editForm.allowedProjectIds.includes(MCP_ALL_PROJECTS);
 
   const extractApiKey = (payload: McpIntegration | Record<string, unknown> | null | undefined) => {
     if (!payload || typeof payload !== 'object') return '';
@@ -127,6 +139,22 @@ export default function McpIntegrationsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenMenuId(null);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenuId]);
 
   const toggleProject = (projectId: string) => {
     setForm((current) => {
@@ -194,6 +222,7 @@ export default function McpIntegrationsPage() {
 
   const rotate = async (id: string, name: string) => {
     if (!confirm(`Rotate the API key for ${name}? The previous key stops working immediately.`)) return;
+    setOpenMenuId(null);
     setBusyId(id);
     setError('');
     setMessage('');
@@ -217,6 +246,7 @@ export default function McpIntegrationsPage() {
 
   const disable = async (id: string, name: string) => {
     if (!confirm(`Disable MCP integration ${name}?`)) return;
+    setOpenMenuId(null);
     setBusyId(id);
     setError('');
     setMessage('');
@@ -233,6 +263,7 @@ export default function McpIntegrationsPage() {
 
   const grantAllProjects = async (id: string, name: string) => {
     if (!confirm(`Allow ${name} to access ALL repository projects (including ones created later)?`)) return;
+    setOpenMenuId(null);
     setBusyId(id);
     setError('');
     setMessage('');
@@ -245,6 +276,97 @@ export default function McpIntegrationsPage() {
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to update project scope.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openEdit = (item: McpIntegration) => {
+    setOpenMenuId(null);
+    setEditing(item);
+    setEditForm({
+      name: item.name,
+      allowedProjectIds: (item.allowedProjectIds || []).length
+        ? [...item.allowedProjectIds]
+        : [MCP_ALL_PROJECTS],
+      allowedTools: (item.allowedTools || []).length ? [...item.allowedTools] : [...MCP_TOOLS],
+      status: item.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE',
+    });
+  };
+
+  const toggleEditProject = (projectId: string) => {
+    setEditForm((current) => {
+      const withoutAll = current.allowedProjectIds.filter((id) => id !== MCP_ALL_PROJECTS);
+      const next = withoutAll.includes(projectId)
+        ? withoutAll.filter((id) => id !== projectId)
+        : [...withoutAll, projectId];
+      return { ...current, allowedProjectIds: next };
+    });
+  };
+
+  const toggleEditAllProjects = () => {
+    setEditForm((current) => ({
+      ...current,
+      allowedProjectIds: current.allowedProjectIds.includes(MCP_ALL_PROJECTS)
+        ? []
+        : [MCP_ALL_PROJECTS],
+    }));
+  };
+
+  const toggleEditTool = (tool: string) => {
+    setEditForm((current) => ({
+      ...current,
+      allowedTools: current.allowedTools.includes(tool)
+        ? current.allowedTools.filter((value) => value !== tool)
+        : [...current.allowedTools, tool],
+    }));
+  };
+
+  const saveEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editing) return;
+    if (!editForm.name.trim() || editForm.allowedProjectIds.length === 0 || editForm.allowedTools.length === 0) {
+      setError('Name, project scope, and at least one tool are required.');
+      return;
+    }
+    setEditSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/mcp/integrations/${editing.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          allowedProjectIds: editForm.allowedProjectIds.includes(MCP_ALL_PROJECTS)
+            ? [MCP_ALL_PROJECTS]
+            : editForm.allowedProjectIds,
+          allowedTools: editForm.allowedTools,
+          status: editForm.status,
+        }),
+      });
+      setMessage(`Updated ${editForm.name.trim()}.`);
+      setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update integration.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const removeIntegration = async (id: string, name: string) => {
+    if (!confirm(`Permanently delete MCP integration ${name}? This cannot be undone.`)) return;
+    setOpenMenuId(null);
+    setBusyId(id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/mcp/integrations/${id}`, { method: 'DELETE' });
+      setMessage(`Deleted ${name}.`);
+      if (editing?.id === id) setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete integration.');
     } finally {
       setBusyId(null);
     }
@@ -294,10 +416,14 @@ export default function McpIntegrationsPage() {
         </div>
       ) : null}
 
-      <div className="panel" style={{ marginBottom: 16 }}>
-        <div className="panel-header">
-          <h2>ChatGPT Custom GPT setup</h2>
-        </div>
+      <details className="panel" style={{ marginBottom: 16 }}>
+        <summary className="panel-header" style={{ cursor: 'pointer', listStyle: 'none' }}>
+          <h2 style={{ display: 'inline' }}>ChatGPT Custom GPT setup</h2>
+          <span className="secondary-text" style={{ marginLeft: 10, fontSize: 12 }}>
+            click to expand
+          </span>
+        </summary>
+        <div style={{ paddingTop: 4 }}>
         {loading && !setup ? (
           <Loading />
         ) : setup ? (
@@ -370,12 +496,13 @@ export default function McpIntegrationsPage() {
         ) : (
           <p className="secondary-text">ChatGPT setup helpers unavailable.</p>
         )}
-      </div>
+        </div>
+      </details>
 
       <div className="notice info">
         MCP HTTP endpoint: <span className="mono">/api/mcp</span>
         {' '}(externally also available as <span className="mono">/mcp</span> via nginx).
-        {' '}Use Custom GPT Actions with the OpenAPI schema above — not the raw JSON-RPC endpoint alone.
+        {' '}Expand <strong>ChatGPT Custom GPT setup</strong> above when you need OpenAPI URLs or GPT instructions.
       </div>
 
       <div className="grid two">
@@ -491,13 +618,14 @@ export default function McpIntegrationsPage() {
                   <th>Tools</th>
                   <th>Last used</th>
                   <th>Expires</th>
-                  <th></th>
+                  <th className={styles.actionsCell} aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => {
                   const busy = busyId === item.id;
                   const disabled = item.status === 'DISABLED';
+                  const menuOpen = openMenuId === item.id;
                   return (
                     <tr key={item.id}>
                       <td className="primary-text">{item.name}</td>
@@ -517,34 +645,71 @@ export default function McpIntegrationsPage() {
                       </td>
                       <td>{formatDate(item.lastUsedAt)}</td>
                       <td>{formatDate(item.expiresAt)}</td>
-                      <td>
-                        <div className={styles.inlineActions}>
-                          {!(item.allowedProjectIds || []).includes(MCP_ALL_PROJECTS) ? (
-                            <button
-                              type="button"
-                              className="button small"
-                              disabled={busy || disabled}
-                              onClick={() => void grantAllProjects(item.id, item.name)}
-                            >
-                              {busy ? '…' : 'Grant all projects'}
-                            </button>
+                      <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
+                        <div
+                          className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}
+                          ref={menuOpen ? menuRef : undefined}
+                        >
+                          <button
+                            type="button"
+                            className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
+                            aria-label={`Actions for ${item.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            disabled={busy}
+                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          {menuOpen ? (
+                            <div className={styles.menu} role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={busy}
+                                onClick={() => openEdit(item)}
+                              >
+                                Edit
+                              </button>
+                              {!(item.allowedProjectIds || []).includes(MCP_ALL_PROJECTS) ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={busy || disabled}
+                                  onClick={() => void grantAllProjects(item.id, item.name)}
+                                >
+                                  Grant all projects
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={busy || disabled}
+                                onClick={() => void rotate(item.id, item.name)}
+                              >
+                                Rotate API key
+                              </button>
+                              {!disabled ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={busy}
+                                  onClick={() => void disable(item.id, item.name)}
+                                >
+                                  Disable
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={styles.dangerItem}
+                                disabled={busy}
+                                onClick={() => void removeIntegration(item.id, item.name)}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           ) : null}
-                          <button
-                            type="button"
-                            className="button small"
-                            disabled={busy || disabled}
-                            onClick={() => void rotate(item.id, item.name)}
-                          >
-                            {busy ? '…' : 'Rotate'}
-                          </button>
-                          <button
-                            type="button"
-                            className="button small danger"
-                            disabled={busy || disabled}
-                            onClick={() => void disable(item.id, item.name)}
-                          >
-                            Disable
-                          </button>
                         </div>
                       </td>
                     </tr>
@@ -555,6 +720,87 @@ export default function McpIntegrationsPage() {
           </div>
         )}
       </div>
+
+      {editing ? (
+        <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="mcp-edit-title">
+          <form className={styles.editModalCard} onSubmit={saveEdit}>
+            <h3 id="mcp-edit-title">Edit integration</h3>
+            <p>Update name, project scope, tools, or status for {editing.apiKeyPrefix}…</p>
+            <div className="field">
+              <label htmlFor="mcp-edit-name">Name <em>*</em></label>
+              <input
+                id="mcp-edit-name"
+                required
+                value={editForm.name}
+                onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="mcp-edit-status">Status</label>
+              <select
+                id="mcp-edit-status"
+                value={editForm.status}
+                onChange={(event) => setEditForm((current) => ({ ...current, status: event.target.value }))}
+              >
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="DISABLED">DISABLED</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Allowed projects <em>*</em></label>
+              <div className={styles.checkboxGrid}>
+                <label className="field checkbox">
+                  <input
+                    type="checkbox"
+                    checked={editAllProjectsSelected}
+                    onChange={toggleEditAllProjects}
+                  />
+                  <span><strong>All projects</strong></span>
+                </label>
+                {projects.map((project) => (
+                  <label key={project.id} className="field checkbox">
+                    <input
+                      type="checkbox"
+                      checked={!editAllProjectsSelected && editForm.allowedProjectIds.includes(project.id)}
+                      disabled={editAllProjectsSelected}
+                      onChange={() => toggleEditProject(project.id)}
+                    />
+                    <span>{project.code} — {project.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="field">
+              <label>Allowed tools</label>
+              <div className={styles.checkboxGrid}>
+                {MCP_TOOLS.map((tool) => (
+                  <label key={tool} className="field checkbox">
+                    <input
+                      type="checkbox"
+                      checked={editForm.allowedTools.includes(tool)}
+                      onChange={() => toggleEditTool(tool)}
+                    />
+                    <span className="mono">{tool}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className={styles.secretModalActions}>
+              <button type="submit" className="button primary" disabled={editSaving}>
+                {editSaving ? 'Saving…' : 'Save changes'}
+              </button>
+              <button
+                type="button"
+                className="button"
+                disabled={editSaving}
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }

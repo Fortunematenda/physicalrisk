@@ -76,6 +76,31 @@ export class UpdateMcpIntegrationProjectsDto {
   allowedProjectIds!: string[];
 }
 
+export class UpdateMcpIntegrationDto {
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
+
+  /** Project UUIDs, or ["*"] for every project in the repository. */
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  allowedProjectIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn(MCP_TOOL_NAMES, { each: true })
+  allowedTools?: McpToolName[];
+
+  @IsOptional()
+  @IsIn(['ACTIVE', 'DISABLED'])
+  status?: 'ACTIVE' | 'DISABLED';
+}
+
 export class McpJsonRpcRequestDto {
   @IsOptional()
   id?: string | number | null;

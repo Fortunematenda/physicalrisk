@@ -1,12 +1,13 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { FolderTree, LayoutTemplate, RefreshCw, Search, Star } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FolderTree, LayoutTemplate, MoreVertical, RefreshCw, Search, Star } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api } from '@/lib/api';
+import actionStyles from '@/components/row-actions.module.css';
 import styles from '../Configuration.module.css';
 
 const DEFAULT_SECTIONS_JSON = `[
@@ -29,23 +30,39 @@ type TemplateRow = {
   name: string;
   description?: string | null;
   isDefault?: boolean;
+  active?: boolean;
   sections: TemplateSection[];
 };
+
+type TemplateForm = {
+  code: string;
+  name: string;
+  description: string;
+  isDefault: boolean;
+  sections: string;
+};
+
+const blankForm = (): TemplateForm => ({
+  code: '',
+  name: '',
+  description: '',
+  isDefault: false,
+  sections: DEFAULT_SECTIONS_JSON,
+});
 
 export default function TemplatesPage() {
   const [items, setItems] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
-  const [form, setForm] = useState({
-    code: '',
-    name: '',
-    description: '',
-    isDefault: false,
-    sections: DEFAULT_SECTIONS_JSON,
-  });
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<TemplateRow | null>(null);
+  const [form, setForm] = useState<TemplateForm>(blankForm);
+  const [editForm, setEditForm] = useState<TemplateForm>(blankForm);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -62,6 +79,25 @@ export default function TemplatesPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenMenuId(null);
+        if (!saving) setEditing(null);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenuId, saving]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -86,14 +122,19 @@ export default function TemplatesPage() {
     return { total: items.length, defaults, sections, shown: filtered.length };
   }, [items, filtered.length]);
 
+  const parseSections = (raw: string) => {
+    const sections = JSON.parse(raw);
+    if (!Array.isArray(sections)) throw new Error('Sections JSON must be an array');
+    return sections;
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setError('');
     setMessage('');
     try {
-      const sections = JSON.parse(form.sections);
-      if (!Array.isArray(sections)) throw new Error('Sections JSON must be an array');
+      const sections = parseSections(form.sections);
       await api('/directory-templates', {
         method: 'POST',
         body: JSON.stringify({
@@ -105,13 +146,7 @@ export default function TemplatesPage() {
         }),
       });
       setMessage('Directory template created.');
-      setForm({
-        code: '',
-        name: '',
-        description: '',
-        isDefault: false,
-        sections: DEFAULT_SECTIONS_JSON,
-      });
+      setForm(blankForm());
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to create template');
@@ -120,8 +155,63 @@ export default function TemplatesPage() {
     }
   };
 
-  const setDefault = async (id: string, name: string) => {
+  const openEdit = (item: TemplateRow) => {
+    setOpenMenuId(null);
+    setEditing(item);
+    setEditForm({
+      code: item.code,
+      name: item.name,
+      description: item.description ?? '',
+      isDefault: Boolean(item.isDefault),
+      sections: JSON.stringify(
+        [...(item.sections ?? [])]
+          .sort((a, b) => a.position - b.position)
+          .map((section) => ({
+            name: section.name,
+            code: section.code,
+            sectionKey: section.sectionKey,
+            slug: section.slug,
+            position: section.position,
+          })),
+        null,
+        2,
+      ),
+    });
+    setError('');
+    setMessage('');
+  };
+
+  const saveEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editing) return;
     setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const sections = parseSections(editForm.sections);
+      await api(`/directory-templates/${encodeURIComponent(editing.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          code: editForm.code.trim(),
+          name: editForm.name.trim(),
+          description: editForm.description.trim() || null,
+          isDefault: editForm.isDefault,
+          sections,
+        }),
+      });
+      setMessage('Directory template updated.');
+      setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setDefault = async (id: string, name: string) => {
+    setOpenMenuId(null);
+    setBusyId(id);
     setError('');
     setMessage('');
     try {
@@ -131,12 +221,13 @@ export default function TemplatesPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The selected directory template could not be updated. Please try again.');
     } finally {
-      setSaving(false);
+      setBusyId(null);
     }
   };
 
   const duplicate = async (id: string) => {
-    setSaving(true);
+    setOpenMenuId(null);
+    setBusyId(id);
     setError('');
     setMessage('');
     try {
@@ -146,25 +237,86 @@ export default function TemplatesPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to duplicate template');
     } finally {
-      setSaving(false);
+      setBusyId(null);
     }
   };
 
-  const archive = async (id: string, name: string) => {
-    if (!window.confirm(`Archive template “${name}”? It will no longer be offered for new projects.`)) return;
-    setSaving(true);
+  const removeTemplate = async (id: string, name: string, isDefault?: boolean) => {
+    setOpenMenuId(null);
+    if (isDefault) {
+      setError('Set another template as default before deleting this one.');
+      return;
+    }
+    if (!window.confirm(`Delete template “${name}”? This cannot be undone.`)) return;
+    setBusyId(id);
     setError('');
     setMessage('');
     try {
-      await api(`/directory-templates/${encodeURIComponent(id)}/archive`, { method: 'POST', body: JSON.stringify({}) });
-      setMessage('Template archived.');
+      await api(`/directory-templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setMessage('Template deleted.');
       await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to archive template');
+      setError(caught instanceof Error ? caught.message : 'Unable to delete template');
     } finally {
-      setSaving(false);
+      setBusyId(null);
     }
   };
+
+  const renderTemplateFields = (
+    values: TemplateForm,
+    setValues: (next: TemplateForm) => void,
+    idPrefix: string,
+  ) => (
+    <>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-code`}>Code <em>*</em></label>
+        <input
+          id={`${idPrefix}-code`}
+          required
+          value={values.code}
+          onChange={(event) => setValues({ ...values, code: event.target.value })}
+          placeholder="STANDARD"
+        />
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-name`}>Name <em>*</em></label>
+        <input
+          id={`${idPrefix}-name`}
+          required
+          value={values.name}
+          onChange={(event) => setValues({ ...values, name: event.target.value })}
+        />
+      </div>
+      <div className={`field ${styles.full}`}>
+        <label htmlFor={`${idPrefix}-description`}>Description</label>
+        <textarea
+          id={`${idPrefix}-description`}
+          value={values.description}
+          onChange={(event) => setValues({ ...values, description: event.target.value })}
+          className={styles.textarea}
+        />
+      </div>
+      <div className={`field ${styles.full}`}>
+        <label htmlFor={`${idPrefix}-sections`}>Sections JSON <em>*</em></label>
+        <textarea
+          id={`${idPrefix}-sections`}
+          required
+          className={styles.textareaTall}
+          value={values.sections}
+          onChange={(event) => setValues({ ...values, sections: event.target.value })}
+        />
+        <small>Array of objects with name, code, sectionKey, slug and position.</small>
+      </div>
+      <label className="checkbox">
+        <input
+          type="checkbox"
+          checked={values.isDefault}
+          onChange={(event) => setValues({ ...values, isDefault: event.target.checked })}
+        />
+        Set as default template
+      </label>
+    </>
+  );
 
   return (
     <div className={styles.page}>
@@ -174,8 +326,8 @@ export default function TemplatesPage() {
         action={{ label: 'Project Registry', href: '/configuration/projects' }}
       />
 
-      {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      {error && !editing ? <div className="notice error">{error}</div> : null}
+      {message && !editing ? <div className="notice success">{message}</div> : null}
 
       <div className={styles.stats}>
         <div className={styles.statCard}>
@@ -211,57 +363,11 @@ export default function TemplatesPage() {
             <p>Define the ordered repository sections that will be provisioned when a project uses this template.</p>
           </div>
           <div className={styles.createBody}>
-            <div className="field">
-              <label htmlFor="template-code">Code <em>*</em></label>
-              <input
-                id="template-code"
-                required
-                value={form.code}
-                onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
-                placeholder="STANDARD"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="template-name">Name <em>*</em></label>
-              <input
-                id="template-name"
-                required
-                value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              />
-            </div>
-            <div className={`field ${styles.full}`}>
-              <label htmlFor="template-description">Description</label>
-              <textarea
-                id="template-description"
-                value={form.description}
-                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                className={styles.textarea}
-              />
-            </div>
-            <div className={`field ${styles.full}`}>
-              <label htmlFor="template-sections">Sections JSON <em>*</em></label>
-              <textarea
-                id="template-sections"
-                required
-                className={styles.textareaTall}
-                value={form.sections}
-                onChange={(event) => setForm((current) => ({ ...current, sections: event.target.value }))}
-              />
-              <small>Array of objects with name, code, sectionKey, slug and position.</small>
-            </div>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={form.isDefault}
-                onChange={(event) => setForm((current) => ({ ...current, isDefault: event.target.checked }))}
-              />
-              Set as default template
-            </label>
+            {renderTemplateFields(form, setForm, 'create')}
           </div>
           <div className={styles.createActions}>
             <button type="submit" className="button primary" disabled={saving}>
-              {saving ? 'Creating…' : 'Create template'}
+              {saving && !editing ? 'Creating…' : 'Create template'}
             </button>
           </div>
         </form>
@@ -305,51 +411,109 @@ export default function TemplatesPage() {
             </div>
           ) : (
             <div className={styles.templateList}>
-              {filtered.map((item) => (
-                <article key={item.id} className={styles.templateCard}>
-                  <div className={styles.templateTop}>
-                    <div>
-                      <strong className="primary-text">{item.name}</strong>
-                      <div className={`mono ${styles.templateMeta}`}>{item.code}</div>
+              {filtered.map((item) => {
+                const menuOpen = openMenuId === item.id;
+                const busy = busyId === item.id;
+                return (
+                  <article key={item.id} className={styles.templateCard}>
+                    <div className={styles.templateTop}>
+                      <div>
+                        <strong className="primary-text">{item.name}</strong>
+                        <div className={`mono ${styles.templateMeta}`}>{item.code}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {item.isDefault ? <StatusBadge value="DEFAULT" /> : null}
+                        <div
+                          className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}
+                          ref={menuOpen ? menuRef : undefined}
+                        >
+                          <button
+                            type="button"
+                            className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                            aria-label={`Actions for ${item.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            disabled={busy || saving}
+                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          {menuOpen ? (
+                            <div className={actionStyles.menu} role="menu">
+                              <button type="button" role="menuitem" disabled={busy} onClick={() => openEdit(item)}>
+                                Edit
+                              </button>
+                              {!item.isDefault ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={busy}
+                                  onClick={() => void setDefault(item.id, item.name)}
+                                >
+                                  Set as default
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={busy}
+                                onClick={() => void duplicate(item.id)}
+                              >
+                                Duplicate
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={actionStyles.dangerItem}
+                                disabled={busy || Boolean(item.isDefault)}
+                                onClick={() => void removeTemplate(item.id, item.name, item.isDefault)}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
-                    {item.isDefault ? <StatusBadge value="DEFAULT" /> : null}
-                  </div>
-                  {item.description ? <p className="secondary-text">{item.description}</p> : null}
-                  <div className={styles.createActions} style={{ marginBottom: 12, justifyContent: 'flex-start', gap: 8 }}>
-                    {!item.isDefault ? (
-                      <button type="button" className="button small" disabled={saving} onClick={() => void setDefault(item.id, item.name)}>
-                        Set as default
-                      </button>
-                    ) : null}
-                    <button type="button" className="button small" disabled={saving} onClick={() => void duplicate(item.id)}>
-                      Duplicate
-                    </button>
-                    {!item.isDefault ? (
-                      <button type="button" className="button small" disabled={saving} onClick={() => void archive(item.id, item.name)}>
-                        Archive
-                      </button>
-                    ) : null}
-                  </div>
-                  <ol className={styles.sectionTree}>
-                    {[...(item.sections ?? [])]
-                      .sort((a, b) => a.position - b.position)
-                      .map((section) => (
-                        <li key={`${item.id}-${section.code}-${section.position}`}>
-                          <span className={styles.position}>{section.position}</span>
-                          <span className={styles.sectionName}>
-                            {section.name}
-                            <span className={styles.sectionKey}>{section.sectionKey || section.code}</span>
-                          </span>
-                          <span className="mono">{section.code}</span>
-                        </li>
-                      ))}
-                  </ol>
-                </article>
-              ))}
+                    {item.description ? <p className="secondary-text">{item.description}</p> : null}
+                    <ol className={styles.sectionTree}>
+                      {[...(item.sections ?? [])]
+                        .sort((a, b) => a.position - b.position)
+                        .map((section) => (
+                          <li key={`${item.id}-${section.code}-${section.position}`}>
+                            <span className={styles.position}>{section.position}</span>
+                            <span className={styles.sectionName}>
+                              {section.name}
+                              <span className={styles.sectionKey}>{section.sectionKey || section.code}</span>
+                            </span>
+                            <span className="mono">{section.code}</span>
+                          </li>
+                        ))}
+                    </ol>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
+
+      {editing ? (
+        <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
+          <form className={actionStyles.editModalCard} onSubmit={saveEdit}>
+            <h3 id="template-edit-title">Edit directory template</h3>
+            <p>Update code, name, description, or sections for {editing.name}.</p>
+            <div className={styles.createBody}>
+              {renderTemplateFields(editForm, setEditForm, 'edit')}
+            </div>
+            {error ? <div className="notice error">{error}</div> : null}
+            <div className={actionStyles.editModalActions}>
+              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+              <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   );
 }

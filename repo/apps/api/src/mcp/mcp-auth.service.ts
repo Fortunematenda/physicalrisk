@@ -104,6 +104,46 @@ export class McpAuthService {
     return this.toView(saved);
   }
 
+  async updateIntegration(
+    id: string,
+    input: {
+      name?: string;
+      allowedProjectIds?: string[];
+      allowedTools?: McpToolName[];
+      status?: 'ACTIVE' | 'DISABLED';
+    },
+    userId?: string,
+  ): Promise<McpIntegrationView> {
+    const integration = await this.requireIntegration(id);
+    const before = this.toView(integration);
+    if (typeof input.name === 'string' && input.name.trim()) {
+      integration.name = input.name.trim();
+    }
+    if (input.allowedProjectIds) {
+      integration.allowedProjectIds = this.requireNormalizedProjectScope(input.allowedProjectIds);
+    }
+    if (input.allowedTools) {
+      if (!input.allowedTools.length) {
+        throw new BadRequestException('Select at least one tool');
+      }
+      integration.allowedTools = input.allowedTools;
+    }
+    if (input.status === 'ACTIVE' || input.status === 'DISABLED') {
+      integration.status = input.status as McpIntegrationStatus;
+    }
+    const saved = await this.db.mcpIntegrations.save(integration);
+    await this.audit.record({
+      userId,
+      action: 'UPDATE',
+      entityType: 'McpIntegration',
+      entityId: saved.id,
+      message: `Updated MCP integration ${saved.name}`,
+      before,
+      after: this.toView(saved),
+    });
+    return this.toView(saved);
+  }
+
   async rotateIntegration(id: string, userId?: string): Promise<CreatedMcpIntegration> {
     const integration = await this.requireIntegration(id);
     const { raw, hash, prefix } = this.generateApiKey();
@@ -135,6 +175,21 @@ export class McpAuthService {
       after: { status: saved.status },
     });
     return this.toView(saved);
+  }
+
+  async deleteIntegration(id: string, userId?: string): Promise<{ deleted: true; id: string }> {
+    const integration = await this.requireIntegration(id);
+    const before = this.toView(integration);
+    await this.db.mcpIntegrations.remove(integration);
+    await this.audit.record({
+      userId,
+      action: 'DELETE',
+      entityType: 'McpIntegration',
+      entityId: id,
+      message: `Deleted MCP integration ${before.name}`,
+      before,
+    });
+    return { deleted: true, id };
   }
 
   async validateApiKey(rawKey: string): Promise<McpIntegration> {

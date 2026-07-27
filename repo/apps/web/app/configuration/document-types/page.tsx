@@ -7,6 +7,7 @@ export default function DocumentTypesPage() {
     <SimpleCrud
       title="Document Types"
       description="Classify what a document is (Article, Technical Specification, Decision Record). This is not the repository folder — folders are Repository Sections / Modules."
+      recordLabel="Document type"
       endpoint="/document-types"
       fields={[
         { key: 'name', label: 'Name', required: true, placeholder: 'Technical Specification' },

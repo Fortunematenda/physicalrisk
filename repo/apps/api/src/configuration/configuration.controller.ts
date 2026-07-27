@@ -34,6 +34,18 @@ export class ConfigurationController {
 
   @Get('directory-templates') listTemplates() { return this.service.listTemplates(); }
   @Post('directory-templates') createTemplate(@Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) { return this.service.createTemplate(body, user?.id); }
+  @Patch('directory-templates/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  updateTemplate(@Param('id') id: string, @Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) {
+    return this.service.updateTemplate(id, body, user?.id);
+  }
+  @Delete('directory-templates/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  deleteTemplate(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.deleteTemplate(id, user?.id);
+  }
   @Post('directory-templates/:id/set-default')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -60,7 +72,16 @@ export class ConfigurationController {
   createSource(@Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) {
     return this.service.createSource(body, user?.id);
   }
-  @Patch('source-systems/:id') updateSource(@Param('id') id: string, @Body() body: Record<string, unknown>) { return this.service.updateSource(id, body); }
+  @Patch('source-systems/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  updateSource(@Param('id') id: string, @Body() body: Record<string, unknown>) { return this.service.updateSource(id, body); }
+  @Delete('source-systems/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  deleteSource(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.deleteSource(id, user?.id);
+  }
 
   @Get('document-types') listDocumentTypes() { return this.service.listDocumentTypes(); }
   @Post('document-types')
@@ -69,8 +90,17 @@ export class ConfigurationController {
   createDocumentType(@Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) {
     return this.service.createDocumentType(body, user?.id);
   }
-  @Patch('document-types/:id') updateDocumentType(@Param('id') id: string, @Body() body: Record<string, unknown>) {
+  @Patch('document-types/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  updateDocumentType(@Param('id') id: string, @Body() body: Record<string, unknown>) {
     return this.service.updateDocumentType(id, body);
+  }
+  @Delete('document-types/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  deleteDocumentType(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.deleteDocumentType(id, user?.id);
   }
 
   @Get('file-types') listFileTypes() { return this.service.listFileTypes(); }

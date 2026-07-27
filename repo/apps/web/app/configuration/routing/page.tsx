@@ -1,9 +1,11 @@
 'use client';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api } from '@/lib/api';
+import styles from '@/components/row-actions.module.css';
 
 type DocumentTypeOption = {
   id: string;
@@ -12,30 +14,54 @@ type DocumentTypeOption = {
   active?: boolean;
 };
 
+type RuleForm = {
+  name: string;
+  projectId: string;
+  sourceSystemId: string;
+  documentType: string;
+  fileExtension: string;
+  targetSectionKey: string;
+  priority: number;
+  active: boolean;
+};
+
+const blankForm = (): RuleForm => ({
+  name: '',
+  projectId: '',
+  sourceSystemId: '',
+  documentType: '',
+  fileExtension: '',
+  targetSectionKey: '',
+  priority: 100,
+  active: true,
+});
+
 export default function RoutingRulesPage() {
   const [rules, setRules] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    projectId: '',
-    sourceSystemId: '',
-    documentType: '',
-    fileExtension: '',
-    targetSectionKey: '',
-    priority: 100,
-    active: true,
-  });
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<any | null>(null);
+  const [form, setForm] = useState<RuleForm>(blankForm);
+  const [editForm, setEditForm] = useState<RuleForm>(blankForm);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === form.projectId),
     [projects, form.projectId],
   );
+  const editSelectedProject = useMemo(
+    () => projects.find((p) => p.id === editForm.projectId),
+    [projects, editForm.projectId],
+  );
   const sections = selectedProject?.sections ?? projects[0]?.sections ?? [];
+  const editSections = editSelectedProject?.sections ?? projects[0]?.sections ?? [];
   const activeDocumentTypes = useMemo(
     () => documentTypes.filter((item) => item.active !== false),
     [documentTypes],
@@ -54,6 +80,7 @@ export default function RoutingRulesPage() {
       setProjects(p);
       setSources(s);
       setDocumentTypes(Array.isArray(types) ? types : []);
+      setError('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load routing rules');
     } finally {
@@ -65,36 +92,98 @@ export default function RoutingRulesPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenMenuId(null);
+        if (!saving) setEditing(null);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openMenuId, saving]);
+
+  const toPayload = (values: RuleForm) => ({
+    ...values,
+    projectId: values.projectId || null,
+    sourceSystemId: values.sourceSystemId || null,
+  });
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setSaving(true);
     setError('');
     setMessage('');
     try {
       await api('/routing-rules', {
         method: 'POST',
-        body: JSON.stringify({
-          ...form,
-          projectId: form.projectId || null,
-          sourceSystemId: form.sourceSystemId || null,
-        }),
+        body: JSON.stringify(toPayload(form)),
       });
       setMessage('Routing rule created.');
-      setForm({
-        ...form,
-        name: '',
-        documentType: '',
-        fileExtension: '',
-        targetSectionKey: '',
-      });
+      setForm((current) => ({
+        ...blankForm(),
+        priority: current.priority,
+        projectId: current.projectId,
+        sourceSystemId: current.sourceSystemId,
+      }));
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to save rule');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEdit = (rule: any) => {
+    setOpenMenuId(null);
+    setEditing(rule);
+    setEditForm({
+      name: rule.name ?? '',
+      projectId: rule.projectId ?? rule.project?.id ?? '',
+      sourceSystemId: rule.sourceSystemId ?? rule.sourceSystem?.id ?? '',
+      documentType: rule.documentType ?? '',
+      fileExtension: rule.fileExtension ?? '',
+      targetSectionKey: rule.targetSectionKey ?? '',
+      priority: Number(rule.priority ?? 100),
+      active: rule.active !== false,
+    });
+    setError('');
+    setMessage('');
+  };
+
+  const saveEdit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editing?.id) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/routing-rules/${encodeURIComponent(editing.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(toPayload(editForm)),
+      });
+      setMessage('Routing rule updated.');
+      setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update rule');
+    } finally {
+      setSaving(false);
     }
   };
 
   const removeRule = async (id: string, name: string) => {
+    setOpenMenuId(null);
     if (!window.confirm(`Delete routing rule “${name}”? This cannot be undone.`)) return;
-    setDeletingId(id);
+    setBusyId(id);
     setError('');
     setMessage('');
     try {
@@ -104,9 +193,111 @@ export default function RoutingRulesPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete rule');
     } finally {
-      setDeletingId(null);
+      setBusyId(null);
     }
   };
+
+  const renderRuleFields = (
+    values: RuleForm,
+    setValues: (next: RuleForm) => void,
+    sectionOptions: any[],
+    idPrefix: string,
+  ) => (
+    <div className="form-grid">
+      <div className="field full">
+        <label htmlFor={`${idPrefix}-name`}>Rule name <em>*</em></label>
+        <input
+          id={`${idPrefix}-name`}
+          required
+          value={values.name}
+          onChange={(e) => setValues({ ...values, name: e.target.value })}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-project`}>Project scope</label>
+        <select
+          id={`${idPrefix}-project`}
+          value={values.projectId}
+          onChange={(e) => setValues({ ...values, projectId: e.target.value, targetSectionKey: '' })}
+        >
+          <option value="">All projects</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.code}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-source`}>Source system</label>
+        <select
+          id={`${idPrefix}-source`}
+          value={values.sourceSystemId}
+          onChange={(e) => setValues({ ...values, sourceSystemId: e.target.value })}
+        >
+          <option value="">Any source</option>
+          {sources.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-doctype`}>Document type</label>
+        <select
+          id={`${idPrefix}-doctype`}
+          value={values.documentType}
+          onChange={(e) => setValues({ ...values, documentType: e.target.value })}
+        >
+          <option value="">Any type</option>
+          {activeDocumentTypes.map((item) => (
+            <option key={item.id} value={item.name}>{item.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-ext`}>File extension</label>
+        <input
+          id={`${idPrefix}-ext`}
+          value={values.fileExtension}
+          onChange={(e) => setValues({ ...values, fileExtension: e.target.value })}
+          placeholder="docx"
+        />
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-section`}>Target section <em>*</em></label>
+        <select
+          id={`${idPrefix}-section`}
+          required
+          value={values.targetSectionKey}
+          onChange={(e) => setValues({ ...values, targetSectionKey: e.target.value })}
+        >
+          <option value="">Select…</option>
+          {sectionOptions
+            .filter((s: any) => !['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(s.sectionKey))
+            .map((s: any) => (
+              <option key={s.id} value={s.sectionKey}>{s.name}</option>
+            ))}
+        </select>
+      </div>
+      <div className="field">
+        <label htmlFor={`${idPrefix}-priority`}>Priority</label>
+        <input
+          id={`${idPrefix}-priority`}
+          type="number"
+          value={values.priority}
+          onChange={(e) => setValues({ ...values, priority: Number(e.target.value) })}
+        />
+      </div>
+      <div className="field">
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={values.active}
+            onChange={(e) => setValues({ ...values, active: e.target.checked })}
+          />
+          Active
+        </label>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -118,86 +309,12 @@ export default function RoutingRulesPage() {
         <form className="form-card" onSubmit={submit}>
           <div className="form-section">
             <h2>Create routing rule</h2>
-            <div className="form-grid">
-              <div className="field full">
-                <label>Rule name <em>*</em></label>
-                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="field">
-                <label>Project scope</label>
-                <select
-                  value={form.projectId}
-                  onChange={(e) => setForm({ ...form, projectId: e.target.value, targetSectionKey: '' })}
-                >
-                  <option value="">All projects</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.code}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Source system</label>
-                <select
-                  value={form.sourceSystemId}
-                  onChange={(e) => setForm({ ...form, sourceSystemId: e.target.value })}
-                >
-                  <option value="">Any source</option>
-                  {sources.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Document type</label>
-                <select
-                  value={form.documentType}
-                  onChange={(e) => setForm({ ...form, documentType: e.target.value })}
-                >
-                  <option value="">Any type</option>
-                  {activeDocumentTypes.map((item) => (
-                    <option key={item.id} value={item.name}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>File extension</label>
-                <input
-                  value={form.fileExtension}
-                  onChange={(e) => setForm({ ...form, fileExtension: e.target.value })}
-                  placeholder="docx"
-                />
-              </div>
-              <div className="field">
-                <label>Target section <em>*</em></label>
-                <select
-                  required
-                  value={form.targetSectionKey}
-                  onChange={(e) => setForm({ ...form, targetSectionKey: e.target.value })}
-                >
-                  <option value="">Select…</option>
-                  {sections
-                    .filter((s: any) => !['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(s.sectionKey))
-                    .map((s: any) => (
-                      <option key={s.id} value={s.sectionKey}>{s.name}</option>
-                    ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Priority</label>
-                <input
-                  type="number"
-                  value={form.priority}
-                  onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
-                />
-              </div>
-            </div>
+            {renderRuleFields(form, setForm, sections, 'create')}
           </div>
-          {error && <div className="notice error">{error}</div>}
-          {message && <div className="notice success">{message}</div>}
+          {error && !editing ? <div className="notice error">{error}</div> : null}
+          {message && !editing ? <div className="notice success">{message}</div> : null}
           <div className="form-actions">
-            <button className="button primary">Create rule</button>
+            <button className="button primary" disabled={saving}>{saving && !editing ? 'Saving…' : 'Create rule'}</button>
           </div>
         </form>
 
@@ -218,43 +335,86 @@ export default function RoutingRulesPage() {
                     <th>Conditions</th>
                     <th>Target</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th className={styles.actionsCell} aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
-                  {rules.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.priority}</td>
-                      <td>
-                        <strong>{r.name}</strong>
-                        <div className="secondary-text">{r.project?.code || 'Global'}</div>
-                      </td>
-                      <td>
-                        {r.documentType || 'Any type'}
-                        <div className="secondary-text">
-                          {r.sourceSystem?.name || 'Any source'} · {r.fileExtension ? `.${r.fileExtension}` : 'Any file'}
-                        </div>
-                      </td>
-                      <td className="mono">{r.targetSectionKey}</td>
-                      <td><StatusBadge value={r.active ? 'ACTIVE' : 'INACTIVE'} /></td>
-                      <td>
-                        <button
-                          type="button"
-                          className="button small"
-                          disabled={deletingId === r.id}
-                          onClick={() => void removeRule(r.id, r.name)}
-                        >
-                          {deletingId === r.id ? 'Deleting…' : 'Delete'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {rules.map((r) => {
+                    const menuOpen = openMenuId === r.id;
+                    const busy = busyId === r.id;
+                    return (
+                      <tr key={r.id}>
+                        <td>{r.priority}</td>
+                        <td>
+                          <strong>{r.name}</strong>
+                          <div className="secondary-text">{r.project?.code || 'Global'}</div>
+                        </td>
+                        <td>
+                          {r.documentType || 'Any type'}
+                          <div className="secondary-text">
+                            {r.sourceSystem?.name || 'Any source'} · {r.fileExtension ? `.${r.fileExtension}` : 'Any file'}
+                          </div>
+                        </td>
+                        <td className="mono">{r.targetSectionKey}</td>
+                        <td><StatusBadge value={r.active ? 'ACTIVE' : 'INACTIVE'} /></td>
+                        <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
+                          <div
+                            className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}
+                            ref={menuOpen ? menuRef : undefined}
+                          >
+                            <button
+                              type="button"
+                              className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
+                              aria-label={`Actions for ${r.name}`}
+                              aria-haspopup="menu"
+                              aria-expanded={menuOpen}
+                              disabled={busy || saving}
+                              onClick={() => setOpenMenuId(menuOpen ? null : r.id)}
+                            >
+                              <MoreVertical size={16} />
+                            </button>
+                            {menuOpen ? (
+                              <div className={styles.menu} role="menu">
+                                <button type="button" role="menuitem" disabled={busy} onClick={() => openEdit(r)}>
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className={styles.dangerItem}
+                                  disabled={busy}
+                                  onClick={() => void removeRule(r.id, r.name)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
       </div>
+
+      {editing ? (
+        <div className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby="routing-edit-title">
+          <form className={styles.editModalCard} onSubmit={saveEdit}>
+            <h3 id="routing-edit-title">Edit routing rule</h3>
+            <p>Update conditions and target for {editing.name}.</p>
+            {renderRuleFields(editForm, setEditForm, editSections, 'edit')}
+            {error ? <div className="notice error">{error}</div> : null}
+            <div className={styles.editModalActions}>
+              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+              <button type="submit" className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }

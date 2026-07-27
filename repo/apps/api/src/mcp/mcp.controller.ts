@@ -29,6 +29,7 @@ import { McpAuthService } from './mcp-auth.service';
 import {
   CreateMcpIntegrationDto,
   MCP_TOOL_NAMES,
+  UpdateMcpIntegrationDto,
   UpdateMcpIntegrationProjectsDto,
   McpJsonRpcRequestDto,
   McpToolName,
@@ -396,6 +397,18 @@ export class McpController {
     return this.auth.updateAllowedProjects(id, body.allowedProjectIds, user?.id);
   }
 
+  @Patch('integrations/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth()
+  updateIntegration(
+    @Param('id') id: string,
+    @Body() body: UpdateMcpIntegrationDto,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.auth.updateIntegration(id, body, user?.id);
+  }
+
   @Post('integrations/:id/disable')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -415,7 +428,7 @@ export class McpController {
     @Param('id') id: string,
     @CurrentUser() user: { id?: string } | null,
   ) {
-    return this.auth.disableIntegration(id, user?.id);
+    return this.auth.deleteIntegration(id, user?.id);
   }
 
   private publicBaseUrl(): string {
