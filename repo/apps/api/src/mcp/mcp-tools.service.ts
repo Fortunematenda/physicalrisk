@@ -95,15 +95,14 @@ export class McpToolsService {
       case 'submit_approved_document': {
         // ChatGPT often still calls this name. Metadata-only → browser upload link.
         // Also accepts a single JSON "payload" string to avoid UnrecognizedKwargsError.
-        const prepared = this.parsePreparePayload(args);
-        const raw = args as Record<string, unknown>;
-        if (!raw.uploadId && !raw.fileContentBase64) {
+        const { dto: prepared, uploadId, fileContentBase64 } = this.parseSubmitPayload(args);
+        if (!uploadId && !fileContentBase64) {
           return this.prepareApprovedDocument(integration, prepared);
         }
         return this.submitApprovedDocument(integration, {
           ...prepared,
-          uploadId: typeof raw.uploadId === 'string' ? raw.uploadId : undefined,
-          fileContentBase64: typeof raw.fileContentBase64 === 'string' ? raw.fileContentBase64 : undefined,
+          uploadId,
+          fileContentBase64,
         }, ipAddress);
       }
       case 'get_import_status':
@@ -516,8 +515,8 @@ export class McpToolsService {
     return first.replace(/\/+$/, '');
   }
 
-  /** Accept flat fields or a single JSON string `payload` (ChatGPT UnrecognizedKwargsError workaround). */
-  private parsePreparePayload(args: Record<string, unknown>): PrepareApprovedDocumentDto {
+  /** Unwrap optional ChatGPT `payload` JSON string into a plain object. */
+  private unwrapPayloadObject(args: Record<string, unknown>): Record<string, unknown> {
     let source: Record<string, unknown> = args ?? {};
     const rawPayload = source.payload;
     if (typeof rawPayload === 'string' && rawPayload.trim()) {
@@ -532,7 +531,12 @@ export class McpToolsService {
         throw new BadRequestException('payload must be valid JSON');
       }
     }
+    return source;
+  }
 
+  /** Accept flat fields or a single JSON string `payload` (ChatGPT UnrecognizedKwargsError workaround). */
+  private parsePreparePayload(args: Record<string, unknown>): PrepareApprovedDocumentDto {
+    const source = this.unwrapPayloadObject(args);
     const str = (key: string) => {
       const value = source[key];
       return typeof value === 'string' ? value.trim() : undefined;
@@ -551,6 +555,27 @@ export class McpToolsService {
       sectionKey: str('sectionKey'),
       fileName: str('fileName'),
       mimeType: str('mimeType'),
+    };
+  }
+
+  private parseSubmitPayload(args: Record<string, unknown>): {
+    dto: PrepareApprovedDocumentDto;
+    uploadId?: string;
+    fileContentBase64?: string;
+  } {
+    const source = this.unwrapPayloadObject(args);
+    const outer = args ?? {};
+    const pick = (key: string) => {
+      const fromSource = source[key];
+      const fromOuter = outer[key];
+      if (typeof fromSource === 'string' && fromSource.trim()) return fromSource.trim();
+      if (typeof fromOuter === 'string' && fromOuter.trim()) return fromOuter.trim();
+      return undefined;
+    };
+    return {
+      dto: this.parsePreparePayload(args),
+      uploadId: pick('uploadId'),
+      fileContentBase64: pick('fileContentBase64'),
     };
   }
 
