@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
-import { ConnectorProvider, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
+import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
+import { compareVersions, suggestNextVersion } from '../imports/version.util';
 import { ConfigService } from '@nestjs/config';
 import { McpAuthService } from './mcp-auth.service';
 import {
@@ -310,19 +311,38 @@ export class McpToolsService {
     return {
       exists: filtered.length > 0,
       projectId,
-      matches: filtered.map((document) => ({
-        id: document.id,
-        code: document.code,
-        title: document.title,
-        documentType: document.documentType,
-        currentVersionNo: document.currentVersionNo,
-        versions: (document.versions ?? []).map((version) => ({
-          id: version.id,
-          versionNo: version.versionNo,
-          originalFileName: version.originalFileName,
-          checksum: version.checksum,
-        })),
-      })),
+      matches: filtered.map((document) => {
+        const versionNos = (document.versions ?? []).map((version) => version.versionNo);
+        if (document.currentVersionNo && !versionNos.includes(document.currentVersionNo)) {
+          versionNos.push(document.currentVersionNo);
+        }
+        const suggestedNextVersionNo = suggestNextVersion(
+          versionNos.length ? versionNos : ['Rev 1.0'],
+        );
+        return {
+          id: document.id,
+          code: document.code,
+          title: document.title,
+          documentType: document.documentType,
+          currentVersionNo: document.currentVersionNo,
+          suggestedNextVersionNo,
+          /** Pass these fields in submit_approved_document payload for a new revision. */
+          newVersionSubmitHints: {
+            mode: 'NEW_VERSION' as const,
+            existingDocumentId: document.id,
+            documentCode: document.code,
+            versionNo: suggestedNextVersionNo,
+            title: document.title,
+            documentType: document.documentType,
+          },
+          versions: (document.versions ?? []).map((version) => ({
+            id: version.id,
+            versionNo: version.versionNo,
+            originalFileName: version.originalFileName,
+            checksum: version.checksum,
+          })),
+        };
+      }),
     };
   }
 
@@ -488,23 +508,24 @@ export class McpToolsService {
 
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
+      const versioned = await this.resolveNewVersionSubmit(projectId, input);
       const result = await this.orchestrator.queueMcpApprovedDocument({
         provider: ConnectorProvider.CHATGPT_MCP,
         projectId,
-        title: input.title,
-        documentCode: input.documentCode,
+        title: versioned.title,
+        documentCode: versioned.documentCode,
         documentType: input.documentType,
         description: input.description,
         owner: input.owner,
-        versionNo: input.versionNo,
+        versionNo: versioned.versionNo,
         approvalStatus: input.approvalStatus,
         approvedBy: input.approvedBy,
         approvalDate: input.approvalDate,
         sectionKey,
         metadataJson: input.metadataJson,
         relationshipsJson: input.relationshipsJson,
-        mode: input.mode,
-        existingDocumentId: input.existingDocumentId,
+        mode: versioned.mode,
+        existingDocumentId: versioned.existingDocumentId,
         fileName,
         fileContentBase64,
         mimeType,
@@ -610,6 +631,77 @@ export class McpToolsService {
     return source;
   }
 
+  /**
+   * When submitting a revision of an existing document, attach existingDocumentId / documentCode
+   * and bump versionNo past the current revision (defaults alone would stay at Rev 1.0).
+   */
+  private async resolveNewVersionSubmit(
+    projectId: string,
+    input: SubmitApprovedDocumentDto,
+  ): Promise<{
+    title: string;
+    documentCode?: string;
+    versionNo: string;
+    mode?: 'NEW' | 'NEW_VERSION';
+    existingDocumentId?: string;
+  }> {
+    const wantsNewVersion = input.mode === 'NEW_VERSION' || Boolean(input.existingDocumentId?.trim());
+    let document: Document | null = null;
+
+    if (input.existingDocumentId?.trim()) {
+      document = await this.db.documents.findOne({
+        where: { id: input.existingDocumentId.trim(), project: { id: projectId } },
+        relations: { versions: true },
+      });
+      if (!document) {
+        throw new BadRequestException('existingDocumentId was not found in this project');
+      }
+    } else if (input.documentCode?.trim()) {
+      document = await this.db.documents.findOne({
+        where: { project: { id: projectId }, code: input.documentCode.trim().toUpperCase() },
+        relations: { versions: true },
+      });
+    } else if (wantsNewVersion && input.title?.trim()) {
+      document = await this.db.documents
+        .createQueryBuilder('document')
+        .leftJoinAndSelect('document.versions', 'versions')
+        .innerJoin('document.project', 'project')
+        .where('project.id = :projectId', { projectId })
+        .andWhere('LOWER(document.title) = LOWER(:title)', { title: input.title.trim() })
+        .getOne();
+    }
+
+    if (!document) {
+      return {
+        title: input.title,
+        documentCode: input.documentCode,
+        versionNo: input.versionNo,
+        mode: input.mode,
+        existingDocumentId: input.existingDocumentId,
+      };
+    }
+
+    const versionNos = (document.versions ?? []).map((version) => version.versionNo);
+    if (document.currentVersionNo && !versionNos.includes(document.currentVersionNo)) {
+      versionNos.push(document.currentVersionNo);
+    }
+    const suggested = suggestNextVersion(versionNos.length ? versionNos : ['Rev 1.0']);
+    const submitted = input.versionNo?.trim() || '';
+    const current = document.currentVersionNo || versionNos[0] || 'Rev 1.0';
+    const treatAsDefault = !submitted || /^rev\s*1\.0$/i.test(submitted) || submitted === '1.0';
+    const notNewer = Boolean(submitted) && compareVersions(submitted, current) <= 0;
+    const versionNo = treatAsDefault || notNewer ? suggested : submitted;
+
+    // Targeting an existing document always means a new revision.
+    return {
+      title: document.title,
+      documentCode: document.code,
+      versionNo,
+      mode: 'NEW_VERSION',
+      existingDocumentId: document.id,
+    };
+  }
+
   /** Accept flat fields or a single JSON string `payload` (ChatGPT UnrecognizedKwargsError workaround). */
   private parsePreparePayload(args: Record<string, unknown>): PrepareApprovedDocumentDto {
     const source = this.unwrapPayloadObject(args);
@@ -618,7 +710,13 @@ export class McpToolsService {
       return typeof value === 'string' ? value.trim() : undefined;
     };
     const modeRaw = str('mode');
-    const mode = modeRaw === 'NEW' || modeRaw === 'NEW_VERSION' ? modeRaw : undefined;
+    const asNewVersion = source.asNewVersion === true
+      || source.newVersion === true
+      || str('asNewVersion')?.toLowerCase() === 'true'
+      || str('newVersion')?.toLowerCase() === 'true';
+    const mode = modeRaw === 'NEW' || modeRaw === 'NEW_VERSION'
+      ? modeRaw
+      : (asNewVersion ? 'NEW_VERSION' : undefined);
 
     return {
       projectId: str('projectId'),
@@ -639,7 +737,7 @@ export class McpToolsService {
       metadataJson: str('metadataJson'),
       relationshipsJson: str('relationshipsJson'),
       mode,
-      existingDocumentId: str('existingDocumentId'),
+      existingDocumentId: str('existingDocumentId') || str('existing_document_id') || str('documentId'),
     };
   }
 
@@ -798,7 +896,8 @@ export class McpToolsService {
         'Advanced: start a chunked file upload session',
       upload_document_chunk:
         'Advanced: upload one base64 chunk of the document',
-      check_document_exists: 'Check whether a document already exists by title, filename, checksum, or code',
+      check_document_exists:
+        'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
         'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64; without those returns uploadUrl',
       get_import_status: 'Get the processing status of an import job by id',

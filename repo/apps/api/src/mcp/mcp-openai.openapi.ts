@@ -61,13 +61,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         description:
           'JSON string. Same-chat approve fields: projectCode, module, documentType, title, documentContent, '
           + 'plus Document Information: owner, description (short summary), approvedBy. '
-          + 'Optional: documentCode, versionNo, approvalDate. '
-          + 'Repo converts Markdown → PDF, imports with those fields into Document Information. '
-          + 'Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvedBy=Wayne, owner=approvedBy, '
-          + 'approvalDate=today, description from first paragraph of documentContent if omitted. '
-          + 'Example: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
-          + '"title":"Cow","owner":"Wayne","description":"Overview of cattle husbandry.",'
-          + '"documentContent":"# Cow\\n\\nA cow is...","approvedBy":"Wayne"}',
+          + 'NEW DOCUMENT: omit mode/documentCode (server allocates code, versionNo defaults to Rev 1.0). '
+          + 'NEW VERSION of an existing document: set mode=NEW_VERSION and existingDocumentId (from check_document_exists), '
+          + 'or set documentCode (e.g. MOSS-AR-003). Server bumps versionNo automatically (e.g. Rev 1.0 → Rev 1.1). '
+          + 'Optional: versionNo if you already know the next revision. '
+          + 'Repo converts Markdown → PDF and imports with Document Information. '
+          + 'Example new: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
+          + '"title":"Cow","owner":"Wayne","description":"Overview of cattle.","documentContent":"# Cow\\n\\n...","approvedBy":"Wayne"} '
+          + 'Example next version: {"projectCode":"MOSS","module":"Research Library","documentType":"Articles",'
+          + '"title":"A Cow","mode":"NEW_VERSION","existingDocumentId":"<uuid>","documentCode":"MOSS-AR-003",'
+          + '"documentContent":"# The Cow\\n\\n...","approvedBy":"Wayne"}',
       },
     },
   };
@@ -78,11 +81,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       title: 'Physical Risk Repo MCP',
       description:
         'Same-chat: research → generate → approve → submit with documentContent. '
-        + 'Repo converts Markdown to PDF, writes Document Information (title, type, owner, description, '
-        + 'approved by), applies routing rules / module, imports into the folder, '
-        + 'and updates the Master Document Index. Queue only if routing or duplicates need a human. '
+        + 'Supports NEW documents and NEW_VERSION revisions of existing documents '
+        + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
+        + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
+        + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.12.0',
+      version: '1.13.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -143,7 +147,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/check_document_exists': {
         post: {
           operationId: 'check_document_exists',
-          summary: 'Check for duplicate documents',
+          summary: 'Check for duplicates; returns newVersionSubmitHints for the next revision',
+          description:
+            'If exists=true, use matches[].newVersionSubmitHints (mode, existingDocumentId, documentCode, versionNo) '
+            + 'inside submit_approved_document payload when the user wants another version of that document.',
           security,
           requestBody: {
             required: true,
@@ -154,6 +161,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                   properties: {
                     projectCode: { type: 'string' },
                     title: { type: 'string' },
+                    documentCode: { type: 'string' },
                     fileName: { type: 'string' },
                   },
                 },
@@ -166,10 +174,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/submit_approved_document': {
         post: {
           operationId: 'submit_approved_document',
-          summary: 'Submit approved document to Import Queue',
+          summary: 'Submit approved document (new or next version)',
           description:
             'Pass ONLY payload. After user approval, call immediately with documentContent. '
-            + 'Do not ask the user for version/date/filename/mime — server defaults those.',
+            + 'For a new revision of an existing document, include mode=NEW_VERSION and existingDocumentId '
+            + '(or documentCode) from check_document_exists; server bumps versionNo. '
+            + 'Do not claim versioning is unsupported.',
           security,
           requestBody: {
             required: true,
@@ -244,6 +254,8 @@ FIELD MAPPING (never swap)
 - owner = Document Information Owner (usually Wayne or the named author).
 - description = short Document Information summary (1–2 sentences), not the full Markdown body.
 - approvedBy = Approver shown on the version.
+- mode = NEW (default) or NEW_VERSION (add a revision to an existing document).
+- existingDocumentId / documentCode = identity of the existing document when mode=NEW_VERSION.
 
 SAME-CHAT FLOW
 1) Research — help; do not submit.
@@ -254,21 +266,34 @@ SAME-CHAT FLOW
    Also include owner and description so Document Information is complete.
    Repo converts Markdown → PDF, applies admin routing rules (or the module you sent), imports into that folder, and updates the Master Document Index. No Import Queue step when routing succeeds.
 
+NEW VERSION (another revision of an existing document)
+- The repository DOES support versioning via submit_approved_document. Never say it does not.
+- When the user asks to import as another version / next revision / update existing (e.g. MOSS-AR-003):
+  1) Call check_document_exists with projectCode + title or documentCode.
+  2) Take matches[0].newVersionSubmitHints (mode, existingDocumentId, documentCode, versionNo).
+  3) Call submit_approved_document with those fields plus module, documentType, documentContent, owner, description, approvedBy.
+- Server bumps versionNo if you omit it or still send Rev 1.0 (e.g. Rev 1.0 → Rev 1.1).
+- Keep the existing document title/code; do not invent a new title like "A Cow (Revised)" unless the user asks for a separate document.
+
 FORBIDDEN after approval
 - Asking again for Version, Approval date, Original filename, MIME type, or "the document itself" if you already generated it in this chat.
 - Claiming a human must always finish Import Queue — only say that when result.needsReview is true.
+- Claiming versioning / NEW_VERSION is unsupported.
 - Submitting with only documentContent and omitting documentType / title / module.
 
 SUBMIT
 - One argument only: payload (JSON string).
 - Required in payload: projectCode, module, documentType, title, documentContent.
 - Strongly include: owner, description, approvedBy.
-- Server defaults: versionNo=Rev 1.0, approvalStatus=APPROVED, approvalDate=today, approvedBy=Wayne, owner=approvedBy, description from first Markdown paragraph if omitted.
-- On success report: imported, documentCode, sectionName, importJobId, and result.message.
+- For next version also include: mode=NEW_VERSION, existingDocumentId and/or documentCode.
+- Server defaults: versionNo=Rev 1.0 for NEW; for NEW_VERSION server suggests the next Rev; approvalStatus=APPROVED; approvalDate=today; approvedBy=Wayne; owner=approvedBy; description from first Markdown paragraph if omitted.
+- On success report: imported, documentCode, sectionName, importJobId, version if known, and result.message.
 - If needsReview=true, tell the user to open Import Queue (routing/duplicate issue).
 
-Example:
-submit_approved_document with payload =
-{"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"Cow","owner":"Wayne","description":"Overview of cattle as domesticated livestock.","approvedBy":"Wayne","documentContent":"# Cow\\n\\nA cow is a domesticated mammal..."}
+Example NEW:
+{"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"Cow","owner":"Wayne","description":"Overview of cattle.","approvedBy":"Wayne","documentContent":"# Cow\\n\\nA cow is..."}
+
+Example NEW_VERSION:
+{"projectCode":"MOSS","module":"Research Library","documentType":"Articles","title":"A Cow","mode":"NEW_VERSION","existingDocumentId":"<uuid-from-check>","documentCode":"MOSS-AR-003","owner":"Wayne","description":"Updated overview of cattle.","approvedBy":"Wayne","documentContent":"# The Cow\\n\\n..."}
 
 Also: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;

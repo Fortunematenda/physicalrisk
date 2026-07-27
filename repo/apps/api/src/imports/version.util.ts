@@ -1,5 +1,7 @@
 interface ParsedVersion {
   raw: string;
+  /** Display prefix such as "Rev " when the stored value used that style. */
+  stylePrefix: string;
   prefix: string;
   parts: number[];
 }
@@ -9,6 +11,7 @@ interface ParsedVersion {
  *
  * Rules:
  * - Trim whitespace
+ * - Strip optional leading "Rev" / "Revision" (with space)
  * - Strip optional leading "v" or "V"
  * - Split on periods or hyphens
  * - Treat each segment as an integer (non-numeric becomes 0)
@@ -16,13 +19,16 @@ interface ParsedVersion {
  */
 export function parseVersion(value: string): ParsedVersion {
   const raw = String(value ?? '').trim();
-  const prefix = raw.length > 0 && /^v/i.test(raw[0] ?? '') ? raw[0]! : '';
-  const stripped = raw.replace(/^v/i, '');
+  const revMatch = raw.match(/^(rev(?:ision)?\s+)/i);
+  const stylePrefix = revMatch?.[1] ?? '';
+  const rest = revMatch ? raw.slice(revMatch[0].length).trim() : raw;
+  const prefix = rest.length > 0 && /^v/i.test(rest[0] ?? '') ? rest[0]! : '';
+  const stripped = rest.replace(/^v/i, '');
   const parts = stripped.split(/[.-]/).map((part) => {
     const parsed = Number.parseInt(part, 10);
     return Number.isNaN(parsed) ? 0 : parsed;
   });
-  return { raw, prefix, parts };
+  return { raw, stylePrefix, prefix, parts };
 }
 
 /**
@@ -46,6 +52,7 @@ export function compareVersions(left: string, right: string): number {
 /**
  * Suggest the next patch/minor version for a list of existing versions.
  * Defaults to adding 1 to the last numeric segment.
+ * Preserves a "Rev " style prefix when any existing version used it.
  */
 export function suggestNextVersion(existingVersions: string[]): string {
   if (!existingVersions.length) return '1.0';
@@ -55,7 +62,9 @@ export function suggestNextVersion(existingVersions: string[]): string {
   const next = [...latest.parts];
   if (next.length === 0) next.push(1, 0);
   next[next.length - 1] += 1;
-  return next.join('.');
+  const numeric = next.join('.');
+  const useRev = parsed.some((item) => Boolean(item.stylePrefix));
+  return useRev ? `Rev ${numeric}` : numeric;
 }
 
 function compareVersionParts(left: number[], right: number[]): number {
@@ -66,4 +75,3 @@ function compareVersionParts(left: number[], right: number[]): number {
   }
   return 0;
 }
-

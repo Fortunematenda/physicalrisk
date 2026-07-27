@@ -37,6 +37,12 @@ describe('version.util', () => {
       assert.equal(compareVersions('1.2.1', '1.2'), 1);
       assert.equal(compareVersions('1.2', '1.2.1'), -1);
     });
+
+    it('handles Rev-prefixed versions', () => {
+      assert.equal(compareVersions('Rev 1.0', 'Rev 1.0'), 0);
+      assert.equal(compareVersions('Rev 1.1', 'Rev 1.0'), 1);
+      assert.equal(compareVersions('Rev 1.0', '1.0'), 0);
+    });
   });
 
   describe('suggestNextVersion', () => {
@@ -52,6 +58,11 @@ describe('version.util', () => {
 
     it('handles v prefix and dotted versions', () => {
       assert.equal(suggestNextVersion(['v1.2.1']), '1.2.2');
+    });
+
+    it('preserves Rev style prefix', () => {
+      assert.equal(suggestNextVersion(['Rev 1.0']), 'Rev 1.1');
+      assert.equal(suggestNextVersion(['Rev 1.0', 'Rev 1.1']), 'Rev 1.2');
     });
   });
 });
