@@ -122,11 +122,13 @@ export default function SourceConnectionDetailPage() {
   const [schedule, setSchedule] = useState('MANUAL');
   const [savingSchedule, setSavingSchedule] = useState(false);
 
-  const [folderCrumbs, setFolderCrumbs] = useState<Breadcrumb[]>([{ id: null, name: 'Root' }]);
+  const [folderCrumbs, setFolderCrumbs] = useState<Breadcrumb[]>([{ id: null, name: 'My Drive' }]);
   const [folders, setFolders] = useState<ExternalFolder[]>([]);
   const [foldersLoading, setFoldersLoading] = useState(false);
   const [foldersError, setFoldersError] = useState('');
   const [selectingRoot, setSelectingRoot] = useState(false);
+  const [rootNotice, setRootNotice] = useState('');
+  const [rootNoticeOk, setRootNoticeOk] = useState(false);
 
   const [mappingForm, setMappingForm] = useState<MappingForm>(EMPTY_MAPPING);
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
@@ -234,20 +236,34 @@ export default function SourceConnectionDetailPage() {
     }
   };
 
-  const selectRootFolder = async (folder: ExternalFolder) => {
+  const currentBrowseFolder = folderCrumbs[folderCrumbs.length - 1] ?? { id: null, name: 'My Drive' };
+
+  const selectRootFolder = async (folder: { id: string | null; name: string }) => {
     setSelectingRoot(true);
     setError('');
     setMessage('');
+    setRootNotice('');
+    setRootNoticeOk(false);
+    // Google Drive top level is the special id "root" when crumb id is null.
+    const folderId = (folder.id && folder.id.trim()) || 'root';
+    const folderName = folder.name?.trim() || (folderId === 'root' ? 'My Drive' : 'Selected folder');
     try {
       const updated = await api<Connection>(`/connectors/${id}/select-root-folder`, {
         method: 'POST',
-        body: JSON.stringify({ folderId: folder.id, folderName: folder.name }),
+        body: JSON.stringify({ folderId, folderName }),
       });
       setConnection(updated);
-      setFileFolderId(folder.id);
-      setMessage(`Root folder set to ${folder.name}.`);
+      setFileFolderId(folderId);
+      const ok = `Root folder set to “${folderName}”. Next: create a Folder Mapping, then Sync Now.`;
+      setMessage(ok);
+      setRootNotice(ok);
+      setRootNoticeOk(true);
+      await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to select root folder.');
+      const msg = caught instanceof Error ? caught.message : 'Unable to select root folder.';
+      setError(msg);
+      setRootNotice(msg);
+      setRootNoticeOk(false);
     } finally {
       setSelectingRoot(false);
     }
@@ -458,9 +474,26 @@ export default function SourceConnectionDetailPage() {
       <div className="panel">
         <div className="panel-header">
           <h2>Root folder</h2>
-          <span className="secondary-text">Browse and select the root folder for this connection</span>
+          <div className={styles.inlineActions}>
+            <span className="secondary-text">
+              Current: {connection.rootExternalFolderName || 'Not selected'}
+            </span>
+            <button
+              type="button"
+              className="button small primary"
+              disabled={selectingRoot || connection.status !== 'CONNECTED'}
+              onClick={() => void selectRootFolder(currentBrowseFolder)}
+            >
+              {selectingRoot ? 'Saving…' : 'Use this folder as root'}
+            </button>
+          </div>
         </div>
         <div className="panel-body">
+          {rootNotice ? (
+            <div className={`notice ${rootNoticeOk ? 'success' : 'error'}`} style={{ marginBottom: 12 }}>
+              {rootNotice}
+            </div>
+          ) : null}
           {connection.status !== 'CONNECTED' ? (
             <EmptyState
               title="Connection not ready"
@@ -468,6 +501,10 @@ export default function SourceConnectionDetailPage() {
             />
           ) : (
             <>
+              <p className="secondary-text" style={{ marginTop: 0 }}>
+                Browse into the Drive folder that contains your files, then click <strong>Use this folder as root</strong>
+                (or <strong>Set as root</strong> on a child folder).
+              </p>
               <div className={styles.breadcrumbs}>
                 {folderCrumbs.map((crumb, index) => (
                   <span key={`${crumb.id ?? 'root'}-${index}`}>
@@ -480,7 +517,10 @@ export default function SourceConnectionDetailPage() {
               {foldersLoading ? (
                 <Loading />
               ) : folders.length === 0 ? (
-                <EmptyState title="No folders here" text="This location has no child folders." />
+                <EmptyState
+                  title="No subfolders here"
+                  text="You can still use this location as root with the button above, then list/import files below."
+                />
               ) : (
                 <div className={styles.folderList}>
                   {folders.map((folder) => (
