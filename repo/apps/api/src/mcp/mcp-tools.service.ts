@@ -440,13 +440,28 @@ export class McpToolsService {
           `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
         );
       }
-      const pdfBuffer = await this.markdownPdf.render(content, {
-        title: input.title,
-        author: input.approvedBy || 'Physical Risk Repository',
-      });
-      fileContentBase64 = pdfBuffer.toString('base64');
-      fileName = this.defaultPdfFileName(fileName || input.title);
-      mimeType = 'application/pdf';
+      try {
+        const pdfBuffer = await this.markdownPdf.render(content, {
+          title: input.title,
+          author: input.approvedBy || 'Physical Risk Repository',
+        });
+        fileContentBase64 = pdfBuffer.toString('base64');
+        fileName = this.defaultPdfFileName(fileName || input.title);
+        mimeType = 'application/pdf';
+      } catch (error) {
+        // Keep same-chat submit working if PDF rendering fails in the container.
+        const message = error instanceof Error ? error.message : String(error);
+        await this.audit.record({
+          action: 'MCP_PDF_FALLBACK',
+          entityType: 'McpIntegration',
+          entityId: integration.id,
+          message: `PDF render failed; queuing Markdown instead (${message})`,
+          ipAddress,
+        });
+        fileContentBase64 = Buffer.from(content, 'utf8').toString('base64');
+        fileName = this.defaultMarkdownFileName(fileName || input.title);
+        mimeType = 'text/markdown';
+      }
     }
     if (!fileContentBase64) {
       throw new BadRequestException(

@@ -78,7 +78,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Same-chat: research → generate → user approves → submit with documentContent. '
         + 'Repo converts Markdown to PDF and queues the PDF. External PDF via fileUrl/uploadUrl. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.10.0',
+      version: '1.10.1',
     },
     servers: [{ url: baseUrl }],
     paths: {
