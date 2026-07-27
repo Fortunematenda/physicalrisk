@@ -1205,6 +1205,7 @@ function ImportDocumentPageContent() {
           </section>
 
           {!routingOnlyContinue ? (
+          <>
           <section className={styles.section}>
             <div className={styles.sectionHead}>
               <h2>3. Approved content</h2>
@@ -1508,6 +1509,7 @@ function ImportDocumentPageContent() {
               </div>
             ) : null}
           </section>
+          </>
           ) : null}
 
           {error && !structuredError && <div className="notice error">{error}</div>}
