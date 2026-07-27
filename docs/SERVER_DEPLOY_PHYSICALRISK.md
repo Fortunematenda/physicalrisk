@@ -27,9 +27,7 @@ If WordPress/Apache already owns port 80 on the same server, do **not** bind com
 ```bash
 # On the server
 cd /path/to/physicalrisk
-git fetch origin
-git checkout development
-git pull origin development
+# Prefer pulling latest main (MCP + connectors are on main)
 
 cp .env.sso.production.example .env.sso   # first time only
 # Edit .env.sso — replace every REPLACE_WITH_* value
