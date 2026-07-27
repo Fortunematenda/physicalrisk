@@ -129,20 +129,35 @@ export class McpController {
     if (!file?.buffer?.length) {
       throw new BadRequestException('Attach the PDF/file in the multipart "file" field');
     }
+    const required = {
+      title: body.title?.trim(),
+      documentType: body.documentType?.trim(),
+      versionNo: (body.versionNo || body.version || '').trim(),
+      approvalStatus: (body.approvalStatus || 'APPROVED').trim(),
+      approvedBy: body.approvedBy?.trim(),
+      approvalDate: body.approvalDate?.trim(),
+    };
+    const missing = Object.entries(required)
+      .filter(([, value]) => !value)
+      .map(([key]) => key);
+    if (missing.length) {
+      throw new BadRequestException(`Missing required fields: ${missing.join(', ')}`);
+    }
+
     const integration = request[MCP_INTEGRATION_KEY]!;
     this.auth.assertToolAllowed(integration, 'submit_approved_document');
     const payload: SubmitApprovedDocumentDto = {
       projectId: body.projectId || undefined,
       projectCode: body.projectCode || body.project || undefined,
-      title: body.title,
+      title: required.title!,
       documentCode: body.documentCode || undefined,
-      documentType: body.documentType,
+      documentType: required.documentType!,
       description: body.description || undefined,
       owner: body.owner || undefined,
-      versionNo: body.versionNo || body.version || undefined,
-      approvalStatus: body.approvalStatus || 'APPROVED',
-      approvedBy: body.approvedBy,
-      approvalDate: body.approvalDate,
+      versionNo: required.versionNo!,
+      approvalStatus: required.approvalStatus!,
+      approvedBy: required.approvedBy!,
+      approvalDate: required.approvalDate!,
       sectionKey: body.sectionKey || undefined,
       module: body.module || undefined,
       metadataJson: body.metadataJson || undefined,
