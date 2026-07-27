@@ -181,7 +181,7 @@ export class SubmitApprovedDocumentDto {
   @IsUUID('4')
   existingDocumentId?: string;
 
-  @ValidateIf((o: SubmitApprovedDocumentDto) => !o.fileUrl?.trim() && !o.uploadId?.trim())
+  @ValidateIf((o: SubmitApprovedDocumentDto) => !o.fileUrl?.trim() && !o.uploadId?.trim() && !o.documentContent?.trim())
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
@@ -204,6 +204,15 @@ export class SubmitApprovedDocumentDto {
   @Transform(trimString)
   @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
   fileUrl?: string;
+
+  /**
+   * Full document body generated in chat (Markdown/text).
+   * ChatGPT same-chat path: research → generate → approve → submit with this field.
+   */
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  documentContent?: string;
 
   @IsOptional()
   @Transform(trimString)

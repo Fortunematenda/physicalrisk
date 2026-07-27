@@ -59,14 +59,13 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       payload: {
         type: 'string',
         description:
-          'JSON object string. Required keys: projectCode, module, documentType, title, versionNo, '
-          + 'approvalStatus, approvedBy, approvalDate, fileName. '
-          + 'Preferred: also include fileUrl (public https URL to the PDF) so Repo downloads and queues it. '
-          + 'Without fileUrl, result.uploadUrl is returned for browser upload. '
-          + 'Example with fileUrl: '
-          + '{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles",'
-          + '"title":"...","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne",'
-          + '"approvalDate":"2026-07-27","fileName":"doc.pdf","fileUrl":"https://example.com/doc.pdf"}',
+          'JSON object string. Required: projectCode, module, documentType, title, versionNo, '
+          + 'approvalStatus, approvedBy, approvalDate. '
+          + 'Same-chat submit: include documentContent (full Markdown body) and optional fileName (.md). '
+          + 'PDF alternatives: fileUrl (public URL) or omit both to receive uploadUrl for browser upload. '
+          + 'Example: {"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles",'
+          + '"title":"Research Note","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne",'
+          + '"approvalDate":"2026-07-27","fileName":"Research Note.md","documentContent":"# Research Note\\n\\n..."}',
       },
     },
   };
@@ -76,10 +75,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Approved Document intake for ChatGPT. Prefer payload.fileUrl (public PDF URL); '
-        + 'otherwise open result.uploadUrl in a browser. '
+        'Approved Document intake for ChatGPT. Same-chat flow: research → generate → approve → '
+        + 'submit with documentContent (Markdown). PDF via fileUrl or browser uploadUrl. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.8.0',
+      version: '1.9.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -163,10 +162,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/submit_approved_document': {
         post: {
           operationId: 'submit_approved_document',
-          summary: 'Submit via fileUrl or get browser upload link',
+          summary: 'Submit approved document (documentContent / fileUrl / upload link)',
           description:
-            'Pass ONLY payload (JSON string). Include fileUrl to queue immediately; '
-            + 'without fileUrl returns uploadUrl for browser upload.',
+            'Pass ONLY payload (JSON string). Prefer documentContent for same-chat Markdown submit. '
+            + 'fileUrl for public PDF. Without either, returns uploadUrl for browser upload.',
           security,
           requestBody: {
             required: true,
@@ -182,8 +181,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       '/api/mcp/tools/prepare_approved_document': {
         post: {
           operationId: 'prepare_approved_document',
-          summary: 'Create browser upload link (alias)',
-          description: 'Same as submit without fileUrl. Pass ONLY payload JSON string.',
+          summary: 'Prepare or submit (alias)',
+          description: 'Same as submit_approved_document. Pass ONLY payload JSON string.',
           security,
           requestBody: {
             required: true,
@@ -232,19 +231,35 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   };
 }
 
-export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
+export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant for Wayne and other reviewers.
 
-CRITICAL
-- Custom GPT Actions cannot send PDF bytes.
-- Call submit_approved_document with exactly ONE argument: payload (a JSON string).
-- Preferred: include fileUrl in the payload — a public https URL to the PDF. Repo downloads it and creates an Import Queue job.
-- Without fileUrl: you receive uploadUrl — tell the user to open it and upload the PDF in a browser.
+SAME-CHAT WORKFLOW (stay in this conversation)
+1) Research — Answer questions and help with analysis. Do NOT call submit tools yet.
+2) Generate — When the user says "generate a document" (or similar), produce the FULL deliverable in chat as Markdown, then show a metadata checklist:
+   - projectCode (e.g. MOSS)
+   - module (e.g. Enterprise Architecture)
+   - documentType (e.g. Articles)
+   - title, versionNo, proposed fileName (.md)
+   Ask them to review the draft.
+3) Approve — Wait for explicit approval ("I approve", "approve and submit", "approved"). Never submit drafts or pending content.
+4) Submit — Call submit_approved_document with exactly ONE argument: payload (a JSON string). Include:
+   - metadata fields above
+   - approvalStatus: "APPROVED"
+   - approvedBy (user's name, e.g. Wayne)
+   - approvalDate (YYYY-MM-DD)
+   - documentContent: the FULL approved Markdown body (required for same-chat submit)
+   - fileName ending in .md
+5) Report result.importJobId. Remind them a human must still complete import from the Import Queue.
+
+CRITICAL RULES
+- Pass ONLY the payload string to submit_approved_document (not separate kwargs — causes UnrecognizedKwargsError).
+- Custom GPT Actions cannot attach PDF bytes. Same-chat path uses documentContent (Markdown).
+- For an existing PDF: include fileUrl (public https URL), or omit documentContent/fileUrl to receive uploadUrl for browser upload.
 - Never invent multipart file uploads.
+- Only APPROVED documents may be submitted.
 
-Example with fileUrl (preferred):
+Example same-chat submit:
 submit_approved_document with payload =
-{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles","title":"MOSS Lean Revenue MVP – Timeline, Deliverables and Payment Milestones","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne","approvalDate":"2026-07-27","fileName":"MOSS Lean Revenue MVP Timeline Deliverables Payment Milestones Signed Contract.pdf","fileUrl":"https://example.com/path/to/signed-contract.pdf"}
-
-Success with fileUrl returns importJobId. A human still completes import from the Import Queue.
+{"projectCode":"MOSS","module":"Enterprise Architecture","documentType":"Articles","title":"Research Summary","versionNo":"Rev 1.0","approvalStatus":"APPROVED","approvedBy":"Wayne","approvalDate":"2026-07-27","fileName":"Research Summary.md","documentContent":"# Research Summary\\n\\n## Findings\\n\\n..."}
 
 Also available: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, get_import_status.`;
