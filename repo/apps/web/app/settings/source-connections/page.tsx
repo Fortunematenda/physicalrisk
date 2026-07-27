@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
-import { ApiError } from '@/lib/api-error';
 import styles from './SourceConnections.module.css';
 
 type Connection = {
@@ -50,10 +49,6 @@ export default function SourceConnectionsPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [showConnect, setShowConnect] = useState(false);
-  const [connectName, setConnectName] = useState('Google Drive');
-  const [connecting, setConnecting] = useState(false);
-  const [connectError, setConnectError] = useState('');
 
   const [oauth, setOauth] = useState<GoogleOAuthSettings | null>(null);
   const [oauthForm, setOauthForm] = useState({
@@ -64,11 +59,6 @@ export default function SourceConnectionsPage() {
   const [oauthSaving, setOauthSaving] = useState(false);
   const [oauthError, setOauthError] = useState('');
   const [oauthMessage, setOauthMessage] = useState('');
-
-  const connectedDrive = useMemo(
-    () => connections.find((item) => item.provider === 'GOOGLE_DRIVE' && item.status === 'CONNECTED'),
-    [connections],
-  );
 
   const loadOauth = async () => {
     try {
@@ -165,45 +155,6 @@ export default function SourceConnectionsPage() {
     }
   };
 
-  const startNewGoogleConnect = () => {
-    if (connectedDrive) {
-      const ok = window.confirm(
-        `Google Drive is already connected as “${connectedDrive.name}”.\n\n`
-        + 'Click OK only if you want to link a different Google account (Google will ask you to sign in again).\n\n'
-        + 'Click Cancel and open the existing connection instead.',
-      );
-      if (!ok) return;
-    }
-    setConnectName(connectedDrive ? 'Google Drive (additional)' : 'Google Drive');
-    setConnectError('');
-    setShowConnect(true);
-  };
-
-  const connectGoogleDrive = async (event: FormEvent) => {
-    event.preventDefault();
-    setConnecting(true);
-    setConnectError('');
-    try {
-      if (!oauth?.configured) {
-        throw new Error('Save Google Client ID and Client Secret in Google API settings first.');
-      }
-      const result = await api<{ authUrl: string }>('/connectors/google-drive/connect', {
-        method: 'POST',
-        body: JSON.stringify({ name: connectName.trim() || 'Google Drive' }),
-      });
-      if (!result.authUrl) throw new Error('No OAuth URL was returned.');
-      window.location.href = result.authUrl;
-    } catch (caught) {
-      const msg = caught instanceof ApiError
-        ? caught.message
-        : caught instanceof Error
-          ? caught.message
-          : 'Unable to start Google Drive connection.';
-      setConnectError(msg);
-      setConnecting(false);
-    }
-  };
-
   return (
     <div className={styles.page}>
       <PageHeader
@@ -283,55 +234,12 @@ export default function SourceConnectionsPage() {
         <div className="panel-body">
           <div className={styles.providerGrid}>
             <div className={styles.providerCard}>
-              <h3>Google Drive</h3>
-              <p>
-                {connectedDrive
-                  ? `Connected as ${connectedDrive.externalAccountLabel || connectedDrive.name}. Open it to sync — do not Connect again unless you need another Google account.`
-                  : 'OAuth connection with folder mapping, sync, and selective import.'}
-              </p>
-              <div className={styles.providerActions}>
-                {connectedDrive ? (
-                  <>
-                    <Link href={`/settings/source-connections/${connectedDrive.id}`} className="button primary small">
-                      Open connected Drive
-                    </Link>
-                    <button type="button" className="button small" onClick={startNewGoogleConnect}>
-                      Connect another account
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="button primary small" onClick={startNewGoogleConnect}>
-                    Connect Google Drive
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className={styles.providerCard}>
               <h3>ChatGPT MCP</h3>
               <p>Allow ChatGPT to list repository modules and submit Approved Documents via MCP.</p>
               <div className={styles.providerActions}>
                 <Link href="/settings/mcp" className="button small primary">Open MCP Integrations</Link>
               </div>
             </div>
-
-            <div className={styles.providerCard}>
-              <h3>Manual Upload</h3>
-              <p>Uses the Import Document page. No Source Connection record is required.</p>
-              <div className={styles.providerActions}>
-                <Link href="/imports/new" className="button small">Import Document</Link>
-              </div>
-            </div>
-
-            {COMING_SOON.map((provider) => (
-              <div key={provider.id} className={`${styles.providerCard} ${styles.disabled}`}>
-                <h3>{provider.name}</h3>
-                <p>{provider.description}</p>
-                <div className={styles.providerActions}>
-                  <button type="button" className="button small" disabled>Coming Soon</button>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       </div>
@@ -348,7 +256,7 @@ export default function SourceConnectionsPage() {
         ) : connections.length === 0 ? (
           <EmptyState
             title="No Source Connections yet"
-            text="Save Google API settings above, then connect Google Drive — or open MCP Integrations."
+            text="Open MCP Integrations to create a ChatGPT MCP API key."
           />
         ) : (
           <div className="table-wrap">
@@ -426,49 +334,6 @@ export default function SourceConnectionsPage() {
           </div>
         )}
       </div>
-
-      {showConnect ? (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (!connecting && event.target === event.currentTarget) setShowConnect(false);
-          }}
-        >
-          <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="gdrive-connect-title">
-            <form onSubmit={connectGoogleDrive}>
-              <div className="modal-header">
-                <h3 id="gdrive-connect-title">Connect Google Drive</h3>
-              </div>
-              <div className="modal-body">
-                <p>
-                  This starts a <strong>new</strong> Google authorization. After it succeeds, use that connection
-                  from the list — you should not need to authorize again for day-to-day sync.
-                </p>
-                <div className="field">
-                  <label htmlFor="gdrive-name">Connection name</label>
-                  <input
-                    id="gdrive-name"
-                    required
-                    value={connectName}
-                    onChange={(event) => setConnectName(event.target.value)}
-                    disabled={connecting}
-                  />
-                </div>
-                {connectError ? <div className="notice error" role="alert">{connectError}</div> : null}
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="button" disabled={connecting} onClick={() => setShowConnect(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="button primary" disabled={connecting || !connectName.trim()}>
-                  {connecting ? 'Connecting…' : 'Continue to Google'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

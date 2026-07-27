@@ -32,11 +32,11 @@ export default function SettingsPage() {
           <h2>Source Connections</h2>
         </div>
         <p style={{ margin: '0 0 12px' }}>
-          Connect Google Drive, manage ChatGPT MCP integrations, and review external imports through the existing Import Queue.
+          Manage ChatGPT MCP integrations and review external imports through the Import Queue.
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <a className="button primary" href="/settings/source-connections">Source Connections</a>
-          <a className="button" href="/settings/mcp">MCP Integrations</a>
+          <a className="button primary" href="/settings/mcp">MCP Integrations</a>
+          <a className="button" href="/settings/source-connections">Source Connections</a>
           <a className="button" href="/imports/queue">Import Queue</a>
         </div>
       </div>
