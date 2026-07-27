@@ -15,7 +15,10 @@ describe('buildChatGptActionsOpenApi', () => {
     ]);
     const submit = (doc.paths as any)['/api/mcp/submit-approved-document'].post;
     expect(submit.requestBody.content['multipart/form-data']).toBeTruthy();
-    expect(submit.requestBody.content['multipart/form-data'].schema.properties.file.format).toBe('binary');
+    expect((doc.components as any).schemas.SubmitApprovedDocumentRequest.properties.file.format).toBe('binary');
+    expect(Object.keys((doc.components as any).securitySchemes)).toEqual(['McpBearer']);
+    expect((doc.components as any).schemas).toBeTruthy();
+    expect(typeof (doc.components as any).schemas).toBe('object');
     for (const path of Object.keys(doc.paths)) {
       const post = (doc.paths as Record<string, { post: { operationId: string; requestBody?: { content: { 'application/json': { schema: { properties?: Record<string, unknown> } } } } } }>)[path].post;
       expect(post.operationId).toBeTruthy();

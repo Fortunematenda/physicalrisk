@@ -1,24 +1,60 @@
 /**
  * OpenAPI document for ChatGPT Custom GPT Actions.
- * Prefer this over JSON-RPC when wiring ChatGPT Actions.
+ * Kept deliberately strict: ChatGPT Actions only allow one security scheme,
+ * require object schemas to include properties, and require components.schemas
+ * to be an object.
  */
 export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const baseUrl = publicBaseUrl.replace(/\/+$/, '') || 'https://repo.physicalrisk.com';
 
-  const emptyOk = {
-    '200': {
-      description: 'Tool result',
-      content: {
-        'application/json': {
-          schema: { type: 'object', additionalProperties: true },
+  const toolResultSchema = {
+    type: 'object',
+    description: 'MCP tool response payload',
+    properties: {
+      tool: { type: 'string', description: 'Tool name when wrapped' },
+      result: {
+        type: 'object',
+        description: 'Tool result object',
+        properties: {
+          accepted: { type: 'boolean' },
+          importJobId: { type: 'string' },
+          status: { type: 'string' },
+          exists: { type: 'boolean' },
+          message: { type: 'string' },
         },
+        additionalProperties: true,
       },
+      message: { type: 'string' },
+      status: { type: 'string' },
     },
-    '401': { description: 'Invalid or missing MCP API key' },
-    '403': { description: 'Tool or project not allowed for this integration' },
+    additionalProperties: true,
   };
 
-  const mcpSecurity = [{ McpBearer: [] }, { McpApiKey: [] }];
+  const okResponse = {
+    description: 'Tool result',
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/ToolResult' },
+      },
+    },
+  };
+
+  const errorResponse = {
+    description: 'Error',
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/ErrorResult' },
+      },
+    },
+  };
+
+  const responses = {
+    '200': okResponse,
+    '401': errorResponse,
+    '403': errorResponse,
+  };
+
+  const bearerSecurity = [{ McpBearer: [] }];
 
   return {
     openapi: '3.1.0',
@@ -29,7 +65,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Files are queued for human review — never written straight to final storage. '
         + 'Prefer resolve_import_targets with human-readable names (e.g. project=MOSS, module=Enterprise Architecture, documentType=Articles). '
         + `Privacy policy: ${baseUrl}/privacy`,
-      version: '1.2.0',
+      version: '1.3.0',
     },
     servers: [{ url: baseUrl }],
     tags: [{ name: 'MCP', description: 'Physical Risk Repository MCP tools' }],
@@ -40,22 +76,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           tags: ['MCP'],
           summary: 'List repository projects',
           description: 'List active repository projects allowed for this MCP integration. Call with {}.',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: false,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
-                  },
-                  additionalProperties: false,
-                },
+                schema: { $ref: '#/components/schemas/EmptyBody' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/tools/list_document_types': {
@@ -64,22 +94,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           tags: ['MCP'],
           summary: 'List document types',
           description: 'List active document types. Call with {}.',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: false,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    unused: { type: 'boolean', description: 'Optional unused field for schema validators' },
-                  },
-                  additionalProperties: false,
-                },
+                schema: { $ref: '#/components/schemas/EmptyBody' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/tools/list_repository_modules': {
@@ -88,23 +112,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           tags: ['MCP'],
           summary: 'List project modules',
           description: 'List active modules for a project. Pass projectId UUID or projectCode/name (e.g. MOSS).',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    projectId: { type: 'string', format: 'uuid' },
-                    projectCode: { type: 'string', description: 'Project code or name if UUID unknown' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/ListModulesRequest' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/tools/resolve_import_targets': {
@@ -113,27 +130,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           tags: ['MCP'],
           summary: 'Resolve names to submission IDs',
           description:
-            'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType. '
-            + 'Call this before check_document_exists and submit_approved_document when the user gives names like MOSS / Enterprise Architecture / Articles.',
-          security: mcpSecurity,
+            'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType.',
+          security: bearerSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['project'],
-                  additionalProperties: false,
-                  properties: {
-                    project: { type: 'string', description: 'Project code, name, or UUID (e.g. MOSS)' },
-                    module: { type: 'string', description: 'Module name, code, or sectionKey' },
-                    documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/ResolveTargetsRequest' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/tools/check_document_exists': {
@@ -141,27 +148,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'check_document_exists',
           tags: ['MCP'],
           summary: 'Check whether a document already exists',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: false,
-                  properties: {
-                    projectId: { type: 'string', format: 'uuid' },
-                    projectCode: { type: 'string' },
-                    title: { type: 'string' },
-                    fileName: { type: 'string' },
-                    checksum: { type: 'string' },
-                    documentCode: { type: 'string' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/CheckExistsRequest' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/submit-approved-document': {
@@ -173,62 +169,16 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
             'PREFERRED for ChatGPT. Attach the user-uploaded PDF as multipart field "file". '
             + 'Use projectCode (e.g. MOSS), module name (e.g. Enterprise Architecture), and documentType name/code (e.g. Articles). '
             + 'Do NOT require UUIDs. Do NOT invent Base64 — attach the uploaded file.',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: true,
             content: {
               'multipart/form-data': {
-                schema: {
-                  type: 'object',
-                  required: [
-                    'file',
-                    'title',
-                    'documentType',
-                    'versionNo',
-                    'approvalStatus',
-                    'approvedBy',
-                    'approvalDate',
-                  ],
-                  properties: {
-                    file: {
-                      type: 'string',
-                      format: 'binary',
-                      description: 'The uploaded PDF/document from the chat',
-                    },
-                    projectCode: {
-                      type: 'string',
-                      description: 'Project code or name (preferred). Example: MOSS',
-                    },
-                    projectId: {
-                      type: 'string',
-                      description: 'Optional UUID if already known',
-                    },
-                    module: {
-                      type: 'string',
-                      description: 'Repository module/section name. Example: Enterprise Architecture',
-                    },
-                    sectionKey: {
-                      type: 'string',
-                      description: 'Optional section key if already known',
-                    },
-                    documentType: {
-                      type: 'string',
-                      description: 'Document type NAME or CODE — not a UUID. Example: Articles or AR',
-                    },
-                    title: { type: 'string' },
-                    versionNo: { type: 'string', description: 'Example: Rev 1.0' },
-                    approvalStatus: { type: 'string', enum: ['APPROVED'] },
-                    approvedBy: { type: 'string' },
-                    approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
-                    fileName: { type: 'string' },
-                    mimeType: { type: 'string' },
-                    mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/SubmitApprovedDocumentRequest' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
       '/api/mcp/tools/get_import_status': {
@@ -236,39 +186,135 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           operationId: 'get_import_status',
           tags: ['MCP'],
           summary: 'Get import job status',
-          security: mcpSecurity,
+          security: bearerSecurity,
           requestBody: {
             required: true,
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['importJobId'],
-                  additionalProperties: false,
-                  properties: {
-                    importJobId: { type: 'string', format: 'uuid' },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/GetImportStatusRequest' },
               },
             },
           },
-          responses: emptyOk,
+          responses,
         },
       },
     },
     components: {
+      schemas: {
+        EmptyBody: {
+          type: 'object',
+          description: 'No parameters. Send {}.',
+          properties: {
+            unused: {
+              type: 'boolean',
+              description: 'Optional unused field for schema validators',
+            },
+          },
+          additionalProperties: false,
+        },
+        ListModulesRequest: {
+          type: 'object',
+          properties: {
+            projectId: { type: 'string', description: 'Project UUID if known' },
+            projectCode: { type: 'string', description: 'Project code or name if UUID unknown' },
+          },
+          additionalProperties: false,
+        },
+        ResolveTargetsRequest: {
+          type: 'object',
+          required: ['project'],
+          properties: {
+            project: { type: 'string', description: 'Project code, name, or UUID (e.g. MOSS)' },
+            module: { type: 'string', description: 'Module name, code, or sectionKey' },
+            documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
+          },
+          additionalProperties: false,
+        },
+        CheckExistsRequest: {
+          type: 'object',
+          properties: {
+            projectId: { type: 'string' },
+            projectCode: { type: 'string' },
+            title: { type: 'string' },
+            fileName: { type: 'string' },
+            checksum: { type: 'string' },
+            documentCode: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        SubmitApprovedDocumentRequest: {
+          type: 'object',
+          required: [
+            'file',
+            'title',
+            'documentType',
+            'versionNo',
+            'approvalStatus',
+            'approvedBy',
+            'approvalDate',
+          ],
+          properties: {
+            file: {
+              type: 'string',
+              format: 'binary',
+              description: 'The uploaded PDF/document from the chat',
+            },
+            projectCode: {
+              type: 'string',
+              description: 'Project code or name (preferred). Example: MOSS',
+            },
+            projectId: {
+              type: 'string',
+              description: 'Optional UUID if already known',
+            },
+            module: {
+              type: 'string',
+              description: 'Repository module/section name. Example: Enterprise Architecture',
+            },
+            sectionKey: {
+              type: 'string',
+              description: 'Optional section key if already known',
+            },
+            documentType: {
+              type: 'string',
+              description: 'Document type NAME or CODE — not a UUID. Example: Articles or AR',
+            },
+            title: { type: 'string' },
+            versionNo: { type: 'string', description: 'Example: Rev 1.0' },
+            approvalStatus: { type: 'string', enum: ['APPROVED'] },
+            approvedBy: { type: 'string' },
+            approvalDate: { type: 'string', description: 'YYYY-MM-DD' },
+            fileName: { type: 'string' },
+            mimeType: { type: 'string' },
+            mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          },
+          additionalProperties: false,
+        },
+        GetImportStatusRequest: {
+          type: 'object',
+          required: ['importJobId'],
+          properties: {
+            importJobId: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        ToolResult: toolResultSchema,
+        ErrorResult: {
+          type: 'object',
+          properties: {
+            code: { type: 'string' },
+            message: { type: 'string' },
+            statusCode: { type: 'integer' },
+          },
+          additionalProperties: true,
+        },
+      },
       securitySchemes: {
         McpBearer: {
           type: 'http',
           scheme: 'bearer',
           description:
             'Paste the full MCP API key (starts with mcp_). ChatGPT sends Authorization: Bearer <key>.',
-        },
-        McpApiKey: {
-          type: 'apiKey',
-          in: 'header',
-          name: 'X-MCP-API-Key',
-          description: 'Alternative: send the full mcp_… key in the X-MCP-API-Key header.',
         },
       },
     },
