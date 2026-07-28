@@ -100,16 +100,21 @@ export default function ImportQueuePage() {
     }
   };
 
-  const clearQueue = async (scope: 'drafts' | 'external' | 'all') => {
-    const labels = {
+  const clearQueue = async (scope: 'drafts' | 'external' | 'all' | 'failed' | 'imported' | 'metrics') => {
+    const labels: Record<typeof scope, string> = {
       drafts: 'all saved drafts',
       external: 'all External Imports awaiting review',
       all: 'the entire Import Queue (drafts and External Imports)',
+      failed: 'all failed import records (resets Failed Imports on the dashboard)',
+      imported: 'completed import history (resets Imported in Period; documents stay in the repository)',
+      metrics: 'imported and failed history (resets both dashboard KPIs; documents stay)',
     };
     const ok = await confirm({
-      title: 'Clear import queue',
-      message: `Clear ${labels[scope]}? Staged files will be removed. Approved/imported documents are not affected.`,
-      confirmLabel: 'Clear queue',
+      title: scope === 'metrics' || scope === 'failed' || scope === 'imported'
+        ? 'Clear import metrics'
+        : 'Clear import queue',
+      message: `Clear ${labels[scope]}? Staged files will be removed where applicable. Approved repository documents are not deleted.`,
+      confirmLabel: 'Clear',
       tone: 'danger',
     });
     if (!ok) return;
@@ -124,12 +129,12 @@ export default function ImportQueuePage() {
       });
       setMessage(
         result.cleared > 0
-          ? `Cleared ${result.cleared} queue item${result.cleared === 1 ? '' : 's'}.`
-          : 'Queue was already empty.',
+          ? `Cleared ${result.cleared} item${result.cleared === 1 ? '' : 's'}.`
+          : 'Nothing to clear.',
       );
       load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to clear the import queue.');
+      setError(caught instanceof Error ? caught.message : 'Unable to clear.');
     } finally {
       setClearing(false);
     }
@@ -189,6 +194,14 @@ export default function ImportQueuePage() {
                   onClick={() => void clearQueue('all')}
                 >
                   Clear all queues
+                </button>
+                <button
+                  type="button"
+                  className="button small danger"
+                  disabled={loading || clearing}
+                  onClick={() => void clearQueue('metrics')}
+                >
+                  Clear imported & failed history
                 </button>
               </>
             ) : null}

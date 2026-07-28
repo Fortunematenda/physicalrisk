@@ -440,10 +440,17 @@ export class ImportsService {
   }
 
   /**
-   * Admin-only: remove queued drafts and/or external review items.
-   * Never deletes IMPORTED jobs / approved repository documents.
+   * Admin-only: remove queued drafts/external items, or clear dashboard metric history.
+   * `failed` / `imported` / `metrics` delete ImportJob rows only — never repository documents.
    */
-  async clearQueue(scope: 'drafts' | 'external' | 'all' = 'all', userId?: string) {
+  async clearQueue(
+    scope: 'drafts' | 'external' | 'all' | 'failed' | 'imported' | 'metrics' = 'all',
+    userId?: string,
+  ) {
+    if (scope === 'failed' || scope === 'imported' || scope === 'metrics') {
+      return this.clearImportMetrics(scope, userId);
+    }
+
     const statuses: ImportStatus[] = [];
     if (scope === 'drafts' || scope === 'all') statuses.push(ImportStatus.DRAFT);
     if (scope === 'external' || scope === 'all') {
@@ -478,6 +485,43 @@ export class ImportsService {
       action: 'IMPORT_QUEUE_CLEARED',
       entityType: 'ImportQueue',
       message: `Cleared ${cleared} import queue item(s) (scope=${scope})`,
+      after: { scope, cleared },
+    });
+
+    return { scope, cleared };
+  }
+
+  /** Reset dashboard "Imported in Period" / "Failed Imports" by deleting job history rows. */
+  private async clearImportMetrics(
+    scope: 'failed' | 'imported' | 'metrics',
+    userId?: string,
+  ) {
+    const statuses: ImportStatus[] = [];
+    if (scope === 'failed' || scope === 'metrics') statuses.push(ImportStatus.FAILED);
+    if (scope === 'imported' || scope === 'metrics') statuses.push(ImportStatus.IMPORTED);
+
+    const jobs = await this.db.importJobs.find({
+      where: { status: In(statuses) },
+      order: { createdAt: 'ASC' },
+    });
+
+    let cleared = 0;
+    for (const job of jobs) {
+      if (job.incomingPath) {
+        await this.storage.remove(job.incomingPath).catch(() => undefined);
+        if (job.incomingPath.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+          await this.storage.cleanupStaging(job.incomingPath).catch(() => undefined);
+        }
+      }
+      await this.db.importJobs.remove(job);
+      cleared += 1;
+    }
+
+    await this.audit.record({
+      userId,
+      action: 'IMPORT_METRICS_CLEARED',
+      entityType: 'ImportQueue',
+      message: `Cleared ${cleared} import history item(s) (scope=${scope})`,
       after: { scope, cleared },
     });
 
