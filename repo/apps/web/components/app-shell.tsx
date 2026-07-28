@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import TopNavigation from './layout/TopNavigation';
 import { ConfirmProvider } from './confirm-dialog';
-import { hasSsoSession, isLoggingOut, isSsoEnabled, clearLogoutGuard, redirectToLogin, ssoLogout } from '@/lib/sso';
+import { hasSsoSession, isLoggingOut, isSsoEnabled, clearLogoutGuard, redirectToLogin, ssoLogout, idleLogout } from '@/lib/sso';
+import { IdleSessionGuard } from './IdleSessionGuard';
 
 const groups = [
   { label: 'Workspace', items: [
@@ -127,6 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ConfirmProvider>
+      <IdleSessionGuard enabled={ready} onTimeout={() => { void idleLogout(); }} />
       <div className={`app-shell ${collapsed ? 'collapsed' : ''}`}>
     <TopNavigation
       organisationName="Physical Risk Consultancy"

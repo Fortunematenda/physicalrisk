@@ -6,7 +6,8 @@ import { AppHeader } from '@/components/layout/app-header';
 import { AppSidebar, useNavBadges } from '@/components/layout/app-sidebar';
 import { MobileSidebar } from '@/components/layout/mobile-sidebar';
 import { PageContainer } from '@/components/layout/page-container';
-import { ssoLogout } from '@/lib/sso';
+import { idleLogout, ssoLogout } from '@/lib/sso';
+import { IdleSessionGuard } from '@/components/IdleSessionGuard';
 
 const SIDEBAR_COLLAPSED_KEY = 'moss_sidebar_collapsed';
 
@@ -66,6 +67,7 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen bg-moss-page">
+      <IdleSessionGuard enabled={mounted} onTimeout={() => { void idleLogout(); }} />
       <AppSidebar
         collapsed={mounted && collapsed}
         onToggleCollapse={toggleCollapse}

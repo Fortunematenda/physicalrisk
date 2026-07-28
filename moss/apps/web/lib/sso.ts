@@ -155,3 +155,23 @@ export async function ssoLogout() {
   }
   window.location.replace('/login');
 }
+
+/** Idle timeout: clear local session and end Keycloak SSO via the portal. */
+export async function idleLogout() {
+  try {
+    window.sessionStorage.setItem(LOGOUT_FLAG, '1');
+  } catch {
+    // ignore
+  }
+  signInInFlight = null;
+  window.localStorage.removeItem('moss_token');
+  window.localStorage.removeItem('moss_user');
+
+  if (await isSsoEnabled()) {
+    await signOut({ redirect: false });
+    clearLogoutGuard();
+    window.location.replace(`${PORTAL_URL.replace(/\/$/, '')}/api/auth/federated-logout`);
+    return;
+  }
+  window.location.replace('/login');
+}
