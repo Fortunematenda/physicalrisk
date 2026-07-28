@@ -515,6 +515,42 @@ export class ImportsService {
       const currentVersion = existingVersions.find((version) => version.isCurrent);
       const currentVersionNo = currentVersion?.versionNo;
 
+      // Parity with MCP/external: block identical file content even for "New Document" imports.
+      // Same-document duplicates are handled by the version checks below.
+      if (job.checksum && job.checksum !== 'draft') {
+        const matchingVersion = await this.db.documentVersions.findOne({
+          where: { checksum: job.checksum },
+          relations: { document: { project: true, section: true } },
+        });
+        if (matchingVersion?.document && (!document || matchingVersion.document.id !== document.id)) {
+          const existingDoc = matchingVersion.document;
+          const existingSection = existingDoc.section ?? section;
+          const details = this.buildErrorDetails(existingDoc, matchingVersion, metadata.versionNo, existingSection);
+          const sameProject = existingDoc.project?.id === job.project.id;
+          await this.audit.record({
+            userId,
+            action: 'DUPLICATE_CONTENT_REJECTED',
+            entityType: 'ImportJob',
+            entityId: job.id,
+            message: `Identical file content already stored as ${existingDoc.code} v${matchingVersion.versionNo}`,
+            before: {
+              submittedVersion: metadata.versionNo,
+              checksum: job.checksum,
+              mode,
+              documentCode: documentCode ?? null,
+            },
+            after: details,
+          });
+          throw new ImportBusinessException(
+            'DUPLICATE_DOCUMENT_CONTENT',
+            sameProject
+              ? `This file is identical to version ${matchingVersion.versionNo} already stored for “${existingDoc.title}” (${existingDoc.code}) in this project. Importing it again as a new document is not allowed.`
+              : `This file is identical to version ${matchingVersion.versionNo} already stored for “${existingDoc.title}” (${existingDoc.code}). Importing duplicate content is not allowed.`,
+            details,
+          );
+        }
+      }
+
       // SCENARIO 4: submitted version is lower than current version
       if (currentVersionNo && compareVersions(metadata.versionNo, currentVersionNo) < 0) {
         const details = this.buildErrorDetails(document, currentVersion, metadata.versionNo, section);

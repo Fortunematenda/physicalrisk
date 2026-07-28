@@ -1044,9 +1044,17 @@ function ImportDocumentPageContent() {
             </div>
           ) : null}
           {notice && <div className="notice success">{notice}</div>}
-          {structuredError?.code === 'DUPLICATE_DOCUMENT_CONTENT' && (
-            <DuplicateModal error={structuredError} onChooseFile={replaceFile} onViewDocument={viewExistingVersion} onCancel={() => setStructuredError(null)} />
-          )}
+          {structuredError?.code === 'DUPLICATE_DOCUMENT_CONTENT' && typeof document !== 'undefined'
+            ? createPortal(
+                <DuplicateModal
+                  error={structuredError}
+                  onChooseFile={replaceFile}
+                  onViewDocument={viewExistingVersion}
+                  onCancel={() => setStructuredError(null)}
+                />,
+                document.body,
+              )
+            : null}
 
           {routingOnlyContinue ? (
             <section className={styles.section}>
@@ -1902,27 +1910,33 @@ function ImportDocumentPageContent() {
 
 function DuplicateModal({ error, onChooseFile, onViewDocument, onCancel }: { error: StructuredError; onChooseFile: () => void; onViewDocument: () => void; onCancel: () => void }) {
   const d = error.details;
-  return <div className="modal-backdrop">
-    <div className="modal">
-      <div className="modal-header"><h3>Duplicate document content detected</h3></div>
-      <div className="modal-body">
-        <p>This uploaded file is identical to version <strong>{d?.existingVersion}</strong> already stored for “<strong>{d?.documentTitle}</strong>”.</p>
-        <p>Changing the version number to <strong>{d?.submittedVersion}</strong> does not create a genuine new version. Upload the updated and approved file for version {d?.submittedVersion}. The existing version will remain safely preserved in the Version Register.</p>
-        <div className="info-panel">
-          <div><span>Document title</span><span>{d?.documentTitle}</span></div>
-          <div><span>Document code</span><span>{d?.documentCode}</span></div>
-          <div><span>Existing version</span><span>{d?.existingVersion}</span></div>
-          <div><span>Submitted version</span><span>{d?.submittedVersion}</span></div>
-          <div><span>Existing import date</span><span>{d?.existingImportDate ? new Date(d.existingImportDate).toLocaleString() : '—'}</span></div>
-          <div><span>Existing file name</span><span>{d?.existingFileName}</span></div>
-          <div><span>Repository location</span><span>{d?.repositoryPath}</span></div>
+  return (
+    <div className="modal-backdrop" role="presentation" style={{ zIndex: 2147483000 }}>
+      <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="duplicate-content-title">
+        <div className="modal-header"><h3 id="duplicate-content-title">Duplicate document content detected</h3></div>
+        <div className="modal-body">
+          <p>{error.message}</p>
+          <p>
+            This uploaded file is identical to version <strong>{d?.existingVersion || '—'}</strong> already stored for “
+            <strong>{d?.documentTitle || 'an existing document'}</strong>”.
+            Upload a genuinely updated approved file, or open the existing document instead of importing a duplicate.
+          </p>
+          <div className="info-panel">
+            <div><span>Document title</span><span>{d?.documentTitle || '—'}</span></div>
+            <div><span>Document code</span><span>{d?.documentCode || '—'}</span></div>
+            <div><span>Existing version</span><span>{d?.existingVersion || '—'}</span></div>
+            <div><span>Submitted version</span><span>{d?.submittedVersion || '—'}</span></div>
+            <div><span>Existing import date</span><span>{d?.existingImportDate ? new Date(d.existingImportDate).toLocaleString() : '—'}</span></div>
+            <div><span>Existing file name</span><span>{d?.existingFileName || '—'}</span></div>
+            <div><span>Repository location</span><span>{d?.repositoryPath || '—'}</span></div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="button primary" onClick={onChooseFile}>Choose Updated File</button>
+          <button type="button" className="button" onClick={onViewDocument} disabled={!d?.documentId}>View Existing Version</button>
+          <button type="button" className="button text" onClick={onCancel}>Cancel Import</button>
         </div>
       </div>
-      <div className="modal-footer">
-        <button className="button primary" onClick={onChooseFile}>Choose Updated File</button>
-        <button className="button" onClick={onViewDocument}>View Existing Version</button>
-        <button className="button text" onClick={onCancel}>Cancel Import</button>
-      </div>
     </div>
-  </div>;
+  );
 }
