@@ -116,7 +116,7 @@ export function IdleSessionGuard({ enabled, onTimeout }: Props) {
           font: 'inherit',
           fontSize: 13,
           fontWeight: 650,
-          cursor: pointer,
+          cursor: 'pointer',
         }}
       >
         Stay signed in
