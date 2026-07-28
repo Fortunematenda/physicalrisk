@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, CheckCircle2, CloudUpload, FileText, Info, X,
@@ -79,20 +80,15 @@ function documentTypeAppliesToProject(
   const normalized = documentType.trim().toLowerCase();
   if (!normalized || !projectId) return true;
 
-  const projectRules = rules.filter((rule) => {
+  // Only an explicit routing rule for this type (project-scoped or all-projects) counts.
+  // Catch-all rules (empty documentType) must NOT mark every type as valid.
+  const hasTypeRule = rules.some((rule) => {
     if (rule.active === false) return false;
     if (rule.projectId && rule.projectId !== projectId) return false;
-    return true;
-  });
-
-  const hasTypeRule = projectRules.some((rule) => {
     const ruleType = rule.documentType?.trim().toLowerCase();
     return Boolean(ruleType) && ruleType === normalized;
   });
   if (hasTypeRule) return true;
-
-  const hasCatchAllRule = projectRules.some((rule) => !rule.documentType?.trim());
-  if (hasCatchAllRule) return true;
 
   const typeKey = documentType.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
   return sections.some((section) => (
@@ -207,14 +203,16 @@ function ImportDocumentPageContent() {
       api('/file-types'),
       api('/document-types'),
       api('/metadata-fields'),
+      api('/routing-rules'),
     ])
-      .then(([p, s, f, types, fields]) => {
+      .then(([p, s, f, types, fields, rules]) => {
         setProjects(p);
         setSources(s.filter((item: SourceSystemRecord) => item.active !== false));
         setFileTypes(f.filter((item: any) => item.active));
         setDocumentTypes(types.filter((item: DocumentTypeRecord) => item.active !== false));
         setMetadataFields((fields as MetadataFieldRecord[]).filter((item) => item.active !== false)
           .sort((a, b) => a.position - b.position || a.label.localeCompare(b.label)));
+        setRoutingRules((rules as RoutingRuleRecord[]).filter((rule) => rule.active !== false));
       })
       .catch((caught) => setError(getErrorMessage(caught)))
       .finally(() => setLoadingOptions(false));
@@ -323,7 +321,6 @@ function ImportDocumentPageContent() {
     if (!form.projectId) {
       setDocuments([]);
       setDocumentsError('');
-      setRoutingRules([]);
       return;
     }
 
@@ -336,11 +333,16 @@ function ImportDocumentPageContent() {
         setDocumentsError(getErrorMessage(caught, 'Unable to load existing documents for this project.'));
       })
       .finally(() => setDocumentsLoading(false));
-
-    api(`/routing-rules?projectId=${encodeURIComponent(form.projectId)}`)
-      .then((rules) => setRoutingRules((rules as RoutingRuleRecord[]).filter((rule) => rule.active !== false)))
-      .catch(() => setRoutingRules([]));
   }, [form.projectId]);
+
+  const refreshRoutingRules = async () => {
+    try {
+      const rules = await api<RoutingRuleRecord[]>('/routing-rules');
+      setRoutingRules((Array.isArray(rules) ? rules : []).filter((rule) => rule.active !== false));
+    } catch {
+      // keep existing rules
+    }
+  };
 
   const selectedProject = useMemo(() => projects.find((item) => item.id === form.projectId), [projects, form.projectId]);
   const projectDocuments = useMemo(
@@ -455,6 +457,17 @@ function ImportDocumentPageContent() {
     window.setTimeout(() => setNotice(''), 4000);
   };
 
+  const showDocTypeProjectWarning = (documentType: string, projectLabel?: string) => {
+    const label = projectLabel || selectedProjectLabel || 'this project';
+    setDocTypeProjectWarning({
+      documentType: documentType.trim(),
+      projectLabel: label,
+    });
+    setError(
+      `Document type “${documentType.trim()}” does not apply to ${label}. Please select a document type configured for this project.`,
+    );
+  };
+
   const refreshProjects = async (preferId?: string) => {
     try {
       const next = await api<ProjectRecord[]>('/projects');
@@ -490,10 +503,7 @@ function ImportDocumentPageContent() {
       && form.documentType.trim()
       && !documentTypeAppliesToProject(form.documentType, form.projectId, routingRules, activeSections)
     ) {
-      setDocTypeProjectWarning({
-        documentType: form.documentType.trim(),
-        projectLabel: selectedProjectLabel || 'this project',
-      });
+      showDocTypeProjectWarning(form.documentType);
       return;
     }
     if (!requiredComplete) {
@@ -1124,10 +1134,7 @@ function ImportDocumentPageContent() {
                     && !documentTypeAppliesToProject(currentType, projectId, routingRules, sections),
                   );
                   if (typeInvalid) {
-                    setDocTypeProjectWarning({
-                      documentType: currentType.trim(),
-                      projectLabel,
-                    });
+                    showDocTypeProjectWarning(currentType, projectLabel);
                   }
                   setForm((current) => ({
                     ...current,
@@ -1449,7 +1456,15 @@ function ImportDocumentPageContent() {
                 required
                 loading={loadingOptions}
                 value={form.documentType}
-                options={documentTypes.map((item) => ({ value: item.name, label: item.name }))}
+                options={documentTypes.map((item) => {
+                  const applies = !form.projectId
+                    || documentTypeAppliesToProject(item.name, form.projectId, routingRules, activeSections);
+                  return {
+                    value: item.name,
+                    label: item.name,
+                    description: applies ? undefined : 'Not configured for this project',
+                  };
+                })}
                 placeholder="Select type…"
                 canCreate={canCreate && form.mode !== 'NEW_VERSION'}
                 createLabel="Add New Document Type"
@@ -1461,13 +1476,11 @@ function ImportDocumentPageContent() {
                     && documentType.trim()
                     && !documentTypeAppliesToProject(documentType, form.projectId, routingRules, activeSections)
                   ) {
-                    setDocTypeProjectWarning({
-                      documentType: documentType.trim(),
-                      projectLabel: selectedProjectLabel || 'this project',
-                    });
+                    showDocTypeProjectWarning(documentType);
                     setForm((current) => ({ ...current, documentType: '' }));
                     return;
                   }
+                  setError('');
                   setForm((current) => ({ ...current, documentType }));
                 }}
                 onCreateClick={() => setCreateModal('documentType')}
@@ -1770,31 +1783,34 @@ function ImportDocumentPageContent() {
         </aside>
       </div>
 
-    {docTypeProjectWarning ? (
-      <div className="modal-backdrop" role="presentation">
-        <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="doc-type-project-warning-title">
-          <div className="modal-header">
-            <h3 id="doc-type-project-warning-title">Document type not valid for this project</h3>
-          </div>
-          <div className="modal-body">
-            <p>
-              Document type <strong>{docTypeProjectWarning.documentType}</strong> does not apply to{' '}
-              <strong>{docTypeProjectWarning.projectLabel}</strong>.
-            </p>
-            <p>Please select a document type that is configured for this project (via a routing rule or matching repository section).</p>
-          </div>
-          <div className="modal-footer">
-            <button
-              type="button"
-              className="button primary"
-              onClick={() => setDocTypeProjectWarning(null)}
-            >
-              Select another document type
-            </button>
-          </div>
-        </div>
-      </div>
-    ) : null}
+    {docTypeProjectWarning && typeof document !== 'undefined'
+      ? createPortal(
+          <div className="modal-backdrop" role="presentation" style={{ zIndex: 2147483000 }}>
+            <div className="modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="doc-type-project-warning-title">
+              <div className="modal-header">
+                <h3 id="doc-type-project-warning-title">Document type not valid for this project</h3>
+              </div>
+              <div className="modal-body">
+                <p>
+                  Document type <strong>{docTypeProjectWarning.documentType}</strong> does not apply to{' '}
+                  <strong>{docTypeProjectWarning.projectLabel}</strong>.
+                </p>
+                <p>Please select a document type that is configured for this project (via a routing rule or matching repository section).</p>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => setDocTypeProjectWarning(null)}
+                >
+                  Select another document type
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null}
 
     {createModal === 'documentType' && (
       <CreateDocumentTypeModal
@@ -1820,15 +1836,7 @@ function ImportDocumentPageContent() {
           void api('/document-types').then((items) => setDocumentTypes(items.filter((item: DocumentTypeRecord) => item.active !== false))).catch(() => {
             setNotice('Document type created and selected. The full list could not be refreshed.');
           });
-          if (form.projectId) {
-            void api(`/routing-rules?projectId=${encodeURIComponent(form.projectId)}`)
-              .then((rules) => setRoutingRules(Array.isArray(rules) ? rules : []))
-              .catch(() => undefined);
-          } else {
-            void api('/routing-rules')
-              .then((rules) => setRoutingRules(Array.isArray(rules) ? rules : []))
-              .catch(() => undefined);
-          }
+          void refreshRoutingRules();
         }}
       />
     )}

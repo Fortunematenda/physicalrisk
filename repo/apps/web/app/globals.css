@@ -240,7 +240,7 @@ tbody tr.clickable-row:focus-visible { outline: 2px solid rgba(23, 105, 170, 0.3
 .select-card strong, .select-card span { display: block; }
 .select-card span { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .readonly-box { background: #f7f9fb; border: 1px solid #e2e8ef; border-radius: 8px; padding: 10px 12px; min-height: 40px; display: flex; flex-direction: column; gap: 4px; }
-.modal-backdrop { position: fixed; inset: 0; background: rgba(8, 28, 52, .45); z-index: 100; display: grid; place-items: center; padding: 20px; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(8, 28, 52, .45); z-index: 10050; display: grid; place-items: center; padding: 20px; }
 .confirm-dialog-overlay {
   z-index: 2147483000;
 }
