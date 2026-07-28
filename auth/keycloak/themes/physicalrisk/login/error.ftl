@@ -2,7 +2,7 @@
 <@layout.registrationLayout displayMessage=false; section>
   <#if section = "header">
     <h2 class="pr-title">Something went wrong</h2>
-    <p class="pr-subtitle">We could not complete that sign-in request.</p>
+    <p class="pr-subtitle">We could not complete that request.</p>
   <#elseif section = "form">
     <div class="pr-alert pr-alert--error" role="alert">
       <#if message?has_content>
@@ -12,7 +12,7 @@
       </#if>
     </div>
     <p style="margin-top:1.25rem;text-align:center;">
-      <a class="pr-link" href="https://repo.physicalrisk.com">Back to application</a>
+      <a class="pr-link" href="https://apps.physicalrisk.com/?signedOut=1">Back to application</a>
     </p>
   </#if>
 </@layout.registrationLayout>

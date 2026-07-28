@@ -12,22 +12,33 @@ const SESSION_COOKIE = 'portal.next-auth.session-token';
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
-  const token = await getToken({
+  const portalUrl = (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'https://apps.physicalrisk.com').replace(
+    /\/$/,
+    '',
+  );
+  const useSecureCookies = portalUrl.startsWith('https://');
+
+  // Production HTTPS sessions use Secure cookies — secureCookie:false cannot read them.
+  let token = await getToken({
     req,
     secret,
     cookieName: SESSION_COOKIE,
-    secureCookie: false,
+    secureCookie: useSecureCookies,
   });
+  if (!token) {
+    token = await getToken({
+      req,
+      secret,
+      cookieName: SESSION_COOKIE,
+      secureCookie: !useSecureCookies,
+    });
+  }
 
   const issuer =
     process.env.KEYCLOAK_ISSUER ||
     process.env.NEXT_PUBLIC_KEYCLOAK_ISSUER ||
     'https://auth.physicalrisk.com/realms/physicalrisk';
   const clientId = (process.env.KEYCLOAK_CLIENT_ID || 'physicalrisk-portal').trim();
-  const portalUrl = (process.env.AUTH_URL || process.env.NEXTAUTH_URL || 'https://apps.physicalrisk.com').replace(
-    /\/$/,
-    '',
-  );
 
   // Land on the apps home page (signed-out). Home skips auto Keycloak when ?signedOut=1.
   const params = new URLSearchParams({
@@ -51,10 +62,20 @@ export async function GET(req: NextRequest) {
   // Clear NextAuth session cookies, then send the browser to Keycloak logout.
   const res = NextResponse.redirect(logoutUrl);
   const clear = (name: string) => {
-    res.cookies.set(name, '', { path: '/', maxAge: 0 });
+    const base = { path: '/', maxAge: 0, sameSite: 'lax' as const };
+    res.cookies.set(name, '', { ...base, secure: useSecureCookies });
+    res.cookies.set(name, '', base);
     // Chunked session cookies (large JWTs)
     for (let i = 0; i < 5; i++) {
-      res.cookies.set(`${name}.${i}`, '', { path: '/', maxAge: 0 });
+      res.cookies.set(`${name}.${i}`, '', { ...base, secure: useSecureCookies });
+      res.cookies.set(`${name}.${i}`, '', base);
+    }
+    // NextAuth secure cookie prefix
+    if (useSecureCookies) {
+      res.cookies.set(`__Secure-${name}`, '', { ...base, secure: true });
+      for (let i = 0; i < 5; i++) {
+        res.cookies.set(`__Secure-${name}.${i}`, '', { ...base, secure: true });
+      }
     }
   };
   clear(SESSION_COOKIE);
