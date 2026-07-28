@@ -1117,32 +1117,25 @@ function ImportDocumentPageContent() {
                   const sections = (project?.sections ?? []).filter(
                     (item: ProjectSectionOption) => item.active !== false && !['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(item.sectionKey),
                   );
-                  setForm((current) => {
-                    const nextType = current.documentType;
-                    if (
-                      projectId
-                      && nextType.trim()
-                      && !documentTypeAppliesToProject(nextType, projectId, routingRules, sections)
-                    ) {
-                      setDocTypeProjectWarning({
-                        documentType: nextType.trim(),
-                        projectLabel,
-                      });
-                      return {
-                        ...current,
-                        projectId,
-                        sectionKey: '',
-                        existingDocumentId: '',
-                        documentType: '',
-                      };
-                    }
-                    return {
-                      ...current,
-                      projectId,
-                      sectionKey: '',
-                      existingDocumentId: '',
-                    };
-                  });
+                  const currentType = form.documentType;
+                  const typeInvalid = Boolean(
+                    projectId
+                    && currentType.trim()
+                    && !documentTypeAppliesToProject(currentType, projectId, routingRules, sections),
+                  );
+                  if (typeInvalid) {
+                    setDocTypeProjectWarning({
+                      documentType: currentType.trim(),
+                      projectLabel,
+                    });
+                  }
+                  setForm((current) => ({
+                    ...current,
+                    projectId,
+                    sectionKey: '',
+                    existingDocumentId: '',
+                    documentType: typeInvalid ? '' : current.documentType,
+                  }));
                 }}
                 onCreateClick={() => setCreateModal('project')}
               />
