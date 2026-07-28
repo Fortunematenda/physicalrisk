@@ -990,7 +990,9 @@ export class ImportsService {
         ? activeSections.find((item) => item.sectionKey === 'PRODUCT_ARCHITECTURE' || item.name.trim().toLowerCase() === 'product architecture')
         : undefined);
     if (!section) {
-      throw new BadRequestException(`No routing rule resolved '${metadata.documentType}' to an active section. Configure a routing rule or choose a section explicitly.`);
+      throw new BadRequestException(
+        `Document type '${metadata.documentType}' does not apply to this project. Please select a document type configured for this project (routing rule or matching repository section), or choose a section explicitly.`,
+      );
     }
     return section;
   }

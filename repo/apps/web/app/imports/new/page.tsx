@@ -62,6 +62,48 @@ interface RoutingRuleRecord {
   active: boolean;
 }
 
+type ProjectSectionOption = {
+  id: string;
+  name: string;
+  sectionKey: string;
+  active?: boolean;
+  position?: number;
+};
+
+function documentTypeAppliesToProject(
+  documentType: string,
+  projectId: string,
+  rules: RoutingRuleRecord[],
+  sections: ProjectSectionOption[],
+): boolean {
+  const normalized = documentType.trim().toLowerCase();
+  if (!normalized || !projectId) return true;
+
+  const projectRules = rules.filter((rule) => {
+    if (rule.active === false) return false;
+    if (rule.projectId && rule.projectId !== projectId) return false;
+    return true;
+  });
+
+  const hasTypeRule = projectRules.some((rule) => {
+    const ruleType = rule.documentType?.trim().toLowerCase();
+    return Boolean(ruleType) && ruleType === normalized;
+  });
+  if (hasTypeRule) return true;
+
+  const hasCatchAllRule = projectRules.some((rule) => !rule.documentType?.trim());
+  if (hasCatchAllRule) return true;
+
+  const typeKey = documentType.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+  return sections.some((section) => (
+    section.active !== false
+    && (
+      section.sectionKey === typeKey
+      || section.name.trim().toLowerCase() === normalized
+    )
+  ));
+}
+
 function titleFromFileName(fileName: string) {
   const base = fileName.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
   return base.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -140,6 +182,10 @@ function ImportDocumentPageContent() {
   const [routingOnlyContinue, setRoutingOnlyContinue] = useState(false);
   const [structuredError, setStructuredError] = useState<StructuredError | null>(null);
   const [createModal, setCreateModal] = useState<CreateModal>(null);
+  const [docTypeProjectWarning, setDocTypeProjectWarning] = useState<{
+    documentType: string;
+    projectLabel: string;
+  } | null>(null);
   const [canCreate, setCanCreate] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [form, setForm] = useState({
@@ -437,6 +483,17 @@ function ImportDocumentPageContent() {
     }
     if (form.mode === 'NEW_VERSION' && !form.existingDocumentId) {
       setError('Select a project so the existing document can be allocated.');
+      return;
+    }
+    if (
+      form.projectId
+      && form.documentType.trim()
+      && !documentTypeAppliesToProject(form.documentType, form.projectId, routingRules, activeSections)
+    ) {
+      setDocTypeProjectWarning({
+        documentType: form.documentType.trim(),
+        projectLabel: selectedProjectLabel || 'this project',
+      });
       return;
     }
     if (!requiredComplete) {
@@ -894,6 +951,16 @@ function ImportDocumentPageContent() {
       };
     }
 
+    if (!documentTypeAppliesToProject(form.documentType, form.projectId, routingRules, activeSections)) {
+      return {
+        status: 'error',
+        summary: 'Document type not valid for project',
+        sectionName: 'Unavailable',
+        ruleName: 'None',
+        reason: `Document type “${form.documentType}” does not apply to this project. Please select a document type configured for this project.`,
+      };
+    }
+
     const typeKey = form.documentType.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
     const byTypeKey = activeSections.find((section) => section.sectionKey === typeKey);
     const byTypeName = activeSections.find((section) => section.name.trim().toLowerCase() === form.documentType.trim().toLowerCase());
@@ -915,7 +982,7 @@ function ImportDocumentPageContent() {
       ruleName: 'None',
       reason: 'Select a repository section to continue, or review routing configuration.',
     };
-  }, [activeSections, form.documentType, form.projectId, form.sectionKey, matchedRoutingRule]);
+  }, [activeSections, form.documentType, form.projectId, form.sectionKey, matchedRoutingRule, routingRules]);
 
   if (loadingOptions || loadingDraft) {
     return (
@@ -1044,7 +1111,39 @@ function ImportDocumentPageContent() {
                 createLabel="Add New Project"
                 disabled={routingOnlyContinue}
                 hint={routingOnlyContinue ? 'Locked from ChatGPT submission.' : undefined}
-                onChange={(projectId) => setForm((current) => ({ ...current, projectId, sectionKey: '', existingDocumentId: '' }))}
+                onChange={(projectId) => {
+                  const project = projects.find((item) => item.id === projectId);
+                  const projectLabel = project ? `${project.code} — ${project.name}` : 'this project';
+                  const sections = (project?.sections ?? []).filter(
+                    (item: ProjectSectionOption) => item.active !== false && !['VERSION_REGISTER', 'MASTER_DOCUMENT_INDEX'].includes(item.sectionKey),
+                  );
+                  setForm((current) => {
+                    const nextType = current.documentType;
+                    if (
+                      projectId
+                      && nextType.trim()
+                      && !documentTypeAppliesToProject(nextType, projectId, routingRules, sections)
+                    ) {
+                      setDocTypeProjectWarning({
+                        documentType: nextType.trim(),
+                        projectLabel,
+                      });
+                      return {
+                        ...current,
+                        projectId,
+                        sectionKey: '',
+                        existingDocumentId: '',
+                        documentType: '',
+                      };
+                    }
+                    return {
+                      ...current,
+                      projectId,
+                      sectionKey: '',
+                      existingDocumentId: '',
+                    };
+                  });
+                }}
                 onCreateClick={() => setCreateModal('project')}
               />
               {!routingOnlyContinue ? (
@@ -1363,7 +1462,21 @@ function ImportDocumentPageContent() {
                 createLabel="Add New Document Type"
                 hint={form.mode === 'NEW_VERSION' ? 'Allocated from the existing document.' : 'Classification of the document (e.g. Article) — not the repository folder name.'}
                 disabled={form.mode === 'NEW_VERSION'}
-                onChange={(documentType) => setForm((current) => ({ ...current, documentType }))}
+                onChange={(documentType) => {
+                  if (
+                    form.projectId
+                    && documentType.trim()
+                    && !documentTypeAppliesToProject(documentType, form.projectId, routingRules, activeSections)
+                  ) {
+                    setDocTypeProjectWarning({
+                      documentType: documentType.trim(),
+                      projectLabel: selectedProjectLabel || 'this project',
+                    });
+                    setForm((current) => ({ ...current, documentType: '' }));
+                    return;
+                  }
+                  setForm((current) => ({ ...current, documentType }));
+                }}
                 onCreateClick={() => setCreateModal('documentType')}
               />
               <div className="field">
@@ -1663,6 +1776,32 @@ function ImportDocumentPageContent() {
           </div>
         </aside>
       </div>
+
+    {docTypeProjectWarning ? (
+      <div className="modal-backdrop" role="presentation">
+        <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="doc-type-project-warning-title">
+          <div className="modal-header">
+            <h3 id="doc-type-project-warning-title">Document type not valid for this project</h3>
+          </div>
+          <div className="modal-body">
+            <p>
+              Document type <strong>{docTypeProjectWarning.documentType}</strong> does not apply to{' '}
+              <strong>{docTypeProjectWarning.projectLabel}</strong>.
+            </p>
+            <p>Please select a document type that is configured for this project (via a routing rule or matching repository section).</p>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => setDocTypeProjectWarning(null)}
+            >
+              Select another document type
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
 
     {createModal === 'documentType' && (
       <CreateDocumentTypeModal
