@@ -172,7 +172,7 @@ export default function ProjectDetailPage() {
           <div className="panel" style={{ marginTop: 18 }}>
             <div className="panel-header">
               <h2>Configured repository sections</h2>
-              <span className="secondary-text">Rename, reorder, activate or change a relative folder path</span>
+              <span className="secondary-text">Rename, reorder, change key/path, or deactivate. Saving an inactive section renumbers remaining active sections automatically.</span>
             </div>
             <div className="table-wrap">
               <table>
@@ -182,27 +182,44 @@ export default function ProjectDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {item.sections.map((section: any, index: number) => (
-                    <tr key={section.id}>
+                  {[...(item.sections ?? [])]
+                    .sort((a: any, b: any) => a.position - b.position)
+                    .map((section: any) => (
+                    <tr key={section.id} style={section.active === false ? { opacity: 0.65 } : undefined}>
                       <td>
                         <input
                           style={{ width: 65 }}
                           type="number"
+                          min={1}
                           value={section.position}
                           onChange={(e) => {
-                            const sections = [...item.sections];
-                            sections[index] = { ...section, position: Number(e.target.value) };
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, position: Number(e.target.value) } : row
+                            ));
                             setItem({ ...item, sections });
                           }}
                         />
                       </td>
-                      <td className="mono">{section.sectionKey}</td>
+                      <td>
+                        <input
+                          className="mono"
+                          style={{ width: 140 }}
+                          value={section.sectionKey}
+                          onChange={(e) => {
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, sectionKey: e.target.value } : row
+                            ));
+                            setItem({ ...item, sections });
+                          }}
+                        />
+                      </td>
                       <td>
                         <input
                           value={section.name}
                           onChange={(e) => {
-                            const sections = [...item.sections];
-                            sections[index] = { ...section, name: e.target.value };
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, name: e.target.value } : row
+                            ));
                             setItem({ ...item, sections });
                           }}
                         />
@@ -212,8 +229,9 @@ export default function ProjectDetailPage() {
                           style={{ width: 75 }}
                           value={section.code}
                           onChange={(e) => {
-                            const sections = [...item.sections];
-                            sections[index] = { ...section, code: e.target.value };
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, code: e.target.value } : row
+                            ));
                             setItem({ ...item, sections });
                           }}
                         />
@@ -223,8 +241,9 @@ export default function ProjectDetailPage() {
                           className="mono"
                           value={section.relativePath || section.name}
                           onChange={(e) => {
-                            const sections = [...item.sections];
-                            sections[index] = { ...section, relativePath: e.target.value };
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, relativePath: e.target.value } : row
+                            ));
                             setItem({ ...item, sections });
                           }}
                         />
@@ -232,16 +251,25 @@ export default function ProjectDetailPage() {
                       <td>
                         <input
                           type="checkbox"
-                          checked={section.active}
+                          checked={section.active !== false}
                           onChange={(e) => {
-                            const sections = [...item.sections];
-                            sections[index] = { ...section, active: e.target.checked };
+                            const sections = item.sections.map((row: any) => (
+                              row.id === section.id ? { ...row, active: e.target.checked } : row
+                            ));
                             setItem({ ...item, sections });
                           }}
                         />
                       </td>
                       <td>
-                        <button type="button" className="button small" onClick={() => updateSection(section)}>Save</button>
+                        <button
+                          type="button"
+                          className="button small"
+                          onClick={() => updateSection(
+                            item.sections.find((row: any) => row.id === section.id) ?? section,
+                          )}
+                        >
+                          Save
+                        </button>
                       </td>
                     </tr>
                   ))}

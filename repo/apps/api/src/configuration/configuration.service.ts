@@ -262,19 +262,105 @@ export class ConfigurationService {
   async updateProjectSection(id: string, input: Record<string, unknown>, userId?: string) {
     const section = await this.db.projectSections.findOne({ where: { id }, relations: { project: true } });
     if (!section) throw new NotFoundException('Project section not found');
-    const before = { ...section };
-    if (input.sectionKey !== undefined) section.sectionKey = sectionKey(input.sectionKey);
+    const before = {
+      sectionKey: section.sectionKey,
+      code: section.code,
+      name: section.name,
+      slug: section.slug,
+      position: section.position,
+      active: section.active,
+      relativePath: section.relativePath,
+    };
+    const projectId = section.project.id;
+    const nextActive = input.active !== undefined ? boolean(input.active, section.active) : section.active;
+    const nextPosition = input.position !== undefined ? Number(input.position) : undefined;
+    if (nextPosition !== undefined && (!Number.isFinite(nextPosition) || nextPosition < 1)) {
+      throw new ConfigurationException('VALIDATION_ERROR', 'Section order must be a positive number');
+    }
+
+    if (input.sectionKey !== undefined) {
+      const nextKey = sectionKey(input.sectionKey);
+      if (!nextKey) throw new ConfigurationException('VALIDATION_ERROR', 'Section key is required');
+      const existingKey = await this.db.projectSections.findOne({
+        where: { project: { id: projectId }, sectionKey: nextKey },
+      });
+      if (existingKey && existingKey.id !== id) {
+        throw new ConfigurationConflictException(
+          'REPOSITORY_MODULE_ALREADY_EXISTS',
+          `A repository section with key “${nextKey}” already exists in this project.`,
+          { existingId: existingKey.id, existingName: existingKey.name },
+        );
+      }
+      section.sectionKey = nextKey;
+    }
     if (input.code !== undefined) section.code = clean(input.code).toUpperCase();
     if (input.name !== undefined) section.name = clean(input.name);
     if (input.slug !== undefined) section.slug = slugify(input.slug);
     else if (input.name !== undefined) section.slug = slugify(input.name);
-    if (input.position !== undefined) section.position = Number(input.position);
-    if (input.active !== undefined) section.active = boolean(input.active);
     if (input.relativePath !== undefined) section.relativePath = repositoryPath(input.relativePath, section.name);
-    const saved = await this.db.projectSections.save(section);
-    await this.audit.record({ userId, action: 'CONFIG_CHANGE', entityType: 'ProjectSection', entityId: id, message: `Updated repository section ${saved.name}`, before, after: saved });
-    await this.storage.ensureProjectStructure(saved.project.id);
+    section.active = nextActive;
+
+    const saved = await this.db.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(ProjectSection);
+      await repo.save(section);
+
+      const siblings = await repo.find({
+        where: { project: { id: projectId } },
+        order: { position: 'ASC', createdAt: 'ASC' },
+      });
+      const current = siblings.find((item) => item.id === id) ?? section;
+      current.active = nextActive;
+
+      let active = siblings
+        .filter((item) => item.id !== id && item.active)
+        .sort((a, b) => a.position - b.position);
+      let inactive = siblings
+        .filter((item) => item.id !== id && !item.active)
+        .sort((a, b) => a.position - b.position);
+
+      if (current.active) {
+        const insertAt = nextPosition === undefined
+          ? active.filter((item) => item.position < before.position).length
+          : Math.max(0, Math.min(active.length, Math.floor(nextPosition) - 1));
+        active = [...active];
+        active.splice(insertAt, 0, current);
+      } else {
+        inactive = [...inactive, current];
+      }
+
+      // Active sections stay contiguous from 1..N; inactive sections follow.
+      await this.persistSectionPositions(repo, [...active, ...inactive]);
+      const refreshed = await repo.findOne({ where: { id }, relations: { project: true } });
+      return refreshed ?? current;
+    });
+
+    await this.audit.record({
+      userId,
+      action: 'CONFIG_CHANGE',
+      entityType: 'ProjectSection',
+      entityId: id,
+      message: `Updated repository section ${saved.name}`,
+      before,
+      after: saved,
+    });
+    await this.storage.ensureProjectStructure(projectId);
     return saved;
+  }
+
+  /** Two-phase write avoids unique (project, position) conflicts while reordering. */
+  private async persistSectionPositions(
+    repo: { save: (entities: ProjectSection[]) => Promise<ProjectSection[]> },
+    ordered: ProjectSection[],
+  ) {
+    if (!ordered.length) return;
+    for (let index = 0; index < ordered.length; index += 1) {
+      ordered[index].position = -(index + 1);
+    }
+    await repo.save(ordered);
+    for (let index = 0; index < ordered.length; index += 1) {
+      ordered[index].position = index + 1;
+    }
+    await repo.save(ordered);
   }
 
   async deleteProjectSection(id: string, userId?: string) {
