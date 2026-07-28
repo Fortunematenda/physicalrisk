@@ -192,10 +192,10 @@ export class SubmitApprovedDocumentDto {
   @IsNotEmpty()
   approvalStatus!: string;
 
+  @IsOptional()
   @Transform(trimString)
   @IsString()
-  @IsNotEmpty()
-  approvedBy!: string;
+  approvedBy?: string;
 
   @Transform(trimString)
   @IsString()
@@ -360,10 +360,10 @@ export class PrepareApprovedDocumentDto {
   @IsNotEmpty()
   approvalStatus!: string;
 
+  @IsOptional()
   @Transform(trimString)
   @IsString()
-  @IsNotEmpty()
-  approvedBy!: string;
+  approvedBy?: string;
 
   @Transform(trimString)
   @IsString()

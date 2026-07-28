@@ -78,7 +78,11 @@ export class McpToolsService {
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
       case 'prepare_approved_document': {
         const parsed = this.parseSubmitPayload(args);
-        const prepared = this.applySubmitDefaults(parsed.dto, parsed.documentContent);
+        const prepared = this.applySubmitDefaults(
+          parsed.dto,
+          parsed.documentContent,
+          this.defaultApproverName(integration),
+        );
         if (parsed.fileUrl || parsed.documentContent) {
           return this.submitApprovedDocument(integration, {
             ...prepared,
@@ -115,7 +119,11 @@ export class McpToolsService {
       }
       case 'submit_approved_document': {
         const parsed = this.parseSubmitPayload(args);
-        const prepared = this.applySubmitDefaults(parsed.dto, parsed.documentContent);
+        const prepared = this.applySubmitDefaults(
+          parsed.dto,
+          parsed.documentContent,
+          this.defaultApproverName(integration),
+        );
         if (!parsed.uploadId && !parsed.fileContentBase64 && !parsed.fileUrl && !parsed.documentContent) {
           return this.prepareApprovedDocument(integration, prepared);
         }
@@ -413,7 +421,10 @@ export class McpToolsService {
   ) {
     const pending = this.browserUploads.get(token);
     this.browserUploads.assertNotExpired(pending);
-    const integration = await this.db.mcpIntegrations.findOne({ where: { id: pending.integrationId } });
+    const integration = await this.db.mcpIntegrations.findOne({
+      where: { id: pending.integrationId },
+      relations: { createdBy: true },
+    });
     if (!integration || integration.status !== McpIntegrationStatus.ACTIVE) {
       throw new BadRequestException('MCP integration for this upload link is not active');
     }
@@ -447,7 +458,7 @@ export class McpToolsService {
     ipAddress?: string,
   ) {
     // Always normalise — browser upload / multipart callers skip dispatchTool defaults.
-    const normalised = await this.normaliseSubmitInput(input);
+    const normalised = await this.normaliseSubmitInput(input, integration);
     input = { ...input, ...normalised };
 
     const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
@@ -738,8 +749,12 @@ export class McpToolsService {
   }
 
   /** Apply defaults + resolve documentType aliases for every submit path. */
-  private async normaliseSubmitInput(input: SubmitApprovedDocumentDto): Promise<SubmitApprovedDocumentDto> {
-    const withDefaults = this.applySubmitDefaults(input, input.documentContent);
+  private async normaliseSubmitInput(
+    input: SubmitApprovedDocumentDto,
+    integration?: McpIntegration,
+  ): Promise<SubmitApprovedDocumentDto> {
+    const defaultApprover = integration ? this.defaultApproverName(integration) : undefined;
+    const withDefaults = this.applySubmitDefaults(input, input.documentContent, defaultApprover);
     const documentType = await this.resolveDocumentTypeName(
       withDefaults.documentType,
       input.module,
@@ -756,7 +771,7 @@ export class McpToolsService {
       description: withDefaults.description?.trim()
         || this.deriveDescription(input.documentContent, title)
         || title,
-      owner: withDefaults.owner?.trim() || withDefaults.approvedBy || 'Wayne',
+      owner: withDefaults.owner?.trim() || withDefaults.approvedBy || defaultApprover || 'Repository User',
     };
   }
 
@@ -880,6 +895,7 @@ export class McpToolsService {
   private applySubmitDefaults(
     input: PrepareApprovedDocumentDto,
     documentContent?: string,
+    defaultApprover?: string,
   ): PrepareApprovedDocumentDto {
     const today = new Date().toISOString().slice(0, 10);
     const titleFromContent = this.deriveTitleFromContent(documentContent);
@@ -889,7 +905,8 @@ export class McpToolsService {
       || input.title?.trim()
       || 'document';
     const hasMarkdown = Boolean(documentContent?.trim());
-    const approvedBy = input.approvedBy?.trim() || 'Wayne';
+    const fallbackApprover = defaultApprover?.trim() || 'Repository User';
+    const approvedBy = input.approvedBy?.trim() || fallbackApprover;
     const description = input.description?.trim()
       || this.deriveDescription(documentContent, title)
       || title;
@@ -908,6 +925,18 @@ export class McpToolsService {
         || (hasMarkdown ? this.defaultPdfFileName(title) : undefined),
       mimeType: input.mimeType?.trim() || (hasMarkdown ? 'application/pdf' : undefined),
     };
+  }
+
+  /** Prefer the repo user who owns the MCP API key; ChatGPT does not send end-user identity. */
+  private defaultApproverName(integration: McpIntegration): string {
+    const user = integration.createdBy;
+    const name = user?.name?.trim();
+    if (name) return name;
+    const email = user?.email?.trim();
+    if (email) return email;
+    const integrationName = integration.name?.trim();
+    if (integrationName) return integrationName;
+    return 'Repository User';
   }
 
   /** Short Document Information description from Markdown when GPT omits description. */
@@ -1084,7 +1113,7 @@ export class McpToolsService {
       },
       prepare_approved_document: {
         type: 'object',
-        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate'],
+        required: ['title', 'documentType'],
         properties: {
           projectCode: { type: 'string' },
           projectId: { type: 'string' },
@@ -1094,7 +1123,10 @@ export class McpToolsService {
           title: { type: 'string' },
           versionNo: { type: 'string' },
           approvalStatus: { type: 'string', enum: ['APPROVED'] },
-          approvedBy: { type: 'string' },
+          approvedBy: {
+            type: 'string',
+            description: 'Optional. Defaults to the MCP API key owner name from the repo.',
+          },
           approvalDate: { type: 'string' },
           fileName: { type: 'string' },
           mimeType: { type: 'string' },
@@ -1134,7 +1166,7 @@ export class McpToolsService {
       },
       submit_approved_document: {
         type: 'object',
-        required: ['title', 'documentType', 'versionNo', 'approvalStatus', 'approvedBy', 'approvalDate'],
+        required: ['title', 'documentType'],
         properties: {
           projectId: { type: 'string', format: 'uuid' },
           projectCode: { type: 'string', description: 'Alternative to projectId (e.g. MOSS)' },
@@ -1145,7 +1177,10 @@ export class McpToolsService {
           owner: { type: 'string' },
           versionNo: { type: 'string' },
           approvalStatus: { type: 'string', enum: ['APPROVED'] },
-          approvedBy: { type: 'string' },
+          approvedBy: {
+            type: 'string',
+            description: 'Optional. Defaults to the MCP API key owner name from the repo.',
+          },
           approvalDate: { type: 'string' },
           sectionKey: { type: 'string' },
           metadataJson: { type: 'string' },

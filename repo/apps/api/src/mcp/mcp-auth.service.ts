@@ -200,6 +200,7 @@ export class McpAuthService {
     const prefix = trimmed.slice(0, 12);
     const candidates = await this.db.mcpIntegrations.find({
       where: { apiKeyPrefix: prefix, status: McpIntegrationStatus.ACTIVE },
+      relations: { createdBy: true },
     });
     const hash = this.hashApiKey(trimmed);
     const match = candidates.find((item) => item.apiKeyHash === hash);

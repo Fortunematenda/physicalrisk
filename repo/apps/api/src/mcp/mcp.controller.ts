@@ -247,7 +247,6 @@ export class McpController {
       documentType: (body.documentType || body.document_type || '').trim(),
       versionNo: (body.versionNo || body.version || body.version_no || '').trim(),
       approvalStatus: (body.approvalStatus || body.approval_status || 'APPROVED').trim(),
-      approvedBy: (body.approvedBy || body.approved_by || '').trim(),
       approvalDate: (body.approvalDate || body.approval_date || '').trim(),
     };
     const missing = Object.entries(required)
@@ -267,7 +266,7 @@ export class McpController {
       owner: body.owner || undefined,
       versionNo: required.versionNo!,
       approvalStatus: required.approvalStatus!,
-      approvedBy: required.approvedBy!,
+      approvedBy: (body.approvedBy || body.approved_by || '').trim(),
       approvalDate: required.approvalDate!,
       sectionKey: body.sectionKey || body.section_key || undefined,
       module: body.module || body.repositoryModule || body.repository_module || undefined,
