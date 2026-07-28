@@ -380,6 +380,7 @@ export class McpToolsService {
       sectionKey = resolved.module?.sectionKey;
     }
 
+    const approvedBy = input.approvedBy?.trim() || this.defaultApproverName(integration);
     const pending = this.browserUploads.create({
       integrationId: integration.id,
       projectId,
@@ -390,7 +391,7 @@ export class McpToolsService {
       title: input.title,
       versionNo: input.versionNo,
       approvalStatus: input.approvalStatus,
-      approvedBy: input.approvedBy,
+      approvedBy,
       approvalDate: input.approvalDate,
       fileName: input.fileName,
       mimeType: input.mimeType || 'application/pdf',
@@ -555,7 +556,7 @@ export class McpToolsService {
         owner: versioned.owner,
         versionNo: versioned.versionNo,
         approvalStatus: input.approvalStatus,
-        approvedBy: input.approvedBy,
+        approvedBy: input.approvedBy?.trim() || this.defaultApproverName(integration),
         approvalDate: input.approvalDate,
         sectionKey,
         metadataJson: input.metadataJson,
