@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { PanelLeftOpen } from 'lucide-react';
 import styles from '../RepositoryExplorer.module.css';
 
 type Props = {
   treeCollapsed: boolean;
   treeWidth: number;
   onTreeWidthChange: (width: number) => void;
+  onExpandTree?: () => void;
   inspectorCollapsed: boolean;
   showInspector: boolean;
   tree: ReactNode;
@@ -20,11 +22,13 @@ type Props = {
 
 const MIN_TREE = 240;
 const MAX_TREE = 360;
+const RAIL_WIDTH = 44;
 
 export function RepositoryExplorerLayout({
   treeCollapsed,
   treeWidth,
   onTreeWidthChange,
+  onExpandTree,
   inspectorCollapsed,
   showInspector,
   tree,
@@ -59,7 +63,7 @@ export function RepositoryExplorerLayout({
   }, [onTreeWidthChange]);
 
   const gridColumns = (() => {
-    const treeCol = treeCollapsed ? '0px' : `${treeWidth}px`;
+    const treeCol = treeCollapsed ? `${RAIL_WIDTH}px` : `${treeWidth}px`;
     const handleCol = treeCollapsed ? '0px' : '8px';
     const mainCol = 'minmax(0, 1fr)';
     if (showInspector && !inspectorCollapsed) {
@@ -75,12 +79,24 @@ export function RepositoryExplorerLayout({
         style={{ gridTemplateColumns: gridColumns }}
         aria-label="Repository workspace"
       >
-        <aside
-          className={`${styles.treePanel} ${treeCollapsed ? styles.panelCollapsed : ''}`}
-          aria-hidden={treeCollapsed}
-        >
-          {tree}
-        </aside>
+        {treeCollapsed ? (
+          <div className={styles.treeRail}>
+            <button
+              type="button"
+              className={styles.treeRailBtn}
+              onClick={onExpandTree}
+              aria-label="Expand repository tree"
+              title="Expand repository tree"
+            >
+              <PanelLeftOpen size={16} />
+              <span>Tree</span>
+            </button>
+          </div>
+        ) : (
+          <aside className={styles.treePanel}>
+            {tree}
+          </aside>
+        )}
         {!treeCollapsed ? (
           <div
             className={styles.resizeHandle}

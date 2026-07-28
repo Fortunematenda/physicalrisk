@@ -938,3 +938,49 @@
   border-radius: 2px;
 }
 .docHeaderIcon { display: none; }
+
+
+/* Expand tree rail when panel is collapsed */
+.treeRail {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  border-right: 1px solid #e2e8f0;
+  background: #fbfcfd;
+}
+.treeRailBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 96px;
+  padding: 14px 6px;
+  border: 0;
+  border-bottom: 1px solid #e8edf2;
+  background: transparent;
+  color: #2563eb;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.treeRailBtn:hover {
+  background: #eff6ff;
+}
+.treeRailBtn span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.treeExpandBtn {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+@media (max-width: 680px) {
+  .treeRail { display: none; }
+}

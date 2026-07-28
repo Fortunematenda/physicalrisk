@@ -729,15 +729,16 @@ export default function RepositoryExplorerPage() {
       ) : null}
 
       <section className={styles.toolbar} aria-label="Repository search and filters">
-        {(isMobile || (isTablet && treeCollapsed)) ? (
+        {(treeCollapsed || isMobile) ? (
           <button
             type="button"
-            className={styles.button}
+            className={`${styles.button} ${styles.treeExpandBtn}`}
             onClick={() => (isMobile ? setTreeSheetOpen(true) : setTreeCollapsed(false))}
-            aria-label="Open repository tree"
+            aria-label="Expand repository tree"
+            title="Expand repository tree"
           >
             <PanelLeftOpen size={15} />
-            Tree
+            Expand tree
           </button>
         ) : null}
         <select aria-label="Project" className={styles.select} value={projectId} onChange={(event) => setProjectId(event.target.value)}>
@@ -789,6 +790,7 @@ export default function RepositoryExplorerPage() {
         treeCollapsed={isMobile ? true : treeCollapsed}
         treeWidth={treeWidth}
         onTreeWidthChange={setTreeWidth}
+        onExpandTree={() => (isMobile ? setTreeSheetOpen(true) : setTreeCollapsed(false))}
         inspectorCollapsed={isTablet || isMobile ? true : inspectorCollapsed || !showDocumentWorkspace}
         showInspector={showDocumentWorkspace && !(isTablet || isMobile)}
         tree={treePanel}
