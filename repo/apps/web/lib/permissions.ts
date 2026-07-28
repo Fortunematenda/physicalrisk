@@ -24,3 +24,7 @@ export function canCreateConfiguration(user: GatewayUser | null = getCurrentUser
   if (!user?.role) return false;
   return CREATE_CONFIG_ROLES.includes(user.role as GatewayRole);
 }
+
+export function isAdmin(user: GatewayUser | null = getCurrentUser()): boolean {
+  return user?.role === 'ADMIN';
+}

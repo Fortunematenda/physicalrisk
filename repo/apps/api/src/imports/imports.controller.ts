@@ -1,12 +1,15 @@
-import { Controller, Get, Param, Post, Query, UploadedFile, UseInterceptors, Body, UseFilters, ParseEnumPipe } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UploadedFile, UseFilters, UseGuards, UseInterceptors, ParseEnumPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { ImportStatus } from '../database/entities';
+import { ImportStatus, UserRole } from '../database/entities';
 import { CurrentUser } from '../common/current-user.decorator';
+import { Roles } from '../common/roles.decorator';
+import { RolesGuard } from '../common/roles.guard';
 import { ImportsService } from './imports.service';
 import { ImportExceptionFilter, ValidationExceptionFilter } from './import-exception.filter';
 import { UploadImportDto, DraftImportDto } from './upload-import.dto';
 import { RejectImportDto } from './reject-import.dto';
+import { ClearQueueDto } from './clear-queue.dto';
 
 const REVIEW_STATUSES = [
   ImportStatus.READY_FOR_REVIEW,
@@ -30,7 +33,21 @@ export class ImportsController {
     }
     return this.imports.list(status);
   }
-  @Get(':id') get(@Param('id') id: string) { return this.imports.get(id); }
+
+  @Post('clear-queue')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  clearQueue(
+    @Body() body: ClearQueueDto,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.imports.clearQueue(body.scope ?? 'all', user?.id);
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.imports.get(id);
+  }
 
   @Post('upload')
   @ApiConsumes('multipart/form-data')
@@ -55,9 +72,22 @@ export class ImportsController {
     return this.imports.saveDraft(file, body as any, user?.id, user?.email);
   }
 
-  @Post(':id/retry') retry(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.imports.retry(id, user?.id); }
-  @Post(':id/dismiss') dismiss(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.imports.dismiss(id, user?.id); }
-  @Post(':id/reject') reject(@Param('id') id: string, @Body() body: RejectImportDto, @CurrentUser() user: { id?: string } | null) {
+  @Post(':id/retry')
+  retry(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.imports.retry(id, user?.id);
+  }
+
+  @Post(':id/dismiss')
+  dismiss(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.imports.dismiss(id, user?.id);
+  }
+
+  @Post(':id/reject')
+  reject(
+    @Param('id') id: string,
+    @Body() body: RejectImportDto,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
     return this.imports.reject(id, body.reason, user?.id);
   }
 }

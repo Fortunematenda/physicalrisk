@@ -6,7 +6,9 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { useConfirm } from '@/components/confirm-dialog';
 import { api, formatDate } from '@/lib/api';
+import { isAdmin } from '@/lib/permissions';
 
 type QueueItem = {
   id: string;
@@ -31,12 +33,15 @@ function providerLabel(provider?: string | null) {
 }
 
 export default function ImportQueuePage() {
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('drafts');
   const [items, setItems] = useState<QueueItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -47,6 +52,10 @@ export default function ImportQueuePage() {
       .catch((caught) => setError(caught instanceof Error ? caught.message : 'Unable to load Import Queue.'))
       .finally(() => setLoading(false));
   }, [tab]);
+
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
 
   useEffect(() => {
     load();
@@ -91,6 +100,41 @@ export default function ImportQueuePage() {
     }
   };
 
+  const clearQueue = async (scope: 'drafts' | 'external' | 'all') => {
+    const labels = {
+      drafts: 'all saved drafts',
+      external: 'all External Imports awaiting review',
+      all: 'the entire Import Queue (drafts and External Imports)',
+    };
+    const ok = await confirm({
+      title: 'Clear import queue',
+      message: `Clear ${labels[scope]}? Staged files will be removed. Approved/imported documents are not affected.`,
+      confirmLabel: 'Clear queue',
+      tone: 'danger',
+    });
+    if (!ok) return;
+
+    setClearing(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<{ cleared: number; scope: string }>('/imports/clear-queue', {
+        method: 'POST',
+        body: JSON.stringify({ scope }),
+      });
+      setMessage(
+        result.cleared > 0
+          ? `Cleared ${result.cleared} queue item${result.cleared === 1 ? '' : 's'}.`
+          : 'Queue was already empty.',
+      );
+      load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to clear the import queue.');
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -127,7 +171,29 @@ export default function ImportQueuePage() {
 
         <div className="panel-header">
           <h2>{tab === 'drafts' ? 'Open drafts' : 'External Imports awaiting review'}</h2>
-          <button type="button" className="button small" onClick={load} disabled={loading}>Refresh</button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {admin ? (
+              <>
+                <button
+                  type="button"
+                  className="button small danger"
+                  disabled={loading || clearing || items.length === 0}
+                  onClick={() => void clearQueue(tab === 'drafts' ? 'drafts' : 'external')}
+                >
+                  {clearing ? 'Clearing…' : tab === 'drafts' ? 'Clear drafts' : 'Clear external queue'}
+                </button>
+                <button
+                  type="button"
+                  className="button small"
+                  disabled={loading || clearing}
+                  onClick={() => void clearQueue('all')}
+                >
+                  Clear all queues
+                </button>
+              </>
+            ) : null}
+            <button type="button" className="button small" onClick={load} disabled={loading || clearing}>Refresh</button>
+          </div>
         </div>
 
         {loading ? (
@@ -229,7 +295,7 @@ export default function ImportQueuePage() {
                           <button
                             type="button"
                             className="button small danger"
-                            disabled={busy}
+                            disabled={busy || clearing}
                             onClick={() => void rejectImport(item.id)}
                           >
                             Reject
@@ -238,7 +304,7 @@ export default function ImportQueuePage() {
                             <button
                               type="button"
                               className="button small"
-                              disabled={busy}
+                              disabled={busy || clearing}
                               onClick={() => void retryImport(item.id)}
                             >
                               Retry

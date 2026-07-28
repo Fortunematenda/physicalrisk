@@ -435,6 +435,64 @@ export class ImportsService {
     if (job.status === ImportStatus.IMPORTED) {
       throw new BadRequestException('Completed imports cannot be dismissed');
     }
+    await this.removeQueueJob(job, userId, 'IMPORT_DISMISSED', `Dismissed draft import ${job.fileName}`);
+    return { id, dismissed: true };
+  }
+
+  /**
+   * Admin-only: remove queued drafts and/or external review items.
+   * Never deletes IMPORTED jobs / approved repository documents.
+   */
+  async clearQueue(scope: 'drafts' | 'external' | 'all' = 'all', userId?: string) {
+    const statuses: ImportStatus[] = [];
+    if (scope === 'drafts' || scope === 'all') statuses.push(ImportStatus.DRAFT);
+    if (scope === 'external' || scope === 'all') {
+      statuses.push(
+        ImportStatus.READY_FOR_REVIEW,
+        ImportStatus.DUPLICATE_REVIEW,
+        ImportStatus.VERSION_REVIEW,
+      );
+    }
+    if (!statuses.length) {
+      throw new BadRequestException('Select a queue scope to clear');
+    }
+
+    const jobs = await this.db.importJobs.find({
+      where: { status: In(statuses) },
+      order: { createdAt: 'ASC' },
+    });
+
+    let cleared = 0;
+    for (const job of jobs) {
+      await this.removeQueueJob(
+        job,
+        userId,
+        'IMPORT_QUEUE_CLEARED',
+        `Cleared queued import ${job.fileName}`,
+      );
+      cleared += 1;
+    }
+
+    await this.audit.record({
+      userId,
+      action: 'IMPORT_QUEUE_CLEARED',
+      entityType: 'ImportQueue',
+      message: `Cleared ${cleared} import queue item(s) (scope=${scope})`,
+      after: { scope, cleared },
+    });
+
+    return { scope, cleared };
+  }
+
+  private async removeQueueJob(
+    job: ImportJob,
+    userId: string | undefined,
+    action: string,
+    message: string,
+  ) {
+    if (job.status === ImportStatus.IMPORTED) {
+      throw new BadRequestException('Completed imports cannot be dismissed');
+    }
     if (job.incomingPath) {
       await this.storage.remove(job.incomingPath).catch(() => undefined);
       if (job.incomingPath.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
@@ -444,13 +502,12 @@ export class ImportsService {
     await this.db.importJobs.remove(job);
     await this.audit.record({
       userId,
-      action: 'IMPORT_DISMISSED',
+      action,
       entityType: 'ImportJob',
-      entityId: id,
-      message: `Dismissed draft import ${job.fileName}`,
+      entityId: job.id,
+      message,
       before: { status: job.status, fileName: job.fileName },
     });
-    return { id, dismissed: true };
   }
 
   async reject(id: string, reason: string, userId?: string) {
