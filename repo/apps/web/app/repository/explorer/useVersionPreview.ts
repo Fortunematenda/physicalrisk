@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { API_URL, getToken } from '@/lib/api';
-import { isInlineType } from '../helpers';
-import type { VersionItem } from '../types';
+import { isInlineType } from './helpers';
+import type { VersionItem } from './types';
 
 export function useVersionPreview(version: VersionItem | null | undefined) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
