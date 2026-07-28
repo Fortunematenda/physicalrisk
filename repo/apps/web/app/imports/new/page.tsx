@@ -1666,18 +1666,37 @@ function ImportDocumentPageContent() {
 
     {createModal === 'documentType' && (
       <CreateDocumentTypeModal
+        defaultProjectId={form.projectId || undefined}
         onCancel={() => setCreateModal(null)}
-        onCreated={(created) => {
+        onCreated={(created, meta) => {
           setDocumentTypes((current) => {
             if (current.some((item) => item.id === created.id)) return current;
             return [...current, created].sort((a, b) => a.name.localeCompare(b.name));
           });
           setForm((current) => ({ ...current, documentType: created.name }));
           setCreateModal(null);
-          showSuccess('Document type created and selected.');
+          if (meta?.warning) {
+            setNotice(meta.warning);
+            setError('');
+          } else {
+            showSuccess(
+              meta?.routingRuleCreated
+                ? 'Document type and routing rule created and selected.'
+                : 'Document type created and selected.',
+            );
+          }
           void api('/document-types').then((items) => setDocumentTypes(items.filter((item: DocumentTypeRecord) => item.active !== false))).catch(() => {
             setNotice('Document type created and selected. The full list could not be refreshed.');
           });
+          if (form.projectId) {
+            void api(`/routing-rules?projectId=${encodeURIComponent(form.projectId)}`)
+              .then((rules) => setRoutingRules(Array.isArray(rules) ? rules : []))
+              .catch(() => undefined);
+          } else {
+            void api('/routing-rules')
+              .then((rules) => setRoutingRules(Array.isArray(rules) ? rules : []))
+              .catch(() => undefined);
+          }
         }}
       />
     )}
