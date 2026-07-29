@@ -30,8 +30,19 @@ export function iconFor(entry: TreeEntry, size = 16): ReactNode {
   return <File size={size} />;
 }
 
-export function isInlineType(mimeType?: string) {
-  return mimeType === 'application/pdf' || /^image\//.test(mimeType ?? '');
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+export function isDocx(version?: VersionItem | null) {
+  if (!version) return false;
+  if (version.mimeType === DOCX_MIME) return true;
+  return extensionOf(version.originalFileName) === 'docx';
+}
+
+export function isInlineType(mimeType?: string, fileName?: string) {
+  if (mimeType === 'application/pdf' || /^image\//.test(mimeType ?? '')) return true;
+  if (mimeType === DOCX_MIME) return true;
+  if (fileName && extensionOf(fileName) === 'docx') return true;
+  return false;
 }
 
 export function flatten(entries: TreeEntry[]): TreeEntry[] {

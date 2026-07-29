@@ -3,9 +3,10 @@
 import { useCallback, type RefObject } from 'react';
 import { FileText } from 'lucide-react';
 import styles from '../RepositoryExplorer.module.css';
-import { isInlineType, isPdf } from '../helpers';
+import { isDocx, isInlineType, isPdf } from '../helpers';
 import type { VersionItem } from '../types';
 import type { ViewerControls } from './DocumentViewerToolbar';
+import { DocxPreviewViewer } from './DocxPreviewViewer';
 import { PdfCanvasViewer } from './PdfCanvasViewer';
 
 type Props = {
@@ -33,12 +34,12 @@ export function DocumentPreview({
     onPageCount(count);
   }, [onPageCount]);
 
-  if (!isInlineType(version.mimeType)) {
+  if (!isInlineType(version.mimeType, version.originalFileName)) {
     return (
       <div className={styles.previewUnavailable}>
         <FileText size={22} />
         <span>
-          Inline preview is available for PDF and image files. Use Open in new tab or Download for this file type.
+          Inline preview is available for PDF, Word (.docx), and image files. Use Open in new tab or Download for this file type.
         </span>
       </div>
     );
@@ -68,6 +69,17 @@ export function DocumentPreview({
         controls={controls}
         onPageCount={handlePageCount}
         onPageChange={onPageChange}
+        viewerRef={viewerRef}
+      />
+    );
+  }
+
+  if (isDocx(version)) {
+    return (
+      <DocxPreviewViewer
+        previewUrl={previewUrl}
+        fileName={version.originalFileName}
+        controls={controls}
         viewerRef={viewerRef}
       />
     );

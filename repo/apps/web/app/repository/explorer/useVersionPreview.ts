@@ -15,7 +15,7 @@ export function useVersionPreview(version: VersionItem | null | undefined) {
     let objectUrl: string | null = null;
 
     const load = async () => {
-      if (!version?.id || !isInlineType(version.mimeType)) {
+      if (!version?.id || !isInlineType(version.mimeType, version.originalFileName)) {
         setPreviewUrl(null);
         setError('');
         setLoading(false);
@@ -48,7 +48,7 @@ export function useVersionPreview(version: VersionItem | null | undefined) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [version?.id, version?.mimeType]);
+  }, [version?.id, version?.mimeType, version?.originalFileName]);
 
   return { previewUrl, loading, error };
 }

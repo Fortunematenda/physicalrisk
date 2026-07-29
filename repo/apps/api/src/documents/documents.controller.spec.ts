@@ -30,7 +30,7 @@ describe('DocumentsController file routes', () => {
     expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'inline; filename="approved.pdf"');
   });
 
-  it('uses attachment disposition for unsupported inline types', async () => {
+  it('uses inline disposition for DOCX files', async () => {
     versionFile.mockResolvedValue({
       version: { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', originalFileName: 'report.docx' },
       absolutePath: 'C:/storage/report.docx',
@@ -39,7 +39,22 @@ describe('DocumentsController file routes', () => {
 
     await controller.view('version-2', result);
 
-    expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="report.docx"');
+    expect(result.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'inline; filename="report.docx"',
+    );
+  });
+
+  it('uses attachment disposition for unsupported inline types', async () => {
+    versionFile.mockResolvedValue({
+      version: { mimeType: 'application/zip', originalFileName: 'bundle.zip' },
+      absolutePath: 'C:/storage/bundle.zip',
+    });
+    const result = response();
+
+    await controller.view('version-3', result);
+
+    expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="bundle.zip"');
   });
 
   it('always uses attachment disposition for secure downloads', async () => {

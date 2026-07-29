@@ -85,7 +85,14 @@ export class DocumentsController {
   @Get('versions/:id/view')
   async view(@Param('id') id: string, @Res() response: Response) {
     const version = await this.documents.versionFile(id);
-    const safeInlineTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+    const safeInlineTypes = [
+      'application/pdf',
+      'image/png',
+      'image/jpeg',
+      'image/gif',
+      'image/webp',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
     const disposition = safeInlineTypes.includes(version.version.mimeType) ? 'inline' : 'attachment';
     response.setHeader('Content-Type', version.version.mimeType);
     response.setHeader('Content-Disposition', `${disposition}; filename="${version.version.originalFileName.replace(/"/g, '')}"`);
