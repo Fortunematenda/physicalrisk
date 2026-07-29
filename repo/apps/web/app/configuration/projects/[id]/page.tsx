@@ -7,6 +7,18 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { useConfirm } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
+import { orderSectionsActiveFirst, syncLinkedSectionFields } from '@/lib/section-fields';
+
+type ProjectSection = {
+  id: string;
+  sectionKey: string;
+  name: string;
+  code: string;
+  relativePath?: string;
+  position: number;
+  active?: boolean;
+  slug?: string;
+};
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -20,7 +32,10 @@ export default function ProjectDetailPage() {
   const load = async () => {
     try {
       const [p, t] = await Promise.all([api(`/projects/${id}`), api('/directory-templates')]);
-      setItem(p);
+      setItem({
+        ...p,
+        sections: orderSectionsActiveFirst([...(p.sections ?? [])] as ProjectSection[]),
+      });
       setTemplates(t);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load project');
@@ -59,7 +74,22 @@ export default function ProjectDetailPage() {
     setMessage('Template applied and VPS folders synchronised.');
   };
 
-  const updateSection = async (section: any) => {
+  const patchSectionLocal = (
+    sectionId: string,
+    updater: (row: ProjectSection) => ProjectSection,
+    reorder = false,
+  ) => {
+    setItem((current: any) => {
+      if (!current) return current;
+      let sections = (current.sections as ProjectSection[]).map((row) => (
+        row.id === sectionId ? updater(row) : row
+      ));
+      if (reorder) sections = orderSectionsActiveFirst(sections);
+      return { ...current, sections };
+    });
+  };
+
+  const updateSection = async (section: ProjectSection) => {
     try {
       await api(`/project-sections/${section.id}`, { method: 'PATCH', body: JSON.stringify(section) });
       setMessage(`Saved ${section.name} and ensured its VPS folder exists.`);
@@ -67,6 +97,25 @@ export default function ProjectDetailPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to update section');
     }
+  };
+
+  const onLinkedFieldChange = (
+    section: ProjectSection,
+    field: 'name' | 'sectionKey' | 'code' | 'relativePath',
+    value: string,
+  ) => {
+    patchSectionLocal(section.id, (row) => syncLinkedSectionFields(row, field, value));
+  };
+
+  const onActiveChange = async (section: ProjectSection, active: boolean) => {
+    const next = orderSectionsActiveFirst(
+      (item.sections as ProjectSection[]).map((row) => (
+        row.id === section.id ? { ...row, active } : row
+      )),
+    );
+    const updated = next.find((row) => row.id === section.id)!;
+    setItem({ ...item, sections: next });
+    await updateSection(updated);
   };
 
   const syncStorage = async () => {
@@ -119,7 +168,7 @@ export default function ProjectDetailPage() {
             </section>
             <section className="form-section">
               <h2>VPS repository configuration</h2>
-              <p>The root below is relative to the mounted storage volume. The application never hard-codes a server path for an individual project.</p>
+              <p>Root folder matches the project name when created. You can adjust it here if needed.</p>
               <div className="form-grid">
                 <div className="field full">
                   <label>Project repository root folder</label>
@@ -128,7 +177,7 @@ export default function ProjectDetailPage() {
                     value={item.repositoryRootPath || ''}
                     onChange={(e) => setItem({ ...item, repositoryRootPath: e.target.value })}
                   />
-                  <small>Effective location: storage/repository/{item.repositoryRootPath || item.code}</small>
+                  <small>Effective location: storage/repository/{item.repositoryRootPath || item.name || item.code}</small>
                 </div>
               </div>
             </section>
@@ -172,7 +221,9 @@ export default function ProjectDetailPage() {
           <div className="panel" style={{ marginTop: 18 }}>
             <div className="panel-header">
               <h2>Configured repository sections</h2>
-              <span className="secondary-text">Rename, reorder, change key/path, or deactivate. Saving an inactive section renumbers remaining active sections automatically.</span>
+              <span className="secondary-text">
+                Changing Name, Key, Code, or folder updates the other linked fields. Inactive modules move to the bottom and are renumbered.
+              </span>
             </div>
             <div className="table-wrap">
               <table>
@@ -183,8 +234,8 @@ export default function ProjectDetailPage() {
                 </thead>
                 <tbody>
                   {[...(item.sections ?? [])]
-                    .sort((a: any, b: any) => a.position - b.position)
-                    .map((section: any) => (
+                    .sort((a: ProjectSection, b: ProjectSection) => a.position - b.position)
+                    .map((section: ProjectSection) => (
                     <tr key={section.id} style={section.active === false ? { opacity: 0.65 } : undefined}>
                       <td>
                         <input
@@ -192,11 +243,12 @@ export default function ProjectDetailPage() {
                           type="number"
                           min={1}
                           value={section.position}
+                          disabled={section.active === false}
                           onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, position: Number(e.target.value) } : row
-                            ));
-                            setItem({ ...item, sections });
+                            patchSectionLocal(section.id, (row) => ({
+                              ...row,
+                              position: Number(e.target.value),
+                            }));
                           }}
                         />
                       </td>
@@ -205,68 +257,44 @@ export default function ProjectDetailPage() {
                           className="mono"
                           style={{ width: 140 }}
                           value={section.sectionKey}
-                          onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, sectionKey: e.target.value } : row
-                            ));
-                            setItem({ ...item, sections });
-                          }}
+                          onChange={(e) => onLinkedFieldChange(section, 'sectionKey', e.target.value)}
                         />
                       </td>
                       <td>
                         <input
                           value={section.name}
-                          onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, name: e.target.value } : row
-                            ));
-                            setItem({ ...item, sections });
-                          }}
+                          onChange={(e) => onLinkedFieldChange(section, 'name', e.target.value)}
                         />
                       </td>
                       <td>
                         <input
                           style={{ width: 75 }}
                           value={section.code}
-                          onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, code: e.target.value } : row
-                            ));
-                            setItem({ ...item, sections });
-                          }}
+                          onChange={(e) => onLinkedFieldChange(section, 'code', e.target.value)}
                         />
                       </td>
                       <td>
                         <input
                           className="mono"
                           value={section.relativePath || section.name}
-                          onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, relativePath: e.target.value } : row
-                            ));
-                            setItem({ ...item, sections });
-                          }}
+                          onChange={(e) => onLinkedFieldChange(section, 'relativePath', e.target.value)}
                         />
                       </td>
                       <td>
                         <input
                           type="checkbox"
                           checked={section.active !== false}
-                          onChange={(e) => {
-                            const sections = item.sections.map((row: any) => (
-                              row.id === section.id ? { ...row, active: e.target.checked } : row
-                            ));
-                            setItem({ ...item, sections });
-                          }}
+                          onChange={(e) => void onActiveChange(section, e.target.checked)}
                         />
                       </td>
                       <td>
                         <button
                           type="button"
                           className="button small"
-                          onClick={() => updateSection(
-                            item.sections.find((row: any) => row.id === section.id) ?? section,
-                          )}
+                          onClick={() => {
+                            const current = (item.sections as ProjectSection[]).find((row) => row.id === section.id) ?? section;
+                            void updateSection(current);
+                          }}
                         >
                           Save
                         </button>

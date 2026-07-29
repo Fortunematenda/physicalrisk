@@ -117,7 +117,7 @@ export class ConfigurationService {
         description: nullable(input.description) ?? null,
         status: (input.status as ProjectStatus) ?? ProjectStatus.ACTIVE,
         directoryTemplate: template ?? null,
-        repositoryRootPath: repositoryPath(input.repositoryRootPath, code),
+        repositoryRootPath: repositoryPath(input.repositoryRootPath, name),
         storageConfiguration: (parseJson(input.storageConfiguration, null) as Record<string, unknown> | null | undefined) ?? null,
       });
       const saved = await projectRepo.save(project);

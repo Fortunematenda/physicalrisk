@@ -31,7 +31,6 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
-  const [repositoryRootPath, setRepositoryRootPath] = useState('');
   const [directoryTemplateId, setDirectoryTemplateId] = useState('');
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault?: boolean }>>([]);
   const [active, setActive] = useState(true);
@@ -67,7 +66,7 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
           name: trimmedName,
           code: trimmedCode,
           description: description.trim() || undefined,
-          repositoryRootPath: repositoryRootPath.trim() || trimmedCode,
+          repositoryRootPath: trimmedName,
           directoryTemplateId: directoryTemplateId || undefined,
           status: active ? 'ACTIVE' : 'INACTIVE',
           origin: 'IMPORT_DOCUMENT',
@@ -104,32 +103,17 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
             onChange={(event) => setName(event.target.value)}
             disabled={saving}
           />
+          <small>VPS repository root folder will match this name.</small>
         </div>
         <div className="field">
           <label htmlFor="create-project-code">Project code <em>*</em></label>
           <input
             id="create-project-code"
             value={code}
-            onChange={(event) => {
-              const next = event.target.value.toUpperCase();
-              setCode(next);
-              if (!repositoryRootPath || repositoryRootPath === code) setRepositoryRootPath(next);
-            }}
+            onChange={(event) => setCode(event.target.value.toUpperCase())}
             placeholder="PRJ"
             disabled={saving}
           />
-        </div>
-        <div className="field full">
-          <label htmlFor="create-project-root">Repository folder name</label>
-          <input
-            id="create-project-root"
-            className="mono"
-            value={repositoryRootPath}
-            onChange={(event) => setRepositoryRootPath(event.target.value)}
-            placeholder="Defaults to project code"
-            disabled={saving}
-          />
-          <small>Relative to the server repository volume. The standard directory template is applied automatically.</small>
         </div>
         <div className="field full">
           <label htmlFor="create-project-template">Directory template</label>

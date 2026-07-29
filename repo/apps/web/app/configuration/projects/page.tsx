@@ -39,7 +39,6 @@ export default function ProjectsPage() {
     name: '',
     description: '',
     directoryTemplateId: '',
-    repositoryRootPath: '',
   });
 
   const load = async () => {
@@ -105,7 +104,7 @@ export default function ProjectsPage() {
         method: 'POST',
         body: JSON.stringify({
           ...form,
-          repositoryRootPath: form.repositoryRootPath || form.code,
+          repositoryRootPath: form.name.trim(),
         }),
       });
       setMessage('Project created and its VPS repository folders were provisioned.');
@@ -114,7 +113,6 @@ export default function ProjectsPage() {
         code: '',
         name: '',
         description: '',
-        repositoryRootPath: '',
       }));
       await load();
     } catch (caught) {
@@ -178,7 +176,6 @@ export default function ProjectsPage() {
                 onChange={(event) => setForm((current) => ({
                   ...current,
                   code: event.target.value,
-                  repositoryRootPath: current.repositoryRootPath || event.target.value.toUpperCase(),
                 }))}
                 placeholder="PRJ"
               />
@@ -191,17 +188,7 @@ export default function ProjectsPage() {
                 value={form.name}
                 onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
               />
-            </div>
-            <div className="field">
-              <label htmlFor="project-root">VPS repository root folder</label>
-              <input
-                id="project-root"
-                className="mono"
-                value={form.repositoryRootPath}
-                onChange={(event) => setForm((current) => ({ ...current, repositoryRootPath: event.target.value }))}
-                placeholder="MOSS"
-              />
-              <small>Relative to the repository volume. Do not enter an absolute path.</small>
+              <small>VPS repository root folder will match this name.</small>
             </div>
             <div className="field">
               <label htmlFor="project-template">Directory template</label>

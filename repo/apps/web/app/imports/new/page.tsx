@@ -773,6 +773,14 @@ function ImportDocumentPageContent() {
         value: selectedProjectLabel || 'Select a project',
       },
       {
+        key: 'sectionKey',
+        label: 'Repository module',
+        done: Boolean(form.sectionKey),
+        value: activeSections.find((section) => section.sectionKey === form.sectionKey)?.name
+          || form.sectionKey
+          || 'Select a module',
+      },
+      {
         key: 'sourceSystemId',
         label: 'Source system',
         done: Boolean(form.sourceSystemId),
@@ -1287,23 +1295,15 @@ function ImportDocumentPageContent() {
                 <CreatableSelect
                   label="Repository module / section"
                   name="sectionKey"
-                  required={routingOnlyContinue}
+                  required
                   value={form.sectionKey}
-                  options={
-                    routingOnlyContinue
-                      ? sectionOptions
-                      : [{ value: '', label: 'Automatic' }, ...sectionOptions]
-                  }
-                  placeholder={routingOnlyContinue ? 'Select module…' : 'Automatic'}
+                  options={sectionOptions}
+                  placeholder={form.projectId ? 'Select module…' : 'Select a project first'}
                   canCreate={canCreate}
                   createLabel="Add New Repository Section"
                   createDisabled={!form.projectId}
                   createDisabledReason="Select a project before adding a repository section."
-                  hint={
-                    routingOnlyContinue
-                      ? 'Required. Confirm the repository folder where this ChatGPT-approved document should land.'
-                      : 'Repository folder (e.g. Articles, Research Library). Not the same as Document type.'
-                  }
+                  hint="Modules listed here come from the selected project’s directory template. Choose where this document should land."
                   onChange={(sectionKey) => setForm((current) => ({ ...current, sectionKey }))}
                   onCreateClick={() => setCreateModal('section')}
                 />
