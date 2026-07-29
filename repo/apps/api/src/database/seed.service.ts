@@ -75,7 +75,15 @@ export class SeedService implements OnApplicationBootstrap {
   constructor(private readonly db: DatabaseService, private readonly config: ConfigService) {}
 
   async onApplicationBootstrap() {
-    await this.seed();
+    try {
+      await this.seed();
+    } catch (error) {
+      // Never crash the API process on seed conflicts (e.g. unique position after admin edits).
+      this.logger.error(
+        `Seed failed; continuing startup. ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 
   private async seed() {
@@ -138,8 +146,22 @@ export class SeedService implements OnApplicationBootstrap {
     for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
       const [sectionKey, code, name] = DEFAULT_SECTIONS[index];
       let section = await this.db.directoryTemplateSections.findOne({ where: { template: { id: template.id }, sectionKey }, relations: { template: true } });
-      if (!section) section = this.db.directoryTemplateSections.create({ template, sectionKey, code, name, slug: slugify(name), position: index + 1, active: true });
-      else Object.assign(section, { code, name, slug: slugify(name), position: index + 1, active: true });
+      if (!section) {
+        const taken = await this.db.directoryTemplateSections.findOne({
+          where: { template: { id: template.id }, position: index + 1 },
+        });
+        section = this.db.directoryTemplateSections.create({
+          template,
+          sectionKey,
+          code,
+          name,
+          slug: slugify(name),
+          position: taken ? await this.nextTemplateSectionPosition(template.id) : index + 1,
+          active: true,
+        });
+      } else {
+        Object.assign(section, { code, name, slug: slugify(name), active: true });
+      }
       await this.db.directoryTemplateSections.save(section);
     }
 
@@ -151,8 +173,31 @@ export class SeedService implements OnApplicationBootstrap {
     for (let index = 0; index < DEFAULT_SECTIONS.length; index += 1) {
       const [sectionKey, code, name] = DEFAULT_SECTIONS[index];
       let section = await this.db.projectSections.findOne({ where: { project: { id: project.id }, sectionKey }, relations: { project: true } });
-      if (!section) section = this.db.projectSections.create({ project, sectionKey, code, name, slug: slugify(name), position: index + 1, active: true, relativePath: name });
-      else Object.assign(section, { code, name, slug: slugify(name), position: index + 1, active: true, relativePath: section.relativePath || name });
+      if (!section) {
+        // Do not force DEFAULT position — admins may already occupy that slot.
+        const taken = await this.db.projectSections.findOne({
+          where: { project: { id: project.id }, position: index + 1 },
+        });
+        section = this.db.projectSections.create({
+          project,
+          sectionKey,
+          code,
+          name,
+          slug: slugify(name),
+          position: taken ? await this.nextProjectSectionPosition(project.id) : index + 1,
+          active: true,
+          relativePath: name,
+        });
+      } else {
+        // Preserve user ordering; only refresh labels/paths.
+        Object.assign(section, {
+          code,
+          name,
+          slug: slugify(name),
+          active: true,
+          relativePath: section.relativePath || name,
+        });
+      }
       await this.db.projectSections.save(section);
     }
 
@@ -323,5 +368,23 @@ export class SeedService implements OnApplicationBootstrap {
     }
 
     this.logger.log('Repository gateway default configuration is ready.');
+  }
+
+  private async nextProjectSectionPosition(projectId: string) {
+    const row = await this.db.projectSections
+      .createQueryBuilder('section')
+      .select('COALESCE(MAX(section.position), 0)', 'max')
+      .where('section.project_id = :projectId', { projectId })
+      .getRawOne<{ max: string | number }>();
+    return Number(row?.max ?? 0) + 1;
+  }
+
+  private async nextTemplateSectionPosition(templateId: string) {
+    const row = await this.db.directoryTemplateSections
+      .createQueryBuilder('section')
+      .select('COALESCE(MAX(section.position), 0)', 'max')
+      .where('section.template_id = :templateId', { templateId })
+      .getRawOne<{ max: string | number }>();
+    return Number(row?.max ?? 0) + 1;
   }
 }
