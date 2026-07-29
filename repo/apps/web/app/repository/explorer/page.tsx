@@ -17,7 +17,7 @@ import { DocumentViewerToolbar, type ViewerControls } from './components/Documen
 import { RepositoryExplorerLayout } from './components/RepositoryExplorerLayout';
 import { RepositoryTreePanel } from './components/RepositoryTreePanel';
 import {
-  downloadText, extensionOf, flatten, isDocx, isInlineType, isPdf, subtreeDocuments,
+  downloadText, extensionOf, flatten, canUseViewerControls, isInlineType, subtreeDocuments,
 } from './helpers';
 import styles from './RepositoryExplorer.module.css';
 import type {
@@ -413,11 +413,7 @@ export default function RepositoryExplorerPage() {
         />
         <DocumentViewerToolbar
           controls={controls}
-          pdfSupported={
-            isPdf(currentVersion)
-            || isDocx(currentVersion)
-            || Boolean(currentVersion.mimeType?.startsWith('image/'))
-          }
+          pdfSupported={canUseViewerControls(currentVersion)}
           onPageChange={(page) => setControls((current) => ({ ...current, page: Math.max(1, page) }))}
           onZoomChange={(zoom) => setControls((current) => ({ ...current, zoom }))}
           onZoomIn={() => stepZoom(1)}

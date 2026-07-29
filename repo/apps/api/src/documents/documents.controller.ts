@@ -91,7 +91,18 @@ export class DocumentsController {
       'image/jpeg',
       'image/gif',
       'image/webp',
+      'image/bmp',
+      'image/svg+xml',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/plain',
+      'text/csv',
+      'text/html',
+      'text/markdown',
+      'application/json',
+      'application/xml',
+      'text/xml',
     ];
     const disposition = safeInlineTypes.includes(version.version.mimeType) ? 'inline' : 'attachment';
     response.setHeader('Content-Type', version.version.mimeType);

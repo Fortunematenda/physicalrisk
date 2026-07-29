@@ -408,6 +408,71 @@
   box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
   border-radius: 4px;
 }
+.textPreviewPage {
+  margin: 0 auto;
+  width: min(100%, 920px);
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+  overflow: auto;
+}
+.textPreview {
+  margin: 0;
+  padding: 18px 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #0f172a;
+}
+.sheetTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.sheetTab,
+.sheetTabActive {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.sheetTabActive {
+  background: #1e293b;
+  border-color: #1e293b;
+  color: #fff;
+}
+.spreadsheetStage {
+  width: fit-content;
+  max-width: 100%;
+  overflow: auto;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
+}
+.spreadsheetTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: #0f172a;
+}
+.spreadsheetTable td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  min-width: 72px;
+  max-width: 320px;
+  white-space: pre-wrap;
+  vertical-align: top;
+}
+.spreadsheetTable tr:first-child td {
+  background: #f8fafc;
+  font-weight: 650;
+}
 .previewLoading,
 .previewUnavailable {
   display: grid;

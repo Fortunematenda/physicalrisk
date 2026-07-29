@@ -31,18 +31,64 @@ export function iconFor(entry: TreeEntry, size = 16): ReactNode {
 }
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const XLS_MIME = 'application/vnd.ms-excel';
+
+const TEXT_EXTS = new Set([
+  'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'xml', 'html', 'htm', 'log', 'yaml', 'yml', 'ini', 'cfg', 'conf', 'rtf',
+]);
+const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'tsv']);
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+
+function versionExt(version?: VersionItem | null) {
+  return version?.originalFileName ? extensionOf(version.originalFileName) : '';
+}
+
+export function isPdf(version?: VersionItem | null) {
+  if (!version) return false;
+  if (version.mimeType === 'application/pdf') return true;
+  return versionExt(version) === 'pdf';
+}
 
 export function isDocx(version?: VersionItem | null) {
   if (!version) return false;
   if (version.mimeType === DOCX_MIME) return true;
-  return extensionOf(version.originalFileName) === 'docx';
+  return versionExt(version) === 'docx';
 }
 
+export function isImage(version?: VersionItem | null) {
+  if (!version) return false;
+  if (/^image\//.test(version.mimeType ?? '')) return true;
+  return IMAGE_EXTS.has(versionExt(version));
+}
+
+export function isSpreadsheet(version?: VersionItem | null) {
+  if (!version) return false;
+  const mime = version.mimeType ?? '';
+  if (mime === XLSX_MIME || mime === XLS_MIME || mime === 'text/csv' || mime === 'text/tab-separated-values') {
+    return true;
+  }
+  return SPREADSHEET_EXTS.has(versionExt(version));
+}
+
+export function isTextPreview(version?: VersionItem | null) {
+  if (!version) return false;
+  const ext = versionExt(version);
+  // Prefer spreadsheet table viewer for CSV/TSV/Excel.
+  if (isSpreadsheet(version) && SPREADSHEET_EXTS.has(ext)) return false;
+  const mime = version.mimeType ?? '';
+  if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') return true;
+  return TEXT_EXTS.has(ext);
+}
+
+/** Types we can render inline (PDF is always included). */
 export function isInlineType(mimeType?: string, fileName?: string) {
-  if (mimeType === 'application/pdf' || /^image\//.test(mimeType ?? '')) return true;
-  if (mimeType === DOCX_MIME) return true;
-  if (fileName && extensionOf(fileName) === 'docx') return true;
-  return false;
+  const version = { mimeType: mimeType ?? '', originalFileName: fileName ?? '' } as VersionItem;
+  return isPdf(version) || isDocx(version) || isImage(version) || isSpreadsheet(version) || isTextPreview(version);
+}
+
+export function canUseViewerControls(version?: VersionItem | null) {
+  return isPdf(version) || isDocx(version) || isImage(version) || isSpreadsheet(version) || isTextPreview(version);
 }
 
 export function flatten(entries: TreeEntry[]): TreeEntry[] {
@@ -99,6 +145,3 @@ export function pdfViewerHash(options: {
   return parts.join('&');
 }
 
-export function isPdf(version?: VersionItem | null) {
-  return version?.mimeType === 'application/pdf';
-}
