@@ -17,7 +17,7 @@ import { DocumentViewerToolbar, type ViewerControls } from './components/Documen
 import { RepositoryExplorerLayout } from './components/RepositoryExplorerLayout';
 import { RepositoryTreePanel } from './components/RepositoryTreePanel';
 import {
-  downloadText, extensionOf, flatten, canUseViewerControls, isInlineType, subtreeDocuments,
+  downloadText, extensionOf, flatten, canUseViewerControls, subtreeDocuments,
 } from './helpers';
 import styles from './RepositoryExplorer.module.css';
 import type {
