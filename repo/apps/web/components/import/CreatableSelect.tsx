@@ -144,11 +144,11 @@ export function CreatableSelect({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      if (showCreate && activeIndex === filtered.length) {
+      if (showCreate && activeIndex === 0) {
         activateCreate();
         return;
       }
-      const option = filtered[activeIndex];
+      const option = filtered[showCreate ? activeIndex - 1 : activeIndex];
       if (option && !option.disabled) selectValue(option.value);
     }
   };
@@ -186,6 +186,25 @@ export function CreatableSelect({
             tabIndex={-1}
             onKeyDown={onMenuKeyDown}
           >
+            {showCreate && (
+              <>
+                <button
+                  type="button"
+                  className={`creatable-select-create creatable-select-create-top ${activeIndex === 0 ? 'active' : ''}`}
+                  disabled={createDisabled}
+                  title={createDisabled ? createDisabledReason : undefined}
+                  onMouseEnter={() => setActiveIndex(0)}
+                  onClick={activateCreate}
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  <span>{createLabel}</span>
+                </button>
+                {createDisabled && createDisabledReason ? (
+                  <div className="creatable-select-hint">{createDisabledReason}</div>
+                ) : null}
+                <div className="creatable-select-divider" aria-hidden="true" />
+              </>
+            )}
             {searchable && (
               <div className="creatable-select-search">
                 <input
@@ -196,7 +215,7 @@ export function CreatableSelect({
                   aria-label={`Search ${label}`}
                   onChange={(event) => {
                     setQuery(event.target.value);
-                    setActiveIndex(0);
+                    setActiveIndex(showCreate ? 1 : 0);
                   }}
                 />
               </div>
@@ -205,39 +224,23 @@ export function CreatableSelect({
               {!filtered.length ? (
                 <div className="creatable-select-empty">No matching options</div>
               ) : null}
-              {filtered.map((option, index) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`creatable-select-option ${index === activeIndex ? 'active' : ''} ${option.value === value ? 'selected' : ''}`}
-                  disabled={option.disabled}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => selectValue(option.value)}
-                >
-                  <span>{option.label}</span>
-                  {option.description ? <small>{option.description}</small> : null}
-                </button>
-              ))}
+              {filtered.map((option, index) => {
+                const optionIndex = showCreate ? index + 1 : index;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`creatable-select-option ${optionIndex === activeIndex ? 'active' : ''} ${option.value === value ? 'selected' : ''}`}
+                    disabled={option.disabled}
+                    onMouseEnter={() => setActiveIndex(optionIndex)}
+                    onClick={() => selectValue(option.value)}
+                  >
+                    <span>{option.label}</span>
+                    {option.description ? <small>{option.description}</small> : null}
+                  </button>
+                );
+              })}
             </div>
-            {showCreate && (
-              <>
-                <div className="creatable-select-divider" aria-hidden="true" />
-                <button
-                  type="button"
-                  className={`creatable-select-create ${activeIndex === filtered.length ? 'active' : ''}`}
-                  disabled={createDisabled}
-                  title={createDisabled ? createDisabledReason : undefined}
-                  onMouseEnter={() => setActiveIndex(filtered.length)}
-                  onClick={activateCreate}
-                >
-                  <Plus size={14} aria-hidden="true" />
-                  <span>{createLabel}</span>
-                </button>
-                {createDisabled && createDisabledReason ? (
-                  <div className="creatable-select-hint">{createDisabledReason}</div>
-                ) : null}
-              </>
-            )}
           </div>
         )}
       </div>

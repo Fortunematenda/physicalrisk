@@ -493,7 +493,6 @@ export default function RepositoryExplorerPage() {
             if (isMobile || isTablet) setInspectorSheetOpen(true);
             else setInspectorCollapsed(false);
           }}
-          compactActions={isMobile}
         />
         <DocumentViewerToolbar
           controls={controls}

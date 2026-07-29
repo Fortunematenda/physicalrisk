@@ -21,7 +21,6 @@ type Props = {
   onDelete?: () => void;
   onOpenDetailsPanel?: () => void;
   showDetailsButton?: boolean;
-  compactActions?: boolean;
 };
 
 export function DocumentViewerHeader({
@@ -34,7 +33,6 @@ export function DocumentViewerHeader({
   onDelete,
   onOpenDetailsPanel,
   showDetailsButton,
-  compactActions,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
@@ -84,45 +82,41 @@ export function DocumentViewerHeader({
         {showDetailsButton ? (
           <button
             type="button"
-            className={styles.button}
+            className={styles.iconButton}
             onClick={onOpenDetailsPanel}
             aria-label="Open document details"
             title="Details"
           >
             <PanelRight size={15} />
-            {!compactActions ? 'Details' : null}
           </button>
         ) : null}
         <button
           type="button"
-          className={styles.button}
+          className={styles.iconButton}
           onClick={onOpenInNewTab}
           aria-label="Open in new tab"
           title="Open in new tab"
         >
           <ExternalLink size={15} />
-          {!compactActions ? 'Open in new tab' : null}
         </button>
         <button
           type="button"
-          className={`${styles.button} ${styles.buttonPrimary}`}
+          className={`${styles.iconButton} ${styles.iconButtonPrimary}`}
           onClick={onDownload}
           aria-label="Download"
           title="Download"
         >
           <Download size={15} />
-          {!compactActions ? 'Download' : null}
         </button>
         {onDelete ? (
           <button
             type="button"
-            className={styles.button}
+            className={styles.iconButton}
             onClick={onDelete}
             aria-label="Delete document"
             title="Delete document"
           >
             <Trash2 size={15} />
-            {!compactActions ? 'Delete' : null}
           </button>
         ) : null}
         <button

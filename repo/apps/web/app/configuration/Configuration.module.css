@@ -83,8 +83,18 @@
   border: 1px solid #dce4ec;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(11, 47, 85, 0.05);
-  overflow: hidden;
   min-width: 0;
+}
+
+.panelCard {
+  overflow: hidden;
+}
+
+.createCard {
+  /* Allow CreatableSelect / dropdown menus to escape the card */
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 
 .createHead,
@@ -224,6 +234,7 @@
 .tableWrap table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .tableWrap th {
@@ -246,6 +257,81 @@
   font-size: 13px;
 }
 
+.colProject { width: 42%; }
+.colStatus { width: 10%; }
+.colPath { width: 18%; }
+.colNum { width: 7%; }
+.colDate { width: 11%; }
+.colActions { width: 5%; text-align: right; }
+
+.projectCell {
+  min-width: 0;
+}
+
+.projectCode {
+  display: inline-block;
+  margin-bottom: 2px;
+  font-weight: 650;
+}
+
+.title {
+  margin-top: 3px;
+  color: #0f2740;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.projectDescription {
+  margin-top: 4px;
+  color: #66778a;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.iconActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.iconActionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #dce4ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+
+.iconActionBtn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.iconActionBtnDanger:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.iconActionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .tableWrap tbody tr:last-child td {
   border-bottom: 0;
 }
@@ -262,16 +348,9 @@
   text-decoration: underline;
 }
 
-.title {
-  margin-top: 3px;
-  color: #0f2740;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
 .path {
   display: inline-block;
-  max-width: 240px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

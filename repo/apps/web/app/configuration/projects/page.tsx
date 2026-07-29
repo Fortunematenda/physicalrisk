@@ -220,7 +220,7 @@ export default function ProjectsPage() {
               />
               <small>VPS repository root folder will match this name.</small>
             </div>
-            <div className="field">
+            <div className={`field ${styles.full}`}>
               <CreatableSelect
                 label="Directory template"
                 name="directoryTemplateId"
@@ -234,7 +234,7 @@ export default function ProjectsPage() {
                 createLabel="Add New Template"
                 onChange={(directoryTemplateId) => setForm((current) => ({ ...current, directoryTemplateId }))}
                 onCreateClick={() => setShowCreateTemplate(true)}
-                hint="Template modules are provisioned as VPS folders for the new project."
+                hint="Open the dropdown and choose Add New Template to create one without leaving this form."
               />
             </div>
             <div className={`field ${styles.full}`}>
@@ -248,7 +248,7 @@ export default function ProjectsPage() {
             </div>
           </div>
           <div className={styles.createActions}>
-            <button type="submit" className="button primary" disabled={saving || templates.length === 0}>
+            <button type="submit" className="button primary" disabled={saving || !form.directoryTemplateId}>
               {saving ? 'Creating…' : 'Create project'}
             </button>
           </div>
@@ -308,13 +308,13 @@ export default function ProjectsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>Project</th>
-                    <th>Status</th>
-                    <th>VPS directory</th>
-                    <th>Documents</th>
-                    <th>Imports</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
+                    <th className={styles.colProject}>Project</th>
+                    <th className={styles.colStatus}>Status</th>
+                    <th className={styles.colPath}>VPS directory</th>
+                    <th className={styles.colNum}>Documents</th>
+                    <th className={styles.colNum}>Imports</th>
+                    <th className={styles.colDate}>Updated</th>
+                    <th className={styles.colActions}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -333,16 +333,16 @@ export default function ProjectsPage() {
                         }
                       }}
                     >
-                      <td>
+                      <td className={styles.projectCell}>
                         <Link
                           href={`/configuration/projects/${item.id}`}
-                          className={`primary-text ${styles.docLink}`}
+                          className={`primary-text ${styles.docLink} ${styles.projectCode}`}
                           onClick={(event) => event.stopPropagation()}
                         >
                           {item.code}
                         </Link>
                         <div className={styles.title}>{item.name}</div>
-                        <div className="secondary-text">{item.description || 'No description'}</div>
+                        <div className={styles.projectDescription}>{item.description || 'No description'}</div>
                       </td>
                       <td><StatusBadge value={item.status} /></td>
                       <td>
@@ -354,24 +354,26 @@ export default function ProjectsPage() {
                       <td>{item._count.documents}</td>
                       <td>{item._count.importJobs}</td>
                       <td>{formatDate(item.updatedAt)}</td>
-                      <td>
-                        <div className={styles.templateActions} onClick={(event) => event.stopPropagation()}>
+                      <td className={styles.colActions}>
+                        <div className={styles.iconActions} onClick={(event) => event.stopPropagation()}>
                           <button
                             type="button"
-                            className="button small"
+                            className={styles.iconActionBtn}
                             onClick={() => router.push(`/configuration/projects/${item.id}`)}
                             title="Edit project"
+                            aria-label={`Edit ${item.name}`}
                           >
-                            <Pencil size={13} /> Edit
+                            <Pencil size={15} />
                           </button>
                           <button
                             type="button"
-                            className="button small"
+                            className={`${styles.iconActionBtn} ${styles.iconActionBtnDanger}`}
                             disabled={busyId === item.id}
                             onClick={() => void deleteProject(item)}
                             title="Delete project"
+                            aria-label={`Delete ${item.name}`}
                           >
-                            <Trash2 size={13} /> Delete
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>
