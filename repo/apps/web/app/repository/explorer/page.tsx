@@ -5,11 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ExternalLink, File, FileJson, FileSpreadsheet, Folder, Grid2X2, List,
-  MoreHorizontal, PanelLeftOpen, RefreshCw, Search, TableProperties,
+  MoreHorizontal, PanelLeftOpen, Pencil, RefreshCw, Search, TableProperties, Trash2,
 } from 'lucide-react';
 
+import { useConfirm } from '@/components/confirm-dialog';
 import { StatusBadge } from '@/components/status-badge';
 import { API_URL, api, formatDate, getToken } from '@/lib/api';
+import { deriveSectionFields } from '@/lib/section-fields';
 import { DocumentDetailsInspector } from './components/DocumentDetailsInspector';
 import { DocumentPreview } from './components/DocumentPreview';
 import { DocumentViewerHeader } from './components/DocumentViewerHeader';
@@ -48,6 +50,7 @@ function useMediaQuery(query: string) {
 export default function RepositoryExplorerPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const confirm = useConfirm();
   const [projects, setProjects] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [projectId, setProjectId] = useState(searchParams.get('projectId') ?? '');
   const [repository, setRepository] = useState<RepositoryResponse | null>(null);
@@ -72,6 +75,8 @@ export default function RepositoryExplorerPage() {
   const [treeSheetOpen, setTreeSheetOpen] = useState(false);
   const [inspectorSheetOpen, setInspectorSheetOpen] = useState(false);
   const [controls, setControls] = useState<ViewerControls>(DEFAULT_CONTROLS);
+  const [renameFolderOpen, setRenameFolderOpen] = useState(false);
+  const [renameFolderName, setRenameFolderName] = useState('');
   const viewerRef = useRef<HTMLDivElement | null>(null);
 
   const isTablet = useMediaQuery('(max-width: 1100px)');
@@ -284,6 +289,84 @@ export default function RepositoryExplorerPage() {
     }
   };
 
+  const deleteDocument = async (documentId: string, title: string) => {
+    const ok = await confirm({
+      title: 'Delete document',
+      message: `Delete “${title}” and all of its versions from the repository? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await api(`/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
+      setNotice(`Deleted “${title}”.`);
+      setSelected(null);
+      setSelectedDocument(null);
+      await load(projectId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete document.');
+    }
+  };
+
+  const deleteFolder = async () => {
+    if (!selected || selected.kind !== 'folder') return;
+    const entry = selected.entry;
+    const folderDocs = subtreeDocuments(entry, documents);
+    const isEmpty = (entry.childCount ?? entry.children?.length ?? 0) === 0 && folderDocs.length === 0;
+    if (!isEmpty) {
+      setError('Only empty folders can be deleted. Remove documents first.');
+      return;
+    }
+    if (!entry.sectionId) {
+      setError('This folder is not a configured repository module and cannot be deleted here.');
+      return;
+    }
+    const ok = await confirm({
+      title: 'Delete folder',
+      message: `Delete empty folder “${entry.name}”?`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await api(`/project-sections/${encodeURIComponent(entry.sectionId)}`, { method: 'DELETE' });
+      setNotice(`Deleted folder “${entry.name}”.`);
+      setSelected(null);
+      await load(projectId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete folder.');
+    }
+  };
+
+  const saveFolderRename = async () => {
+    if (!selected || selected.kind !== 'folder' || !selected.entry.sectionId) {
+      setError('Only configured repository modules can be renamed here.');
+      return;
+    }
+    const nextName = renameFolderName.trim();
+    if (!nextName) {
+      setError('Enter a folder name.');
+      return;
+    }
+    const derived = deriveSectionFields(nextName);
+    try {
+      await api(`/project-sections/${encodeURIComponent(selected.entry.sectionId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: derived.name,
+          sectionKey: derived.sectionKey,
+          code: derived.code,
+          relativePath: derived.relativePath,
+        }),
+      });
+      setRenameFolderOpen(false);
+      setNotice(`Renamed folder to “${derived.name}”.`);
+      await load(projectId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to rename folder.');
+    }
+  };
+
   const exportRegister = (kind: 'index' | 'versions', format: 'csv' | 'json') => {
     const rows =
       kind === 'index'
@@ -403,6 +486,7 @@ export default function RepositoryExplorerPage() {
           version={currentVersion}
           onOpenInNewTab={() => void viewFile(currentVersion)}
           onDownload={() => void download(currentVersion)}
+          onDelete={() => void deleteDocument(selectedDocument.id, selectedDocument.title)}
           onFullscreen={() => void toggleFullscreen()}
           showDetailsButton={isTablet || inspectorCollapsed}
           onOpenDetailsPanel={() => {
@@ -547,6 +631,38 @@ export default function RepositoryExplorerPage() {
               <span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
               <span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span>
             </div>
+            {selected.entry.sectionId || selected.entry.nodeType === 'module' ? (
+              <div className={styles.folderActions}>
+                <button
+                  type="button"
+                  className={styles.button}
+                  disabled={!selected.entry.sectionId}
+                  onClick={() => {
+                    setRenameFolderName(selected.entry.name);
+                    setRenameFolderOpen(true);
+                  }}
+                >
+                  <Pencil size={14} /> Edit folder
+                </button>
+                <button
+                  type="button"
+                  className={styles.button}
+                  disabled={
+                    !selected.entry.sectionId
+                    || displayedFolderDocs.length > 0
+                    || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
+                  }
+                  title={
+                    displayedFolderDocs.length > 0 || (selected.entry.childCount ?? 0) > 0
+                      ? 'Only empty folders can be deleted'
+                      : 'Delete empty folder'
+                  }
+                  onClick={() => void deleteFolder()}
+                >
+                  <Trash2 size={14} /> Delete folder
+                </button>
+              </div>
+            ) : null}
           </div>
           {displayedFolderDocs.length === 0 ? (
             <div className={styles.empty}>
@@ -604,21 +720,30 @@ export default function RepositoryExplorerPage() {
                       <td><StatusBadge value={document.status} /></td>
                       <td>{formatDate(document.updatedAt)}</td>
                       <td>
-                        <button
-                          type="button"
-                          className={styles.buttonLink}
-                          onClick={() =>
-                            void selectEntry({
-                              name: document.title,
-                              path: document.section.relativePath,
-                              type: 'directory',
-                              nodeType: 'document',
-                              documentId: document.id,
-                              documentCode: document.code,
-                            })}
-                        >
-                          Open Details
-                        </button>
+                        <div className={styles.inlineActions}>
+                          <button
+                            type="button"
+                            className={styles.buttonLink}
+                            onClick={() =>
+                              void selectEntry({
+                                name: document.title,
+                                path: document.section.relativePath,
+                                type: 'directory',
+                                nodeType: 'document',
+                                documentId: document.id,
+                                documentCode: document.code,
+                              })}
+                          >
+                            Open
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.buttonLink}
+                            onClick={() => void deleteDocument(document.id, document.title)}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -801,6 +926,30 @@ export default function RepositoryExplorerPage() {
         onCloseTreeSheet={() => setTreeSheetOpen(false)}
         onCloseInspectorSheet={() => setInspectorSheetOpen(false)}
       />
+
+      {renameFolderOpen ? (
+        <div className={styles.modalOverlay} role="dialog" aria-modal="true" aria-labelledby="rename-folder-title">
+          <div className={styles.modalCard}>
+            <h3 id="rename-folder-title">Edit folder</h3>
+            <p>Key, code and VPS path update automatically from the name.</p>
+            <div className="field">
+              <label htmlFor="rename-folder-name">Folder name</label>
+              <input
+                id="rename-folder-name"
+                value={renameFolderName}
+                onChange={(event) => setRenameFolderName(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.button} onClick={() => setRenameFolderOpen(false)}>Cancel</button>
+              <button type="button" className={`${styles.button} ${styles.buttonPrimary}`} onClick={() => void saveFolderRename()}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

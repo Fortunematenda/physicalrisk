@@ -3,11 +3,14 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FolderKanban, FileStack, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { FolderKanban, FileStack, Pencil, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { useConfirm } from '@/components/confirm-dialog';
+import { CreatableSelect } from '@/components/import/CreatableSelect';
+import { CreateDirectoryTemplateModal } from '@/components/import/CreateDirectoryTemplateModal';
 import { api, formatDate } from '@/lib/api';
 import styles from '../Configuration.module.css';
 
@@ -26,14 +29,17 @@ type ProjectRow = {
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [items, setItems] = useState<ProjectRow[]>([]);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [query, setQuery] = useState('');
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false);
   const [form, setForm] = useState({
     code: '',
     name: '',
@@ -122,6 +128,30 @@ export default function ProjectsPage() {
     }
   };
 
+  const deleteProject = async (item: ProjectRow) => {
+    const ok = await confirm({
+      title: 'Delete project',
+      message: item._count.documents > 0
+        ? `“${item.name}” still has ${item._count.documents} document(s). Remove them first, then delete the project.`
+        : `Delete project “${item.name}”? Its VPS folder will be removed. This cannot be undone.`,
+      confirmLabel: item._count.documents > 0 ? 'OK' : 'Delete',
+      tone: item._count.documents > 0 ? 'default' : 'danger',
+    });
+    if (!ok || item._count.documents > 0) return;
+    setBusyId(item.id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/projects/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+      setMessage(`Deleted project “${item.name}”.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete project');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <PageHeader
@@ -191,18 +221,21 @@ export default function ProjectsPage() {
               <small>VPS repository root folder will match this name.</small>
             </div>
             <div className="field">
-              <label htmlFor="project-template">Directory template</label>
-              <select
-                id="project-template"
+              <CreatableSelect
+                label="Directory template"
+                name="directoryTemplateId"
                 value={form.directoryTemplateId}
-                onChange={(event) => setForm((current) => ({ ...current, directoryTemplateId: event.target.value }))}
-              >
-                {templates.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}{item.isDefault ? ' (Default)' : ''}
-                  </option>
-                ))}
-              </select>
+                options={templates.map((item) => ({
+                  value: item.id,
+                  label: `${item.name}${item.isDefault ? ' (Default)' : ''}`,
+                }))}
+                placeholder="Select a template…"
+                canCreate
+                createLabel="Add New Template"
+                onChange={(directoryTemplateId) => setForm((current) => ({ ...current, directoryTemplateId }))}
+                onCreateClick={() => setShowCreateTemplate(true)}
+                hint="Template modules are provisioned as VPS folders for the new project."
+              />
             </div>
             <div className={`field ${styles.full}`}>
               <label htmlFor="project-description">Description</label>
@@ -281,6 +314,7 @@ export default function ProjectsPage() {
                     <th>Documents</th>
                     <th>Imports</th>
                     <th>Updated</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -320,6 +354,27 @@ export default function ProjectsPage() {
                       <td>{item._count.documents}</td>
                       <td>{item._count.importJobs}</td>
                       <td>{formatDate(item.updatedAt)}</td>
+                      <td>
+                        <div className={styles.templateActions} onClick={(event) => event.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="button small"
+                            onClick={() => router.push(`/configuration/projects/${item.id}`)}
+                            title="Edit project"
+                          >
+                            <Pencil size={13} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="button small"
+                            disabled={busyId === item.id}
+                            onClick={() => void deleteProject(item)}
+                            title="Delete project"
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -328,6 +383,18 @@ export default function ProjectsPage() {
           )}
         </div>
       </div>
+
+      {showCreateTemplate ? (
+        <CreateDirectoryTemplateModal
+          onCancel={() => setShowCreateTemplate(false)}
+          onCreated={(created) => {
+            setTemplates((current) => [...current, created]);
+            setForm((current) => ({ ...current, directoryTemplateId: created.id }));
+            setShowCreateTemplate(false);
+            setMessage(`Template “${created.name}” created and selected.`);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

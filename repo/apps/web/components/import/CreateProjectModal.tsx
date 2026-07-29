@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { ApiError, getErrorMessage } from '@/lib/api-error';
 import { CreateEntityModal } from './CreateEntityModal';
+import { CreatableSelect } from './CreatableSelect';
+import { CreateDirectoryTemplateModal } from './CreateDirectoryTemplateModal';
 
 export interface ProjectRecord {
   id: string;
@@ -37,6 +39,7 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false);
 
   useEffect(() => {
     api('/directory-templates')
@@ -85,74 +88,89 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
   };
 
   return (
-    <CreateEntityModal
-      title="Add New Project"
-      submitLabel="Create Project"
-      saving={saving}
-      error={error}
-      onSubmit={submit}
-      onCancel={onCancel}
-      width="md"
-    >
-      <div className="form-grid">
-        <div className="field">
-          <label htmlFor="create-project-name">Project name <em>*</em></label>
-          <input
-            id="create-project-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            disabled={saving}
-          />
-          <small>VPS repository root folder will match this name.</small>
-        </div>
-        <div className="field">
-          <label htmlFor="create-project-code">Project code <em>*</em></label>
-          <input
-            id="create-project-code"
-            value={code}
-            onChange={(event) => setCode(event.target.value.toUpperCase())}
-            placeholder="PRJ"
-            disabled={saving}
-          />
-        </div>
-        <div className="field full">
-          <label htmlFor="create-project-template">Directory template</label>
-          <select
-            id="create-project-template"
-            value={directoryTemplateId}
-            onChange={(event) => setDirectoryTemplateId(event.target.value)}
-            disabled={saving || !templates.length}
-          >
-            {templates.map((template) => (
-              <option key={template.id} value={template.id}>
-                {template.name}{template.isDefault ? ' (Default)' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field full">
-          <label htmlFor="create-project-description">Description</label>
-          <textarea
-            id="create-project-description"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            disabled={saving}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="create-project-active">
+    <>
+      <CreateEntityModal
+        title="Add New Project"
+        submitLabel="Create Project"
+        saving={saving}
+        error={error}
+        onSubmit={submit}
+        onCancel={onCancel}
+        width="md"
+      >
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="create-project-name">Project name <em>*</em></label>
             <input
-              id="create-project-active"
-              type="checkbox"
-              checked={active}
-              onChange={(event) => setActive(event.target.checked)}
+              id="create-project-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
               disabled={saving}
-            />{' '}
-            Active
-          </label>
+            />
+            <small>VPS repository root folder will match this name.</small>
+          </div>
+          <div className="field">
+            <label htmlFor="create-project-code">Project code <em>*</em></label>
+            <input
+              id="create-project-code"
+              value={code}
+              onChange={(event) => setCode(event.target.value.toUpperCase())}
+              placeholder="PRJ"
+              disabled={saving}
+            />
+          </div>
+          <div className="field full">
+            <CreatableSelect
+              label="Directory template"
+              name="directoryTemplateId"
+              value={directoryTemplateId}
+              options={templates.map((template) => ({
+                value: template.id,
+                label: `${template.name}${template.isDefault ? ' (Default)' : ''}`,
+              }))}
+              placeholder="Select a template…"
+              canCreate
+              createLabel="Add New Template"
+              disabled={saving}
+              onChange={setDirectoryTemplateId}
+              onCreateClick={() => setShowCreateTemplate(true)}
+            />
+          </div>
+          <div className="field full">
+            <label htmlFor="create-project-description">Description</label>
+            <textarea
+              id="create-project-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              disabled={saving}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="create-project-active">
+              <input
+                id="create-project-active"
+                type="checkbox"
+                checked={active}
+                onChange={(event) => setActive(event.target.checked)}
+                disabled={saving}
+              />{' '}
+              Active
+            </label>
+          </div>
+          {fieldError ? <div className="field-error" role="alert">{fieldError}</div> : null}
         </div>
-        {fieldError ? <div className="field-error" role="alert">{fieldError}</div> : null}
-      </div>
-    </CreateEntityModal>
+      </CreateEntityModal>
+
+      {showCreateTemplate ? (
+        <CreateDirectoryTemplateModal
+          onCancel={() => setShowCreateTemplate(false)}
+          onCreated={(created) => {
+            setTemplates((current) => [...current, created]);
+            setDirectoryTemplateId(created.id);
+            setShowCreateTemplate(false);
+          }}
+        />
+      ) : null}
+    </>
   );
 }

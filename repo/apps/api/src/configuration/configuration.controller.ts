@@ -22,6 +22,12 @@ export class ConfigurationController {
     return this.service.createProject(body, user?.id);
   }
   @Patch('projects/:id') updateProject(@Param('id') id: string, @Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) { return this.service.updateProject(id, body, user?.id); }
+  @Delete('projects/:id')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  deleteProject(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.service.deleteProject(id, user?.id);
+  }
   @Post('projects/:id/apply-template/:templateId') applyTemplate(@Param('id') id: string, @Param('templateId') templateId: string, @CurrentUser() user: { id?: string } | null) { return this.service.applyTemplate(id, templateId, user?.id); }
   @Post('projects/:id/sections')
   @UseGuards(RolesGuard)

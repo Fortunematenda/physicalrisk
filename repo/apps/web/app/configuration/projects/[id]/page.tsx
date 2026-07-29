@@ -1,11 +1,12 @@
 'use client';
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { useConfirm } from '@/components/confirm-dialog';
+import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
 import { api } from '@/lib/api';
 import { orderSectionsActiveFirst, syncLinkedSectionFields } from '@/lib/section-fields';
 
@@ -28,6 +29,7 @@ export default function ProjectDetailPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [showCreateSection, setShowCreateSection] = useState(false);
 
   const load = async () => {
     try {
@@ -117,6 +119,12 @@ export default function ProjectDetailPage() {
     setItem({ ...item, sections: next });
     await updateSection(updated);
   };
+
+  const nextSectionPosition = useMemo(() => {
+    const list = item?.sections ?? [];
+    if (!list.length) return 1;
+    return Math.max(...list.map((section: ProjectSection) => section.position || 0)) + 1;
+  }, [item]);
 
   const syncStorage = async () => {
     try {
@@ -224,6 +232,9 @@ export default function ProjectDetailPage() {
               <span className="secondary-text">
                 Changing Name, Key, Code, or folder updates the other linked fields. Inactive modules move to the bottom and are renumbered.
               </span>
+              <button type="button" className="button small" onClick={() => setShowCreateSection(true)}>
+                Add section
+              </button>
             </div>
             <div className="table-wrap">
               <table>
@@ -307,6 +318,18 @@ export default function ProjectDetailPage() {
           </div>
         </>
       )}
+      {showCreateSection && item ? (
+        <CreateRepositorySectionModal
+          projectId={item.id}
+          nextPosition={nextSectionPosition}
+          onCancel={() => setShowCreateSection(false)}
+          onCreated={async () => {
+            setShowCreateSection(false);
+            setMessage(`Section added at order ${nextSectionPosition}.`);
+            await load();
+          }}
+        />
+      ) : null}
     </>
   );
 }

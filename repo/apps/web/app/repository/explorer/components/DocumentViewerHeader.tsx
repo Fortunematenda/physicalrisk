@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Download, ExternalLink, FileText, Maximize2, MoreHorizontal, PanelRight, X,
+  Download, ExternalLink, FileText, Maximize2, MoreHorizontal, PanelRight, Trash2, X,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatBytes } from '@/lib/api';
@@ -18,6 +18,7 @@ type Props = {
   onOpenInNewTab: () => void;
   onDownload: () => void;
   onFullscreen: () => void;
+  onDelete?: () => void;
   onOpenDetailsPanel?: () => void;
   showDetailsButton?: boolean;
   compactActions?: boolean;
@@ -30,6 +31,7 @@ export function DocumentViewerHeader({
   onOpenInNewTab,
   onDownload,
   onFullscreen,
+  onDelete,
   onOpenDetailsPanel,
   showDetailsButton,
   compactActions,
@@ -111,6 +113,18 @@ export function DocumentViewerHeader({
           <Download size={15} />
           {!compactActions ? 'Download' : null}
         </button>
+        {onDelete ? (
+          <button
+            type="button"
+            className={styles.button}
+            onClick={onDelete}
+            aria-label="Delete document"
+            title="Delete document"
+          >
+            <Trash2 size={15} />
+            {!compactActions ? 'Delete' : null}
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.iconButton}

@@ -165,6 +165,39 @@ export class ConfigurationService {
     return this.getProject(id);
   }
 
+  async deleteProject(id: string, userId?: string) {
+    const project = await this.db.projects.findOne({ where: { id } });
+    if (!project) throw new NotFoundException('Project not found');
+    const documentCount = await this.db.documents.count({ where: { project: { id } } });
+    if (documentCount > 0) {
+      throw new ConfigurationException(
+        'PROJECT_HAS_DOCUMENTS',
+        `“${project.name}” still has ${documentCount} document(s). Delete or move them before deleting the project.`,
+        { documentCount },
+      );
+    }
+    const importCount = await this.db.importJobs.count({ where: { project: { id } } });
+    if (importCount > 0) {
+      await this.db.importJobs
+        .createQueryBuilder()
+        .delete()
+        .where('project_id = :id', { id })
+        .execute();
+    }
+    const rootRelative = this.storage.projectRelativeRoot(project);
+    await this.db.projects.remove(project);
+    await this.storage.removeDirectory(rootRelative);
+    await this.audit.record({
+      userId,
+      action: 'DELETE',
+      entityType: 'Project',
+      entityId: id,
+      message: `Deleted project ${project.code}`,
+      before: project,
+    });
+    return { deleted: true, id };
+  }
+
   async applyTemplate(projectId: string, templateId: string, userId?: string) {
     const [project, template] = await Promise.all([
       this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } }),
@@ -300,6 +333,9 @@ export class ConfigurationService {
     if (input.relativePath !== undefined) section.relativePath = repositoryPath(input.relativePath, section.name);
     section.active = nextActive;
 
+    const previousRelativePath = before.relativePath;
+    const nextRelativePath = section.relativePath;
+
     const saved = await this.db.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(ProjectSection);
       await repo.save(section);
@@ -343,6 +379,16 @@ export class ConfigurationService {
       before,
       after: saved,
     });
+    if (previousRelativePath !== nextRelativePath) {
+      const project = section.project;
+      const from = `${this.storage.projectRelativeRoot(project)}/${this.storage.normaliseRelativePath(previousRelativePath)}`.replace(/\\/g, '/');
+      const to = `${this.storage.projectRelativeRoot(project)}/${this.storage.normaliseRelativePath(nextRelativePath)}`.replace(/\\/g, '/');
+      try {
+        await this.storage.renameDirectory(from, to);
+      } catch {
+        // ensureProjectStructure will recreate the destination if rename failed because source was missing.
+      }
+    }
     await this.storage.ensureProjectStructure(projectId);
     return saved;
   }
@@ -368,12 +414,22 @@ export class ConfigurationService {
     if (!section) throw new NotFoundException('Project section not found');
     const documentCount = await this.db.documents.count({ where: { section: { id } } });
     if (documentCount > 0) {
-      section.active = false;
-      const disabled = await this.db.projectSections.save(section);
-      await this.audit.record({ userId, action: 'CONFIG_CHANGE', entityType: 'ProjectSection', entityId: id, message: `Deactivated section ${section.name}; existing documents were retained` });
-      return disabled;
+      throw new ConfigurationException(
+        'SECTION_NOT_EMPTY',
+        `“${section.name}” still contains ${documentCount} document(s). Remove them before deleting this folder.`,
+        { documentCount },
+      );
+    }
+    const folderRelative = `${this.storage.projectRelativeRoot(section.project)}/${this.storage.normaliseRelativePath(section.relativePath)}`.replace(/\\/g, '/');
+    const empty = await this.storage.isDirectoryEmpty(folderRelative);
+    if (!empty) {
+      throw new ConfigurationException(
+        'SECTION_NOT_EMPTY',
+        `“${section.name}” folder is not empty on the VPS. Clear files before deleting.`,
+      );
     }
     await this.db.projectSections.remove(section);
+    await this.storage.removeDirectory(folderRelative);
     await this.audit.record({ userId, action: 'DELETE', entityType: 'ProjectSection', entityId: id, message: `Removed empty section ${section.name}` });
     return { deleted: true };
   }

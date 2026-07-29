@@ -103,6 +103,16 @@ export function CreateRepositorySectionModal({
               const next = event.target.value;
               setName(next);
               if (!pathTouched) setRelativePath(slugifyPath(next));
+              if (!code.trim()) {
+                const words = next.trim().split(/\s+/).filter(Boolean);
+                const generated = words
+                  .filter((word) => !/^\d+$/.test(word))
+                  .map((word) => word[0] ?? '')
+                  .join('')
+                  .toUpperCase()
+                  .slice(0, 6);
+                if (generated) setCode(generated);
+              }
             }}
             placeholder="e.g. Security Architecture"
             title="Section name"
@@ -158,6 +168,7 @@ export function CreateRepositorySectionModal({
             disabled
             readOnly
           />
+          <small>Auto-populated as the next available order ({nextPosition}).</small>
         </div>
         <div className="field">
           <label htmlFor="create-section-active">

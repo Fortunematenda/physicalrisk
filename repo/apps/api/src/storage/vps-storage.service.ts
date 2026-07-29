@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { access, copyFile, mkdir, readFile, readdir, rm, stat, statfs, unlink, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, statfs, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { DatabaseService } from '../database/database.service';
 import { Project, ProjectStatus } from '../database/entities';
@@ -12,6 +12,7 @@ export interface TreeEntry {
   nodeType?: 'root' | 'module' | 'folder' | 'document' | 'version' | 'file' | 'register';
   childCount?: number;
   documentId?: string;
+  sectionId?: string;
   versionId?: string;
   documentCode?: string;
   versionNo?: string;
@@ -165,6 +166,25 @@ export class VpsStorageService implements OnApplicationBootstrap {
   async removeDirectory(relativeOrAbsolutePath: string) {
     const target = isAbsolute(relativeOrAbsolutePath) ? relativeOrAbsolutePath : this.resolveStoragePath(relativeOrAbsolutePath);
     await rm(target, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  async isDirectoryEmpty(relativePath: string) {
+    const absolute = this.resolveStoragePath(relativePath);
+    try {
+      const entries = await readdir(absolute);
+      return entries.filter((name) => !name.startsWith('.gateway-')).length === 0;
+    } catch {
+      return true;
+    }
+  }
+
+  async renameDirectory(fromRelative: string, toRelative: string) {
+    const from = this.resolveStoragePath(fromRelative);
+    const to = this.resolveStoragePath(toRelative);
+    if (from === to) return to;
+    await mkdir(dirname(to), { recursive: true });
+    await rename(from, to);
+    return to;
   }
 
   async ensureProjectStructure(projectId: string) {
@@ -358,6 +378,7 @@ export class VpsStorageService implements OnApplicationBootstrap {
           type: 'directory',
           nodeType: section ? (section.sectionKey === 'MASTER_DOCUMENT_INDEX' || section.sectionKey === 'VERSION_REGISTER' ? 'register' : 'module') : document ? 'document' : isVersion ? 'version' : 'folder',
           documentId: document?.id,
+          sectionId: section?.id,
           documentCode: document?.code,
           status: document?.status,
           versionNo: isVersion ? entry.name.replace(/^v/i, '') : undefined,

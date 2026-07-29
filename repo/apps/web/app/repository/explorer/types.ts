@@ -7,6 +7,7 @@ export type TreeEntry = {
   nodeType?: NodeType;
   childCount?: number;
   documentId?: string;
+  sectionId?: string;
   versionId?: string;
   documentCode?: string;
   versionNo?: string;

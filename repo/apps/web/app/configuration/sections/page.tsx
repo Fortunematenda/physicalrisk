@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Layers3, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { FolderOpen, Layers3, Plus, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
 import { api } from '@/lib/api';
 import styles from '../Configuration.module.css';
 
@@ -35,9 +36,11 @@ export default function SectionsPage() {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [projectQuery, setProjectQuery] = useState('');
   const [sectionQuery, setSectionQuery] = useState('');
   const [activeOnly, setActiveOnly] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   const loadProjects = async () => {
     setLoading(true);
@@ -53,20 +56,29 @@ export default function SectionsPage() {
     }
   };
 
+  const reloadSelected = async (id = projectId) => {
+    if (!id) {
+      setProject(null);
+      return;
+    }
+    setDetailLoading(true);
+    try {
+      const next = await api<ProjectRow>(`/projects/${id}`);
+      setProject(next);
+      setProjects((current) => current.map((item) => (item.id === id ? { ...item, sections: next.sections } : item)));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to load project sections');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadProjects();
   }, []);
 
   useEffect(() => {
-    if (!projectId) {
-      setProject(null);
-      return;
-    }
-    setDetailLoading(true);
-    api<ProjectRow>(`/projects/${projectId}`)
-      .then(setProject)
-      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Unable to load project sections'))
-      .finally(() => setDetailLoading(false));
+    void reloadSelected(projectId);
   }, [projectId]);
 
   const filteredProjects = useMemo(() => {
@@ -88,6 +100,12 @@ export default function SectionsPage() {
       return haystack.includes(needle);
     });
   }, [project, sectionQuery, activeOnly]);
+
+  const nextPosition = useMemo(() => {
+    const list = project?.sections ?? [];
+    if (!list.length) return 1;
+    return Math.max(...list.map((section) => section.position || 0)) + 1;
+  }, [project]);
 
   const stats = useMemo(() => {
     const allSections = projects.reduce((total, item) => total + (item.sections?.length ?? 0), 0);
@@ -111,6 +129,7 @@ export default function SectionsPage() {
       />
 
       {error ? <div className="notice error">{error}</div> : null}
+      {message ? <div className="notice success">{message}</div> : null}
 
       <div className={styles.stats}>
         <div className={styles.statCard}>
@@ -207,9 +226,18 @@ export default function SectionsPage() {
                 )}
               </div>
               {project ? (
-                <Link className="button small" href={`/configuration/projects/${project.id}`}>
-                  Edit configuration
-                </Link>
+                <div className={styles.templateActions}>
+                  <button
+                    type="button"
+                    className="button primary small"
+                    onClick={() => setShowCreate(true)}
+                  >
+                    <Plus size={14} /> Add section
+                  </button>
+                  <Link className="button small" href={`/configuration/projects/${project.id}`}>
+                    Edit configuration
+                  </Link>
+                </div>
               ) : null}
             </div>
 
@@ -245,7 +273,10 @@ export default function SectionsPage() {
               </div>
             ) : sections.length === 0 ? (
               <div className={styles.stateWrap}>
-                <EmptyState title="No sections found" text="This project has no matching repository sections." />
+                <EmptyState
+                  title="No sections found"
+                  text="Add a repository section/module for this project using Add section."
+                />
               </div>
             ) : (
               <ol className={styles.sectionTree}>
@@ -270,6 +301,20 @@ export default function SectionsPage() {
           </div>
         </div>
       )}
+
+      {showCreate && project ? (
+        <CreateRepositorySectionModal
+          projectId={project.id}
+          nextPosition={nextPosition}
+          onCancel={() => setShowCreate(false)}
+          onCreated={async () => {
+            setShowCreate(false);
+            setMessage(`Section added at order ${nextPosition}.`);
+            await reloadSelected(project.id);
+            await loadProjects();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
