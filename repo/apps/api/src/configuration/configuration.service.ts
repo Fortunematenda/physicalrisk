@@ -181,6 +181,7 @@ export class ConfigurationService {
       await this.db.importJobs
         .createQueryBuilder()
         .delete()
+        .from('import_jobs')
         .where('project_id = :id', { id })
         .execute();
     }

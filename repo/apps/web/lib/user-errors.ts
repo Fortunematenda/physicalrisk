@@ -28,6 +28,10 @@ export function friendlyErrorMessage(error: unknown, fallback = 'Something went 
       return 'Architecture Doc is not configured as an active document type. Ask an administrator to enable it, or choose Product Architecture / Enterprise Architecture.';
     }
     if (error.status >= 500) {
+      // Prefer a concrete Nest/API message when present (helps ops diagnose live failures).
+      if (raw && !/^internal server error$/i.test(raw) && raw.length < 280) {
+        return raw;
+      }
       return 'The server could not complete this request. Please try again. If it continues, contact an administrator.';
     }
     return raw || fallback;
