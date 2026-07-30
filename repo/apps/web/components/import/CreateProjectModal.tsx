@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { ApiError, getErrorMessage } from '@/lib/api-error';
+import { nextProjectCode } from '@/lib/project-code';
 import { CreateEntityModal } from './CreateEntityModal';
 import { CreatableSelect } from './CreatableSelect';
 import { CreateDirectoryTemplateModal } from './CreateDirectoryTemplateModal';
@@ -32,9 +33,12 @@ interface CreateProjectModalProps {
 export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalProps) {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [codeTouched, setCodeTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [directoryTemplateId, setDirectoryTemplateId] = useState('');
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; isDefault?: boolean }>>([]);
+  const [existingCodes, setExistingCodes] = useState<string[]>([]);
+  const [projectCount, setProjectCount] = useState(0);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -42,21 +46,33 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
 
   useEffect(() => {
-    api('/directory-templates')
-      .then((items) => {
-        setTemplates(items);
-        const defaultTemplate = items.find((item: { isDefault?: boolean }) => item.isDefault) ?? items[0];
+    void Promise.all([
+      api<Array<{ id: string; name: string; isDefault?: boolean }>>('/directory-templates'),
+      api<Array<{ code: string }>>('/projects'),
+    ])
+      .then(([templateList, projects]) => {
+        setTemplates(templateList);
+        const defaultTemplate = templateList.find((item) => item.isDefault) ?? templateList[0];
         if (defaultTemplate) setDirectoryTemplateId(defaultTemplate.id);
+        setExistingCodes(projects.map((item) => item.code));
+        setProjectCount(projects.length);
       })
       .catch(() => undefined);
   }, []);
 
+  const onNameChange = (value: string) => {
+    setName(value);
+    if (!codeTouched) {
+      setCode(nextProjectCode(value, existingCodes, projectCount));
+    }
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
-    const trimmedCode = code.trim().toUpperCase();
+    const trimmedCode = (code.trim() || nextProjectCode(trimmedName, existingCodes, projectCount)).toUpperCase();
     if (!trimmedName || !trimmedCode) {
-      setFieldError('Project name and code are required.');
+      setFieldError('Project name is required.');
       return;
     }
     setFieldError('');
@@ -104,7 +120,7 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
             <input
               id="create-project-name"
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => onNameChange(event.target.value)}
               disabled={saving}
             />
             <small>VPS repository root folder will match this name.</small>
@@ -113,11 +129,20 @@ export function CreateProjectModal({ onCreated, onCancel }: CreateProjectModalPr
             <label htmlFor="create-project-code">Project code <em>*</em></label>
             <input
               id="create-project-code"
+              className="mono"
               value={code}
-              onChange={(event) => setCode(event.target.value.toUpperCase())}
-              placeholder="PRJ"
+              onChange={(event) => {
+                setCodeTouched(true);
+                setCode(event.target.value.toUpperCase());
+              }}
+              placeholder="Auto from name"
               disabled={saving}
             />
+            <small>
+              Auto-generated from the name
+              {projectCount >= 0 ? ` · next sequence ${projectCount + 1}` : ''}
+              . 3+ words → initials; otherwise first 3 letters, plus the project number.
+            </small>
           </div>
           <div className="field full">
             <CreatableSelect
