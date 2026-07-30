@@ -113,15 +113,49 @@ export default function ProjectDetailPage() {
     activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
   }, [openMenuId]);
 
-  /** This project's modules only (active + inactive). Template is not mutated by toggles. */
-  const modules = useMemo(
-    () => orderSectionsActiveFirst([...(item?.sections ?? [])]),
-    [item?.sections],
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === item?.directoryTemplateId) ?? null,
+    [templates, item?.directoryTemplateId],
   );
+
+  /**
+   * Modules for the selected directory template only (active + inactive on this project).
+   * Leftover sections from other templates are excluded from the total and list.
+   * Toggles still only update this project's ProjectSection rows.
+   */
+  const modules = useMemo(() => {
+    const projectSections = orderSectionsActiveFirst([...(item?.sections ?? [])]);
+    if (!selectedTemplate) return projectSections;
+
+    const templateKeys = new Set(
+      (selectedTemplate.sections ?? []).map((section) => section.sectionKey),
+    );
+    const fromTemplate = projectSections.filter((section) => templateKeys.has(section.sectionKey));
+    if (fromTemplate.length) return fromTemplate;
+
+    // Template selected but not yet applied — show template definitions for the total/list.
+    return [...(selectedTemplate.sections ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((section) => ({
+        id: section.id || section.sectionKey,
+        sectionKey: section.sectionKey,
+        name: section.name,
+        code: section.code,
+        relativePath: section.relativePath || section.name,
+        position: section.position,
+        active: section.active !== false,
+      }));
+  }, [item?.sections, selectedTemplate]);
 
   const openSection = openMenuId
     ? modules.find((section) => section.id === openMenuId) ?? null
     : null;
+
+  /** Totals reflect active modules for the selected template only. */
+  const activeModuleCount = useMemo(
+    () => modules.filter((section) => section.active !== false).length,
+    [modules],
+  );
 
   const setSectionActive = async (section: ProjectSection, active: boolean) => {
     setOpenMenuId(null);
@@ -224,11 +258,7 @@ export default function ProjectDetailPage() {
             <div className={styles.kpiRow}>
               <div className={styles.kpi}>
                 <span>Modules</span>
-                <strong>{modules.length}</strong>
-              </div>
-              <div className={styles.kpi}>
-                <span>Active</span>
-                <strong>{modules.filter((section) => section.active !== false).length}</strong>
+                <strong>{activeModuleCount}</strong>
               </div>
               <div className={styles.kpi}>
                 <span>Template</span>
@@ -258,7 +288,7 @@ export default function ProjectDetailPage() {
                     <Icon size={15} />
                     {entry.label}
                     {entry.id === 'modules' ? (
-                      <span className={styles.tabCount}>{modules.length}</span>
+                      <span className={styles.tabCount}>{activeModuleCount}</span>
                     ) : null}
                   </button>
                 );
@@ -287,7 +317,7 @@ export default function ProjectDetailPage() {
                         <span>
                           <strong>View modules</strong>
                           <span>
-                            {modules.length} module{modules.length === 1 ? '' : 's'}
+                            {activeModuleCount} active module{activeModuleCount === 1 ? '' : 's'}
                             {item.directoryTemplate?.name ? ` from ${item.directoryTemplate.name}` : ''}
                           </span>
                         </span>
