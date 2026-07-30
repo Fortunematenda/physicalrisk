@@ -1,15 +1,20 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { FolderTree, LayoutTemplate, Pencil, Plus, RefreshCw, Search, Star, Trash2 } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  FolderTree, LayoutTemplate, MoreVertical, Pencil, Plus, RefreshCw, Search, Star, Trash2,
+} from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import { deriveSectionFields, syncLinkedSectionFields } from '@/lib/section-fields';
 import styles from '../Configuration.module.css';
+import actionStyles from '@/components/row-actions.module.css';
 
 type TemplateSection = {
   id?: string;
@@ -79,14 +84,19 @@ export default function TemplatesPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState<TemplateForm>(blankForm);
   const [editing, setEditing] = useState<TemplateRow | null>(null);
   const [editForm, setEditForm] = useState<TemplateForm>(blankForm);
+  const [details, setDetails] = useState<TemplateRow | null>(null);
   const [moduleDraft, setModuleDraft] = useState(deriveSectionFields(''));
   const [editingModuleKey, setEditingModuleKey] = useState<string | null>(null);
   const [showModuleModal, setShowModuleModal] = useState(false);
   const [moduleTarget, setModuleTarget] = useState<'create' | 'edit'>('create');
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -94,9 +104,9 @@ export default function TemplatesPage() {
     try {
       const next = await api<TemplateRow[]>('/directory-templates');
       setItems(next);
-      setSelectedId((current) => {
-        if (current && next.some((item) => item.id === current)) return current;
-        return next[0]?.id ?? null;
+      setDetails((current) => {
+        if (!current) return null;
+        return next.find((item) => item.id === current.id) ?? null;
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load templates');
@@ -107,7 +117,12 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     void load();
+    setMounted(true);
   }, []);
+
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
 
   const catalog = useMemo(() => catalogFromTemplates(items), [items]);
 
@@ -128,10 +143,9 @@ export default function TemplatesPage() {
     });
   }, [items, query]);
 
-  const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? null,
-    [items, selectedId],
-  );
+  const openItem = openMenuId
+    ? filtered.find((item) => item.id === openMenuId) ?? items.find((item) => item.id === openMenuId) ?? null
+    : null;
 
   const stats = useMemo(() => {
     const defaults = items.filter((item) => item.isDefault).length;
@@ -199,57 +213,11 @@ export default function TemplatesPage() {
 
     if (moduleTarget === 'edit') setEditForm((current) => applyToForm(current));
     else setForm((current) => applyToForm(current));
-
-    // Keep catalog-like edits reflected on the selected template detail when editing an existing template section.
-    if (selected && editingModuleKey) {
-      setItems((current) => current.map((item) => {
-        if (item.id !== selected.id) return item;
-        return {
-          ...item,
-          sections: withPositions(
-            item.sections.map((section) => (
-              section.sectionKey === editingModuleKey ? { ...section, ...nextSection } : section
-            )),
-          ),
-        };
-      }));
-    }
-
     setShowModuleModal(false);
     setError('');
   };
 
-  const removeModuleFromForm = async (sectionKey: string, target: 'create' | 'edit' | 'selected') => {
-    if (target === 'selected' && selected) {
-      const ok = await confirm({
-        title: 'Remove module',
-        message: `Remove this module from “${selected.name}”? Save the template afterwards to persist.`,
-        confirmLabel: 'Remove',
-        tone: 'danger',
-      });
-      if (!ok) return;
-      const nextSections = withPositions(selected.sections.filter((section) => section.sectionKey !== sectionKey));
-      setBusyId(selected.id);
-      try {
-        await api(`/directory-templates/${encodeURIComponent(selected.id)}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            code: selected.code,
-            name: selected.name,
-            description: selected.description ?? null,
-            isDefault: Boolean(selected.isDefault),
-            sections: nextSections,
-          }),
-        });
-        setMessage('Module removed from template.');
-        await load();
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Unable to remove module');
-      } finally {
-        setBusyId(null);
-      }
-      return;
-    }
+  const removeModuleFromForm = (sectionKey: string, target: 'create' | 'edit') => {
     if (target === 'edit') {
       setEditForm((current) => ({
         ...current,
@@ -261,6 +229,13 @@ export default function TemplatesPage() {
       ...current,
       sections: withPositions(current.sections.filter((section) => section.sectionKey !== sectionKey)),
     }));
+  };
+
+  const openCreate = () => {
+    setForm(blankForm());
+    setShowCreate(true);
+    setError('');
+    setMessage('');
   };
 
   const submit = async (event: FormEvent) => {
@@ -284,6 +259,7 @@ export default function TemplatesPage() {
         }),
       });
       setMessage('Directory template created.');
+      setShowCreate(false);
       setForm(blankForm());
       await load();
     } catch (caught) {
@@ -294,7 +270,8 @@ export default function TemplatesPage() {
   };
 
   const openEdit = (item: TemplateRow) => {
-    setSelectedId(item.id);
+    setOpenMenuId(null);
+    setDetails(null);
     setEditing(item);
     setEditForm({
       code: item.code,
@@ -338,13 +315,14 @@ export default function TemplatesPage() {
     }
   };
 
-  const setDefault = async (id: string, name: string) => {
-    setBusyId(id);
+  const setDefault = async (item: TemplateRow) => {
+    setOpenMenuId(null);
+    setBusyId(item.id);
     setError('');
     setMessage('');
     try {
-      await api(`/directory-templates/${encodeURIComponent(id)}/set-default`, { method: 'POST', body: JSON.stringify({}) });
-      setMessage(`“${name}” is now the system default for new projects.`);
+      await api(`/directory-templates/${encodeURIComponent(item.id)}/set-default`, { method: 'POST', body: JSON.stringify({}) });
+      setMessage(`“${item.name}” is now the system default for new projects.`);
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to set default template');
@@ -353,12 +331,13 @@ export default function TemplatesPage() {
     }
   };
 
-  const duplicate = async (id: string) => {
-    setBusyId(id);
+  const duplicate = async (item: TemplateRow) => {
+    setOpenMenuId(null);
+    setBusyId(item.id);
     setError('');
     setMessage('');
     try {
-      await api(`/directory-templates/${encodeURIComponent(id)}/duplicate`, { method: 'POST', body: JSON.stringify({}) });
+      await api(`/directory-templates/${encodeURIComponent(item.id)}/duplicate`, { method: 'POST', body: JSON.stringify({}) });
       setMessage('Template duplicated.');
       await load();
     } catch (caught) {
@@ -368,26 +347,27 @@ export default function TemplatesPage() {
     }
   };
 
-  const removeTemplate = async (id: string, name: string, isDefault?: boolean) => {
-    if (isDefault) {
+  const removeTemplate = async (item: TemplateRow) => {
+    setOpenMenuId(null);
+    if (item.isDefault) {
       setError('Set another template as default before deleting this one.');
       return;
     }
     const ok = await confirm({
       title: 'Delete template',
-      message: `Delete template “${name}”? This cannot be undone.`,
+      message: `Delete template “${item.name}”? This cannot be undone.`,
       confirmLabel: 'Delete',
       tone: 'danger',
     });
     if (!ok) return;
-    setBusyId(id);
+    setBusyId(item.id);
     setError('');
     setMessage('');
     try {
-      await api(`/directory-templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await api(`/directory-templates/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
       setMessage('Template deleted.');
-      if (selectedId === id) setSelectedId(null);
-      if (editing?.id === id) setEditing(null);
+      if (editing?.id === item.id) setEditing(null);
+      if (details?.id === item.id) setDetails(null);
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete template');
@@ -465,7 +445,7 @@ export default function TemplatesPage() {
                   <button
                     type="button"
                     className="button small"
-                    onClick={() => void removeModuleFromForm(section.sectionKey, target)}
+                    onClick={() => removeModuleFromForm(section.sectionKey, target)}
                     title="Remove"
                   >
                     <Trash2 size={13} />
@@ -531,11 +511,10 @@ export default function TemplatesPage() {
     <div className={styles.page}>
       <PageHeader
         title="Directory Templates"
-        description="List templates, open one to manage its modules, and assign modules with multi-select instead of JSON."
-        action={{ label: 'Project Registry', href: '/configuration/projects' }}
+        description="Reusable directory blueprints that provision repository modules for new projects."
       />
 
-      {error && !showModuleModal ? <div className="notice error">{error}</div> : null}
+      {error && !showModuleModal && !showCreate && !editing ? <div className="notice error">{error}</div> : null}
       {message && !showModuleModal ? <div className="notice success">{message}</div> : null}
 
       <div className={styles.stats}>
@@ -558,268 +537,308 @@ export default function TemplatesPage() {
         <div className={styles.statCard}>
           <div className={`${styles.statIcon} ${styles.statIconOrange}`}><FolderTree size={18} /></div>
           <div>
-            <span>Sections</span>
+            <span>Modules</span>
             <strong>{stats.sections}</strong>
             <small>Across all templates</small>
           </div>
         </div>
       </div>
 
-      <div className={styles.templatesWorkspace}>
-        <form className={styles.createCard} onSubmit={submit}>
-          <div className={styles.createHead}>
-            <h2>Create template</h2>
-            <p>Choose modules from the list, or add a new module, then save the template.</p>
+      <div className={styles.panelCard}>
+        <div className={styles.toolbar}>
+          <button type="button" className="button primary small" onClick={openCreate}>
+            <Plus size={14} /> Add template
+          </button>
+          <div className={styles.searchWrap}>
+            <Search size={15} className={styles.searchIcon} />
+            <input
+              className={styles.search}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search code, name or modules"
+              aria-label="Search templates"
+            />
           </div>
-          <div className={styles.createBody}>
-            {renderTemplateFields(form, setForm, 'create', 'create')}
-          </div>
-          <div className={styles.createActions}>
-            <button type="submit" className="button primary" disabled={saving || !form.sections.length}>
-              {saving && !editing ? 'Creating…' : 'Create template'}
-            </button>
-          </div>
-        </form>
+          <button
+            type="button"
+            className={`button small ${styles.refresh}`}
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh templates"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? styles.spinning : undefined} />
+            Refresh
+          </button>
+          <span className={styles.count}>{stats.shown} shown</span>
+        </div>
 
-        <div className={styles.splitLayout}>
-          <div className={styles.panelCard}>
-            <div className={styles.toolbar}>
-              <div className={styles.searchWrap}>
-                <Search size={15} className={styles.searchIcon} />
-                <input
-                  className={styles.search}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search templates"
-                  aria-label="Search templates"
-                />
-              </div>
-              <button
-                type="button"
-                className={`button small ${styles.refresh}`}
-                onClick={() => void load()}
-                disabled={loading}
-                aria-label="Refresh templates"
-                title="Refresh"
-              >
-                <RefreshCw size={14} className={loading ? styles.spinning : undefined} />
-                Refresh
-              </button>
-              <span className={styles.count}>{stats.shown} shown</span>
-            </div>
-
-            {loading ? (
-              <div className={styles.stateWrap}><Loading /></div>
-            ) : filtered.length === 0 ? (
-              <div className={styles.stateWrap}>
-                <EmptyState
-                  title="No templates found"
-                  text={items.length === 0
-                    ? 'Create the first directory template for project provisioning.'
-                    : 'No templates match the current search.'}
-                />
-              </div>
-            ) : (
-              <div className={styles.projectList}>
+        {loading ? (
+          <div className={styles.stateWrap}><Loading /></div>
+        ) : filtered.length === 0 ? (
+          <div className={styles.stateWrap}>
+            <EmptyState
+              title="No templates found"
+              text={items.length === 0
+                ? 'Use Add template to create the first directory blueprint.'
+                : 'No templates match the current search.'}
+            />
+          </div>
+        ) : (
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th className={styles.colCode}>Code</th>
+                  <th className={styles.colProject}>Template</th>
+                  <th>Modules</th>
+                  <th className={styles.colStatus}>Default</th>
+                  <th className={styles.colStatus}>Status</th>
+                  <th className={actionStyles.actionsCell} aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
                 {filtered.map((item) => {
+                  const menuOpen = openMenuId === item.id;
                   const busy = busyId === item.id;
-                  const active = selectedId === item.id;
                   return (
-                    <div
-                      key={item.id}
-                      className={`${styles.projectButton} ${active ? styles.projectButtonActive : ''}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedId(item.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setSelectedId(item.id);
-                        }
-                      }}
-                    >
-                      <div className={styles.templateTop}>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span className={`mono ${styles.templateMeta}`}>{item.code}</span>
-                          <span>{item.sections?.length ?? 0} modules{item.isDefault ? ' · Default' : ''}</span>
-                        </div>
-                        <div className={styles.templateActions} onClick={(event) => event.stopPropagation()}>
-                          {item.isDefault ? <StatusBadge value="DEFAULT" /> : null}
+                    <tr key={item.id}>
+                      <td>
+                        <span className={`mono ${styles.projectCode}`}>{item.code}</span>
+                      </td>
+                      <td className={styles.projectCell}>
+                        <div className={styles.title}>{item.name}</div>
+                        <div className={styles.projectDescription}>{item.description || 'No description'}</div>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.projectCountBtn}
+                          onClick={() => setDetails(item)}
+                          title={`View modules in ${item.name}`}
+                        >
+                          {item.sections?.length ?? 0}
+                          <span>module{(item.sections?.length ?? 0) === 1 ? '' : 's'}</span>
+                        </button>
+                      </td>
+                      <td>{item.isDefault ? <StatusBadge value="DEFAULT" /> : <span className="secondary-text">—</span>}</td>
+                      <td><StatusBadge value={item.active !== false ? 'ACTIVE' : 'INACTIVE'} /></td>
+                      <td className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}>
+                        <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
                           <button
                             type="button"
-                            className="button small"
+                            ref={(node) => {
+                              menuButtonRefs.current[item.id] = node;
+                              if (menuOpen) activeMenuAnchor.current = node;
+                            }}
+                            className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                            aria-label={`Actions for ${item.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
                             disabled={busy || saving}
-                            onClick={() => openEdit(item)}
-                            title="Edit template"
+                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
                           >
-                            <Pencil size={13} /> Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="button small"
-                            disabled={busy || saving || Boolean(item.isDefault)}
-                            onClick={() => void removeTemplate(item.id, item.name, item.isDefault)}
-                            title="Delete template"
-                          >
-                            <Trash2 size={13} /> Delete
+                            <MoreVertical size={16} />
                           </button>
                         </div>
-                      </div>
-                    </div>
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            )}
+              </tbody>
+            </table>
           </div>
-
-          <div className={styles.panelCard}>
-            {!selected ? (
-              <div className={styles.stateWrap}>
-                <EmptyState title="Select a template" text="Click a template on the left to view and manage its modules." />
-              </div>
-            ) : (
-              <>
-                <div className={styles.detailHead}>
-                  <div>
-                    <h2>{selected.name}</h2>
-                    <p className="secondary-text">{selected.description || 'No description'} · {selected.code}</p>
-                  </div>
-                  <div className={styles.templateActions}>
-                    {!selected.isDefault ? (
-                      <button
-                        type="button"
-                        className="button small"
-                        disabled={busyId === selected.id}
-                        onClick={() => void setDefault(selected.id, selected.name)}
-                      >
-                        Set default
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="button small"
-                      disabled={busyId === selected.id}
-                      onClick={() => void duplicate(selected.id)}
-                    >
-                      Duplicate
-                    </button>
-                    <button
-                      type="button"
-                      className="button small"
-                      onClick={() => openEdit(selected)}
-                    >
-                      <Pencil size={13} /> Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="button small"
-                      disabled={Boolean(selected.isDefault)}
-                      onClick={() => void removeTemplate(selected.id, selected.name, selected.isDefault)}
-                    >
-                      <Trash2 size={13} /> Delete
-                    </button>
-                  </div>
-                </div>
-                <ol className={styles.sectionTree}>
-                  {[...(selected.sections ?? [])]
-                    .sort((a, b) => a.position - b.position)
-                    .map((section) => (
-                      <li key={`${selected.id}-${section.sectionKey}-${section.position}`}>
-                        <span className={styles.position}>{section.position}</span>
-                        <span className={styles.sectionName}>
-                          {section.name}
-                          <span className={styles.sectionKey}>{section.sectionKey} · {section.code}</span>
-                        </span>
-                        <button
-                          type="button"
-                          className="button small"
-                          onClick={() => {
-                            openEdit(selected);
-                            openEditModule(section, 'edit');
-                          }}
-                          title="Edit module"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className="button small"
-                          onClick={() => void removeModuleFromForm(section.sectionKey, 'selected')}
-                          title="Remove module"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </li>
-                    ))}
-                </ol>
-              </>
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
-      {editing ? (
-        <div className={styles.editOverlay} role="dialog" aria-modal="true" aria-labelledby="template-edit-title">
-          <form className={styles.editCard} onSubmit={saveEdit}>
-            <h3 id="template-edit-title">Edit directory template</h3>
-            <p>Update “{editing.name}” and its selected modules.</p>
-            <div className={styles.createBody}>
-              {renderTemplateFields(editForm, setEditForm, 'edit', 'edit')}
-            </div>
-            {error ? <div className="notice error">{error}</div> : null}
-            <div className={styles.editActions}>
-              <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-              <button type="submit" className="button primary" disabled={saving || !editForm.sections.length}>
-                {saving ? 'Saving…' : 'Save changes'}
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <RowActionsMenu
+        open={Boolean(openItem)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && openEdit(openItem)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
+          onClick={() => openItem && void setDefault(openItem)}
+        >
+          Set default
+        </button>
+        <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && void duplicate(openItem)}>
+          Duplicate
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={actionStyles.dangerItem}
+          disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
+          onClick={() => openItem && void removeTemplate(openItem)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
 
-      {showModuleModal ? (
-        <div className={styles.editOverlay} role="dialog" aria-modal="true" aria-labelledby="module-edit-title">
-          <div className={styles.editCard}>
-            <h3 id="module-edit-title">{editingModuleKey ? 'Edit module' : 'Add module'}</h3>
-            <p>Linked fields stay in sync — change one and the others update.</p>
-            <div className={styles.createBody}>
-              <div className="field">
-                <label htmlFor="module-name">Name <em>*</em></label>
-                <input
-                  id="module-name"
-                  value={moduleDraft.name}
-                  onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'name', event.target.value))}
-                />
+      {mounted && details
+        ? createPortal(
+            <div
+              className={actionStyles.editModal}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="template-details-title"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setDetails(null);
+              }}
+            >
+              <div className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`}>
+                <h3 id="template-details-title">{details.name}</h3>
+                <p>
+                  <span className="mono">{details.code}</span>
+                  {' · '}
+                  {details.sections?.length ?? 0} module{(details.sections?.length ?? 0) === 1 ? '' : 's'}
+                  {details.isDefault ? ' · Default' : ''}
+                </p>
+                <div className={styles.tableWrap}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Order</th>
+                        <th>Key</th>
+                        <th>Name</th>
+                        <th>Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...(details.sections ?? [])]
+                        .sort((a, b) => a.position - b.position)
+                        .map((section) => (
+                          <tr key={`${details.id}-${section.sectionKey}`}>
+                            <td>{section.position}</td>
+                            <td><span className="mono">{section.sectionKey}</span></td>
+                            <td>{section.name}</td>
+                            <td><span className="mono">{section.code}</span></td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" onClick={() => setDetails(null)}>Close</button>
+                  <button type="button" className="button primary" onClick={() => openEdit(details)}>Edit template</button>
+                </div>
               </div>
-              <div className="field">
-                <label htmlFor="module-key">Key <em>*</em></label>
-                <input
-                  id="module-key"
-                  className="mono"
-                  value={moduleDraft.sectionKey}
-                  onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'sectionKey', event.target.value))}
-                />
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {mounted && showCreate
+        ? createPortal(
+            <div
+              className={actionStyles.editModal}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="template-create-title"
+              onMouseDown={(event) => {
+                if (!saving && event.target === event.currentTarget) setShowCreate(false);
+              }}
+            >
+              <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={submit}>
+                <h3 id="template-create-title">Add directory template</h3>
+                <p>Choose modules for this blueprint, then create the template.</p>
+                <div className="form-grid">
+                  {renderTemplateFields(form, setForm, 'create', 'create')}
+                </div>
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setShowCreate(false)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving || !form.sections.length}>
+                    {saving ? 'Creating…' : 'Create template'}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {mounted && editing
+        ? createPortal(
+            <div
+              className={actionStyles.editModal}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="template-edit-title"
+              onMouseDown={(event) => {
+                if (!saving && event.target === event.currentTarget) setEditing(null);
+              }}
+            >
+              <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={saveEdit}>
+                <h3 id="template-edit-title">Edit directory template</h3>
+                <p>Update “{editing.name}” and its selected modules.</p>
+                <div className="form-grid">
+                  {renderTemplateFields(editForm, setEditForm, 'edit', 'edit')}
+                </div>
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving || !editForm.sections.length}>
+                    {saving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {mounted && showModuleModal
+        ? createPortal(
+            <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="module-edit-title">
+              <div className={actionStyles.editModalCard}>
+                <h3 id="module-edit-title">{editingModuleKey ? 'Edit module' : 'Add module'}</h3>
+                <p>Linked fields stay in sync — change one and the others update.</p>
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="module-name">Name <em>*</em></label>
+                    <input
+                      id="module-name"
+                      value={moduleDraft.name}
+                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'name', event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="module-key">Key <em>*</em></label>
+                    <input
+                      id="module-key"
+                      className="mono"
+                      value={moduleDraft.sectionKey}
+                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'sectionKey', event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="module-code">Code <em>*</em></label>
+                    <input
+                      id="module-code"
+                      value={moduleDraft.code}
+                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'code', event.target.value))}
+                    />
+                  </div>
+                </div>
+                {error ? <div className="notice error">{error}</div> : null}
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" onClick={() => setShowModuleModal(false)}>Cancel</button>
+                  <button type="button" className="button primary" onClick={applyModuleDraft}>
+                    {editingModuleKey ? 'Update module' : 'Add module'}
+                  </button>
+                </div>
               </div>
-              <div className="field">
-                <label htmlFor="module-code">Code <em>*</em></label>
-                <input
-                  id="module-code"
-                  value={moduleDraft.code}
-                  onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'code', event.target.value))}
-                />
-              </div>
-            </div>
-            {error ? <div className="notice error">{error}</div> : null}
-            <div className={styles.editActions}>
-              <button type="button" className="button" onClick={() => setShowModuleModal(false)}>Cancel</button>
-              <button type="button" className="button primary" onClick={applyModuleDraft}>
-                {editingModuleKey ? 'Update module' : 'Add module'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
