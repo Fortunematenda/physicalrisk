@@ -95,6 +95,26 @@ export function flatten(entries: TreeEntry[]): TreeEntry[] {
   return entries.flatMap((entry) => [entry, ...(entry.children ? flatten(entry.children) : [])]);
 }
 
+export function findTreeEntry(entries: TreeEntry[], path: string): TreeEntry | null {
+  const target = path.replace(/\\/g, '/');
+  for (const entry of entries) {
+    if (entry.path.replace(/\\/g, '/') === target) return entry;
+    if (entry.children?.length) {
+      const nested = findTreeEntry(entry.children, target);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+export function parentTreePath(path?: string | null): string | null {
+  if (!path) return null;
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const index = normalized.lastIndexOf('/');
+  if (index <= 0) return null;
+  return normalized.slice(0, index);
+}
+
 export function subtreeDocuments(entry: TreeEntry, documents: DocumentItem[]) {
   const flat = flatten([entry]);
   const paths = new Set(flat.map((item) => item.path));

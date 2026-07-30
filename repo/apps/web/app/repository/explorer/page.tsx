@@ -19,7 +19,8 @@ import { DocumentViewerToolbar, type ViewerControls } from './components/Documen
 import { RepositoryExplorerLayout } from './components/RepositoryExplorerLayout';
 import { RepositoryTreePanel } from './components/RepositoryTreePanel';
 import {
-  downloadText, extensionOf, flatten, canUseViewerControls, subtreeDocuments,
+  downloadText, extensionOf, findTreeEntry, flatten, canUseViewerControls,
+  parentTreePath, subtreeDocuments,
 } from './helpers';
 import styles from './RepositoryExplorer.module.css';
 import type {
@@ -82,7 +83,7 @@ export default function RepositoryExplorerPage() {
   const isTablet = useMediaQuery('(max-width: 1100px)');
   const isMobile = useMediaQuery('(max-width: 680px)');
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, options?: { selectPath?: string | null }) => {
     if (!id) return;
     setLoading(true);
     setError('');
@@ -105,6 +106,24 @@ export default function RepositoryExplorerPage() {
         }
       };
       walkExpand(tree.entries, 0);
+
+      const stayPath = options?.selectPath?.replace(/\\/g, '/') || null;
+      if (stayPath) {
+        // Keep ancestors expanded so the current folder remains visible after delete/refresh.
+        let prefix = '';
+        for (const part of stayPath.split('/')) {
+          prefix = prefix ? `${prefix}/${part}` : part;
+          if (prefix) initiallyExpanded.add(prefix);
+        }
+        const entry = findTreeEntry(tree.entries, stayPath);
+        if (entry && entry.type === 'directory') {
+          setExpanded(initiallyExpanded);
+          setSelected({ entry, kind: 'folder' });
+          setSelectedDocument(null);
+          return;
+        }
+      }
+
       setExpanded(initiallyExpanded);
       setSelected(null);
       setSelectedDocument(null);
@@ -318,12 +337,15 @@ export default function RepositoryExplorerPage() {
       tone: 'danger',
     });
     if (!ok) return;
+    // Stay on the current folder after delete (do not bounce back to project root).
+    const stayPath = selected?.kind === 'folder'
+      ? selected.entry.path
+      : parentTreePath(selected?.entry.path);
     try {
       await api(`/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
       setNotice(`Deleted “${title}”.`);
-      setSelected(null);
       setSelectedDocument(null);
-      await load(projectId);
+      await load(projectId, { selectPath: stayPath });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete document.');
     }
