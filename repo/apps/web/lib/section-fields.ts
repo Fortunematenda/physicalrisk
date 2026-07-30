@@ -26,33 +26,58 @@ export function toSectionSlug(value: string) {
     .replace(/^-+|-+$/g, '');
 }
 
-/** Short code from words / key segments (e.g. "01 Governance" → "GOV"). */
+/**
+ * Short code from words / key segments.
+ * - Letter words contribute their first letter (e.g. "Article Series" → "AS")
+ * - Numbers in the name are kept (e.g. "Article Series 1" → "AS1")
+ * - Leading order prefixes like "01" are ignored (e.g. "01 Governance" → "GOV")
+ */
 export function toSectionCode(value: string) {
   const cleaned = value.trim();
   if (!cleaned) return '';
+
+  const buildCode = (tokens: string[]) => {
+    // Drop leading numeric-only order prefixes ("01", "02", …).
+    let start = 0;
+    while (start < tokens.length && /^\d+$/.test(tokens[start]!)) start += 1;
+    const rest = tokens.slice(start);
+    if (!rest.length) return '';
+
+    const alphaTokens = rest.filter((token) => !/^\d+$/.test(token));
+    const numberTokens = rest.filter((token) => /^\d+$/.test(token));
+    const letters = alphaTokens
+      .map((token) => (token.match(/[A-Za-z]/)?.[0] ?? ''))
+      .join('')
+      .toUpperCase();
+    const numbers = numberTokens.join('');
+    // Keep trailing digits glued to a word ("Series1" → "S" + "1").
+    const gluedDigits = alphaTokens
+      .map((token) => (token.match(/\d+$/)?.[0] ?? ''))
+      .join('');
+    const suffix = numbers || gluedDigits;
+
+    if (alphaTokens.length >= 2 || suffix) {
+      return `${letters}${suffix}`.slice(0, 8);
+    }
+    // Single word after dropping order prefix: use a short stem ("Governance" → "GOV").
+    const stem = (alphaTokens[0] ?? '').replace(/[^A-Za-z]/g, '').toUpperCase();
+    return stem.slice(0, 3);
+  };
+
   const words = cleaned
     .replace(/[^A-Za-z0-9]+/g, ' ')
     .trim()
     .split(/\s+/)
     .filter(Boolean);
-  if (words.length >= 2) {
-    const fromWords = words
-      .filter((word) => !/^\d+$/.test(word))
-      .map((word) => word[0] ?? '')
-      .join('')
-      .toUpperCase();
-    if (fromWords.length >= 2) return fromWords.slice(0, 6);
-  }
+  const fromWords = buildCode(words);
+  if (fromWords) return fromWords;
+
   const key = toSectionKey(cleaned);
   const parts = key.split('_').filter(Boolean);
-  if (parts.length >= 2) {
-    return parts
-      .filter((part) => !/^\d+$/.test(part))
-      .map((part) => part.slice(0, 1))
-      .join('')
-      .slice(0, 6) || key.slice(0, 3);
-  }
-  return key.slice(0, 6) || cleaned.slice(0, 3).toUpperCase();
+  const fromParts = buildCode(parts);
+  if (fromParts) return fromParts;
+
+  return key.replace(/_/g, '').slice(0, 6) || cleaned.slice(0, 3).toUpperCase();
 }
 
 export function deriveSectionFields(source: string): Pick<SectionFields, 'name' | 'sectionKey' | 'code' | 'relativePath' | 'slug'> {
