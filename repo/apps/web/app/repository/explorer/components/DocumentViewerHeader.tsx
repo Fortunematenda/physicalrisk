@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Download, ExternalLink, FileText, Maximize2, MoreHorizontal, PanelRight, Trash2, X,
+  Download, ExternalLink, FileText, Maximize2, MoreVertical, PanelRight, X,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/status-badge';
 import { formatBytes } from '@/lib/api';
@@ -108,17 +108,6 @@ export function DocumentViewerHeader({
         >
           <Download size={15} />
         </button>
-        {onDelete ? (
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={onDelete}
-            aria-label="Delete document"
-            title="Delete document"
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
         <button
           type="button"
           className={styles.iconButton}
@@ -138,7 +127,7 @@ export function DocumentViewerHeader({
             title="More actions"
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <MoreHorizontal size={17} />
+            <MoreVertical size={17} />
           </button>
           {menuOpen ? (
             <div className={styles.menu} role="menu">
@@ -158,6 +147,19 @@ export function DocumentViewerHeader({
               >
                 View version history
               </Link>
+              {onDelete ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={styles.menuDanger}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDelete();
+                  }}
+                >
+                  Delete file
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

@@ -72,6 +72,18 @@
   background: #eef5fb;
   color: #0d3a68;
 }
+.menuDanger {
+  color: #b91c1c !important;
+}
+.menuDanger:hover:not(:disabled) {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+}
+.menu button:disabled,
+.menuDanger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .iconButtonActive {
   border-color: #9ec0ea;
   background: #eaf2ff;
@@ -214,14 +226,27 @@
   padding: 6px 8px 12px;
 }
 .treeRoot { padding: 7px 8px; color: #001b36; font-size: 13px; font-weight: 750; }
+.treeRowWrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.treeRowWrap:hover { background: #f1f5f9; }
+.treeRowWrap.selected {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
 .treeRow {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 34px;
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 0 8px;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 8px;
   background: transparent;
   color: #334155;
@@ -230,12 +255,44 @@
   text-align: left;
   cursor: pointer;
 }
-.treeRow:hover { background: #f1f5f9; }
+.treeRowWrap:hover .treeRow { background: transparent; }
 .treeRow.selected {
-  border-color: #bfdbfe;
-  background: #eff6ff;
   color: #1d4ed8;
   font-weight: 700;
+}
+.treeRowMenu {
+  position: relative;
+  flex: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.treeRowWrap:hover .treeRowMenu,
+.treeRowWrap.selected .treeRowMenu,
+.treeRowMenu:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.treeMenuButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.treeMenuButton:hover,
+.treeMenuButton.iconButtonActive {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+.treeMenu {
+  min-width: 160px;
 }
 .treeRow:focus-visible,
 .button:focus-visible,
@@ -644,8 +701,10 @@
 .folderActions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   width: 100%;
+  justify-content: flex-end;
 }
 .inlineActions {
   display: flex;

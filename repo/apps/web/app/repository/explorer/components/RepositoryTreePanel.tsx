@@ -1,7 +1,8 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import {
-  ChevronDown, ChevronRight, ChevronsLeft, PanelLeftClose, PanelLeftOpen,
+  ChevronDown, ChevronRight, ChevronsLeft, MoreVertical, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import styles from '../RepositoryExplorer.module.css';
 import { iconFor } from '../helpers';
@@ -14,6 +15,7 @@ function TreeRow({
   expanded,
   onToggle,
   onSelect,
+  onDeleteFolder,
 }: {
   entry: TreeEntry;
   level: number;
@@ -21,10 +23,33 @@ function TreeRow({
   expanded: Set<string>;
   onToggle: (entry: TreeEntry) => void;
   onSelect: (entry: TreeEntry) => void;
+  onDeleteFolder?: (entry: TreeEntry) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const expandable = entry.type === 'directory' && Boolean(entry.children?.length);
   const opened = expanded.has(entry.path);
   const selected = selectedPath === entry.path;
+  const isFolder = entry.type === 'directory' && entry.nodeType !== 'document';
+  const canDeleteFolder = Boolean(isFolder && entry.sectionId && onDeleteFolder);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'ArrowRight' && expandable && !opened) {
       event.preventDefault();
@@ -44,28 +69,64 @@ function TreeRow({
 
   return (
     <>
-      <button
-        type="button"
-        className={`${styles.treeRow} ${selected ? styles.selected : ''}`}
-        style={{ paddingLeft: 8 + level * 16 }}
-        onClick={() => onSelect(entry)}
-        onKeyDown={onKeyDown}
-        aria-label={label}
-        aria-current={selected ? 'true' : undefined}
-      >
-        <span
-          className={styles.chevron}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (expandable) onToggle(entry);
-          }}
+      <div className={`${styles.treeRowWrap} ${selected ? styles.selected : ''}`}>
+        <button
+          type="button"
+          className={`${styles.treeRow} ${selected ? styles.selected : ''}`}
+          style={{ paddingLeft: 8 + level * 16 }}
+          onClick={() => onSelect(entry)}
+          onKeyDown={onKeyDown}
+          aria-label={label}
+          aria-current={selected ? 'true' : undefined}
         >
-          {expandable ? (opened ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
-        </span>
-        <span className={styles.nodeIcon}>{iconFor(entry)}</span>
-        <span className={styles.nodeLabel}>{entry.name}</span>
-        {entry.childCount !== undefined && <span className={styles.nodeMeta}>{entry.childCount}</span>}
-      </button>
+          <span
+            className={styles.chevron}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (expandable) onToggle(entry);
+            }}
+          >
+            {expandable ? (opened ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : null}
+          </span>
+          <span className={styles.nodeIcon}>{iconFor(entry)}</span>
+          <span className={styles.nodeLabel}>{entry.name}</span>
+          {entry.childCount !== undefined && <span className={styles.nodeMeta}>{entry.childCount}</span>}
+        </button>
+        {canDeleteFolder ? (
+          <div className={styles.treeRowMenu} ref={menuRef}>
+            <button
+              type="button"
+              className={`${styles.treeMenuButton} ${menuOpen ? styles.iconButtonActive : ''}`}
+              aria-label={`Actions for ${entry.name}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title="Folder actions"
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((open) => !open);
+              }}
+            >
+              <MoreVertical size={14} />
+            </button>
+            {menuOpen ? (
+              <div className={`${styles.menu} ${styles.treeMenu}`} role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={styles.menuDanger}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                    onDeleteFolder?.(entry);
+                  }}
+                >
+                  Delete folder
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {expandable && opened
         ? entry.children?.map((child) => (
             <TreeRow
@@ -76,6 +137,7 @@ function TreeRow({
               expanded={expanded}
               onToggle={onToggle}
               onSelect={onSelect}
+              onDeleteFolder={onDeleteFolder}
             />
           ))
         : null}
@@ -93,6 +155,7 @@ type Props = {
   expanded: Set<string>;
   onToggle: (entry: TreeEntry) => void;
   onSelect: (entry: TreeEntry) => void;
+  onDeleteFolder?: (entry: TreeEntry) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
@@ -108,6 +171,7 @@ export function RepositoryTreePanel({
   expanded,
   onToggle,
   onSelect,
+  onDeleteFolder,
   collapsed,
   onToggleCollapsed,
   showCollapseButton = true,
@@ -145,6 +209,7 @@ export function RepositoryTreePanel({
                 expanded={expanded}
                 onToggle={onToggle}
                 onSelect={onSelect}
+                onDeleteFolder={onDeleteFolder}
               />
             ))}
       </div>

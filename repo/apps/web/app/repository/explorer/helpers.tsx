@@ -115,30 +115,37 @@ export function parentTreePath(path?: string | null): string | null {
   return normalized.slice(0, index);
 }
 
+/** Documents that belong to the clicked folder (and its nested pack paths). */
 export function subtreeDocuments(entry: TreeEntry, documents: DocumentItem[]) {
-  const flat = flatten([entry]);
-  const paths = new Set(flat.map((item) => item.path));
-  const documentIds = new Set(flat.map((item) => item.documentId).filter(Boolean) as string[]);
-  const folderPrefix = `${entry.path.replace(/\\/g, '/')}/`;
+  const byId = new Map(documents.map((document) => [document.id, document]));
+  const found = new Map<string, DocumentItem>();
+  const folderPath = entry.path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const folderPrefix = `${folderPath}/`;
 
-  return documents.filter((document) => {
-    if (documentIds.has(document.id)) return true;
+  for (const item of flatten([entry])) {
+    if (!item.documentId) continue;
+    const document = byId.get(item.documentId);
+    if (document) found.set(document.id, document);
+  }
+
+  for (const document of documents) {
+    if (found.has(document.id)) continue;
+
+    const sectionPath = document.section.relativePath.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (sectionPath === folderPath || sectionPath.startsWith(folderPrefix)) {
+      found.set(document.id, document);
+      continue;
+    }
 
     const versionPaths = (document.versions ?? [])
       .map((version) => version.storagePath?.replace(/\\/g, '/'))
       .filter(Boolean) as string[];
-    if (versionPaths.some((path) => path === entry.path || path.startsWith(folderPrefix))) {
-      return true;
+    if (versionPaths.some((path) => path === folderPath || path.startsWith(folderPrefix))) {
+      found.set(document.id, document);
     }
+  }
 
-    // Fallback for classic section browsing (non-pack folders).
-    return paths.has(document.section.relativePath)
-      || [...paths].some(
-        (path) =>
-          document.section.relativePath.includes(path.replace(/^.*?\//, ''))
-          || path.includes(document.section.relativePath),
-      );
-  });
+  return [...found.values()];
 }
 
 export function downloadText(fileName: string, contents: string, type: string) {

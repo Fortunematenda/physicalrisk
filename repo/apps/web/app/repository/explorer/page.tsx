@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ExternalLink, File, FileJson, FileSpreadsheet, Folder, Grid2X2, List,
-  MoreHorizontal, PanelLeftOpen, Pencil, RefreshCw, Search, TableProperties, Trash2,
+  MoreHorizontal, MoreVertical, PanelLeftOpen, Pencil, RefreshCw, Search, TableProperties,
 } from 'lucide-react';
 
 import { useConfirm } from '@/components/confirm-dialog';
@@ -70,6 +70,8 @@ export default function RepositoryExplorerPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [folderMenuOpen, setFolderMenuOpen] = useState(false);
+  const folderMenuRef = useRef<HTMLDivElement | null>(null);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [treeWidth, setTreeWidth] = useState(280);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -146,6 +148,23 @@ export default function RepositoryExplorerPage() {
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!folderMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (folderMenuRef.current?.contains(event.target as Node)) return;
+      setFolderMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFolderMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [folderMenuOpen]);
+
+  useEffect(() => {
     if (isTablet) {
       setInspectorCollapsed(true);
     } else {
@@ -211,34 +230,37 @@ export default function RepositoryExplorerPage() {
 
   const selectEntry = async (entry: TreeEntry) => {
     if (entry.type === 'file' && !entry.documentId) return;
-    if (entry.type === 'directory' && entry.children?.length) {
-      setExpanded((current) => {
-        const next = new Set(current);
-        next.has(entry.path) ? next.delete(entry.path) : next.add(entry.path);
-        return next;
-      });
+
+    // Folder click: expand and show this folder's files (chevron alone toggles collapse).
+    if (entry.type === 'directory') {
+      const isLeafDocument =
+        entry.nodeType === 'document'
+        && !(entry.children?.some((child) => child.type === 'directory'));
+
+      if (!isLeafDocument) {
+        setExpanded((current) => {
+          const next = new Set(current);
+          next.add(entry.path);
+          return next;
+        });
+        setSelected({ entry, kind: 'folder' });
+        setSelectedDocument(null);
+        setControls(DEFAULT_CONTROLS);
+        setFolderMenuOpen(false);
+        setTreeSheetOpen(false);
+        if (isTablet) setInspectorSheetOpen(false);
+        return;
+      }
     }
-    const childDirs = entry.children?.filter((child) => child.type === 'directory').length ?? 0;
-    const childFiles = entry.children?.filter((child) => child.type === 'file').length ?? 0;
-    // Pack/shared folders can carry a documentId from one child — still treat as folder when
-    // they contain multiple items so explorer lists all extracted files.
-    const isDocumentDir =
-      entry.type === 'directory'
-      && (entry.nodeType === 'document' || Boolean(entry.documentId))
-      && childDirs === 0
-      && childFiles <= 1;
-    const kind =
-      entry.type === 'file'
-        ? 'file'
-        : isDocumentDir
-          ? 'document'
-          : 'folder';
+
+    const kind = entry.type === 'file' ? 'file' : 'document';
     setSelected({ entry, kind });
     setSelectedDocument(null);
     setControls(DEFAULT_CONTROLS);
+    setFolderMenuOpen(false);
     setTreeSheetOpen(false);
     if (isTablet) setInspectorSheetOpen(false);
-    if (entry.documentId && (kind === 'document' || kind === 'file')) {
+    if (entry.documentId) {
       try {
         setSelectedDocument(await api(`/documents/${entry.documentId}`));
       } catch (caught) {
@@ -321,9 +343,9 @@ export default function RepositoryExplorerPage() {
 
   const deleteDocument = async (documentId: string, title: string) => {
     const ok = await confirm({
-      title: 'Delete document',
-      message: `Delete “${title}” and all of its versions from the repository? This cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: 'Delete file',
+      message: `Delete selected file “${title}” and all of its versions from the repository? This cannot be undone.`,
+      confirmLabel: 'Delete file',
       tone: 'danger',
     });
     if (!ok) return;
@@ -333,38 +355,40 @@ export default function RepositoryExplorerPage() {
       : parentTreePath(selected?.entry.path);
     try {
       await api(`/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
-      setNotice(`Deleted “${title}”.`);
+      setNotice(`Deleted file “${title}”.`);
       setSelectedDocument(null);
       await load(projectId, { selectPath: stayPath });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to delete document.');
+      setError(caught instanceof Error ? caught.message : 'Unable to delete file.');
     }
   };
 
-  const deleteFolder = async () => {
-    if (!selected || selected.kind !== 'folder') return;
-    const entry = selected.entry;
-    const folderDocs = subtreeDocuments(entry, documents);
-    const isEmpty = (entry.childCount ?? entry.children?.length ?? 0) === 0 && folderDocs.length === 0;
+  const deleteFolder = async (entry?: TreeEntry) => {
+    const target = entry ?? (selected?.kind === 'folder' ? selected.entry : null);
+    if (!target) return;
+    setFolderMenuOpen(false);
+    const folderDocs = subtreeDocuments(target, documents);
+    const isEmpty = (target.childCount ?? target.children?.length ?? 0) === 0 && folderDocs.length === 0;
     if (!isEmpty) {
       setError('Only empty folders can be deleted. Remove documents first.');
       return;
     }
-    if (!entry.sectionId) {
+    if (!target.sectionId) {
       setError('This folder is not a configured repository module and cannot be deleted here.');
       return;
     }
     const ok = await confirm({
       title: 'Delete folder',
-      message: `Delete empty folder “${entry.name}”?`,
-      confirmLabel: 'Delete',
+      message: `Delete empty folder “${target.name}”?`,
+      confirmLabel: 'Delete folder',
       tone: 'danger',
     });
     if (!ok) return;
     try {
-      await api(`/project-sections/${encodeURIComponent(entry.sectionId)}`, { method: 'DELETE' });
-      setNotice(`Deleted folder “${entry.name}”.`);
+      await api(`/project-sections/${encodeURIComponent(target.sectionId)}`, { method: 'DELETE' });
+      setNotice(`Deleted folder “${target.name}”.`);
       setSelected(null);
+      setSelectedDocument(null);
       await load(projectId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete folder.');
@@ -488,6 +512,7 @@ export default function RepositoryExplorerPage() {
       expanded={expanded}
       onToggle={toggleExpand}
       onSelect={(item) => void selectEntry(item)}
+      onDeleteFolder={(entry) => void deleteFolder(entry)}
       collapsed={treeCollapsed && !isMobile}
       onToggleCollapsed={() => {
         if (isMobile) setTreeSheetOpen(false);
@@ -668,8 +693,8 @@ export default function RepositoryExplorerPage() {
               <span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
               <span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span>
             </div>
-            {selected.entry.sectionId || selected.entry.nodeType === 'module' ? (
-              <div className={styles.folderActions}>
+            <div className={styles.folderActions}>
+              {selected.entry.sectionId || selected.entry.nodeType === 'module' ? (
                 <button
                   type="button"
                   className={styles.button}
@@ -681,25 +706,46 @@ export default function RepositoryExplorerPage() {
                 >
                   <Pencil size={14} /> Edit folder
                 </button>
+              ) : null}
+              <div className={styles.menuWrap} ref={folderMenuRef}>
                 <button
                   type="button"
-                  className={styles.button}
-                  disabled={
-                    !selected.entry.sectionId
-                    || displayedFolderDocs.length > 0
-                    || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
-                  }
-                  title={
-                    displayedFolderDocs.length > 0 || (selected.entry.childCount ?? 0) > 0
-                      ? 'Only empty folders can be deleted'
-                      : 'Delete empty folder'
-                  }
-                  onClick={() => void deleteFolder()}
+                  className={`${styles.iconButton} ${folderMenuOpen ? styles.iconButtonActive : ''}`}
+                  aria-label="Folder actions"
+                  aria-haspopup="menu"
+                  aria-expanded={folderMenuOpen}
+                  title="Folder actions"
+                  onClick={() => setFolderMenuOpen((open) => !open)}
                 >
-                  <Trash2 size={14} /> Delete folder
+                  <MoreVertical size={16} />
                 </button>
+                {folderMenuOpen ? (
+                  <div className={styles.menu} role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuDanger}
+                      disabled={
+                        !selected.entry.sectionId
+                        || displayedFolderDocs.length > 0
+                        || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
+                      }
+                      title={
+                        !selected.entry.sectionId
+                          ? 'Only configured repository modules can be deleted here'
+                          : displayedFolderDocs.length > 0
+                            || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
+                            ? 'Only empty folders can be deleted'
+                            : 'Delete empty folder'
+                      }
+                      onClick={() => void deleteFolder(selected.entry)}
+                    >
+                      Delete folder
+                    </button>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
           {displayedFolderDocs.length === 0 ? (
             <div className={styles.empty}>
@@ -778,7 +824,7 @@ export default function RepositoryExplorerPage() {
                             className={styles.buttonLink}
                             onClick={() => void deleteDocument(document.id, document.title)}
                           >
-                            Delete
+                            Delete file
                           </button>
                         </div>
                       </td>
