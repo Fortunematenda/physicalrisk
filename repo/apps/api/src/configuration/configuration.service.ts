@@ -442,6 +442,55 @@ export class ConfigurationService {
     await repo.save(ordered);
   }
 
+  /**
+   * Set active/inactive for a repository module everywhere it appears:
+   * all project placements and matching directory-template sections.
+   */
+  async setRepositoryModuleActive(rawKey: string, active: boolean, userId?: string) {
+    const key = sectionKey(rawKey);
+    if (!key) throw new ConfigurationException('VALIDATION_ERROR', 'Section key is required');
+
+    const projectSections = await this.db.projectSections.find({
+      where: { sectionKey: key },
+      relations: { project: true },
+      order: { createdAt: 'ASC' },
+    });
+    const templateSections = await this.db.directoryTemplateSections.find({
+      where: { sectionKey: key },
+      relations: { template: true },
+    });
+
+    if (!projectSections.length && !templateSections.length) {
+      throw new NotFoundException(`Repository module “${key}” was not found`);
+    }
+
+    for (const section of projectSections) {
+      if (section.active === active) continue;
+      await this.updateProjectSection(section.id, { active }, userId);
+    }
+
+    for (const section of templateSections) {
+      if (section.active === active) continue;
+      section.active = active;
+      await this.db.directoryTemplateSections.save(section);
+    }
+
+    await this.audit.record({
+      userId,
+      action: 'CONFIG_CHANGE',
+      entityType: 'ProjectSection',
+      entityId: key,
+      message: `Set repository module ${key} ${active ? 'active' : 'inactive'} across ${projectSections.length} project(s) and ${templateSections.length} template section(s)`,
+    });
+
+    return {
+      sectionKey: key,
+      active,
+      projectSectionsUpdated: projectSections.length,
+      templateSectionsUpdated: templateSections.length,
+    };
+  }
+
   async deleteProjectSection(id: string, userId?: string) {
     const section = await this.db.projectSections.findOne({ where: { id }, relations: { project: true } });
     if (!section) throw new NotFoundException('Project section not found');

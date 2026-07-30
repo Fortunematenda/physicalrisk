@@ -232,6 +232,46 @@ export default function SectionsPage() {
     }
   };
 
+  const setModuleActive = async (module: ModuleGroup, active: boolean) => {
+    setOpenMenuKey(null);
+    const ok = await confirm({
+      title: active ? 'Activate repository module' : 'Deactivate repository module',
+      message: active
+        ? `Set “${module.name}” active across all ${module.instances.length} project placement(s) and matching directory templates?`
+        : `Set “${module.name}” inactive across all ${module.instances.length} project placement(s) and matching directory templates? Inactive modules are hidden from import and project module totals.`,
+      confirmLabel: active ? 'Set active' : 'Set inactive',
+      tone: active ? 'default' : 'danger',
+    });
+    if (!ok) return;
+    setBusyKey(module.sectionKey);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<{
+        projectSectionsUpdated: number;
+        templateSectionsUpdated: number;
+      }>(`/repository-modules/${encodeURIComponent(module.sectionKey)}/active`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active }),
+      });
+      setMessage(
+        `“${module.name}” is now ${active ? 'active' : 'inactive'} `
+        + `across ${result.projectSectionsUpdated} project(s)`
+        + (result.templateSectionsUpdated
+          ? ` and ${result.templateSectionsUpdated} template section(s)`
+          : '')
+        + '.',
+      );
+      const data = await api<ProjectRow[]>('/projects');
+      setProjects(data);
+      refreshDetails(module.sectionKey, data);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update module status');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const deleteModule = async (module: ModuleGroup) => {
     setOpenMenuKey(null);
     const ok = await confirm({
@@ -382,6 +422,26 @@ export default function SectionsPage() {
             >
               Edit
             </button>
+            {openModule && openModule.activeCount > 0 ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busyKey === openModule.sectionKey}
+                onClick={() => void setModuleActive(openModule, false)}
+              >
+                Set inactive
+              </button>
+            ) : null}
+            {openModule && openModule.inactiveCount > 0 ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busyKey === openModule.sectionKey}
+                onClick={() => void setModuleActive(openModule, true)}
+              >
+                Set active
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"

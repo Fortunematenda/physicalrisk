@@ -37,6 +37,16 @@ export class ConfigurationController {
   }
   @Patch('project-sections/:id') updateProjectSection(@Param('id') id: string, @Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) { return this.service.updateProjectSection(id, body, user?.id); }
   @Delete('project-sections/:id') deleteProjectSection(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) { return this.service.deleteProjectSection(id, user?.id); }
+  @Patch('repository-modules/:sectionKey/active')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  setRepositoryModuleActive(
+    @Param('sectionKey') sectionKey: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.service.setRepositoryModuleActive(sectionKey, body.active === true || body.active === 'true', user?.id);
+  }
 
   @Get('directory-templates') listTemplates() { return this.service.listTemplates(); }
   @Post('directory-templates') createTemplate(@Body() body: Record<string, unknown>, @CurrentUser() user: { id?: string } | null) { return this.service.createTemplate(body, user?.id); }
