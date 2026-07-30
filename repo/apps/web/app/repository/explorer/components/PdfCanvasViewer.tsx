@@ -16,8 +16,15 @@ type Props = {
 
 async function loadPdfjs() {
   const pdfjs = await import('pdfjs-dist');
-  // CDN worker avoids Next/webpack path issues in Docker standalone builds.
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  // Prefer the package worker (bundled) so page-count works even when CDN is blocked.
+  try {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      'pdfjs-dist/build/pdf.worker.min.mjs',
+      import.meta.url,
+    ).toString();
+  } catch {
+    pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  }
   return pdfjs;
 }
 
@@ -55,10 +62,11 @@ export function PdfCanvasViewer({
           return;
         }
         pdfRef.current = pdf;
-        onPageCountRef.current(pdf.numPages);
+        const totalPages = Number(pdf.numPages) || 0;
+        if (totalPages > 0) onPageCountRef.current(totalPages);
 
         const nextThumbs: string[] = [];
-        for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
+        for (let pageNo = 1; pageNo <= totalPages; pageNo += 1) {
           const page = await pdf.getPage(pageNo);
           const viewport = page.getViewport({ scale: 0.22 });
           const canvas = document.createElement('canvas');
@@ -68,8 +76,14 @@ export function PdfCanvasViewer({
           if (!ctx) continue;
           await page.render({ canvasContext: ctx, viewport }).promise;
           nextThumbs.push(canvas.toDataURL('image/jpeg', 0.72));
+          // Keep page total visible even while thumbnails are still generating.
+          if (!cancelled && pageNo === 1) onPageCountRef.current(totalPages);
         }
-        if (!cancelled) setThumbs(nextThumbs);
+        if (!cancelled) {
+          setThumbs(nextThumbs);
+          if (totalPages > 0) onPageCountRef.current(totalPages);
+          else if (nextThumbs.length > 0) onPageCountRef.current(nextThumbs.length);
+        }
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : 'PDF could not be rendered.');
@@ -94,6 +108,7 @@ export function PdfCanvasViewer({
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!pdf || !canvas || !container || loadingDoc) return;
+      if (pdf.numPages > 0) onPageCountRef.current(pdf.numPages);
       const pageNumber = Math.min(Math.max(1, controls.page), pdf.numPages || 1);
       try {
         const page = await pdf.getPage(pageNumber);

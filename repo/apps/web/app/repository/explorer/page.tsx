@@ -94,37 +94,27 @@ export default function RepositoryExplorerPage() {
       ]);
       setRepository(tree);
       setDocuments(records);
-      // Expand modules plus nested pack/folder levels so ZIP contents are visible.
-      const initiallyExpanded = new Set<string>();
-      const walkExpand = (entries: typeof tree.entries, depth: number) => {
-        for (const entry of entries) {
-          if (entry.type !== 'directory' || !entry.children?.length) continue;
-          if (depth <= 3 || entry.nodeType === 'module' || entry.nodeType === 'register') {
-            initiallyExpanded.add(entry.path);
-            walkExpand(entry.children, depth + 1);
-          }
-        }
-      };
-      walkExpand(tree.entries, 0);
 
       const stayPath = options?.selectPath?.replace(/\\/g, '/') || null;
       if (stayPath) {
-        // Keep ancestors expanded so the current folder remains visible after delete/refresh.
+        // Only expand ancestors of the folder we should stay on (e.g. after delete).
+        const ancestors = new Set<string>();
         let prefix = '';
         for (const part of stayPath.split('/')) {
           prefix = prefix ? `${prefix}/${part}` : part;
-          if (prefix) initiallyExpanded.add(prefix);
+          if (prefix) ancestors.add(prefix);
         }
         const entry = findTreeEntry(tree.entries, stayPath);
         if (entry && entry.type === 'directory') {
-          setExpanded(initiallyExpanded);
+          setExpanded(ancestors);
           setSelected({ entry, kind: 'folder' });
           setSelectedDocument(null);
           return;
         }
       }
 
-      setExpanded(initiallyExpanded);
+      // Keep the tree collapsed by default — admins expand folders they need.
+      setExpanded(new Set());
       setSelected(null);
       setSelectedDocument(null);
     } catch (caught) {
@@ -554,12 +544,17 @@ export default function RepositoryExplorerPage() {
             loading={previewLoading}
             error={previewError}
             controls={controls}
-            onPageCount={(count) =>
-              setControls((current) => ({
-                ...current,
-                pageCount: count > 0 ? count : null,
-                page: count > 0 ? Math.min(current.page, count) : current.page,
-              }))}
+            onPageCount={(count) => {
+              if (!(count > 0)) return;
+              setControls((current) => {
+                if (current.pageCount === count && current.page <= count) return current;
+                return {
+                  ...current,
+                  pageCount: count,
+                  page: Math.min(Math.max(1, current.page), count),
+                };
+              });
+            }}
             onPageChange={(page) => setControls((current) => ({ ...current, page: Math.max(1, page) }))}
             viewerRef={viewerRef}
           />
