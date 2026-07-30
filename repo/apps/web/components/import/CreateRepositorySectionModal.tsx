@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { ApiError, getErrorMessage } from '@/lib/api-error';
 import { CreateEntityModal } from './CreateEntityModal';
@@ -16,8 +16,16 @@ export interface RepositorySectionRecord {
   relativePath: string;
 }
 
+type ProjectOption = {
+  id: string;
+  code: string;
+  name: string;
+  sections?: Array<{ position: number }>;
+};
+
 interface CreateRepositorySectionModalProps {
-  projectId: string;
+  projectId?: string;
+  projects?: ProjectOption[];
   nextPosition?: number;
   onCreated: (item: RepositorySectionRecord) => void;
   onCancel: () => void;
@@ -28,11 +36,13 @@ function slugifyPath(value: string) {
 }
 
 export function CreateRepositorySectionModal({
-  projectId,
-  nextPosition = 1,
+  projectId: initialProjectId = '',
+  projects = [],
+  nextPosition: initialNextPosition = 1,
   onCreated,
   onCancel,
 }: CreateRepositorySectionModalProps) {
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
@@ -43,7 +53,19 @@ export function CreateRepositorySectionModal({
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
 
+  useEffect(() => {
+    setProjectId(initialProjectId);
+  }, [initialProjectId]);
+
   const suggestedPath = useMemo(() => slugifyPath(name), [name]);
+
+  const nextPosition = useMemo(() => {
+    if (initialProjectId && initialProjectId === projectId) return initialNextPosition;
+    const selected = projects.find((project) => project.id === projectId);
+    const positions = (selected?.sections ?? []).map((section) => section.position || 0);
+    if (!positions.length) return 1;
+    return Math.max(...positions) + 1;
+  }, [projects, projectId, initialProjectId, initialNextPosition]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -94,6 +116,25 @@ export function CreateRepositorySectionModal({
       onCancel={onCancel}
     >
       <div className="form-grid">
+        {projects.length > 0 ? (
+          <div className="field full">
+            <label htmlFor="create-section-project">Project <em>*</em></label>
+            <select
+              id="create-section-project"
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+              disabled={saving || Boolean(initialProjectId)}
+              required
+            >
+              <option value="">Select a project…</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} — {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className="field">
           <label htmlFor="create-section-name">Section name <em>*</em></label>
           <input
@@ -105,12 +146,9 @@ export function CreateRepositorySectionModal({
               if (!pathTouched) setRelativePath(slugifyPath(next));
               if (!code.trim()) {
                 const words = next.trim().split(/\s+/).filter(Boolean);
-                const generated = words
-                  .filter((word) => !/^\d+$/.test(word))
-                  .map((word) => word[0] ?? '')
-                  .join('')
-                  .toUpperCase()
-                  .slice(0, 6);
+                const generated = words.length >= 3
+                  ? words.map((word) => word[0] ?? '').join('').toUpperCase().slice(0, 6)
+                  : next.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3);
                 if (generated) setCode(generated);
               }
             }}

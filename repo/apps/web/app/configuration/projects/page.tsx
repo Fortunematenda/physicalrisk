@@ -330,7 +330,7 @@ export default function ProjectsPage() {
           onCancel={() => setShowCreate(false)}
           onCreated={async (created) => {
             setShowCreate(false);
-            setMessage(`Project “${created.name}” created and its VPS repository folders were provisioned.`);
+            setMessage(`Project “${created.name}” created.`);
             await load();
           }}
         />

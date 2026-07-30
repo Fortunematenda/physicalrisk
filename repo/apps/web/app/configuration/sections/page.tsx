@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FolderOpen, Layers3, MoreVertical, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { FolderOpen, Layers3, MoreVertical, Plus, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { StatusBadge } from '@/components/status-badge';
+import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
 import { api } from '@/lib/api';
 import { syncLinkedSectionFields } from '@/lib/section-fields';
 import configStyles from '../Configuration.module.css';
@@ -104,6 +105,7 @@ export default function SectionsPage() {
   const [query, setQuery] = useState('');
   const [activeOnly, setActiveOnly] = useState(false);
   const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [detailsModule, setDetailsModule] = useState<ModuleGroup | null>(null);
   const [editing, setEditing] = useState<ModuleGroup | null>(null);
   const [editForm, setEditForm] = useState({
@@ -294,7 +296,6 @@ export default function SectionsPage() {
       <PageHeader
         title="Repository Modules"
         description="Repository folders (modules) used across projects — for example Articles or Research Library. Click a project count to inspect where a module is used."
-        action={{ label: 'Project Registry', href: '/configuration/projects' }}
       />
 
       {error ? <div className="notice error">{error}</div> : null}
@@ -329,6 +330,14 @@ export default function SectionsPage() {
 
       <div className={configStyles.panelCard}>
         <div className={configStyles.toolbar}>
+          <button
+            type="button"
+            className="button primary small"
+            onClick={() => setShowCreate(true)}
+            disabled={!projects.length}
+          >
+            <Plus size={14} /> Add section
+          </button>
           <div className={configStyles.searchWrap}>
             <Search size={15} className={configStyles.searchIcon} />
             <input
@@ -626,6 +635,23 @@ export default function SectionsPage() {
             document.body,
           )
         : null}
+
+      {showCreate ? (
+        <CreateRepositorySectionModal
+          projects={projects.map((project) => ({
+            id: project.id,
+            code: project.code,
+            name: project.name,
+            sections: project.sections,
+          }))}
+          onCancel={() => setShowCreate(false)}
+          onCreated={async (created) => {
+            setShowCreate(false);
+            setMessage(`Section “${created.name}” added.`);
+            await load();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

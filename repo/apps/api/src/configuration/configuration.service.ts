@@ -210,16 +210,48 @@ export class ConfigurationService {
     await this.db.dataSource.transaction(async (manager) => {
       const projects = manager.getRepository(Project);
       const sections = manager.getRepository(ProjectSection);
-      for (const source of [...template.sections].sort((a, b) => a.position - b.position)) {
-        let target = await sections.findOne({ where: { project: { id: projectId }, sectionKey: source.sectionKey }, relations: { project: true } });
-        if (!target) target = sections.create({ project, sectionKey: source.sectionKey, relativePath: source.name });
+      const existing = await sections.find({ where: { project: { id: projectId } }, relations: { project: true } });
+
+      // Shift positions out of the unique (project, position) range before reordering.
+      let tempPosition = 10_000;
+      for (const row of existing) {
+        row.position = tempPosition++;
+        await sections.save(row);
+      }
+
+      const templateSections = [...(template.sections ?? [])].sort((a, b) => a.position - b.position);
+      const keptKeys = new Set(templateSections.map((source) => source.sectionKey));
+
+      for (const source of templateSections) {
+        let target = existing.find((row) => row.sectionKey === source.sectionKey);
+        if (!target) {
+          target = sections.create({
+            project,
+            sectionKey: source.sectionKey,
+            relativePath: source.name,
+          });
+          existing.push(target);
+        }
         target.code = source.code;
         target.name = source.name;
         target.slug = source.slug;
         target.position = source.position;
-        target.active = source.active;
+        target.active = source.active !== false;
+        if (!target.relativePath) target.relativePath = source.name;
         await sections.save(target);
       }
+
+      // Sections not in the new template sink inactive to the bottom (kept for existing docs).
+      const extras = existing
+        .filter((row) => !keptKeys.has(row.sectionKey))
+        .sort((a, b) => a.position - b.position);
+      let nextPosition = templateSections.length + 1;
+      for (const row of extras) {
+        row.active = false;
+        row.position = nextPosition++;
+        await sections.save(row);
+      }
+
       project.directoryTemplate = template;
       await projects.save(project);
     });

@@ -4,15 +4,14 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  FolderKanban, FolderSync, LayoutTemplate, Layers3, Save, Settings2,
+  FolderKanban, LayoutTemplate, Layers3, Save, Settings2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { useConfirm } from '@/components/confirm-dialog';
-import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
 import { api, formatDate } from '@/lib/api';
-import { orderSectionsActiveFirst, syncLinkedSectionFields } from '@/lib/section-fields';
+import { getErrorMessage } from '@/lib/api-error';
 import styles from './ProjectDetail.module.css';
 
 type TabId = 'overview' | 'configuration' | 'modules' | 'template';
@@ -26,6 +25,16 @@ type ProjectSection = {
   position: number;
   active?: boolean;
   slug?: string;
+};
+
+type TemplateSection = {
+  id?: string;
+  sectionKey: string;
+  name: string;
+  code: string;
+  relativePath?: string;
+  position: number;
+  active?: boolean;
 };
 
 type ProjectDetail = {
@@ -46,7 +55,7 @@ type TemplateRow = {
   id: string;
   name: string;
   isDefault?: boolean;
-  sections: Array<{ id?: string }>;
+  sections: TemplateSection[];
 };
 
 const TABS: Array<{ id: TabId; label: string; icon: typeof Settings2 }> = [
@@ -63,10 +72,9 @@ export default function ProjectDetailPage() {
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [tab, setTab] = useState<TabId>('overview');
   const [saving, setSaving] = useState(false);
-  const [busySectionId, setBusySectionId] = useState<string | null>(null);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [showCreateSection, setShowCreateSection] = useState(false);
 
   const load = async () => {
     try {
@@ -74,13 +82,10 @@ export default function ProjectDetailPage() {
         api<ProjectDetail>(`/projects/${id}`),
         api<TemplateRow[]>('/directory-templates'),
       ]);
-      setItem({
-        ...project,
-        sections: orderSectionsActiveFirst([...(project.sections ?? [])] as ProjectSection[]),
-      });
+      setItem(project);
       setTemplates(templateList);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load project');
+      setError(getErrorMessage(caught, 'Unable to load project'));
     }
   };
 
@@ -88,20 +93,37 @@ export default function ProjectDetailPage() {
     void load();
   }, [id]);
 
-  const sections = useMemo(
-    () => [...(item?.sections ?? [])].sort((a, b) => a.position - b.position),
-    [item],
+  // Keep VPS folders in sync quietly; create/update APIs already ensure structure.
+  useEffect(() => {
+    if (!id) return;
+    void api(`/storage/projects/${id}/sync`, { method: 'POST' }).catch(() => undefined);
+  }, [id]);
+
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === item?.directoryTemplateId) ?? null,
+    [templates, item?.directoryTemplateId],
   );
 
-  const activeModules = useMemo(
-    () => sections.filter((section) => section.active !== false).length,
-    [sections],
-  );
+  /** Modules for the project's selected template (prefer live project folders). */
+  const modules = useMemo(() => {
+    const projectSections = [...(item?.sections ?? [])]
+      .filter((section) => section.active !== false)
+      .sort((a, b) => a.position - b.position);
 
-  const nextSectionPosition = useMemo(() => {
-    if (!sections.length) return 1;
-    return Math.max(...sections.map((section) => section.position || 0)) + 1;
-  }, [sections]);
+    if (projectSections.length) return projectSections;
+
+    return [...(selectedTemplate?.sections ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((section) => ({
+        id: section.id || section.sectionKey,
+        sectionKey: section.sectionKey,
+        name: section.name,
+        code: section.code,
+        relativePath: section.relativePath || section.name,
+        position: section.position,
+        active: section.active !== false,
+      }));
+  }, [item?.sections, selectedTemplate]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -111,91 +133,40 @@ export default function ProjectDetailPage() {
     setMessage('');
     try {
       await api(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(item) });
-      setMessage('Project configuration saved and VPS folders synchronised.');
+      setMessage('Project configuration saved.');
       await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to save');
+      setError(getErrorMessage(caught, 'Unable to save'));
     } finally {
       setSaving(false);
     }
   };
 
   const applyTemplate = async (templateId: string) => {
+    if (templateId === item?.directoryTemplateId) {
+      setTab('modules');
+      return;
+    }
+    const template = templates.find((row) => row.id === templateId);
     const ok = await confirm({
       title: 'Apply template',
-      message: 'Apply this template? Existing files, document relationships and version history are retained.',
+      message: `Apply “${template?.name || 'this template'}”? Existing files, document relationships and version history are retained. Modules not in the template are marked inactive.`,
       confirmLabel: 'Apply template',
       tone: 'default',
     });
     if (!ok) return;
     setError('');
     setMessage('');
+    setApplyingTemplate(true);
     try {
-      await api(`/projects/${id}/apply-template/${templateId}`, { method: 'POST' });
+      await api(`/projects/${id}/apply-template/${templateId}`, { method: 'POST', body: JSON.stringify({}) });
       await load();
-      setMessage('Template applied and VPS folders synchronised.');
+      setMessage(`Template “${template?.name || 'selected'}” applied.`);
       setTab('modules');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to apply template');
-    }
-  };
-
-  const patchSectionLocal = (
-    sectionId: string,
-    updater: (row: ProjectSection) => ProjectSection,
-    reorder = false,
-  ) => {
-    setItem((current) => {
-      if (!current) return current;
-      let nextSections = current.sections.map((row) => (
-        row.id === sectionId ? updater(row) : row
-      ));
-      if (reorder) nextSections = orderSectionsActiveFirst(nextSections);
-      return { ...current, sections: nextSections };
-    });
-  };
-
-  const updateSection = async (section: ProjectSection) => {
-    setBusySectionId(section.id);
-    setError('');
-    setMessage('');
-    try {
-      await api(`/project-sections/${section.id}`, { method: 'PATCH', body: JSON.stringify(section) });
-      setMessage(`Saved “${section.name}” and ensured its VPS folder exists.`);
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to update section');
+      setError(getErrorMessage(caught, 'Unable to apply template'));
     } finally {
-      setBusySectionId(null);
-    }
-  };
-
-  const onLinkedFieldChange = (
-    section: ProjectSection,
-    field: 'name' | 'sectionKey' | 'code' | 'relativePath',
-    value: string,
-  ) => {
-    patchSectionLocal(section.id, (row) => syncLinkedSectionFields(row, field, value));
-  };
-
-  const onActiveChange = async (section: ProjectSection, active: boolean) => {
-    if (!item) return;
-    const next = orderSectionsActiveFirst(
-      item.sections.map((row) => (row.id === section.id ? { ...row, active } : row)),
-    );
-    const updated = next.find((row) => row.id === section.id)!;
-    setItem({ ...item, sections: next });
-    await updateSection(updated);
-  };
-
-  const syncStorage = async () => {
-    setError('');
-    setMessage('');
-    try {
-      const result = await api<{ sectionsCreated: number }>(`/storage/projects/${id}/sync`, { method: 'POST' });
-      setMessage(`VPS repository synchronised: ${result.sectionsCreated} active section folders are ready.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to synchronise storage');
+      setApplyingTemplate(false);
     }
   };
 
@@ -227,24 +198,16 @@ export default function ProjectDetailPage() {
                   {item.description?.trim() || 'No description provided for this project yet.'}
                 </p>
               </div>
-              <div className={styles.heroActions}>
-                <button type="button" className="button small" onClick={() => void syncStorage}>
-                  <FolderSync size={14} /> Sync VPS
-                </button>
-                <button type="button" className="button primary small" onClick={() => setTab('configuration')}>
-                  Edit configuration
-                </button>
-              </div>
             </div>
 
             <div className={styles.kpiRow}>
               <div className={styles.kpi}>
                 <span>Modules</span>
-                <strong>{sections.length}</strong>
+                <strong>{modules.length}</strong>
               </div>
               <div className={styles.kpi}>
-                <span>Active</span>
-                <strong>{activeModules}</strong>
+                <span>Template</span>
+                <strong style={{ fontSize: 14 }}>{item.directoryTemplate?.name || 'Custom'}</strong>
               </div>
               <div className={styles.kpi}>
                 <span>Documents</span>
@@ -274,7 +237,7 @@ export default function ProjectDetailPage() {
                     <Icon size={15} />
                     {entry.label}
                     {entry.id === 'modules' ? (
-                      <span className={styles.tabCount}>{sections.length}</span>
+                      <span className={styles.tabCount}>{modules.length}</span>
                     ) : null}
                   </button>
                 );
@@ -301,20 +264,23 @@ export default function ProjectDetailPage() {
                       </Link>
                       <button type="button" className={styles.quickItem} onClick={() => setTab('modules')}>
                         <span>
-                          <strong>Manage modules</strong>
-                          <span>{activeModules} active of {sections.length} configured folders</span>
+                          <strong>View modules</strong>
+                          <span>
+                            {modules.length} module{modules.length === 1 ? '' : 's'}
+                            {item.directoryTemplate?.name ? ` from ${item.directoryTemplate.name}` : ''}
+                          </span>
                         </span>
                       </button>
+                      <Link className={styles.quickItem} href="/configuration/sections">
+                        <span>
+                          <strong>Edit in Repository Modules</strong>
+                          <span>Add, edit or delete modules across projects</span>
+                        </span>
+                      </Link>
                       <button type="button" className={styles.quickItem} onClick={() => setTab('template')}>
                         <span>
                           <strong>Directory template</strong>
                           <span>{item.directoryTemplate?.name || 'Custom configuration'}</span>
-                        </span>
-                      </button>
-                      <button type="button" className={styles.quickItem} onClick={() => void syncStorage}>
-                        <span>
-                          <strong>Synchronise VPS folders</strong>
-                          <span>Ensure active module folders exist on disk</span>
                         </span>
                       </button>
                     </div>
@@ -407,9 +373,6 @@ export default function ProjectDetailPage() {
                     <Save size={14} />
                     {saving ? 'Saving…' : 'Save project'}
                   </button>
-                  <button type="button" className="button" onClick={() => void syncStorage}>
-                    <FolderSync size={14} /> Synchronise VPS folders
-                  </button>
                   <Link className="button" href={`/repository/explorer?projectId=${id}`}>
                     Open repository explorer
                   </Link>
@@ -421,18 +384,22 @@ export default function ProjectDetailPage() {
               <div className={styles.panel} role="tabpanel">
                 <div className={styles.panelHead}>
                   <div>
-                    <h2>Repository modules</h2>
+                    <h2>Template modules</h2>
                     <p>
-                      Changing Name, Key, Code, or folder updates the linked fields. Inactive modules move to the bottom.
+                      {item.directoryTemplate?.name
+                        ? `Read-only view of modules from “${item.directoryTemplate.name}”. Edit or add modules in Repository Modules.`
+                        : 'No directory template selected yet. Choose one under Template, or manage modules in Repository Modules.'}
                     </p>
                   </div>
-                  <button type="button" className="button primary small" onClick={() => setShowCreateSection(true)}>
-                    Add section
-                  </button>
+                  <Link className="button small" href="/configuration/sections">
+                    Open Repository Modules
+                  </Link>
                 </div>
 
-                {sections.length === 0 ? (
-                  <div className="notice">No modules yet. Add a section or apply a directory template.</div>
+                {modules.length === 0 ? (
+                  <div className="notice">
+                    No modules for this project yet. Apply a directory template or add a section in Repository Modules.
+                  </div>
                 ) : (
                   <div className={styles.tableWrap}>
                     <table>
@@ -443,78 +410,21 @@ export default function ProjectDetailPage() {
                           <th>Name</th>
                           <th>Code</th>
                           <th>VPS relative folder</th>
-                          <th>Active</th>
-                          <th aria-label="Actions" />
+                          <th>Status</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {sections.map((section) => (
-                          <tr key={section.id} style={section.active === false ? { opacity: 0.65 } : undefined}>
-                            <td style={{ width: 72 }}>
-                              <input
-                                type="number"
-                                min={1}
-                                value={section.position}
-                                disabled={section.active === false || busySectionId === section.id}
-                                onChange={(event) => {
-                                  patchSectionLocal(section.id, (row) => ({
-                                    ...row,
-                                    position: Number(event.target.value),
-                                  }));
-                                }}
-                              />
+                        {modules.map((section) => (
+                          <tr key={section.id || section.sectionKey}>
+                            <td>{section.position}</td>
+                            <td><span className="mono">{section.sectionKey}</span></td>
+                            <td>{section.name}</td>
+                            <td><span className="mono">{section.code}</span></td>
+                            <td>
+                              <span className="mono">{section.relativePath || section.name}</span>
                             </td>
                             <td>
-                              <input
-                                className="mono"
-                                value={section.sectionKey}
-                                disabled={busySectionId === section.id}
-                                onChange={(event) => onLinkedFieldChange(section, 'sectionKey', event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={section.name}
-                                disabled={busySectionId === section.id}
-                                onChange={(event) => onLinkedFieldChange(section, 'name', event.target.value)}
-                              />
-                            </td>
-                            <td style={{ width: 90 }}>
-                              <input
-                                value={section.code}
-                                disabled={busySectionId === section.id}
-                                onChange={(event) => onLinkedFieldChange(section, 'code', event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                className="mono"
-                                value={section.relativePath || section.name}
-                                disabled={busySectionId === section.id}
-                                onChange={(event) => onLinkedFieldChange(section, 'relativePath', event.target.value)}
-                              />
-                            </td>
-                            <td style={{ width: 70 }}>
-                              <input
-                                type="checkbox"
-                                checked={section.active !== false}
-                                disabled={busySectionId === section.id}
-                                onChange={(event) => void onActiveChange(section, event.target.checked)}
-                                aria-label={`Active ${section.name}`}
-                              />
-                            </td>
-                            <td style={{ width: 80 }}>
-                              <button
-                                type="button"
-                                className="button small"
-                                disabled={busySectionId === section.id}
-                                onClick={() => {
-                                  const current = item.sections.find((row) => row.id === section.id) ?? section;
-                                  void updateSection(current);
-                                }}
-                              >
-                                {busySectionId === section.id ? '…' : 'Save'}
-                              </button>
+                              <StatusBadge value={section.active !== false ? 'ACTIVE' : 'INACTIVE'} />
                             </td>
                           </tr>
                         ))}
@@ -531,7 +441,7 @@ export default function ProjectDetailPage() {
                   <div>
                     <h2>Directory template</h2>
                     <p>
-                      Apply a template to provision or refresh module folders. Existing documents and relationships are kept.
+                      Apply a template to provision or refresh this project’s modules. Existing documents and relationships are kept.
                     </p>
                   </div>
                 </div>
@@ -543,11 +453,12 @@ export default function ProjectDetailPage() {
                         key={template.id}
                         type="button"
                         className={`${styles.templateCard} ${active ? styles.templateCardActive : ''}`}
+                        disabled={applyingTemplate}
                         onClick={() => void applyTemplate(template.id)}
                       >
                         <strong>{template.name}</strong>
                         <span>
-                          {template.sections.length} configured sections
+                          {template.sections?.length ?? 0} configured sections
                           {template.isDefault ? ' · Default' : ''}
                           {active ? ' · Current' : ''}
                         </span>
@@ -559,20 +470,6 @@ export default function ProjectDetailPage() {
             ) : null}
           </div>
         </>
-      ) : null}
-
-      {showCreateSection && item ? (
-        <CreateRepositorySectionModal
-          projectId={item.id}
-          nextPosition={nextSectionPosition}
-          onCancel={() => setShowCreateSection(false)}
-          onCreated={async () => {
-            setShowCreateSection(false);
-            setMessage(`Section added at order ${nextSectionPosition}.`);
-            await load();
-            setTab('modules');
-          }}
-        />
       ) : null}
     </div>
   );
