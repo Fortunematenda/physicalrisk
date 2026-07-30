@@ -257,7 +257,8 @@
   font-size: 13px;
 }
 
-.colProject { width: 42%; }
+.colCode { width: 10%; }
+.colProject { width: 32%; }
 .colStatus { width: 10%; }
 .colPath { width: 18%; }
 .colNum { width: 7%; }

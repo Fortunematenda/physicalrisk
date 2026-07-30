@@ -1,17 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FolderKanban, FileStack, Pencil, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { FolderKanban, FileStack, MoreVertical, Plus, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
 import { CreateProjectModal } from '@/components/import/CreateProjectModal';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api, formatDate } from '@/lib/api';
 import styles from '../Configuration.module.css';
+import actionStyles from '@/components/row-actions.module.css';
 
 type ProjectRow = {
   id: string;
@@ -36,6 +38,9 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [query, setQuery] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -53,6 +58,10 @@ export default function ProjectsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -72,13 +81,21 @@ export default function ProjectsPage() {
     });
   }, [items, statusFilter, query]);
 
+  const openItem = openMenuId ? filtered.find((item) => item.id === openMenuId) ?? items.find((item) => item.id === openMenuId) ?? null : null;
+
   const stats = useMemo(() => {
     const active = items.filter((item) => item.status === 'ACTIVE').length;
     const documents = items.reduce((total, item) => total + (item._count?.documents ?? 0), 0);
     return { total: items.length, active, documents, shown: filtered.length };
   }, [items, filtered.length]);
 
+  const editProject = (item: ProjectRow) => {
+    setOpenMenuId(null);
+    router.push(`/configuration/projects/${item.id}`);
+  };
+
   const deleteProject = async (item: ProjectRow) => {
+    setOpenMenuId(null);
     const ok = await confirm({
       title: 'Delete project',
       message: item._count.documents > 0
@@ -201,82 +218,112 @@ export default function ProjectsPage() {
             <table>
               <thead>
                 <tr>
+                  <th className={styles.colCode}>Code</th>
                   <th className={styles.colProject}>Project</th>
                   <th className={styles.colStatus}>Status</th>
                   <th className={styles.colPath}>VPS directory</th>
                   <th className={styles.colNum}>Documents</th>
                   <th className={styles.colNum}>Imports</th>
                   <th className={styles.colDate}>Updated</th>
-                  <th className={styles.colActions}>Actions</th>
+                  <th className={actionStyles.actionsCell} aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="clickable-row"
-                    tabIndex={0}
-                    role="link"
-                    aria-label={`Open project ${item.code}`}
-                    onClick={() => router.push(`/configuration/projects/${item.id}`)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        router.push(`/configuration/projects/${item.id}`);
-                      }
-                    }}
-                  >
-                    <td className={styles.projectCell}>
-                      <Link
-                        href={`/configuration/projects/${item.id}`}
-                        className={`primary-text ${styles.docLink} ${styles.projectCode}`}
+                {filtered.map((item) => {
+                  const menuOpen = openMenuId === item.id;
+                  const busy = busyId === item.id;
+                  return (
+                    <tr
+                      key={item.id}
+                      className="clickable-row"
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Open project ${item.code}`}
+                      onClick={() => router.push(`/configuration/projects/${item.id}`)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          router.push(`/configuration/projects/${item.id}`);
+                        }
+                      }}
+                    >
+                      <td>
+                        <Link
+                          href={`/configuration/projects/${item.id}`}
+                          className={`primary-text ${styles.docLink} ${styles.projectCode}`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {item.code}
+                        </Link>
+                      </td>
+                      <td className={styles.projectCell}>
+                        <div className={styles.title}>{item.name}</div>
+                        <div className={styles.projectDescription}>{item.description || 'No description'}</div>
+                      </td>
+                      <td><StatusBadge value={item.status} /></td>
+                      <td>
+                        <span className={`mono ${styles.path}`} title={`repository/${item.repositoryRootPath}`}>
+                          repository/{item.repositoryRootPath}
+                        </span>
+                        <div className="secondary-text">{item.sections.length} sections</div>
+                      </td>
+                      <td>{item._count.documents}</td>
+                      <td>{item._count.importJobs}</td>
+                      <td>{formatDate(item.updatedAt)}</td>
+                      <td
+                        className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        {item.code}
-                      </Link>
-                      <div className={styles.title}>{item.name}</div>
-                      <div className={styles.projectDescription}>{item.description || 'No description'}</div>
-                    </td>
-                    <td><StatusBadge value={item.status} /></td>
-                    <td>
-                      <span className={`mono ${styles.path}`} title={`repository/${item.repositoryRootPath}`}>
-                        repository/{item.repositoryRootPath}
-                      </span>
-                      <div className="secondary-text">{item.sections.length} sections</div>
-                    </td>
-                    <td>{item._count.documents}</td>
-                    <td>{item._count.importJobs}</td>
-                    <td>{formatDate(item.updatedAt)}</td>
-                    <td className={styles.colActions}>
-                      <div className={styles.iconActions} onClick={(event) => event.stopPropagation()}>
-                        <button
-                          type="button"
-                          className={styles.iconActionBtn}
-                          onClick={() => router.push(`/configuration/projects/${item.id}`)}
-                          title="Edit project"
-                          aria-label={`Edit ${item.name}`}
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.iconActionBtn} ${styles.iconActionBtnDanger}`}
-                          disabled={busyId === item.id}
-                          onClick={() => void deleteProject(item)}
-                          title="Delete project"
-                          aria-label={`Delete ${item.name}`}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
+                          <button
+                            type="button"
+                            ref={(node) => {
+                              menuButtonRefs.current[item.id] = node;
+                              if (menuOpen) activeMenuAnchor.current = node;
+                            }}
+                            className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                            aria-label={`Actions for ${item.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            disabled={busy}
+                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      <RowActionsMenu
+        open={Boolean(openItem)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyId === openItem?.id}
+          onClick={() => openItem && editProject(openItem)}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={actionStyles.dangerItem}
+          disabled={busyId === openItem?.id}
+          onClick={() => openItem && void deleteProject(openItem)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
 
       {showCreate ? (
         <CreateProjectModal
