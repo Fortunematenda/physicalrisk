@@ -268,7 +268,8 @@ export class SeedService implements OnApplicationBootstrap {
       ['pptx', 'Microsoft PowerPoint Presentation', ['application/vnd.openxmlformats-officedocument.presentationml.presentation'], 50, true],
       ['md', 'Markdown Document', ['text/markdown', 'text/plain'], 10, true], ['txt', 'Plain Text Document', ['text/plain'], 10, true],
       ['csv', 'CSV Dataset', ['text/csv'], 25, true], ['png', 'PNG Image', ['image/png'], 25, false],
-      ['jpg', 'JPEG Image', ['image/jpeg'], 25, false], ['zip', 'Developer Pack Archive', ['application/zip'], 100, false],
+      ['jpg', 'JPEG Image', ['image/jpeg'], 25, false],
+      ['zip', 'Developer Pack Archive', ['application/zip', 'application/x-zip-compressed', 'application/x-zip'], 100, false],
     ];
     for (const [extension, label, mimeTypes, maxSizeMb, allowMetadataExtraction] of fileTypes) {
       let row = await this.db.fileTypes.findOne({ where: { extension } });

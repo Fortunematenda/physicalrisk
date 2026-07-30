@@ -22,6 +22,13 @@ type DocumentTypeOption = {
   active?: boolean;
 };
 
+type FileTypeOption = {
+  id: string;
+  extension: string;
+  label?: string;
+  active?: boolean;
+};
+
 type RuleForm = {
   name: string;
   projectId: string;
@@ -64,6 +71,7 @@ export default function RoutingRulesPage() {
   const [projects, setProjects] = useState<any[]>([]);
   const [sources, setSources] = useState<any[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeOption[]>([]);
+  const [fileTypes, setFileTypes] = useState<FileTypeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -94,6 +102,16 @@ export default function RoutingRulesPage() {
     () => documentTypes.filter((item) => item.active !== false),
     [documentTypes],
   );
+  const activeFileTypes = useMemo(
+    () => fileTypes
+      .filter((item) => item.active !== false && item.extension)
+      .map((item) => ({
+        ...item,
+        extension: item.extension.replace(/^\./, '').toLowerCase(),
+      }))
+      .sort((a, b) => a.extension.localeCompare(b.extension)),
+    [fileTypes],
+  );
 
   const nextPriority = useMemo(() => {
     if (!rules.length) return 100;
@@ -103,16 +121,18 @@ export default function RoutingRulesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [r, p, s, types] = await Promise.all([
+      const [r, p, s, types, files] = await Promise.all([
         api<RoutingRule[]>('/routing-rules'),
         api('/projects'),
         api('/source-systems'),
         api('/document-types'),
+        api<FileTypeOption[]>('/file-types'),
       ]);
       setRules(r);
       setProjects(p);
       setSources(s);
       setDocumentTypes(Array.isArray(types) ? types : []);
+      setFileTypes(Array.isArray(files) ? files : []);
       setError('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to load routing rules');
@@ -206,7 +226,7 @@ export default function RoutingRulesPage() {
       projectId: rule.projectId ?? rule.project?.id ?? '',
       sourceSystemId: rule.sourceSystemId ?? rule.sourceSystem?.id ?? '',
       documentType: rule.documentType ?? '',
-      fileExtension: rule.fileExtension ?? '',
+      fileExtension: (rule.fileExtension ?? '').replace(/^\./, '').toLowerCase(),
       targetSectionKey: rule.targetSectionKey ?? '',
       priority: Number(rule.priority ?? 100),
       active: rule.active !== false,
@@ -316,12 +336,25 @@ export default function RoutingRulesPage() {
       </div>
       <div className="field">
         <label htmlFor={`${idPrefix}-ext`}>File extension</label>
-        <input
+        <select
           id={`${idPrefix}-ext`}
           value={values.fileExtension}
           onChange={(e) => setValues({ ...values, fileExtension: e.target.value })}
-          placeholder="docx"
-        />
+        >
+          <option value="">Any file</option>
+          {activeFileTypes.map((item) => (
+            <option key={item.id} value={item.extension}>
+              .{item.extension}{item.label ? ` — ${item.label}` : ''}
+            </option>
+          ))}
+          {values.fileExtension
+            && !activeFileTypes.some((item) => item.extension === values.fileExtension.replace(/^\./, '').toLowerCase())
+            ? (
+              <option value={values.fileExtension.replace(/^\./, '').toLowerCase()}>
+                .{values.fileExtension.replace(/^\./, '').toLowerCase()} (current)
+              </option>
+            ) : null}
+        </select>
       </div>
       <div className="field">
         <label htmlFor={`${idPrefix}-section`}>Target section <em>*</em></label>

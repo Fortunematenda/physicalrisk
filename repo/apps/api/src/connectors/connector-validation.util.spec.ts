@@ -25,6 +25,17 @@ describe('connector validation helpers', () => {
     expect(() => assertMimeTypeAllowed('text/plain', fileType, 'report.pdf')).toThrow(BadRequestException);
   });
 
+  it('accepts Windows zip MIME aliases when application/zip is configured', () => {
+    const zipType: FileType = {
+      ...fileType,
+      extension: 'zip',
+      label: 'ZIP',
+      mimeTypes: ['application/zip'],
+    };
+    expect(() => assertMimeTypeAllowed('application/x-zip-compressed', zipType, 'bundle.zip')).not.toThrow();
+    expect(() => assertMimeTypeAllowed('application/zip', zipType, 'bundle.zip')).not.toThrow();
+  });
+
   it('validates file size limits', () => {
     expect(() => assertFileSizeAllowed(512 * 1024, fileType)).not.toThrow();
     expect(() => assertFileSizeAllowed(2 * 1024 * 1024, fileType)).toThrow(BadRequestException);

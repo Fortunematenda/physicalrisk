@@ -19,6 +19,7 @@ import {
   SourceSystem,
   User,
 } from '../database/entities';
+import { mimeTypeAllowed } from '../connectors/connector-validation.util';
 import { VpsStorageService } from '../storage/vps-storage.service';
 import { ImportBusinessException } from './import.exception';
 import { compareVersions, suggestNextVersion } from './version.util';
@@ -1026,16 +1027,10 @@ export class ImportsService {
 
     const declaredMime = String(fileContext.mimeType || '').trim().toLowerCase().split(';')[0].trim();
     const allowedMimes = (fileType.mimeTypes ?? []).map((item) => String(item).trim().toLowerCase().split(';')[0].trim()).filter(Boolean);
-    if (allowedMimes.length && declaredMime && declaredMime !== 'application/octet-stream') {
-      const mimeAllowed = allowedMimes.some((allowed) => {
-        if (allowed.endsWith('/*')) return declaredMime.startsWith(allowed.slice(0, -1));
-        return allowed === declaredMime;
-      });
-      if (!mimeAllowed) {
-        throw new BadRequestException(
-          `MIME type '${declaredMime}' is not allowed for .${extension} files (allowed: ${allowedMimes.join(', ')})`,
-        );
-      }
+    if (!mimeTypeAllowed(declaredMime, allowedMimes)) {
+      throw new BadRequestException(
+        `MIME type '${declaredMime}' is not allowed for .${extension} files (allowed: ${allowedMimes.join(', ')})`,
+      );
     }
 
     return { project, source, fileType, documentType, approvalDate, customMetadata, relationships };
