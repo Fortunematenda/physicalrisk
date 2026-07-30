@@ -1,9 +1,18 @@
 import { BadRequestException, Injectable, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import AdmZip = require('adm-zip');
 import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, statfs, unlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { DatabaseService } from '../database/database.service';
 import { Project, ProjectStatus } from '../database/entities';
+
+export type ZipMember = {
+  /** Sanitised path relative to the pack root (posix separators). */
+  relativePath: string;
+  fileName: string;
+  data: Buffer;
+  size: number;
+};
 
 export interface TreeEntry {
   name: string;
@@ -80,6 +89,78 @@ export class VpsStorageService implements OnApplicationBootstrap {
       this.safeSegment(fileName),
     ];
     return segments.join('/').replace(/\\/g, '/');
+  }
+
+  /**
+   * Pack folder for an extracted ZIP under a project section:
+   * repository/{root}/{section}/{packFolder}/{memberRelativePath}
+   */
+  packMemberRelativePath(
+    project: Project,
+    sectionRelativePath: string,
+    packFolder: string,
+    memberRelativePath: string,
+  ) {
+    const member = this.normaliseRelativePath(memberRelativePath);
+    if (!member || member.includes('..')) {
+      throw new BadRequestException('ZIP entry path is invalid');
+    }
+    return [
+      this.projectRelativeRoot(project),
+      this.normaliseRelativePath(sectionRelativePath),
+      this.safeSegment(packFolder),
+      member,
+    ].join('/').replace(/\\/g, '/');
+  }
+
+  /**
+   * Read file entries from a ZIP on the storage volume (or absolute path).
+   * Skips directories and junk (__MACOSX, .DS_Store); rejects path traversal.
+   */
+  listZipMembers(relativeOrAbsoluteZipPath: string): ZipMember[] {
+    const absolute = isAbsolute(relativeOrAbsoluteZipPath)
+      ? relativeOrAbsoluteZipPath
+      : this.resolveStoragePath(relativeOrAbsoluteZipPath);
+    let zip: AdmZip;
+    try {
+      zip = new AdmZip(absolute);
+    } catch {
+      throw new BadRequestException('Unable to read ZIP archive');
+    }
+
+    const members: ZipMember[] = [];
+    const seen = new Set<string>();
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory) continue;
+      const raw = String(entry.entryName || '').replace(/\\/g, '/');
+      if (!raw || raw.endsWith('/')) continue;
+      const parts = raw.split('/').filter(Boolean);
+      if (!parts.length) continue;
+      if (parts.some((part) => part === '..' || part === '.' || part.includes('\0'))) {
+        throw new BadRequestException(`ZIP contains an unsafe path: ${raw}`);
+      }
+      if (parts[0] === '__MACOSX' || parts.some((part) => part.startsWith('._'))) continue;
+      const fileName = parts[parts.length - 1];
+      if (!fileName || fileName === '.DS_Store' || fileName.toLowerCase() === 'thumbs.db') continue;
+
+      const relativePath = parts.map((part) => this.safeSegment(part)).join('/');
+      if (!relativePath || seen.has(relativePath)) continue;
+      seen.add(relativePath);
+
+      const data = entry.getData();
+      if (!data?.length) continue;
+      members.push({
+        relativePath,
+        fileName: basename(relativePath),
+        data,
+        size: data.length,
+      });
+    }
+
+    if (!members.length) {
+      throw new BadRequestException('ZIP archive has no extractable files');
+    }
+    return members;
   }
 
   async stageIncoming(fileName: string, data: Buffer) {
@@ -359,13 +440,15 @@ export class VpsStorageService implements OnApplicationBootstrap {
       rootPath: string;
     },
   ): Promise<TreeEntry[]> {
-    if (depth > 8) return [];
+    if (depth > 14) return [];
     const entries = await readdir(absoluteDir, { withFileTypes: true });
     const output: TreeEntry[] = [];
     for (const entry of entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))) {
       const absolutePath = join(absoluteDir, entry.name);
       const relativePath = join(relativeDir, entry.name).replace(/\\/g, '/');
       if (entry.isDirectory()) {
+        // Hide pack version history and internal gateway folders from the explorer.
+        if (entry.name === '_history' || entry.name.startsWith('.gateway-')) continue;
         const children = await this.readTree(absolutePath, relativePath, depth + 1, mappings);
         const document = mappings.documentsByDirectory.get(relativePath);
         const section = mappings.modulePaths.get(relativePath);

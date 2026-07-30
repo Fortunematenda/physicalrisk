@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
+import { lookup as mimeLookup } from 'mime-types';
 import { Brackets, In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { DatabaseService } from '../database/database.service';
@@ -12,6 +13,7 @@ import {
   DocumentStatus,
   DocumentVersion,
   ExternalImportStatus,
+  FileType,
   ImportJob,
   ImportStatus,
   ProjectSection,
@@ -612,6 +614,11 @@ export class ImportsService {
       };
       await this.db.importJobs.save(job);
 
+      // ZIP packs are expanded into individual repository files/folders for the explorer.
+      if (extension === 'zip') {
+        return this.processZipPack(id, job, section, metadata, userId);
+      }
+
       const { document, documentCode, mode } = await this.resolveLogicalDocument(job.project.id, section, metadata);
       const existingVersions = document?.versions ?? [];
       const currentVersion = existingVersions.find((version) => version.isCurrent);
@@ -908,6 +915,358 @@ export class ImportsService {
       await this.audit.record({ userId, action: 'IMPORT_FAILED', entityType: 'ImportJob', entityId: id, message });
       throw error;
     }
+  }
+
+  /**
+   * Extract a ZIP into the target section as a pack folder.
+   * Matching pack files (same pack folder + zip entry path) receive a new version
+   * when the submitted version is newer; unchanged checksums are skipped.
+   */
+  private async processZipPack(
+    id: string,
+    job: ImportJob,
+    section: ProjectSection,
+    metadata: StoredMetadata,
+    userId?: string,
+  ) {
+    const members = this.storage.listZipMembers(job.incomingPath);
+    const fileTypes = await this.db.fileTypes.find({ where: { active: true } });
+    const byExtension = new Map(
+      fileTypes.map((item) => [String(item.extension || '').replace(/^\./, '').toLowerCase(), item]),
+    );
+
+    type AllowedMember = { member: ReturnType<VpsStorageService['listZipMembers']>[number]; fileType: FileType; extension: string };
+    const allowed: AllowedMember[] = [];
+    const skipped: Array<{ path: string; reason: string }> = [];
+
+    for (const member of members) {
+      const extension = extname(member.fileName).replace('.', '').toLowerCase();
+      if (!extension || extension === 'zip') {
+        skipped.push({ path: member.relativePath, reason: extension === 'zip' ? 'nested ZIP skipped' : 'missing extension' });
+        continue;
+      }
+      const fileType = byExtension.get(extension);
+      if (!fileType) {
+        skipped.push({ path: member.relativePath, reason: `.${extension} is not an enabled file type` });
+        continue;
+      }
+      if (member.size > fileType.maxSizeMb * 1024 * 1024) {
+        skipped.push({ path: member.relativePath, reason: `exceeds ${fileType.maxSizeMb} MB limit` });
+        continue;
+      }
+      allowed.push({ member, fileType, extension });
+    }
+
+    if (!allowed.length) {
+      throw new BadRequestException(
+        skipped.length
+          ? `ZIP has no files matching enabled file types. Skipped: ${skipped.slice(0, 5).map((item) => item.path).join(', ')}${skipped.length > 5 ? '…' : ''}`
+          : 'ZIP archive has no extractable files',
+      );
+    }
+
+    const packFolder = this.storage.sanitizeFileName(metadata.title.trim() || 'ZIP Pack');
+    const versionNo = metadata.versionNo.trim() || '1.0';
+    const packRoot = [
+      this.storage.projectRelativeRoot(job.project),
+      this.storage.normaliseRelativePath(section.relativePath),
+      packFolder,
+    ].join('/').replace(/\\/g, '/');
+
+    // Existing pack members in this section (matched by pack folder + zip entry).
+    const existingPackVersions = await this.db.documentVersions.createQueryBuilder('version')
+      .leftJoinAndSelect('version.document', 'document')
+      .leftJoinAndSelect('document.section', 'section')
+      .leftJoinAndSelect('document.project', 'project')
+      .where('project.id = :projectId', { projectId: job.project.id })
+      .andWhere('section.id = :sectionId', { sectionId: section.id })
+      .andWhere(`version.metadata->>'zipPack' = 'true'`)
+      .andWhere(`version.metadata->>'packFolder' = :packFolder`, { packFolder })
+      .getMany();
+
+    const existingByEntry = new Map<string, { document: Document; current: DocumentVersion | null; versions: DocumentVersion[] }>();
+    for (const version of existingPackVersions) {
+      const entry = String(version.metadata?.zipEntry ?? '').replace(/\\/g, '/');
+      if (!entry || !version.document) continue;
+      const bucket = existingByEntry.get(entry) ?? {
+        document: version.document,
+        current: null,
+        versions: [],
+      };
+      bucket.versions.push(version);
+      if (version.isCurrent) bucket.current = version;
+      existingByEntry.set(entry, bucket);
+    }
+    for (const bucket of existingByEntry.values()) {
+      if (!bucket.current) {
+        bucket.current = [...bucket.versions].sort((a, b) => compareVersions(b.versionNo, a.versionNo))[0] ?? null;
+      }
+    }
+
+    let packCode = metadata.documentCode?.trim().toUpperCase() || '';
+    if (!packCode) {
+      const existingPackCode = [...existingByEntry.values()]
+        .map((item) => String(item.current?.metadata?.packCode ?? item.versions[0]?.metadata?.packCode ?? ''))
+        .find(Boolean);
+      packCode = existingPackCode || await this.nextDocumentCode(job.project.code, section.code, job.project.id);
+    }
+
+    // Pre-validate version conflicts before writing files.
+    const versionConflicts: string[] = [];
+    for (const { member } of allowed) {
+      const existing = existingByEntry.get(member.relativePath);
+      if (!existing?.current) continue;
+      const checksum = createHash('sha256').update(member.data).digest('hex');
+      if (existing.current.checksum === checksum) continue;
+      const cmp = compareVersions(versionNo, existing.current.versionNo);
+      if (cmp < 0) {
+        versionConflicts.push(
+          `${member.relativePath}: submitted ${versionNo} is older than current ${existing.current.versionNo}`,
+        );
+      } else if (cmp === 0) {
+        versionConflicts.push(
+          `${member.relativePath}: version ${versionNo} already exists with different content`,
+        );
+      }
+    }
+    if (versionConflicts.length) {
+      throw new ImportBusinessException(
+        'VERSION_NOT_NEWER',
+        `ZIP pack cannot update existing files: ${versionConflicts.slice(0, 3).join('; ')}${versionConflicts.length > 3 ? '…' : ''}`,
+        { conflicts: versionConflicts, submittedVersion: versionNo },
+      );
+    }
+
+    const writtenPaths: string[] = [];
+    const movedPaths: Array<{ from: string; to: string }> = [];
+    let primaryDocument: Document | null = null;
+    let primaryVersion: DocumentVersion | null = null;
+    const importedMembers: Array<{
+      documentCode: string;
+      path: string;
+      zipEntry: string;
+      action: 'created' | 'versioned' | 'unchanged';
+    }> = [];
+
+    try {
+      await this.db.dataSource.transaction(async (manager) => {
+        const documentRepo = manager.getRepository(Document);
+        const versionRepo = manager.getRepository(DocumentVersion);
+        const importRepo = manager.getRepository(ImportJob);
+        const userRepo = manager.getRepository(User);
+        const createdBy = userId ? await userRepo.findOne({ where: { id: userId } }) : null;
+
+        let sequence = await documentRepo.count({ where: { project: { id: job.project.id } } }) + 1;
+
+        for (const { member, extension } of allowed) {
+          const checksum = createHash('sha256').update(member.data).digest('hex');
+          const mimeType = String(mimeLookup(extension) || 'application/octet-stream');
+          const storagePath = this.storage.packMemberRelativePath(
+            job.project,
+            section.relativePath,
+            packFolder,
+            member.relativePath,
+          );
+          const title = `${metadata.title.trim()} / ${member.relativePath}`.slice(0, 240);
+          const existing = existingByEntry.get(member.relativePath);
+          const current = existing?.current ?? null;
+
+          if (current && current.checksum === checksum) {
+            importedMembers.push({
+              documentCode: existing!.document.code,
+              path: current.storagePath,
+              zipEntry: member.relativePath,
+              action: 'unchanged',
+            });
+            if (!primaryDocument) {
+              primaryDocument = existing!.document;
+              primaryVersion = current;
+            }
+            continue;
+          }
+
+          let documentRecord = existing?.document ?? null;
+          let action: 'created' | 'versioned' = 'created';
+
+          if (documentRecord && current) {
+            action = 'versioned';
+            // Preserve previous file under _history before overwriting the live pack path.
+            if (current.storagePath) {
+              const historyPath = [
+                packRoot,
+                '_history',
+                this.storage.sanitizeFileName(documentRecord.code),
+                `v${this.storage.sanitizeFileName(current.versionNo)}`,
+                this.storage.sanitizeFileName(current.storedFileName || member.fileName),
+              ].join('/').replace(/\\/g, '/');
+              await this.storage.moveRepositoryFile(current.storagePath, historyPath);
+              movedPaths.push({ from: current.storagePath, to: historyPath });
+              current.storagePath = historyPath;
+              current.isCurrent = false;
+              await versionRepo.save(current);
+            } else {
+              await versionRepo.createQueryBuilder()
+                .update(DocumentVersion)
+                .set({ isCurrent: false })
+                .where('document_id = :documentId AND is_current = true', { documentId: documentRecord.id })
+                .execute();
+            }
+
+            const fresh = await documentRepo.findOne({
+              where: { id: documentRecord.id },
+              relations: { project: true, section: true },
+            });
+            if (!fresh) throw new Error('Document was lost during ZIP version update');
+            documentRecord = fresh;
+          } else {
+            let documentCode = `${packCode}-${String(sequence).padStart(3, '0')}`;
+            while (await documentRepo.findOne({ where: { project: { id: job.project.id }, code: documentCode } })) {
+              sequence += 1;
+              documentCode = `${packCode}-${String(sequence).padStart(3, '0')}`;
+            }
+            sequence += 1;
+
+            documentRecord = await documentRepo.save(documentRepo.create({
+              project: job.project,
+              section,
+              code: documentCode,
+              title,
+              documentType: metadata.documentType.trim(),
+              description: metadata.description?.trim() || `Extracted from ZIP pack ${job.fileName}`,
+              owner: metadata.owner?.trim() || null,
+              status: DocumentStatus.CURRENT,
+              currentVersionNo: versionNo,
+              currentVersion: null,
+            }));
+          }
+
+          await this.storage.writeRepositoryFile(storagePath, member.data);
+          writtenPaths.push(storagePath);
+
+          const version = await versionRepo.save(versionRepo.create({
+            document: documentRecord,
+            versionNo,
+            originalFileName: member.fileName,
+            storedFileName: member.fileName,
+            mimeType,
+            fileSize: member.size,
+            checksum,
+            storagePath,
+            approvalStatus: ApprovalStatus.APPROVED,
+            approvedBy: String(metadata.approvedBy ?? '').trim(),
+            approvalDate: new Date(metadata.approvalDate),
+            isCurrent: true,
+            metadata: {
+              ...(metadata.customMetadata ?? {}),
+              zipPack: true,
+              zipEntry: member.relativePath,
+              packFolder,
+              packCode,
+              packFileName: job.fileName,
+              importJobId: job.id,
+            },
+            createdBy,
+          }));
+
+          documentRecord.title = title;
+          if (metadata.documentType?.trim()) documentRecord.documentType = metadata.documentType.trim();
+          if (metadata.description?.trim()) documentRecord.description = metadata.description.trim();
+          if (metadata.owner?.trim()) documentRecord.owner = metadata.owner.trim();
+          documentRecord.section = section;
+          documentRecord.status = DocumentStatus.CURRENT;
+          documentRecord.currentVersionNo = versionNo;
+          documentRecord.currentVersion = version;
+          await documentRepo.save(documentRecord);
+
+          importedMembers.push({
+            documentCode: documentRecord.code,
+            path: storagePath,
+            zipEntry: member.relativePath,
+            action,
+          });
+          if (!primaryDocument) {
+            primaryDocument = documentRecord;
+            primaryVersion = version;
+          }
+        }
+
+        const transactionJob = await importRepo.findOne({
+          where: { id },
+          relations: { project: true, sourceSystem: true },
+        });
+        if (!transactionJob) throw new NotFoundException('Import job not found during transaction');
+        transactionJob.document = primaryDocument;
+        transactionJob.version = primaryVersion;
+        transactionJob.resolvedSection = section;
+        await importRepo.save(transactionJob);
+      });
+    } catch (error) {
+      for (const path of writtenPaths) {
+        await this.storage.remove(path).catch(() => undefined);
+      }
+      // Best-effort restore of moved history files on failure.
+      for (const moved of [...movedPaths].reverse()) {
+        await this.storage.moveRepositoryFile(moved.to, moved.from).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    if (!primaryDocument || !primaryVersion) {
+      throw new BadRequestException('ZIP import did not produce any documents');
+    }
+
+    const registerResult = await this.storage.refreshRegisters(job.project.id);
+    const createdCount = importedMembers.filter((item) => item.action === 'created').length;
+    const versionedCount = importedMembers.filter((item) => item.action === 'versioned').length;
+    const unchangedCount = importedMembers.filter((item) => item.action === 'unchanged').length;
+
+    const storageResult: Record<string, unknown> = {
+      mode: 'VPS_LOCAL_FILESYSTEM',
+      zipPack: true,
+      packFolder,
+      packCode,
+      packRoot,
+      repositoryPath: packRoot,
+      importedCount: createdCount + versionedCount,
+      createdCount,
+      versionedCount,
+      unchangedCount,
+      skippedCount: skipped.length,
+      skipped,
+      members: importedMembers,
+      registers: registerResult,
+    };
+
+    const finalJob = await this.db.importJobs.findOne({
+      where: { id },
+      relations: {
+        project: true, sourceSystem: true, resolvedSection: true,
+        document: true, version: true, initiatedBy: true,
+      },
+    });
+    if (!finalJob) throw new NotFoundException('Import job not found');
+    finalJob.status = ImportStatus.IMPORTED;
+    if (finalJob.provider) finalJob.externalImportStatus = ExternalImportStatus.IMPORTED;
+    finalJob.completedAt = new Date();
+    finalJob.storageResult = storageResult;
+    await this.db.importJobs.save(finalJob);
+
+    if (job.incomingPath?.replace(/\\/g, '/').startsWith('staging/external-imports/')) {
+      await this.storage.cleanupStaging(job.incomingPath).catch(() => undefined);
+    } else {
+      await this.storage.remove(job.incomingPath);
+    }
+
+    await this.audit.record({
+      userId,
+      action: 'DOCUMENT_VERSION_IMPORTED',
+      entityType: 'ImportJob',
+      entityId: finalJob.id,
+      message: `ZIP “${job.fileName}” → ${createdCount} new, ${versionedCount} versioned, ${unchangedCount} unchanged under ${section.name}/${packFolder}`,
+      after: storageResult,
+    });
+
+    return this.get(id);
   }
 
   private async assertImportRequirements(
