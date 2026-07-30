@@ -85,6 +85,7 @@ export function DocumentPreview({
         previewUrl={previewUrl}
         fileName={version.originalFileName}
         controls={controls}
+        onPageCount={handlePageCount}
         viewerRef={viewerRef}
       />
     );

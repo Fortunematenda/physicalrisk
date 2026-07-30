@@ -428,6 +428,12 @@
   box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16);
   border-radius: 4px;
 }
+.docxPaged :global(.docx-wrapper > section.docx[hidden]) {
+  display: none !important;
+}
+.docxPaged :global(.docx-wrapper > section.docx:not([hidden])) {
+  margin-bottom: 0 !important;
+}
 .textPreviewPage {
   margin: 0 auto;
   width: min(100%, 920px);
