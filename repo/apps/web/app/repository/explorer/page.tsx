@@ -93,7 +93,19 @@ export default function RepositoryExplorerPage() {
       ]);
       setRepository(tree);
       setDocuments(records);
-      setExpanded(new Set(tree.entries.map((entry) => entry.path)));
+      // Expand modules plus nested pack/folder levels so ZIP contents are visible.
+      const initiallyExpanded = new Set<string>();
+      const walkExpand = (entries: typeof tree.entries, depth: number) => {
+        for (const entry of entries) {
+          if (entry.type !== 'directory' || !entry.children?.length) continue;
+          if (depth <= 3 || entry.nodeType === 'module' || entry.nodeType === 'register') {
+            initiallyExpanded.add(entry.path);
+            walkExpand(entry.children, depth + 1);
+          }
+        }
+      };
+      walkExpand(tree.entries, 0);
+      setExpanded(initiallyExpanded);
       setSelected(null);
       setSelectedDocument(null);
     } catch (caught) {
@@ -197,18 +209,27 @@ export default function RepositoryExplorerPage() {
         return next;
       });
     }
+    const childDirs = entry.children?.filter((child) => child.type === 'directory').length ?? 0;
+    const childFiles = entry.children?.filter((child) => child.type === 'file').length ?? 0;
+    // Pack/shared folders can carry a documentId from one child — still treat as folder when
+    // they contain multiple items so explorer lists all extracted files.
+    const isDocumentDir =
+      entry.type === 'directory'
+      && (entry.nodeType === 'document' || Boolean(entry.documentId))
+      && childDirs === 0
+      && childFiles <= 1;
     const kind =
-      entry.nodeType === 'document' || (entry.documentId && entry.type === 'directory')
-        ? 'document'
-        : entry.type === 'file'
-          ? 'file'
+      entry.type === 'file'
+        ? 'file'
+        : isDocumentDir
+          ? 'document'
           : 'folder';
     setSelected({ entry, kind });
     setSelectedDocument(null);
     setControls(DEFAULT_CONTROLS);
     setTreeSheetOpen(false);
     if (isTablet) setInspectorSheetOpen(false);
-    if (entry.documentId) {
+    if (entry.documentId && (kind === 'document' || kind === 'file')) {
       try {
         setSelectedDocument(await api(`/documents/${entry.documentId}`));
       } catch (caught) {

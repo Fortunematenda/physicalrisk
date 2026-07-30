@@ -355,7 +355,12 @@ export class VpsStorageService implements OnApplicationBootstrap {
     const versionsByPath = new Map(versions.map((version) => [version.storagePath.replace(/\\/g, '/'), version]));
     const documentsByDirectory = new Map<string, typeof versions[number]['document']>();
     for (const version of versions) {
-      const documentDirectory = dirname(version.storagePath).replace(/\\/g, '/').replace(/\/v[^/]+$/, '');
+      const storagePath = version.storagePath.replace(/\\/g, '/');
+      // ZIP pack members live under a shared pack folder (no /vX/ segment). Mapping those
+      // parents as "document" collapses the pack into one node and hides sibling files.
+      const meta = version.metadata as Record<string, unknown> | null | undefined;
+      if (meta?.zipPack === true || meta?.zipEntry) continue;
+      const documentDirectory = dirname(storagePath).replace(/\/v[^/]+$/, '');
       documentsByDirectory.set(documentDirectory, version.document);
     }
     const modulePaths = new Map((project.sections ?? []).map((section) => [

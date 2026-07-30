@@ -96,16 +96,29 @@ export function flatten(entries: TreeEntry[]): TreeEntry[] {
 }
 
 export function subtreeDocuments(entry: TreeEntry, documents: DocumentItem[]) {
-  const paths = new Set(flatten([entry]).map((item) => item.path));
-  return documents.filter(
-    (document) =>
-      paths.has(document.section.relativePath)
+  const flat = flatten([entry]);
+  const paths = new Set(flat.map((item) => item.path));
+  const documentIds = new Set(flat.map((item) => item.documentId).filter(Boolean) as string[]);
+  const folderPrefix = `${entry.path.replace(/\\/g, '/')}/`;
+
+  return documents.filter((document) => {
+    if (documentIds.has(document.id)) return true;
+
+    const versionPaths = (document.versions ?? [])
+      .map((version) => version.storagePath?.replace(/\\/g, '/'))
+      .filter(Boolean) as string[];
+    if (versionPaths.some((path) => path === entry.path || path.startsWith(folderPrefix))) {
+      return true;
+    }
+
+    // Fallback for classic section browsing (non-pack folders).
+    return paths.has(document.section.relativePath)
       || [...paths].some(
         (path) =>
           document.section.relativePath.includes(path.replace(/^.*?\//, ''))
           || path.includes(document.section.relativePath),
-      ),
-  );
+      );
+  });
 }
 
 export function downloadText(fileName: string, contents: string, type: string) {
