@@ -448,6 +448,61 @@ export class ConfigurationService {
     await repo.save(ordered);
   }
 
+  /** Two-phase write avoids unique (template, position) conflicts while reordering. */
+  private async persistTemplateSectionPositions(
+    repo: { save: (entities: DirectoryTemplateSection[]) => Promise<DirectoryTemplateSection[]> },
+    ordered: DirectoryTemplateSection[],
+  ) {
+    if (!ordered.length) return;
+    for (let index = 0; index < ordered.length; index += 1) {
+      ordered[index].position = -(index + 1);
+    }
+    await repo.save(ordered);
+    for (let index = 0; index < ordered.length; index += 1) {
+      ordered[index].position = index + 1;
+    }
+    await repo.save(ordered);
+  }
+
+  /** Active template sections become 1..N; inactive sections follow. */
+  private async resequenceTemplateSections(templateId: string) {
+    await this.db.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(DirectoryTemplateSection);
+      const siblings = await repo.find({
+        where: { template: { id: templateId } },
+        order: { position: 'ASC', createdAt: 'ASC' },
+      });
+      const active = siblings
+        .filter((item) => item.active)
+        .sort((a, b) => a.position - b.position);
+      const inactive = siblings
+        .filter((item) => !item.active)
+        .sort((a, b) => a.position - b.position);
+      await this.persistTemplateSectionPositions(repo, [...active, ...inactive]);
+    });
+  }
+
+  /** Normalise create/update payload: active first, then inactive, positions 1..N. */
+  private normaliseTemplateSectionInputs(rawSections: Array<Record<string, unknown>>) {
+    const mapped = rawSections.map((raw, index) => ({
+      raw,
+      index,
+      active: boolean(raw.active),
+      position: Number(raw.position ?? index + 1),
+    }));
+    const active = mapped
+      .filter((item) => item.active)
+      .sort((a, b) => a.position - b.position || a.index - b.index);
+    const inactive = mapped
+      .filter((item) => !item.active)
+      .sort((a, b) => a.position - b.position || a.index - b.index);
+    return [...active, ...inactive].map((item, index) => ({
+      ...item.raw,
+      position: index + 1,
+      active: item.active,
+    }));
+  }
+
   /**
    * Set active/inactive for a repository module everywhere it appears:
    * all project placements and matching directory-template sections.
@@ -470,15 +525,24 @@ export class ConfigurationService {
       throw new NotFoundException(`Repository module “${key}” was not found`);
     }
 
+    let projectSectionsUpdated = 0;
     for (const section of projectSections) {
       if (section.active === active) continue;
       await this.updateProjectSection(section.id, { active }, userId);
+      projectSectionsUpdated += 1;
     }
 
+    const touchedTemplateIds = new Set<string>();
+    let templateSectionsUpdated = 0;
     for (const section of templateSections) {
       if (section.active === active) continue;
       section.active = active;
       await this.db.directoryTemplateSections.save(section);
+      touchedTemplateIds.add(section.template.id);
+      templateSectionsUpdated += 1;
+    }
+    for (const templateId of touchedTemplateIds) {
+      await this.resequenceTemplateSections(templateId);
     }
 
     await this.audit.record({
@@ -486,14 +550,14 @@ export class ConfigurationService {
       action: 'CONFIG_CHANGE',
       entityType: 'ProjectSection',
       entityId: key,
-      message: `Set repository module ${key} ${active ? 'active' : 'inactive'} across ${projectSections.length} project(s) and ${templateSections.length} template section(s)`,
+      message: `Set repository module ${key} ${active ? 'active' : 'inactive'} across ${projectSectionsUpdated} project(s) and ${templateSectionsUpdated} template section(s)`,
     });
 
     return {
       sectionKey: key,
       active,
-      projectSectionsUpdated: projectSections.length,
-      templateSectionsUpdated: templateSections.length,
+      projectSectionsUpdated,
+      templateSectionsUpdated,
     };
   }
 
@@ -540,7 +604,8 @@ export class ConfigurationService {
           active: boolean(input.active),
         }));
         if (rawSections.length) {
-          await sections.save(rawSections.map((raw, index) => sections.create({
+          const normalised = this.normaliseTemplateSectionInputs(rawSections);
+          await sections.save(normalised.map((raw, index) => sections.create({
             template: created,
             sectionKey: sectionKey(raw.sectionKey ?? raw.name),
             code: clean(raw.code || `SEC${index + 1}`).toUpperCase(),
@@ -675,7 +740,8 @@ export class ConfigurationService {
         if (rawSections) {
           await sections.delete({ template: { id } });
           if (rawSections.length) {
-            await sections.save(rawSections.map((raw, index) => sections.create({
+            const normalised = this.normaliseTemplateSectionInputs(rawSections);
+            await sections.save(normalised.map((raw, index) => sections.create({
               template,
               sectionKey: sectionKey(raw.sectionKey ?? raw.name),
               code: clean(raw.code || `SEC${index + 1}`).toUpperCase(),

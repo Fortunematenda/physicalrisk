@@ -13,7 +13,9 @@ import {
 } from '@/components/configuration-list-shell';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
-import { deriveSectionFields, syncLinkedSectionFields } from '@/lib/section-fields';
+import {
+  deriveSectionFields, orderSectionsActiveFirst, syncLinkedSectionFields,
+} from '@/lib/section-fields';
 import actionStyles from '@/components/row-actions.module.css';
 
 type TemplateSection = {
@@ -72,7 +74,13 @@ function catalogFromTemplates(templates: TemplateRow[]): TemplateSection[] {
 }
 
 function withPositions(sections: TemplateSection[]): TemplateSection[] {
-  return sections.map((section, index) => ({ ...section, position: index + 1 }));
+  return orderSectionsActiveFirst(
+    sections.map((section, index) => ({
+      ...section,
+      position: Number(section.position) > 0 ? Number(section.position) : index + 1,
+      active: section.active !== false,
+    })),
+  );
 }
 
 export default function TemplatesPage() {
