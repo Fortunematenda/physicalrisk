@@ -17,6 +17,9 @@ export class DocumentsService {
   constructor(private readonly db: DatabaseService, private readonly audit: AuditService, private readonly storage: VpsStorageService) {}
 
   async list(filters: { projectId?: string; sectionId?: string; search?: string; status?: string }) {
+    // Heal Index/Explorer drift: DB rows whose files were wiped by older deletes.
+    await this.purgeMissingStorage(filters.projectId).catch(() => undefined);
+
     const qb = this.db.documents.createQueryBuilder('document')
       .leftJoinAndSelect('document.project', 'project')
       .leftJoinAndSelect('document.section', 'section')
@@ -385,7 +388,12 @@ export class DocumentsService {
     return this.get(id);
   }
 
-  async remove(id: string, userId?: string) {
+  /**
+   * Hard-delete a document row and its version files.
+   * ZIP pack members share a pack folder — only that member's files are removed
+   * (never wipe the whole pack/section, which used to orphan siblings still listed in Index).
+   */
+  async remove(id: string, userId?: string, options?: { skipPurge?: boolean }) {
     const document = await this.db.documents.findOne({
       where: { id },
       relations: { project: true, section: true, versions: true },
@@ -400,12 +408,23 @@ export class DocumentsService {
       versionCount: document.versions?.length ?? 0,
     };
 
-    const storagePaths = (document.versions ?? []).map((version) => version.storagePath).filter(Boolean);
-    const documentDirectories = [...new Set(
-      storagePaths
-        .map((path) => dirname(dirname(path.replace(/\\/g, '/'))))
-        .filter(Boolean),
-    )];
+    const versions = document.versions ?? [];
+    const storagePaths = versions.map((version) => version.storagePath).filter(Boolean) as string[];
+    const isZipPack = versions.some((version) => {
+      const meta = version.metadata as Record<string, unknown> | null | undefined;
+      return meta?.zipPack === true || Boolean(meta?.zipEntry);
+    });
+
+    // Normal docs: repository/.../{code}/v{n}/{file} → remove the {code} directory after files.
+    // ZIP packs: only unlink member files (+ history copies); prune empty dirs up to the pack root.
+    const documentDirectories = new Set<string>();
+    if (!isZipPack) {
+      for (const path of storagePaths) {
+        const normalised = path.replace(/\\/g, '/');
+        const match = normalised.match(/^(.*\/[^/]+)\/v[^/]+\/[^/]+$/);
+        if (match?.[1]) documentDirectories.add(match[1]);
+      }
+    }
 
     await this.db.dataSource.transaction(async (manager) => {
       await manager.query(
@@ -423,7 +442,21 @@ export class DocumentsService {
     });
 
     for (const path of storagePaths) await this.storage.remove(path);
-    for (const directory of documentDirectories) await this.storage.removeDirectory(directory);
+
+    if (isZipPack) {
+      const sectionStop = [
+        this.storage.projectRelativeRoot(document.project),
+        this.storage.normaliseRelativePath(document.section.relativePath),
+      ].join('/').replace(/\\/g, '/');
+      for (const path of storagePaths) {
+        await this.storage.removeEmptyParents(path, sectionStop);
+      }
+    } else {
+      for (const directory of documentDirectories) {
+        await this.storage.removeDirectory(directory);
+      }
+    }
+
     await this.storage.refreshRegisters(document.project.id).catch(() => undefined);
 
     await this.audit.record({
@@ -435,7 +468,43 @@ export class DocumentsService {
       before,
     });
 
+    // Clear Index ghosts left by older deletes that wiped disk files but left DB rows.
+    if (!options?.skipPurge) {
+      await this.purgeMissingStorage(document.project.id, userId).catch(() => undefined);
+    }
+
     return { deleted: true, id, code: before.code, projectId: before.projectId };
+  }
+
+  /** Remove documents whose version files are no longer on disk (orphans vs Explorer tree). */
+  async purgeMissingStorage(projectId?: string, userId?: string) {
+    const documents = await this.db.documents.find({
+      where: projectId ? { project: { id: projectId } } : {},
+      relations: { versions: true, project: true, section: true },
+    });
+    const purged: Array<{ id: string; code: string }> = [];
+    for (const document of documents) {
+      const paths = (document.versions ?? [])
+        .map((version) => version.storagePath)
+        .filter(Boolean) as string[];
+      if (!paths.length) {
+        await this.remove(document.id, userId, { skipPurge: true });
+        purged.push({ id: document.id, code: document.code });
+        continue;
+      }
+      let anyExists = false;
+      for (const path of paths) {
+        if (await this.storage.exists(path)) {
+          anyExists = true;
+          break;
+        }
+      }
+      if (!anyExists) {
+        await this.remove(document.id, userId, { skipPurge: true });
+        purged.push({ id: document.id, code: document.code });
+      }
+    }
+    return { purged: purged.length, documents: purged };
   }
 
   async versionRegister(projectId?: string) {

@@ -68,6 +68,16 @@ export class DocumentsController {
     return this.documents.remove(id, user?.id);
   }
 
+  @Post('documents/purge-orphans')
+  @UseGuards(RolesGuard)
+  @Roles(...DOCUMENT_MUTATION_ROLES)
+  purgeOrphans(
+    @Query('projectId') projectId: string | undefined,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    return this.documents.purgeMissingStorage(projectId, user?.id);
+  }
+
   @Get('version-register') versionRegister(@Query('projectId') projectId?: string) { return this.documents.versionRegister(projectId); }
   @Get('relationships') relationships(@Query('projectId') projectId?: string) { return this.documents.relationships(projectId); }
   @Post('relationships') createRelationship(@Body() body: { fromDocumentId: string; toDocumentId: string; type?: RelationshipType; description?: string }, @CurrentUser() user: { id?: string } | null) { return this.documents.createRelationship(body, user?.id); }

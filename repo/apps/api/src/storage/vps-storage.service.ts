@@ -226,6 +226,32 @@ export class VpsStorageService implements OnApplicationBootstrap {
     await unlink(target).catch(() => undefined);
   }
 
+  async exists(relativeOrAbsolutePath: string) {
+    const target = isAbsolute(relativeOrAbsolutePath)
+      ? relativeOrAbsolutePath
+      : this.resolveStoragePath(relativeOrAbsolutePath);
+    try {
+      await access(target);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Remove empty parent directories up to (but not including) stopAtRelativePath. */
+  async removeEmptyParents(fileRelativePath: string, stopAtRelativePath: string) {
+    const stop = this.normaliseRelativePath(stopAtRelativePath).replace(/\/+$/, '');
+    let current = dirname(fileRelativePath.replace(/\\/g, '/')).replace(/\\/g, '/');
+    while (current && current !== '.' && current !== stop) {
+      const normalised = current.replace(/\/+$/, '');
+      if (!normalised.startsWith(`${stop}/`) && normalised !== stop) break;
+      if (normalised === stop) break;
+      if (!(await this.isDirectoryEmpty(normalised))) break;
+      await this.removeDirectory(normalised);
+      current = dirname(normalised).replace(/\\/g, '/');
+    }
+  }
+
   async moveRepositoryFile(fromRelative: string, toRelative: string) {
     const from = this.resolveStoragePath(fromRelative);
     const to = this.resolveStoragePath(toRelative);
