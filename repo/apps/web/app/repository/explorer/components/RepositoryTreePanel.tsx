@@ -31,7 +31,11 @@ function TreeRow({
   const opened = expanded.has(entry.path);
   const selected = selectedPath === entry.path;
   const isFolder = entry.type === 'directory' && entry.nodeType !== 'document';
-  const canDeleteFolder = Boolean(isFolder && entry.sectionId && onDeleteFolder);
+  const canDeleteFolder = Boolean(
+    isFolder
+    && entry.nodeType !== 'register'
+    && onDeleteFolder,
+  );
 
   useEffect(() => {
     if (!menuOpen) return;

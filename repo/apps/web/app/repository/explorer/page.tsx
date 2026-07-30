@@ -365,28 +365,35 @@ export default function RepositoryExplorerPage() {
 
   const deleteFolder = async (entry?: TreeEntry) => {
     const target = entry ?? (selected?.kind === 'folder' ? selected.entry : null);
-    if (!target) return;
+    if (!target || !projectId) return;
     setFolderMenuOpen(false);
+    if (target.nodeType === 'register') {
+      setError('System register folders cannot be deleted from the explorer.');
+      return;
+    }
     const folderDocs = subtreeDocuments(target, documents);
-    const isEmpty = (target.childCount ?? target.children?.length ?? 0) === 0 && folderDocs.length === 0;
-    if (!isEmpty) {
-      setError('Only empty folders can be deleted. Remove documents first.');
-      return;
-    }
-    if (!target.sectionId) {
-      setError('This folder is not a configured repository module and cannot be deleted here.');
-      return;
-    }
+    const docCount = folderDocs.length;
+    const isModule = Boolean(target.sectionId || target.nodeType === 'module');
     const ok = await confirm({
       title: 'Delete folder',
-      message: `Delete empty folder “${target.name}”?`,
+      message: docCount > 0
+        ? `Delete folder “${target.name}” and its ${docCount} document(s)? This permanently removes the folder${isModule ? ' (module)' : ''}, all nested files, and Index records. This cannot be undone.`
+        : `Delete folder “${target.name}”${isModule ? ' (module)' : ''} from the repository? This cannot be undone.`,
       confirmLabel: 'Delete folder',
       tone: 'danger',
     });
     if (!ok) return;
     try {
-      await api(`/project-sections/${encodeURIComponent(target.sectionId)}`, { method: 'DELETE' });
-      setNotice(`Deleted folder “${target.name}”.`);
+      const result = await api<{ documentsDeleted?: number }>(
+        `/projects/${encodeURIComponent(projectId)}/repository-folders?path=${encodeURIComponent(target.path)}`,
+        { method: 'DELETE' },
+      );
+      const removed = result?.documentsDeleted ?? docCount;
+      setNotice(
+        removed > 0
+          ? `Deleted folder “${target.name}” and ${removed} document(s).`
+          : `Deleted folder “${target.name}”.`,
+      );
       setSelected(null);
       setSelectedDocument(null);
       await load(projectId);
@@ -725,18 +732,11 @@ export default function RepositoryExplorerPage() {
                       type="button"
                       role="menuitem"
                       className={styles.menuDanger}
-                      disabled={
-                        !selected.entry.sectionId
-                        || displayedFolderDocs.length > 0
-                        || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
-                      }
+                      disabled={selected.entry.nodeType === 'register'}
                       title={
-                        !selected.entry.sectionId
-                          ? 'Only configured repository modules can be deleted here'
-                          : displayedFolderDocs.length > 0
-                            || (selected.entry.childCount ?? selected.entry.children?.length ?? 0) > 0
-                            ? 'Only empty folders can be deleted'
-                            : 'Delete empty folder'
+                        selected.entry.nodeType === 'register'
+                          ? 'System register folders cannot be deleted'
+                          : 'Delete this folder and all documents inside it'
                       }
                       onClick={() => void deleteFolder(selected.entry)}
                     >

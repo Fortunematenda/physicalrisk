@@ -3,6 +3,7 @@ import { Brackets } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { ConfigurationConflictException, ConfigurationException } from '../common/configuration.exception';
 import { DatabaseService } from '../database/database.service';
+import { DocumentsService } from '../documents/documents.service';
 import { VpsStorageService } from '../storage/vps-storage.service';
 import {
   DirectoryTemplate,
@@ -47,7 +48,12 @@ const fromImport = (input: Record<string, unknown>) => clean(input.origin).toUpp
 
 @Injectable()
 export class ConfigurationService {
-  constructor(private readonly db: DatabaseService, private readonly audit: AuditService, private readonly storage: VpsStorageService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly audit: AuditService,
+    private readonly storage: VpsStorageService,
+    private readonly documents: DocumentsService,
+  ) {}
 
   async listProjects() {
     const projects = await this.db.projects.find({
@@ -494,26 +500,10 @@ export class ConfigurationService {
   async deleteProjectSection(id: string, userId?: string) {
     const section = await this.db.projectSections.findOne({ where: { id }, relations: { project: true } });
     if (!section) throw new NotFoundException('Project section not found');
-    const documentCount = await this.db.documents.count({ where: { section: { id } } });
-    if (documentCount > 0) {
-      throw new ConfigurationException(
-        'SECTION_NOT_EMPTY',
-        `“${section.name}” still contains ${documentCount} document(s). Remove them before deleting this folder.`,
-        { documentCount },
-      );
-    }
-    const folderRelative = `${this.storage.projectRelativeRoot(section.project)}/${this.storage.normaliseRelativePath(section.relativePath)}`.replace(/\\/g, '/');
-    const empty = await this.storage.isDirectoryEmpty(folderRelative);
-    if (!empty) {
-      throw new ConfigurationException(
-        'SECTION_NOT_EMPTY',
-        `“${section.name}” folder is not empty on the VPS. Clear files before deleting.`,
-      );
-    }
-    await this.db.projectSections.remove(section);
-    await this.storage.removeDirectory(folderRelative);
-    await this.audit.record({ userId, action: 'DELETE', entityType: 'ProjectSection', entityId: id, message: `Removed empty section ${section.name}` });
-    return { deleted: true };
+    const folderRelative = `${this.storage.projectRelativeRoot(section.project)}/${this.storage.normaliseRelativePath(section.relativePath)}`
+      .replace(/\\/g, '/');
+    // Cascade: documents, pack subfolders, VPS directory, and the module row.
+    return this.documents.deleteRepositoryFolder(section.project.id, folderRelative, userId);
   }
 
   async listTemplates() {

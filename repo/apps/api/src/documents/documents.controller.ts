@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { DocumentStatus, RelationshipType, UserRole } from '../database/entities';
@@ -76,6 +76,19 @@ export class DocumentsController {
     @CurrentUser() user: { id?: string } | null,
   ) {
     return this.documents.purgeMissingStorage(projectId, user?.id);
+  }
+
+  @Delete('projects/:projectId/repository-folders')
+  @UseGuards(RolesGuard)
+  @Roles(...DOCUMENT_MUTATION_ROLES)
+  deleteRepositoryFolder(
+    @Param('projectId') projectId: string,
+    @Query('path') path: string | undefined,
+    @CurrentUser() user: { id?: string } | null,
+  ) {
+    const folderPath = typeof path === 'string' ? path.trim() : '';
+    if (!folderPath) throw new BadRequestException('Folder path is required');
+    return this.documents.deleteRepositoryFolder(projectId, folderPath, user?.id);
   }
 
   @Get('version-register') versionRegister(@Query('projectId') projectId?: string) { return this.documents.versionRegister(projectId); }

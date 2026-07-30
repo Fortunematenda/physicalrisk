@@ -476,6 +476,97 @@ export class DocumentsService {
     return { deleted: true, id, code: before.code, projectId: before.projectId };
   }
 
+  /**
+   * Delete a repository folder (imported pack folder or configured module) and everything under it:
+   * documents/versions in DB, files on disk, and the ProjectSection row when it is a module.
+   */
+  async deleteRepositoryFolder(projectId: string, folderPath: string, userId?: string) {
+    const project = await this.db.projects.findOne({
+      where: { id: projectId },
+      relations: { sections: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    const root = this.storage.projectRelativeRoot(project).replace(/\\/g, '/');
+    const normalised = folderPath.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (!normalised || normalised === root) {
+      throw new BadRequestException('Cannot delete the project repository root');
+    }
+    if (normalised !== root && !normalised.startsWith(`${root}/`)) {
+      throw new BadRequestException('Folder path is outside this project repository');
+    }
+
+    const section = (project.sections ?? []).find((item) => {
+      const sectionPath = `${root}/${this.storage.normaliseRelativePath(item.relativePath)}`
+        .replace(/\\/g, '/')
+        .replace(/\/+$/, '');
+      return sectionPath === normalised;
+    });
+
+    if (
+      section
+      && (section.sectionKey === 'MASTER_DOCUMENT_INDEX' || section.sectionKey === 'VERSION_REGISTER')
+    ) {
+      throw new BadRequestException('System register folders cannot be deleted from the explorer');
+    }
+
+    const documents = await this.db.documents.find({
+      where: { project: { id: projectId } },
+      relations: { versions: true, section: true, project: true },
+    });
+    const prefix = `${normalised}/`;
+    const toDelete = documents.filter((document) => {
+      if (section && document.section?.id === section.id) return true;
+
+      const sectionPath = document.section
+        ? `${root}/${this.storage.normaliseRelativePath(document.section.relativePath)}`
+          .replace(/\\/g, '/')
+          .replace(/\/+$/, '')
+        : '';
+      if (sectionPath === normalised || sectionPath.startsWith(prefix)) return true;
+
+      return (document.versions ?? []).some((version) => {
+        const path = version.storagePath?.replace(/\\/g, '/');
+        return Boolean(path && (path === normalised || path.startsWith(prefix)));
+      });
+    });
+
+    for (const document of toDelete) {
+      await this.remove(document.id, userId, { skipPurge: true });
+    }
+
+    await this.storage.removeDirectory(normalised);
+
+    if (section) {
+      await this.db.projectSections.remove(section);
+    }
+
+    await this.storage.refreshRegisters(projectId).catch(() => undefined);
+    await this.audit.record({
+      userId,
+      action: 'DOCUMENT_DELETE',
+      entityType: section ? 'ProjectSection' : 'RepositoryFolder',
+      entityId: section?.id ?? normalised,
+      message: section
+        ? `Deleted module folder ${section.name} and ${toDelete.length} document(s)`
+        : `Deleted folder ${normalised} and ${toDelete.length} document(s)`,
+      before: {
+        path: normalised,
+        sectionId: section?.id ?? null,
+        sectionName: section?.name ?? null,
+        documentsDeleted: toDelete.map((document) => document.code),
+      },
+    });
+
+    return {
+      deleted: true,
+      path: normalised,
+      documentsDeleted: toDelete.length,
+      sectionDeleted: Boolean(section),
+      sectionId: section?.id ?? null,
+    };
+  }
+
   /** Remove documents whose version files are no longer on disk (orphans vs Explorer tree). */
   async purgeMissingStorage(projectId?: string, userId?: string) {
     const documents = await this.db.documents.find({
