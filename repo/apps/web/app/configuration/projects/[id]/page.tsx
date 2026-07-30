@@ -1,18 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  FolderKanban, LayoutTemplate, Layers3, Save, Settings2,
+  FolderKanban, LayoutTemplate, Layers3, MoreVertical, Save, Settings2,
 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { useConfirm } from '@/components/confirm-dialog';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api, formatDate } from '@/lib/api';
 import { getErrorMessage } from '@/lib/api-error';
+import { orderSectionsActiveFirst } from '@/lib/section-fields';
 import styles from './ProjectDetail.module.css';
+import actionStyles from '@/components/row-actions.module.css';
 
 type TabId = 'overview' | 'configuration' | 'modules' | 'template';
 
@@ -73,8 +76,12 @@ export default function ProjectDetailPage() {
   const [tab, setTab] = useState<TabId>('overview');
   const [saving, setSaving] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [busySectionId, setBusySectionId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   const load = async () => {
     try {
@@ -82,7 +89,10 @@ export default function ProjectDetailPage() {
         api<ProjectDetail>(`/projects/${id}`),
         api<TemplateRow[]>('/directory-templates'),
       ]);
-      setItem(project);
+      setItem({
+        ...project,
+        sections: orderSectionsActiveFirst([...(project.sections ?? [])]),
+      });
       setTemplates(templateList);
     } catch (caught) {
       setError(getErrorMessage(caught, 'Unable to load project'));
@@ -99,31 +109,42 @@ export default function ProjectDetailPage() {
     void api(`/storage/projects/${id}/sync`, { method: 'POST' }).catch(() => undefined);
   }, [id]);
 
-  const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === item?.directoryTemplateId) ?? null,
-    [templates, item?.directoryTemplateId],
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
+
+  /** This project's modules only (active + inactive). Template is not mutated by toggles. */
+  const modules = useMemo(
+    () => orderSectionsActiveFirst([...(item?.sections ?? [])]),
+    [item?.sections],
   );
 
-  /** Modules for the project's selected template (prefer live project folders). */
-  const modules = useMemo(() => {
-    const projectSections = [...(item?.sections ?? [])]
-      .filter((section) => section.active !== false)
-      .sort((a, b) => a.position - b.position);
+  const openSection = openMenuId
+    ? modules.find((section) => section.id === openMenuId) ?? null
+    : null;
 
-    if (projectSections.length) return projectSections;
-
-    return [...(selectedTemplate?.sections ?? [])]
-      .sort((a, b) => a.position - b.position)
-      .map((section) => ({
-        id: section.id || section.sectionKey,
-        sectionKey: section.sectionKey,
-        name: section.name,
-        code: section.code,
-        relativePath: section.relativePath || section.name,
-        position: section.position,
-        active: section.active !== false,
-      }));
-  }, [item?.sections, selectedTemplate]);
+  const setSectionActive = async (section: ProjectSection, active: boolean) => {
+    setOpenMenuId(null);
+    if (!section.id || section.id === section.sectionKey) {
+      setError('This module is not provisioned on the project yet. Apply a template first.');
+      return;
+    }
+    setBusySectionId(section.id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/project-sections/${encodeURIComponent(section.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active }),
+      });
+      setMessage(`“${section.name}” is now ${active ? 'active' : 'inactive'} for this project only.`);
+      await load();
+    } catch (caught) {
+      setError(getErrorMessage(caught, 'Unable to update module status'));
+    } finally {
+      setBusySectionId(null);
+    }
+  };
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -206,16 +227,16 @@ export default function ProjectDetailPage() {
                 <strong>{modules.length}</strong>
               </div>
               <div className={styles.kpi}>
+                <span>Active</span>
+                <strong>{modules.filter((section) => section.active !== false).length}</strong>
+              </div>
+              <div className={styles.kpi}>
                 <span>Template</span>
                 <strong style={{ fontSize: 14 }}>{item.directoryTemplate?.name || 'Custom'}</strong>
               </div>
               <div className={styles.kpi}>
                 <span>Documents</span>
                 <strong>{item._count?.documents ?? 0}</strong>
-              </div>
-              <div className={styles.kpi}>
-                <span>Imports</span>
-                <strong>{item._count?.importJobs ?? 0}</strong>
               </div>
             </div>
           </section>
@@ -384,11 +405,10 @@ export default function ProjectDetailPage() {
               <div className={styles.panel} role="tabpanel">
                 <div className={styles.panelHead}>
                   <div>
-                    <h2>Template modules</h2>
+                    <h2>Project modules</h2>
                     <p>
-                      {item.directoryTemplate?.name
-                        ? `Read-only view of modules from “${item.directoryTemplate.name}”. Edit or add modules in Repository Modules.`
-                        : 'No directory template selected yet. Choose one under Template, or manage modules in Repository Modules.'}
+                      Activate or deactivate modules for this project only. The directory template is not changed.
+                      Add or edit module definitions in Repository Modules.
                     </p>
                   </div>
                   <Link className="button small" href="/configuration/sections">
@@ -411,23 +431,48 @@ export default function ProjectDetailPage() {
                           <th>Code</th>
                           <th>VPS relative folder</th>
                           <th>Status</th>
+                          <th className={actionStyles.actionsCell} aria-label="Actions" />
                         </tr>
                       </thead>
                       <tbody>
-                        {modules.map((section) => (
-                          <tr key={section.id || section.sectionKey}>
-                            <td>{section.position}</td>
-                            <td><span className="mono">{section.sectionKey}</span></td>
-                            <td>{section.name}</td>
-                            <td><span className="mono">{section.code}</span></td>
-                            <td>
-                              <span className="mono">{section.relativePath || section.name}</span>
-                            </td>
-                            <td>
-                              <StatusBadge value={section.active !== false ? 'ACTIVE' : 'INACTIVE'} />
-                            </td>
-                          </tr>
-                        ))}
+                        {modules.map((section) => {
+                          const menuOpen = openMenuId === section.id;
+                          const busy = busySectionId === section.id;
+                          const isActive = section.active !== false;
+                          return (
+                            <tr key={section.id} style={isActive ? undefined : { opacity: 0.65 }}>
+                              <td>{section.position}</td>
+                              <td><span className="mono">{section.sectionKey}</span></td>
+                              <td>{section.name}</td>
+                              <td><span className="mono">{section.code}</span></td>
+                              <td>
+                                <span className="mono">{section.relativePath || section.name}</span>
+                              </td>
+                              <td>
+                                <StatusBadge value={isActive ? 'ACTIVE' : 'INACTIVE'} />
+                              </td>
+                              <td className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}>
+                                <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
+                                  <button
+                                    type="button"
+                                    ref={(node) => {
+                                      menuButtonRefs.current[section.id] = node;
+                                      if (menuOpen) activeMenuAnchor.current = node;
+                                    }}
+                                    className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                                    aria-label={`Actions for ${section.name}`}
+                                    aria-haspopup="menu"
+                                    aria-expanded={menuOpen}
+                                    disabled={busy}
+                                    onClick={() => setOpenMenuId(menuOpen ? null : section.id)}
+                                  >
+                                    <MoreVertical size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -471,6 +516,32 @@ export default function ProjectDetailPage() {
           </div>
         </>
       ) : null}
+
+      <RowActionsMenu
+        open={Boolean(openSection)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuId(null)}
+      >
+        {openSection?.active !== false ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busySectionId === openSection?.id}
+            onClick={() => openSection && void setSectionActive(openSection, false)}
+          >
+            Set inactive
+          </button>
+        ) : (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busySectionId === openSection?.id}
+            onClick={() => openSection && void setSectionActive(openSection, true)}
+          >
+            Set active
+          </button>
+        )}
+      </RowActionsMenu>
     </div>
   );
 }
