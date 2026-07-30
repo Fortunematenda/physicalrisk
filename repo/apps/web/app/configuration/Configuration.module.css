@@ -516,6 +516,36 @@
   flex-wrap: wrap;
 }
 
+.projectCountBtn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #cfe0ef;
+  border-radius: 999px;
+  background: #eef5fb;
+  color: #0d3a68;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.projectCountBtn span {
+  font-size: 11px;
+  font-weight: 600;
+  color: #536577;
+}
+
+.projectCountBtn:hover {
+  border-color: #1769aa;
+  background: #e0eef9;
+}
+
+.moduleDetailsCard {
+  width: min(860px, 100%) !important;
+}
+
 .folderBadge {
   display: inline-flex;
   align-items: center;

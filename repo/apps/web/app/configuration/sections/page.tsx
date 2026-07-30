@@ -1,18 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { FolderOpen, Layers3, Plus, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { FolderOpen, Layers3, MoreVertical, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
-import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
+import { RowActionsMenu } from '@/components/row-actions-menu';
+import { StatusBadge } from '@/components/status-badge';
 import { api } from '@/lib/api';
-import { orderSectionsActiveFirst, syncLinkedSectionFields } from '@/lib/section-fields';
-import styles from '../Configuration.module.css';
-
-const ALL_PROJECTS = '__all__';
+import { syncLinkedSectionFields } from '@/lib/section-fields';
+import configStyles from '../Configuration.module.css';
+import styles from '@/components/row-actions.module.css';
 
 type SectionRow = {
   id: string;
@@ -34,18 +35,30 @@ type ProjectRow = {
   sections: SectionRow[];
 };
 
-type EditableSection = SectionRow & {
+type ModuleInstance = SectionRow & {
   projectId: string;
   projectCode: string;
   projectName: string;
   repositoryRootPath: string;
 };
 
-function flattenSections(projects: ProjectRow[]): EditableSection[] {
-  const rows: EditableSection[] = [];
+type ModuleGroup = {
+  sectionKey: string;
+  name: string;
+  code: string;
+  relativePath: string;
+  activeCount: number;
+  inactiveCount: number;
+  instances: ModuleInstance[];
+};
+
+function buildModules(projects: ProjectRow[]): ModuleGroup[] {
+  const map = new Map<string, ModuleGroup>();
   for (const project of projects) {
     for (const section of project.sections ?? []) {
-      rows.push({
+      const key = section.sectionKey || section.code;
+      if (!key) continue;
+      const instance: ModuleInstance = {
         ...section,
         code: section.code || '',
         relativePath: section.relativePath || section.name,
@@ -53,513 +66,566 @@ function flattenSections(projects: ProjectRow[]): EditableSection[] {
         projectCode: project.code,
         projectName: project.name,
         repositoryRootPath: project.repositoryRootPath,
-      });
+      };
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          sectionKey: key,
+          name: section.name,
+          code: section.code || '',
+          relativePath: section.relativePath || section.name,
+          activeCount: section.active === false ? 0 : 1,
+          inactiveCount: section.active === false ? 1 : 0,
+          instances: [instance],
+        });
+      } else {
+        existing.instances.push(instance);
+        if (section.active === false) existing.inactiveCount += 1;
+        else existing.activeCount += 1;
+      }
     }
   }
-  return rows.sort((a, b) => {
-    const byProject = a.projectCode.localeCompare(b.projectCode);
-    if (byProject !== 0) return byProject;
-    return a.position - b.position;
-  });
+  return [...map.values()]
+    .map((module) => ({
+      ...module,
+      instances: [...module.instances].sort((a, b) => a.projectCode.localeCompare(b.projectCode)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export default function SectionsPage() {
   const confirm = useConfirm();
   const [projects, setProjects] = useState<ProjectRow[]>([]);
-  const [selection, setSelection] = useState(ALL_PROJECTS);
-  const [rows, setRows] = useState<EditableSection[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [projectQuery, setProjectQuery] = useState('');
-  const [sectionQuery, setSectionQuery] = useState('');
+  const [query, setQuery] = useState('');
   const [activeOnly, setActiveOnly] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
+  const [detailsModule, setDetailsModule] = useState<ModuleGroup | null>(null);
+  const [editing, setEditing] = useState<ModuleGroup | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    sectionKey: '',
+    code: '',
+    relativePath: '',
+  });
+  const [mounted, setMounted] = useState(false);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
-  const isAll = selection === ALL_PROJECTS;
-  const selectedProject = useMemo(
-    () => (isAll ? null : projects.find((item) => item.id === selection) ?? null),
-    [isAll, projects, selection],
-  );
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  const loadProjects = async () => {
+  const load = async () => {
     setLoading(true);
     setError('');
     try {
       const data = await api<ProjectRow[]>('/projects');
       setProjects(data);
-      setSelection((current) => {
-        if (current === ALL_PROJECTS) return ALL_PROJECTS;
-        if (data.some((item) => item.id === current)) return current;
-        return ALL_PROJECTS;
-      });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load projects');
+      setError(caught instanceof Error ? caught.message : 'Unable to load repository modules');
     } finally {
       setLoading(false);
     }
   };
 
-  const rebuildRows = (projectList: ProjectRow[], nextSelection: string) => {
-    if (nextSelection === ALL_PROJECTS) {
-      setRows(flattenSections(projectList));
-      return;
-    }
-    const project = projectList.find((item) => item.id === nextSelection);
-    if (!project) {
-      setRows([]);
-      return;
-    }
-    setRows(
-      orderSectionsActiveFirst(
-        (project.sections ?? []).map((section) => ({
-          ...section,
-          code: section.code || '',
-          relativePath: section.relativePath || section.name,
-          projectId: project.id,
-          projectCode: project.code,
-          projectName: project.name,
-          repositoryRootPath: project.repositoryRootPath,
-        })),
-      ),
-    );
-  };
-
   useEffect(() => {
-    void (async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const data = await api<ProjectRow[]>('/projects');
-        setProjects(data);
-        setSelection(ALL_PROJECTS);
-        setRows(flattenSections(data));
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Unable to load projects');
-      } finally {
-        setLoading(false);
-      }
-    })();
+    void load();
   }, []);
 
-  useEffect(() => {
-    if (!projects.length) return;
-    rebuildRows(projects, selection);
-  }, [projects, selection]);
+  const modules = useMemo(() => buildModules(projects), [projects]);
 
-  const filteredProjects = useMemo(() => {
-    const needle = projectQuery.trim().toLowerCase();
-    if (!needle) return projects;
-    return projects.filter((item) => {
-      const haystack = `${item.code} ${item.name} ${item.repositoryRootPath}`.toLowerCase();
-      return haystack.includes(needle);
-    });
-  }, [projects, projectQuery]);
-
-  const visibleRows = useMemo(() => {
-    const needle = sectionQuery.trim().toLowerCase();
-    return rows.filter((section) => {
-      if (activeOnly && section.active === false) return false;
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return modules.filter((module) => {
+      if (activeOnly && module.activeCount === 0) return false;
       if (!needle) return true;
       const haystack = [
-        section.name,
-        section.sectionKey,
-        section.code,
-        section.relativePath,
-        section.projectCode,
-        section.projectName,
+        module.name,
+        module.sectionKey,
+        module.code,
+        module.relativePath,
+        ...module.instances.flatMap((item) => [item.projectCode, item.projectName]),
       ].join(' ').toLowerCase();
       return haystack.includes(needle);
     });
-  }, [rows, sectionQuery, activeOnly]);
+  }, [modules, query, activeOnly]);
 
-  const nextPosition = useMemo(() => {
-    if (isAll || !selectedProject) return 1;
-    const list = selectedProject.sections ?? [];
-    if (!list.length) return 1;
-    return Math.max(...list.map((section) => section.position || 0)) + 1;
-  }, [isAll, selectedProject]);
+  const openModule = openMenuKey ? modules.find((item) => item.sectionKey === openMenuKey) ?? null : null;
 
-  const allSectionCount = useMemo(
-    () => projects.reduce((total, item) => total + (item.sections?.length ?? 0), 0),
-    [projects],
-  );
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuKey ? menuButtonRefs.current[openMenuKey] ?? null : null;
+  }, [openMenuKey]);
 
   const stats = useMemo(() => {
     const activeProjects = projects.filter((item) => item.status === 'ACTIVE').length;
-    const selectedActive = rows.filter((section) => section.active !== false).length;
+    const activeModules = modules.filter((item) => item.activeCount > 0).length;
     return {
       projects: projects.length,
       activeProjects,
-      sections: allSectionCount,
-      selectedActive,
-      selectedTotal: rows.length,
+      modules: modules.length,
+      activeModules,
+      instances: modules.reduce((total, item) => total + item.instances.length, 0),
     };
-  }, [projects, rows, allSectionCount]);
+  }, [projects, modules]);
 
-  const patchLocal = (
-    sectionId: string,
-    updater: (row: EditableSection) => EditableSection,
-    reorder = false,
-  ) => {
-    setRows((current) => {
-      let next = current.map((row) => (row.id === sectionId ? updater(row) : row));
-      if (reorder && !isAll) next = orderSectionsActiveFirst(next);
-      return next;
+  const refreshDetails = (sectionKey: string, nextProjects: ProjectRow[]) => {
+    const next = buildModules(nextProjects).find((item) => item.sectionKey === sectionKey) ?? null;
+    setDetailsModule(next);
+    if (editing?.sectionKey === sectionKey) setEditing(next);
+  };
+
+  const openEdit = (module: ModuleGroup) => {
+    setOpenMenuKey(null);
+    setEditing(module);
+    setEditForm({
+      name: module.name,
+      sectionKey: module.sectionKey,
+      code: module.code,
+      relativePath: module.relativePath,
     });
   };
 
-  const saveSection = async (section: EditableSection) => {
-    setBusyId(section.id);
+  const saveEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editing) return;
+    const name = editForm.name.trim();
+    const sectionKey = editForm.sectionKey.trim().toUpperCase();
+    const code = editForm.code.trim().toUpperCase();
+    const relativePath = editForm.relativePath.trim() || name;
+    if (!name || !sectionKey || !code) {
+      setError('Module name, key, and code are required.');
+      return;
+    }
+    setSaving(true);
     setError('');
     setMessage('');
     try {
-      await api(`/project-sections/${section.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name: section.name,
-          sectionKey: section.sectionKey,
-          code: section.code,
-          relativePath: section.relativePath,
-          position: section.position,
-          active: section.active !== false,
-        }),
-      });
-      setMessage(`Saved “${section.name}” (${section.projectCode}).`);
+      for (const instance of editing.instances) {
+        await api(`/project-sections/${instance.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name,
+            sectionKey,
+            code,
+            relativePath,
+            position: instance.position,
+            active: instance.active !== false,
+          }),
+        });
+      }
+      setMessage(`Updated “${name}” across ${editing.instances.length} project(s).`);
+      setEditing(null);
       const data = await api<ProjectRow[]>('/projects');
       setProjects(data);
+      refreshDetails(sectionKey, data);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to update section');
+      setError(caught instanceof Error ? caught.message : 'Unable to update module');
     } finally {
-      setBusyId(null);
+      setSaving(false);
     }
   };
 
-  const deleteSection = async (section: EditableSection) => {
+  const deleteModule = async (module: ModuleGroup) => {
+    setOpenMenuKey(null);
     const ok = await confirm({
-      title: 'Delete section',
-      message: `Delete “${section.name}” from ${section.projectCode}? The VPS folder must be empty.`,
-      confirmLabel: 'Delete section',
+      title: 'Delete repository module',
+      message: `Delete “${module.name}” from ${module.instances.length} project(s)? Each VPS folder must be empty.`,
+      confirmLabel: 'Delete module',
       tone: 'danger',
     });
     if (!ok) return;
-    setBusyId(section.id);
+    setBusyKey(module.sectionKey);
     setError('');
     setMessage('');
+    const failures: string[] = [];
+    let deleted = 0;
     try {
-      await api(`/project-sections/${section.id}`, { method: 'DELETE' });
-      setMessage(`Deleted “${section.name}” from ${section.projectCode}.`);
+      for (const instance of module.instances) {
+        try {
+          await api(`/project-sections/${instance.id}`, { method: 'DELETE' });
+          deleted += 1;
+        } catch (caught) {
+          failures.push(
+            `${instance.projectCode}: ${caught instanceof Error ? caught.message : 'Unable to delete'}`,
+          );
+        }
+      }
+      if (deleted) setMessage(`Deleted “${module.name}” from ${deleted} project(s).`);
+      if (failures.length) setError(failures.join(' · '));
+      if (detailsModule?.sectionKey === module.sectionKey) setDetailsModule(null);
       const data = await api<ProjectRow[]>('/projects');
       setProjects(data);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to delete section');
     } finally {
-      setBusyId(null);
+      setBusyKey(null);
     }
   };
 
-  const onLinkedFieldChange = (
-    section: EditableSection,
-    field: 'name' | 'sectionKey' | 'code' | 'relativePath',
-    value: string,
-  ) => {
-    patchLocal(section.id, (row) => syncLinkedSectionFields(row, field, value));
-  };
-
-  const onActiveChange = async (section: EditableSection, active: boolean) => {
-    const updated = { ...section, active };
-    patchLocal(section.id, () => updated, true);
-    await saveSection({ ...updated, active });
+  const deleteInstance = async (instance: ModuleInstance) => {
+    const ok = await confirm({
+      title: 'Delete section',
+      message: `Delete “${instance.name}” from ${instance.projectCode}? The VPS folder must be empty.`,
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusyKey(instance.id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/project-sections/${instance.id}`, { method: 'DELETE' });
+      setMessage(`Deleted “${instance.name}” from ${instance.projectCode}.`);
+      const data = await api<ProjectRow[]>('/projects');
+      setProjects(data);
+      if (detailsModule) refreshDetails(detailsModule.sectionKey, data);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete section');
+    } finally {
+      setBusyKey(null);
+    }
   };
 
   return (
-    <div className={styles.page}>
+    <div className={configStyles.page}>
       <PageHeader
-        title="Repository Sections"
-        description="Repository folders (modules) where approved files are stored on the VPS — for example Articles or Research Library. This is not Document Type (classification such as Article or Technical Specification)."
+        title="Repository Modules"
+        description="Repository folders (modules) used across projects — for example Articles or Research Library. Click a project count to inspect where a module is used."
         action={{ label: 'Project Registry', href: '/configuration/projects' }}
       />
 
       {error ? <div className="notice error">{error}</div> : null}
       {message ? <div className="notice success">{message}</div> : null}
 
-      <div className={styles.stats}>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconBlue}`}><FolderOpen size={18} /></div>
+      <div className={configStyles.stats}>
+        <div className={configStyles.statCard}>
+          <div className={`${configStyles.statIcon} ${configStyles.statIconBlue}`}><FolderOpen size={18} /></div>
           <div>
             <span>Projects</span>
             <strong>{stats.projects}</strong>
             <small>{stats.activeProjects} active repositories</small>
           </div>
         </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconOrange}`}><Layers3 size={18} /></div>
+        <div className={configStyles.statCard}>
+          <div className={`${configStyles.statIcon} ${configStyles.statIconOrange}`}><Layers3 size={18} /></div>
           <div>
-            <span>All sections</span>
-            <strong>{stats.sections}</strong>
-            <small>Configured across the registry</small>
+            <span>Modules</span>
+            <strong>{stats.modules}</strong>
+            <small>{stats.instances} project placements</small>
           </div>
         </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconGreen}`}><ShieldCheck size={18} /></div>
+        <div className={configStyles.statCard}>
+          <div className={`${configStyles.statIcon} ${configStyles.statIconGreen}`}><ShieldCheck size={18} /></div>
           <div>
-            <span>{isAll ? 'Showing' : 'Selected project'}</span>
-            <strong>{stats.selectedActive}</strong>
-            <small>{stats.selectedTotal} total sections</small>
+            <span>Active modules</span>
+            <strong>{stats.activeModules}</strong>
+            <small>In use on at least one project</small>
           </div>
         </div>
       </div>
 
-      {loading ? (
-        <div className={styles.panelCard}><div className={styles.stateWrap}><Loading /></div></div>
-      ) : projects.length === 0 ? (
-        <div className={styles.panelCard}>
-          <div className={styles.stateWrap}>
-            <EmptyState title="No projects yet" text="Create a project in the Project Registry to review its repository sections." />
+      <div className={configStyles.panelCard}>
+        <div className={configStyles.toolbar}>
+          <div className={configStyles.searchWrap}>
+            <Search size={15} className={configStyles.searchIcon} />
+            <input
+              className={configStyles.search}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search modules or projects"
+              aria-label="Search modules"
+            />
           </div>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={activeOnly}
+              onChange={(event) => setActiveOnly(event.target.checked)}
+            />
+            Active only
+          </label>
+          <button
+            type="button"
+            className={`button small ${configStyles.refresh}`}
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh modules"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? configStyles.spinning : undefined} />
+            Refresh
+          </button>
+          <span className={configStyles.count}>{filtered.length} shown</span>
         </div>
-      ) : (
-        <div className={styles.splitLayout}>
-          <div className={styles.panelCard}>
-            <div className={styles.panelHead}>
-              <div>
-                <h2>Projects</h2>
-                <p>Select All sections or a project to edit its VPS folders.</p>
-              </div>
-              <button
-                type="button"
-                className={`button small ${styles.refresh}`}
-                onClick={() => void loadProjects()}
-                aria-label="Refresh projects"
-                title="Refresh"
-              >
-                <RefreshCw size={14} />
-              </button>
-            </div>
-            <div className={styles.toolbar}>
-              <div className={styles.searchWrap}>
-                <Search size={15} className={styles.searchIcon} />
-                <input
-                  className={styles.search}
-                  value={projectQuery}
-                  onChange={(event) => setProjectQuery(event.target.value)}
-                  placeholder="Search projects"
-                  aria-label="Search projects"
-                />
-              </div>
-            </div>
-            <div className={styles.projectList}>
-              <button
-                type="button"
-                className={`${styles.projectButton} ${isAll ? styles.projectButtonActive : ''}`}
-                onClick={() => setSelection(ALL_PROJECTS)}
-              >
-                <strong>All sections</strong>
-                <span>{allSectionCount} repository sections · every project</span>
-              </button>
-              {filteredProjects.length === 0 ? (
-                <EmptyState title="No matches" text="No projects match the current search." />
-              ) : (
-                filteredProjects.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`${styles.projectButton} ${item.id === selection ? styles.projectButtonActive : ''}`}
-                    onClick={() => setSelection(item.id)}
-                  >
-                    <strong>{item.code} — {item.name}</strong>
-                    <span>{item.sections.length} repository sections · repository/{item.repositoryRootPath}</span>
-                  </button>
-                ))
-              )}
-            </div>
+
+        {loading ? (
+          <div className={configStyles.stateWrap}><Loading /></div>
+        ) : filtered.length === 0 ? (
+          <div className={configStyles.stateWrap}>
+            <EmptyState
+              title="No modules found"
+              text="No repository modules match the current filters."
+            />
           </div>
-
-          <div className={styles.panelCard}>
-            <div className={styles.panelHead}>
-              <div>
-                <h2>{isAll ? 'All repository sections' : `${selectedProject?.name || 'Select project'} directory`}</h2>
-                {isAll ? (
-                  <p>Edit or delete sections across every project. Changes apply to that project’s VPS folder.</p>
-                ) : selectedProject ? (
-                  <p className="mono">repository/{selectedProject.repositoryRootPath}</p>
-                ) : (
-                  <p>Choose a project on the left to review its sections.</p>
-                )}
-              </div>
-              <div className={styles.templateActions}>
-                {!isAll && selectedProject ? (
-                  <>
-                    <button
-                      type="button"
-                      className="button primary small"
-                      onClick={() => setShowCreate(true)}
-                    >
-                      <Plus size={14} /> Add section
-                    </button>
-                    <Link className="button small" href={`/configuration/projects/${selectedProject.id}`}>
-                      Edit configuration
-                    </Link>
-                  </>
-                ) : null}
-              </div>
-            </div>
-
-            <div className={styles.toolbar}>
-              <div className={styles.searchWrap}>
-                <Search size={15} className={styles.searchIcon} />
-                <input
-                  className={styles.search}
-                  value={sectionQuery}
-                  onChange={(event) => setSectionQuery(event.target.value)}
-                  placeholder={isAll ? 'Search sections or projects' : 'Search sections'}
-                  aria-label="Search sections"
-                />
-              </div>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={activeOnly}
-                  onChange={(event) => setActiveOnly(event.target.checked)}
-                />
-                Active only
-              </label>
-              <span className={styles.count}>{visibleRows.length} shown</span>
-            </div>
-
-            {visibleRows.length === 0 ? (
-              <div className={styles.stateWrap}>
-                <EmptyState
-                  title="No sections found"
-                  text={isAll
-                    ? 'No repository sections match the current filters.'
-                    : 'Add a repository section/module for this project using Add section.'}
-                />
-              </div>
-            ) : (
-              <div className={styles.tableWrap}>
-                <table>
-                  <thead>
-                    <tr>
-                      {isAll ? <th className={styles.colStatus}>Project</th> : null}
-                      <th className={styles.colNum}>Order</th>
-                      <th>Key</th>
-                      <th>Name</th>
-                      <th className={styles.colNum}>Code</th>
-                      <th>VPS relative folder</th>
-                      <th className={styles.colStatus}>Active</th>
-                      <th className={styles.colActions}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleRows.map((section) => (
-                      <tr key={section.id} style={section.active === false ? { opacity: 0.65 } : undefined}>
-                        {isAll ? (
-                          <td>
-                            <div className={styles.title}>{section.projectCode}</div>
-                            <div className="secondary-text">{section.projectName}</div>
-                          </td>
-                        ) : null}
-                        <td>
-                          <input
-                            style={{ width: 64 }}
-                            type="number"
-                            min={1}
-                            value={section.position}
-                            disabled={section.active === false || busyId === section.id}
-                            onChange={(event) => {
-                              const position = Number(event.target.value);
-                              patchLocal(section.id, (row) => ({ ...row, position }));
+        ) : (
+          <div className={configStyles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Key</th>
+                  <th>Code</th>
+                  <th>Projects</th>
+                  <th>Status</th>
+                  <th className={styles.actionsCell} aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((module) => {
+                  const menuOpen = openMenuKey === module.sectionKey;
+                  const busy = busyKey === module.sectionKey;
+                  return (
+                    <tr key={module.sectionKey}>
+                      <td>
+                        <div className={configStyles.title}>{module.name}</div>
+                        <div className="secondary-text mono">{module.relativePath}</div>
+                      </td>
+                      <td><span className="mono">{module.sectionKey}</span></td>
+                      <td><span className="mono">{module.code || '—'}</span></td>
+                      <td>
+                        <button
+                          type="button"
+                          className={configStyles.projectCountBtn}
+                          onClick={() => setDetailsModule(module)}
+                          title={`View ${module.name} details`}
+                        >
+                          {module.instances.length}
+                          <span>project{module.instances.length === 1 ? '' : 's'}</span>
+                        </button>
+                      </td>
+                      <td>
+                        <StatusBadge value={module.activeCount > 0 ? 'ACTIVE' : 'INACTIVE'} />
+                      </td>
+                      <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
+                        <div className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}>
+                          <button
+                            type="button"
+                            ref={(node) => {
+                              menuButtonRefs.current[module.sectionKey] = node;
+                              if (menuOpen) activeMenuAnchor.current = node;
                             }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="mono"
-                            style={{ width: 140 }}
-                            value={section.sectionKey}
-                            disabled={busyId === section.id}
-                            onChange={(event) => onLinkedFieldChange(section, 'sectionKey', event.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={section.name}
-                            disabled={busyId === section.id}
-                            onChange={(event) => onLinkedFieldChange(section, 'name', event.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            style={{ width: 72 }}
-                            value={section.code}
-                            disabled={busyId === section.id}
-                            onChange={(event) => onLinkedFieldChange(section, 'code', event.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            className="mono"
-                            value={section.relativePath || section.name}
-                            disabled={busyId === section.id}
-                            onChange={(event) => onLinkedFieldChange(section, 'relativePath', event.target.value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={section.active !== false}
-                            disabled={busyId === section.id}
-                            onChange={(event) => void onActiveChange(section, event.target.checked)}
-                            aria-label={`Active ${section.name}`}
-                          />
-                        </td>
-                        <td className={styles.colActions}>
-                          <div className={styles.iconActions}>
+                            className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
+                            aria-label={`Actions for ${module.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            disabled={busy || saving}
+                            onClick={() => setOpenMenuKey(menuOpen ? null : module.sectionKey)}
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <RowActionsMenu
+        open={Boolean(openModule)}
+        anchorRef={activeMenuAnchor}
+        onClose={() => setOpenMenuKey(null)}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={busyKey === openModule?.sectionKey}
+          onClick={() => openModule && openEdit(openModule)}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          className={styles.dangerItem}
+          disabled={busyKey === openModule?.sectionKey}
+          onClick={() => openModule && void deleteModule(openModule)}
+        >
+          Delete
+        </button>
+      </RowActionsMenu>
+
+      {mounted && detailsModule
+        ? createPortal(
+            <div
+              className={styles.editModal}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="module-details-title"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setDetailsModule(null);
+              }}
+            >
+              <div className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`}>
+                <h3 id="module-details-title">{detailsModule.name}</h3>
+                <p>
+                  <span className="mono">{detailsModule.sectionKey}</span>
+                  {' · '}
+                  <span className="mono">{detailsModule.code || '—'}</span>
+                  {' · '}
+                  used in {detailsModule.instances.length} project{detailsModule.instances.length === 1 ? '' : 's'}
+                </p>
+                <div className={configStyles.tableWrap}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Project</th>
+                        <th>Order</th>
+                        <th>VPS folder</th>
+                        <th>Status</th>
+                        <th aria-label="Actions" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailsModule.instances.map((instance) => (
+                        <tr key={instance.id}>
+                          <td>
+                            <Link href={`/configuration/projects/${instance.projectId}`} className="primary-text">
+                              {instance.projectCode}
+                            </Link>
+                            <div className="secondary-text">{instance.projectName}</div>
+                          </td>
+                          <td>{instance.position}</td>
+                          <td>
+                            <span className="mono" title={`repository/${instance.repositoryRootPath}/${instance.relativePath}`}>
+                              repository/{instance.repositoryRootPath}/{instance.relativePath}
+                            </span>
+                          </td>
+                          <td>
+                            <StatusBadge value={instance.active !== false ? 'ACTIVE' : 'INACTIVE'} />
+                          </td>
+                          <td>
                             <button
                               type="button"
                               className="button small"
-                              disabled={busyId === section.id}
-                              onClick={() => void saveSection(section)}
+                              disabled={busyKey === instance.id}
+                              onClick={() => void deleteInstance(instance)}
                             >
-                              {busyId === section.id ? '…' : 'Save'}
+                              Delete
                             </button>
-                            <button
-                              type="button"
-                              className={`${styles.iconActionBtn} ${styles.iconActionBtnDanger}`}
-                              disabled={busyId === section.id}
-                              title="Delete section"
-                              aria-label={`Delete ${section.name}`}
-                              onClick={() => void deleteSection(section)}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={styles.editModalActions}>
+                  <button type="button" className="button" onClick={() => setDetailsModule(null)}>Close</button>
+                  <button type="button" className="button primary" onClick={() => openEdit(detailsModule)}>Edit module</button>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
-      )}
+            </div>,
+            document.body,
+          )
+        : null}
 
-      {showCreate && selectedProject ? (
-        <CreateRepositorySectionModal
-          projectId={selectedProject.id}
-          nextPosition={nextPosition}
-          onCancel={() => setShowCreate(false)}
-          onCreated={async () => {
-            setShowCreate(false);
-            setMessage(`Section added at order ${nextPosition}.`);
-            const data = await api<ProjectRow[]>('/projects');
-            setProjects(data);
-          }}
-        />
-      ) : null}
+      {mounted && editing
+        ? createPortal(
+            <div
+              className={styles.editModal}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="module-edit-title"
+              onMouseDown={(event) => {
+                if (!saving && event.target === event.currentTarget) setEditing(null);
+              }}
+            >
+              <form className={styles.editModalCard} onSubmit={saveEdit}>
+                <h3 id="module-edit-title">Edit repository module</h3>
+                <p>
+                  Changes apply to all {editing.instances.length} project placement
+                  {editing.instances.length === 1 ? '' : 's'} of this module.
+                </p>
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="edit-module-name">Name <em>*</em></label>
+                    <input
+                      id="edit-module-name"
+                      required
+                      value={editForm.name}
+                      disabled={saving}
+                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                        ...current,
+                        sectionKey: current.sectionKey,
+                        code: current.code,
+                        relativePath: current.relativePath,
+                      }, 'name', event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="edit-module-key">Key <em>*</em></label>
+                    <input
+                      id="edit-module-key"
+                      className="mono"
+                      required
+                      value={editForm.sectionKey}
+                      disabled={saving}
+                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                        ...current,
+                        name: current.name,
+                        code: current.code,
+                        relativePath: current.relativePath,
+                      }, 'sectionKey', event.target.value))}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="edit-module-code">Code <em>*</em></label>
+                    <input
+                      id="edit-module-code"
+                      required
+                      value={editForm.code}
+                      disabled={saving}
+                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                        ...current,
+                        name: current.name,
+                        sectionKey: current.sectionKey,
+                        relativePath: current.relativePath,
+                      }, 'code', event.target.value))}
+                    />
+                  </div>
+                  <div className="field full">
+                    <label htmlFor="edit-module-path">VPS relative folder</label>
+                    <input
+                      id="edit-module-path"
+                      className="mono"
+                      value={editForm.relativePath}
+                      disabled={saving}
+                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                        ...current,
+                        name: current.name,
+                        sectionKey: current.sectionKey,
+                        code: current.code,
+                      }, 'relativePath', event.target.value))}
+                    />
+                  </div>
+                </div>
+                <div className={styles.editModalActions}>
+                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                  <button type="submit" className="button primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
