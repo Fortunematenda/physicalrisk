@@ -4,16 +4,16 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderOpen, Layers3, MoreVertical, Plus, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
-import { Loading } from '@/components/loading';
-import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
+import {
+  ConfigurationListShell,
+  configurationListStyles as configStyles,
+} from '@/components/configuration-list-shell';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { StatusBadge } from '@/components/status-badge';
 import { CreateRepositorySectionModal } from '@/components/import/CreateRepositorySectionModal';
 import { api } from '@/lib/api';
 import { syncLinkedSectionFields } from '@/lib/section-fields';
-import configStyles from '../Configuration.module.css';
 import styles from '@/components/row-actions.module.css';
 
 type SectionRow = {
@@ -292,44 +292,36 @@ export default function SectionsPage() {
   };
 
   return (
-    <div className={configStyles.page}>
-      <PageHeader
-        title="Repository Modules"
-        description="Repository folders (modules) used across projects — for example Articles or Research Library. Click a project count to inspect where a module is used."
-      />
-
-      {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
-
-      <div className={configStyles.stats}>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconBlue}`}><FolderOpen size={18} /></div>
-          <div>
-            <span>Projects</span>
-            <strong>{stats.projects}</strong>
-            <small>{stats.activeProjects} active repositories</small>
-          </div>
-        </div>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconOrange}`}><Layers3 size={18} /></div>
-          <div>
-            <span>Modules</span>
-            <strong>{stats.modules}</strong>
-            <small>{stats.instances} project placements</small>
-          </div>
-        </div>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconGreen}`}><ShieldCheck size={18} /></div>
-          <div>
-            <span>Active modules</span>
-            <strong>{stats.activeModules}</strong>
-            <small>In use on at least one project</small>
-          </div>
-        </div>
-      </div>
-
-      <div className={configStyles.panelCard}>
-        <div className={configStyles.toolbar}>
+    <ConfigurationListShell
+      title="Repository Modules"
+      description="Repository folders (modules) used across projects — for example Articles or Research Library. Click a project count to inspect where a module is used."
+      error={error}
+      message={message}
+      stats={[
+        {
+          label: 'Projects',
+          value: stats.projects,
+          hint: `${stats.activeProjects} active repositories`,
+          icon: <FolderOpen size={18} />,
+          tone: 'blue',
+        },
+        {
+          label: 'Modules',
+          value: stats.modules,
+          hint: `${stats.instances} project placements`,
+          icon: <Layers3 size={18} />,
+          tone: 'orange',
+        },
+        {
+          label: 'Active modules',
+          value: stats.activeModules,
+          hint: 'In use on at least one project',
+          icon: <ShieldCheck size={18} />,
+          tone: 'green',
+        },
+      ]}
+      toolbar={(
+        <>
           <button
             type="button"
             className="button primary small"
@@ -368,290 +360,285 @@ export default function SectionsPage() {
             Refresh
           </button>
           <span className={configStyles.count}>{filtered.length} shown</span>
-        </div>
+        </>
+      )}
+      loading={loading}
+      empty={filtered.length === 0 ? {
+        title: 'No modules found',
+        text: 'No repository modules match the current filters.',
+      } : null}
+      footer={(
+        <>
+          <RowActionsMenu
+            open={Boolean(openModule)}
+            anchorRef={activeMenuAnchor}
+            onClose={() => setOpenMenuKey(null)}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busyKey === openModule?.sectionKey}
+              onClick={() => openModule && openEdit(openModule)}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.dangerItem}
+              disabled={busyKey === openModule?.sectionKey}
+              onClick={() => openModule && void deleteModule(openModule)}
+            >
+              Delete
+            </button>
+          </RowActionsMenu>
 
-        {loading ? (
-          <div className={configStyles.stateWrap}><Loading /></div>
-        ) : filtered.length === 0 ? (
-          <div className={configStyles.stateWrap}>
-            <EmptyState
-              title="No modules found"
-              text="No repository modules match the current filters."
+          {mounted && detailsModule
+            ? createPortal(
+                <div
+                  className={styles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="module-details-title"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setDetailsModule(null);
+                  }}
+                >
+                  <div className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`}>
+                    <h3 id="module-details-title">{detailsModule.name}</h3>
+                    <p>
+                      <span className="mono">{detailsModule.sectionKey}</span>
+                      {' · '}
+                      <span className="mono">{detailsModule.code || '—'}</span>
+                      {' · '}
+                      used in {detailsModule.instances.length} project{detailsModule.instances.length === 1 ? '' : 's'}
+                    </p>
+                    <div className={configStyles.tableWrap}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Project</th>
+                            <th>Order</th>
+                            <th>VPS folder</th>
+                            <th>Status</th>
+                            <th aria-label="Actions" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detailsModule.instances.map((instance) => (
+                            <tr key={instance.id}>
+                              <td>
+                                <Link href={`/configuration/projects/${instance.projectId}`} className="primary-text">
+                                  {instance.projectCode}
+                                </Link>
+                                <div className="secondary-text">{instance.projectName}</div>
+                              </td>
+                              <td>{instance.position}</td>
+                              <td>
+                                <span className="mono" title={`repository/${instance.repositoryRootPath}/${instance.relativePath}`}>
+                                  repository/{instance.repositoryRootPath}/{instance.relativePath}
+                                </span>
+                              </td>
+                              <td>
+                                <StatusBadge value={instance.active !== false ? 'ACTIVE' : 'INACTIVE'} />
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="button small"
+                                  disabled={busyKey === instance.id}
+                                  onClick={() => void deleteInstance(instance)}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className={styles.editModalActions}>
+                      <button type="button" className="button" onClick={() => setDetailsModule(null)}>Close</button>
+                      <button type="button" className="button primary" onClick={() => openEdit(detailsModule)}>Edit module</button>
+                    </div>
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {mounted && editing
+            ? createPortal(
+                <div
+                  className={styles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="module-edit-title"
+                  onMouseDown={(event) => {
+                    if (!saving && event.target === event.currentTarget) setEditing(null);
+                  }}
+                >
+                  <form className={styles.editModalCard} onSubmit={saveEdit}>
+                    <h3 id="module-edit-title">Edit repository module</h3>
+                    <p>
+                      Changes apply to all {editing.instances.length} project placement
+                      {editing.instances.length === 1 ? '' : 's'} of this module.
+                    </p>
+                    <div className="form-grid">
+                      <div className="field">
+                        <label htmlFor="edit-module-name">Name <em>*</em></label>
+                        <input
+                          id="edit-module-name"
+                          required
+                          value={editForm.name}
+                          disabled={saving}
+                          onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                            ...current,
+                            sectionKey: current.sectionKey,
+                            code: current.code,
+                            relativePath: current.relativePath,
+                          }, 'name', event.target.value))}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="edit-module-key">Key <em>*</em></label>
+                        <input
+                          id="edit-module-key"
+                          className="mono"
+                          required
+                          value={editForm.sectionKey}
+                          disabled={saving}
+                          onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                            ...current,
+                            name: current.name,
+                            code: current.code,
+                            relativePath: current.relativePath,
+                          }, 'sectionKey', event.target.value))}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="edit-module-code">Code <em>*</em></label>
+                        <input
+                          id="edit-module-code"
+                          required
+                          value={editForm.code}
+                          disabled={saving}
+                          onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                            ...current,
+                            name: current.name,
+                            sectionKey: current.sectionKey,
+                            relativePath: current.relativePath,
+                          }, 'code', event.target.value))}
+                        />
+                      </div>
+                      <div className="field full">
+                        <label htmlFor="edit-module-path">VPS relative folder</label>
+                        <input
+                          id="edit-module-path"
+                          className="mono"
+                          value={editForm.relativePath}
+                          disabled={saving}
+                          onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
+                            ...current,
+                            name: current.name,
+                            sectionKey: current.sectionKey,
+                            code: current.code,
+                          }, 'relativePath', event.target.value))}
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.editModalActions}>
+                      <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                      <button type="submit" className="button primary" disabled={saving}>
+                        {saving ? 'Saving…' : 'Save changes'}
+                      </button>
+                    </div>
+                  </form>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {showCreate ? (
+            <CreateRepositorySectionModal
+              projects={projects.map((project) => ({
+                id: project.id,
+                code: project.code,
+                name: project.name,
+                sections: project.sections,
+              }))}
+              onCancel={() => setShowCreate(false)}
+              onCreated={async (created) => {
+                setShowCreate(false);
+                setMessage(`Section “${created.name}” added.`);
+                await load();
+              }}
             />
-          </div>
-        ) : (
-          <div className={configStyles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Module</th>
-                  <th>Key</th>
-                  <th>Code</th>
-                  <th>Projects</th>
-                  <th>Status</th>
-                  <th className={styles.actionsCell} aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((module) => {
-                  const menuOpen = openMenuKey === module.sectionKey;
-                  const busy = busyKey === module.sectionKey;
-                  return (
-                    <tr key={module.sectionKey}>
-                      <td>
-                        <div className={configStyles.title}>{module.name}</div>
-                        <div className="secondary-text mono">{module.relativePath}</div>
-                      </td>
-                      <td><span className="mono">{module.sectionKey}</span></td>
-                      <td><span className="mono">{module.code || '—'}</span></td>
-                      <td>
-                        <button
-                          type="button"
-                          className={configStyles.projectCountBtn}
-                          onClick={() => setDetailsModule(module)}
-                          title={`View ${module.name} details`}
-                        >
-                          {module.instances.length}
-                          <span>project{module.instances.length === 1 ? '' : 's'}</span>
-                        </button>
-                      </td>
-                      <td>
-                        <StatusBadge value={module.activeCount > 0 ? 'ACTIVE' : 'INACTIVE'} />
-                      </td>
-                      <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
-                        <div className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}>
-                          <button
-                            type="button"
-                            ref={(node) => {
-                              menuButtonRefs.current[module.sectionKey] = node;
-                              if (menuOpen) activeMenuAnchor.current = node;
-                            }}
-                            className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
-                            aria-label={`Actions for ${module.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            disabled={busy || saving}
-                            onClick={() => setOpenMenuKey(menuOpen ? null : module.sectionKey)}
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <RowActionsMenu
-        open={Boolean(openModule)}
-        anchorRef={activeMenuAnchor}
-        onClose={() => setOpenMenuKey(null)}
-      >
-        <button
-          type="button"
-          role="menuitem"
-          disabled={busyKey === openModule?.sectionKey}
-          onClick={() => openModule && openEdit(openModule)}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className={styles.dangerItem}
-          disabled={busyKey === openModule?.sectionKey}
-          onClick={() => openModule && void deleteModule(openModule)}
-        >
-          Delete
-        </button>
-      </RowActionsMenu>
-
-      {mounted && detailsModule
-        ? createPortal(
-            <div
-              className={styles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="module-details-title"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) setDetailsModule(null);
-              }}
-            >
-              <div className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`}>
-                <h3 id="module-details-title">{detailsModule.name}</h3>
-                <p>
-                  <span className="mono">{detailsModule.sectionKey}</span>
-                  {' · '}
-                  <span className="mono">{detailsModule.code || '—'}</span>
-                  {' · '}
-                  used in {detailsModule.instances.length} project{detailsModule.instances.length === 1 ? '' : 's'}
-                </p>
-                <div className={configStyles.tableWrap}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Project</th>
-                        <th>Order</th>
-                        <th>VPS folder</th>
-                        <th>Status</th>
-                        <th aria-label="Actions" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detailsModule.instances.map((instance) => (
-                        <tr key={instance.id}>
-                          <td>
-                            <Link href={`/configuration/projects/${instance.projectId}`} className="primary-text">
-                              {instance.projectCode}
-                            </Link>
-                            <div className="secondary-text">{instance.projectName}</div>
-                          </td>
-                          <td>{instance.position}</td>
-                          <td>
-                            <span className="mono" title={`repository/${instance.repositoryRootPath}/${instance.relativePath}`}>
-                              repository/{instance.repositoryRootPath}/{instance.relativePath}
-                            </span>
-                          </td>
-                          <td>
-                            <StatusBadge value={instance.active !== false ? 'ACTIVE' : 'INACTIVE'} />
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="button small"
-                              disabled={busyKey === instance.id}
-                              onClick={() => void deleteInstance(instance)}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className={styles.editModalActions}>
-                  <button type="button" className="button" onClick={() => setDetailsModule(null)}>Close</button>
-                  <button type="button" className="button primary" onClick={() => openEdit(detailsModule)}>Edit module</button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {mounted && editing
-        ? createPortal(
-            <div
-              className={styles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="module-edit-title"
-              onMouseDown={(event) => {
-                if (!saving && event.target === event.currentTarget) setEditing(null);
-              }}
-            >
-              <form className={styles.editModalCard} onSubmit={saveEdit}>
-                <h3 id="module-edit-title">Edit repository module</h3>
-                <p>
-                  Changes apply to all {editing.instances.length} project placement
-                  {editing.instances.length === 1 ? '' : 's'} of this module.
-                </p>
-                <div className="form-grid">
-                  <div className="field">
-                    <label htmlFor="edit-module-name">Name <em>*</em></label>
-                    <input
-                      id="edit-module-name"
-                      required
-                      value={editForm.name}
-                      disabled={saving}
-                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
-                        ...current,
-                        sectionKey: current.sectionKey,
-                        code: current.code,
-                        relativePath: current.relativePath,
-                      }, 'name', event.target.value))}
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="edit-module-key">Key <em>*</em></label>
-                    <input
-                      id="edit-module-key"
-                      className="mono"
-                      required
-                      value={editForm.sectionKey}
-                      disabled={saving}
-                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
-                        ...current,
-                        name: current.name,
-                        code: current.code,
-                        relativePath: current.relativePath,
-                      }, 'sectionKey', event.target.value))}
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="edit-module-code">Code <em>*</em></label>
-                    <input
-                      id="edit-module-code"
-                      required
-                      value={editForm.code}
-                      disabled={saving}
-                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
-                        ...current,
-                        name: current.name,
-                        sectionKey: current.sectionKey,
-                        relativePath: current.relativePath,
-                      }, 'code', event.target.value))}
-                    />
-                  </div>
-                  <div className="field full">
-                    <label htmlFor="edit-module-path">VPS relative folder</label>
-                    <input
-                      id="edit-module-path"
-                      className="mono"
-                      value={editForm.relativePath}
-                      disabled={saving}
-                      onChange={(event) => setEditForm((current) => syncLinkedSectionFields({
-                        ...current,
-                        name: current.name,
-                        sectionKey: current.sectionKey,
-                        code: current.code,
-                      }, 'relativePath', event.target.value))}
-                    />
-                  </div>
-                </div>
-                <div className={styles.editModalActions}>
-                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-                  <button type="submit" className="button primary" disabled={saving}>
-                    {saving ? 'Saving…' : 'Save changes'}
+          ) : null}
+        </>
+      )}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th>Module</th>
+            <th>Key</th>
+            <th>Code</th>
+            <th>Projects</th>
+            <th>Status</th>
+            <th className={styles.actionsCell} aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((module) => {
+            const menuOpen = openMenuKey === module.sectionKey;
+            const busy = busyKey === module.sectionKey;
+            return (
+              <tr key={module.sectionKey}>
+                <td>
+                  <div className={configStyles.title}>{module.name}</div>
+                  <div className="secondary-text mono">{module.relativePath}</div>
+                </td>
+                <td><span className="mono">{module.sectionKey}</span></td>
+                <td><span className="mono">{module.code || '—'}</span></td>
+                <td>
+                  <button
+                    type="button"
+                    className={configStyles.projectCountBtn}
+                    onClick={() => setDetailsModule(module)}
+                    title={`View ${module.name} details`}
+                  >
+                    {module.instances.length}
+                    <span>project{module.instances.length === 1 ? '' : 's'}</span>
                   </button>
-                </div>
-              </form>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {showCreate ? (
-        <CreateRepositorySectionModal
-          projects={projects.map((project) => ({
-            id: project.id,
-            code: project.code,
-            name: project.name,
-            sections: project.sections,
-          }))}
-          onCancel={() => setShowCreate(false)}
-          onCreated={async (created) => {
-            setShowCreate(false);
-            setMessage(`Section “${created.name}” added.`);
-            await load();
-          }}
-        />
-      ) : null}
-    </div>
+                </td>
+                <td>
+                  <StatusBadge value={module.activeCount > 0 ? 'ACTIVE' : 'INACTIVE'} />
+                </td>
+                <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
+                  <div className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}>
+                    <button
+                      type="button"
+                      ref={(node) => {
+                        menuButtonRefs.current[module.sectionKey] = node;
+                        if (menuOpen) activeMenuAnchor.current = node;
+                      }}
+                      className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
+                      aria-label={`Actions for ${module.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      disabled={busy || saving}
+                      onClick={() => setOpenMenuKey(menuOpen ? null : module.sectionKey)}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </ConfigurationListShell>
   );
 }

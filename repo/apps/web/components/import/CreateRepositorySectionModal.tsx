@@ -46,8 +46,6 @@ export function CreateRepositorySectionModal({
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
-  const [relativePath, setRelativePath] = useState('');
-  const [pathTouched, setPathTouched] = useState(false);
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -87,7 +85,7 @@ export function CreateRepositorySectionModal({
         body: JSON.stringify({
           name: trimmedName,
           code: code.trim() || undefined,
-          relativePath: (relativePath.trim() || suggestedPath),
+          relativePath: suggestedPath,
           position: nextPosition,
           active,
           description: description.trim() || undefined,
@@ -143,7 +141,6 @@ export function CreateRepositorySectionModal({
             onChange={(event) => {
               const next = event.target.value;
               setName(next);
-              if (!pathTouched) setRelativePath(slugifyPath(next));
               if (!code.trim()) {
                 const words = next.trim().split(/\s+/).filter(Boolean);
                 const generated = words.length >= 3
@@ -168,22 +165,6 @@ export function CreateRepositorySectionModal({
             title="Section code"
             disabled={saving}
           />
-        </div>
-        <div className="field full">
-          <label htmlFor="create-section-path">Relative folder path</label>
-          <input
-            id="create-section-path"
-            className="mono"
-            value={relativePath}
-            onChange={(event) => {
-              setPathTouched(true);
-              setRelativePath(event.target.value);
-            }}
-            placeholder="Generated from name when blank"
-            title="Relative folder path"
-            disabled={saving}
-          />
-          <small>Created under the selected project’s configured repository directory.</small>
         </div>
         <div className="field full">
           <label htmlFor="create-section-description">Description</label>

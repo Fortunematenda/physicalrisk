@@ -5,15 +5,15 @@ import { createPortal } from 'react-dom';
 import {
   FolderTree, LayoutTemplate, MoreVertical, Pencil, Plus, RefreshCw, Search, Star, Trash2,
 } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
-import { Loading } from '@/components/loading';
-import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
+import {
+  ConfigurationListShell,
+  configurationListStyles as styles,
+} from '@/components/configuration-list-shell';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api } from '@/lib/api';
 import { deriveSectionFields, syncLinkedSectionFields } from '@/lib/section-fields';
-import styles from '../Configuration.module.css';
 import actionStyles from '@/components/row-actions.module.css';
 
 type TemplateSection = {
@@ -508,44 +508,36 @@ export default function TemplatesPage() {
   );
 
   return (
-    <div className={styles.page}>
-      <PageHeader
-        title="Directory Templates"
-        description="Reusable directory blueprints that provision repository modules for new projects."
-      />
-
-      {error && !showModuleModal && !showCreate && !editing ? <div className="notice error">{error}</div> : null}
-      {message && !showModuleModal ? <div className="notice success">{message}</div> : null}
-
-      <div className={styles.stats}>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconBlue}`}><LayoutTemplate size={18} /></div>
-          <div>
-            <span>Templates</span>
-            <strong>{stats.total}</strong>
-            <small>Reusable directory blueprints</small>
-          </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconGreen}`}><Star size={18} /></div>
-          <div>
-            <span>Default</span>
-            <strong>{stats.defaults}</strong>
-            <small>Applied to new projects</small>
-          </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconOrange}`}><FolderTree size={18} /></div>
-          <div>
-            <span>Modules</span>
-            <strong>{stats.sections}</strong>
-            <small>Across all templates</small>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.panelCard}>
-        <div className={styles.toolbar}>
+    <ConfigurationListShell
+      title="Directory Templates"
+      description="Reusable directory blueprints that provision repository modules for new projects."
+      error={!showModuleModal && !showCreate && !editing ? error : undefined}
+      message={!showModuleModal ? message : undefined}
+      stats={[
+        {
+          label: 'Templates',
+          value: stats.total,
+          hint: 'Reusable directory blueprints',
+          icon: <LayoutTemplate size={18} />,
+          tone: 'blue',
+        },
+        {
+          label: 'Default',
+          value: stats.defaults,
+          hint: 'Applied to new projects',
+          icon: <Star size={18} />,
+          tone: 'green',
+        },
+        {
+          label: 'Modules',
+          value: stats.sections,
+          hint: 'Across all templates',
+          icon: <FolderTree size={18} />,
+          tone: 'orange',
+        },
+      ]}
+      toolbar={(
+        <>
           <button type="button" className="button primary small" onClick={openCreate}>
             <Plus size={14} /> Add template
           </button>
@@ -571,274 +563,269 @@ export default function TemplatesPage() {
             Refresh
           </button>
           <span className={styles.count}>{stats.shown} shown</span>
-        </div>
-
-        {loading ? (
-          <div className={styles.stateWrap}><Loading /></div>
-        ) : filtered.length === 0 ? (
-          <div className={styles.stateWrap}>
-            <EmptyState
-              title="No templates found"
-              text={items.length === 0
-                ? 'Use Add template to create the first directory blueprint.'
-                : 'No templates match the current search.'}
-            />
-          </div>
-        ) : (
-          <div className={styles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th className={styles.colCode}>Code</th>
-                  <th className={styles.colProject}>Template</th>
-                  <th>Modules</th>
-                  <th className={styles.colStatus}>Default</th>
-                  <th className={styles.colStatus}>Status</th>
-                  <th className={actionStyles.actionsCell} aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item) => {
-                  const menuOpen = openMenuId === item.id;
-                  const busy = busyId === item.id;
-                  return (
-                    <tr key={item.id}>
-                      <td>
-                        <span className={`mono ${styles.projectCode}`}>{item.code}</span>
-                      </td>
-                      <td className={styles.projectCell}>
-                        <div className={styles.title}>{item.name}</div>
-                        <div className={styles.projectDescription}>{item.description || 'No description'}</div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={styles.projectCountBtn}
-                          onClick={() => setDetails(item)}
-                          title={`View modules in ${item.name}`}
-                        >
-                          {item.sections?.length ?? 0}
-                          <span>module{(item.sections?.length ?? 0) === 1 ? '' : 's'}</span>
-                        </button>
-                      </td>
-                      <td>{item.isDefault ? <StatusBadge value="DEFAULT" /> : <span className="secondary-text">—</span>}</td>
-                      <td><StatusBadge value={item.active !== false ? 'ACTIVE' : 'INACTIVE'} /></td>
-                      <td className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}>
-                        <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
-                          <button
-                            type="button"
-                            ref={(node) => {
-                              menuButtonRefs.current[item.id] = node;
-                              if (menuOpen) activeMenuAnchor.current = node;
-                            }}
-                            className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
-                            aria-label={`Actions for ${item.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            disabled={busy || saving}
-                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <RowActionsMenu
-        open={Boolean(openItem)}
-        anchorRef={activeMenuAnchor}
-        onClose={() => setOpenMenuId(null)}
-      >
-        <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && openEdit(openItem)}>
-          Edit
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
-          onClick={() => openItem && void setDefault(openItem)}
-        >
-          Set default
-        </button>
-        <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && void duplicate(openItem)}>
-          Duplicate
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className={actionStyles.dangerItem}
-          disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
-          onClick={() => openItem && void removeTemplate(openItem)}
-        >
-          Delete
-        </button>
-      </RowActionsMenu>
-
-      {mounted && details
-        ? createPortal(
-            <div
-              className={actionStyles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="template-details-title"
-              onMouseDown={(event) => {
-                if (event.target === event.currentTarget) setDetails(null);
-              }}
+        </>
+      )}
+      loading={loading}
+      empty={filtered.length === 0 ? {
+        title: 'No templates found',
+        text: items.length === 0
+          ? 'Use Add template to create the first directory blueprint.'
+          : 'No templates match the current search.',
+      } : null}
+      footer={(
+        <>
+          <RowActionsMenu
+            open={Boolean(openItem)}
+            anchorRef={activeMenuAnchor}
+            onClose={() => setOpenMenuId(null)}
+          >
+            <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && openEdit(openItem)}>
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
+              onClick={() => openItem && void setDefault(openItem)}
             >
-              <div className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`}>
-                <h3 id="template-details-title">{details.name}</h3>
-                <p>
-                  <span className="mono">{details.code}</span>
-                  {' · '}
-                  {details.sections?.length ?? 0} module{(details.sections?.length ?? 0) === 1 ? '' : 's'}
-                  {details.isDefault ? ' · Default' : ''}
-                </p>
-                <div className={styles.tableWrap}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Order</th>
-                        <th>Key</th>
-                        <th>Name</th>
-                        <th>Code</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...(details.sections ?? [])]
-                        .sort((a, b) => a.position - b.position)
-                        .map((section) => (
-                          <tr key={`${details.id}-${section.sectionKey}`}>
-                            <td>{section.position}</td>
-                            <td><span className="mono">{section.sectionKey}</span></td>
-                            <td>{section.name}</td>
-                            <td><span className="mono">{section.code}</span></td>
+              Set default
+            </button>
+            <button type="button" role="menuitem" disabled={busyId === openItem?.id} onClick={() => openItem && void duplicate(openItem)}>
+              Duplicate
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={actionStyles.dangerItem}
+              disabled={busyId === openItem?.id || Boolean(openItem?.isDefault)}
+              onClick={() => openItem && void removeTemplate(openItem)}
+            >
+              Delete
+            </button>
+          </RowActionsMenu>
+
+          {mounted && details
+            ? createPortal(
+                <div
+                  className={actionStyles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="template-details-title"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setDetails(null);
+                  }}
+                >
+                  <div className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`}>
+                    <h3 id="template-details-title">{details.name}</h3>
+                    <p>
+                      <span className="mono">{details.code}</span>
+                      {' · '}
+                      {details.sections?.length ?? 0} module{(details.sections?.length ?? 0) === 1 ? '' : 's'}
+                      {details.isDefault ? ' · Default' : ''}
+                    </p>
+                    <div className={styles.tableWrap}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Order</th>
+                            <th>Key</th>
+                            <th>Name</th>
+                            <th>Code</th>
                           </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className={actionStyles.editModalActions}>
-                  <button type="button" className="button" onClick={() => setDetails(null)}>Close</button>
-                  <button type="button" className="button primary" onClick={() => openEdit(details)}>Edit template</button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {mounted && showCreate
-        ? createPortal(
-            <div
-              className={actionStyles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="template-create-title"
-              onMouseDown={(event) => {
-                if (!saving && event.target === event.currentTarget) setShowCreate(false);
-              }}
-            >
-              <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={submit}>
-                <h3 id="template-create-title">Add directory template</h3>
-                <p>Choose modules for this blueprint, then create the template.</p>
-                <div className="form-grid">
-                  {renderTemplateFields(form, setForm, 'create', 'create')}
-                </div>
-                {error ? <div className="notice error">{error}</div> : null}
-                <div className={actionStyles.editModalActions}>
-                  <button type="button" className="button" disabled={saving} onClick={() => setShowCreate(false)}>Cancel</button>
-                  <button type="submit" className="button primary" disabled={saving || !form.sections.length}>
-                    {saving ? 'Creating…' : 'Create template'}
-                  </button>
-                </div>
-              </form>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {mounted && editing
-        ? createPortal(
-            <div
-              className={actionStyles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="template-edit-title"
-              onMouseDown={(event) => {
-                if (!saving && event.target === event.currentTarget) setEditing(null);
-              }}
-            >
-              <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={saveEdit}>
-                <h3 id="template-edit-title">Edit directory template</h3>
-                <p>Update “{editing.name}” and its selected modules.</p>
-                <div className="form-grid">
-                  {renderTemplateFields(editForm, setEditForm, 'edit', 'edit')}
-                </div>
-                {error ? <div className="notice error">{error}</div> : null}
-                <div className={actionStyles.editModalActions}>
-                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-                  <button type="submit" className="button primary" disabled={saving || !editForm.sections.length}>
-                    {saving ? 'Saving…' : 'Save changes'}
-                  </button>
-                </div>
-              </form>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {mounted && showModuleModal
-        ? createPortal(
-            <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="module-edit-title">
-              <div className={actionStyles.editModalCard}>
-                <h3 id="module-edit-title">{editingModuleKey ? 'Edit module' : 'Add module'}</h3>
-                <p>Linked fields stay in sync — change one and the others update.</p>
-                <div className="form-grid">
-                  <div className="field">
-                    <label htmlFor="module-name">Name <em>*</em></label>
-                    <input
-                      id="module-name"
-                      value={moduleDraft.name}
-                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'name', event.target.value))}
-                    />
+                        </thead>
+                        <tbody>
+                          {[...(details.sections ?? [])]
+                            .sort((a, b) => a.position - b.position)
+                            .map((section) => (
+                              <tr key={`${details.id}-${section.sectionKey}`}>
+                                <td>{section.position}</td>
+                                <td><span className="mono">{section.sectionKey}</span></td>
+                                <td>{section.name}</td>
+                                <td><span className="mono">{section.code}</span></td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className={actionStyles.editModalActions}>
+                      <button type="button" className="button" onClick={() => setDetails(null)}>Close</button>
+                      <button type="button" className="button primary" onClick={() => openEdit(details)}>Edit template</button>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label htmlFor="module-key">Key <em>*</em></label>
-                    <input
-                      id="module-key"
-                      className="mono"
-                      value={moduleDraft.sectionKey}
-                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'sectionKey', event.target.value))}
-                    />
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {mounted && showCreate
+            ? createPortal(
+                <div
+                  className={actionStyles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="template-create-title"
+                  onMouseDown={(event) => {
+                    if (!saving && event.target === event.currentTarget) setShowCreate(false);
+                  }}
+                >
+                  <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={submit}>
+                    <h3 id="template-create-title">Add directory template</h3>
+                    <p>Choose modules for this blueprint, then create the template.</p>
+                    <div className="form-grid">
+                      {renderTemplateFields(form, setForm, 'create', 'create')}
+                    </div>
+                    {error ? <div className="notice error">{error}</div> : null}
+                    <div className={actionStyles.editModalActions}>
+                      <button type="button" className="button" disabled={saving} onClick={() => setShowCreate(false)}>Cancel</button>
+                      <button type="submit" className="button primary" disabled={saving || !form.sections.length}>
+                        {saving ? 'Creating…' : 'Create template'}
+                      </button>
+                    </div>
+                  </form>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {mounted && editing
+            ? createPortal(
+                <div
+                  className={actionStyles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="template-edit-title"
+                  onMouseDown={(event) => {
+                    if (!saving && event.target === event.currentTarget) setEditing(null);
+                  }}
+                >
+                  <form className={`${actionStyles.editModalCard} ${styles.moduleDetailsCard}`} onSubmit={saveEdit}>
+                    <h3 id="template-edit-title">Edit directory template</h3>
+                    <p>Update “{editing.name}” and its selected modules.</p>
+                    <div className="form-grid">
+                      {renderTemplateFields(editForm, setEditForm, 'edit', 'edit')}
+                    </div>
+                    {error ? <div className="notice error">{error}</div> : null}
+                    <div className={actionStyles.editModalActions}>
+                      <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                      <button type="submit" className="button primary" disabled={saving || !editForm.sections.length}>
+                        {saving ? 'Saving…' : 'Save changes'}
+                      </button>
+                    </div>
+                  </form>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {mounted && showModuleModal
+            ? createPortal(
+                <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="module-edit-title">
+                  <div className={actionStyles.editModalCard}>
+                    <h3 id="module-edit-title">{editingModuleKey ? 'Edit module' : 'Add module'}</h3>
+                    <p>Linked fields stay in sync — change one and the others update.</p>
+                    <div className="form-grid">
+                      <div className="field">
+                        <label htmlFor="module-name">Name <em>*</em></label>
+                        <input
+                          id="module-name"
+                          value={moduleDraft.name}
+                          onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'name', event.target.value))}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="module-key">Key <em>*</em></label>
+                        <input
+                          id="module-key"
+                          className="mono"
+                          value={moduleDraft.sectionKey}
+                          onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'sectionKey', event.target.value))}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="module-code">Code <em>*</em></label>
+                        <input
+                          id="module-code"
+                          value={moduleDraft.code}
+                          onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'code', event.target.value))}
+                        />
+                      </div>
+                    </div>
+                    {error ? <div className="notice error">{error}</div> : null}
+                    <div className={actionStyles.editModalActions}>
+                      <button type="button" className="button" onClick={() => setShowModuleModal(false)}>Cancel</button>
+                      <button type="button" className="button primary" onClick={applyModuleDraft}>
+                        {editingModuleKey ? 'Update module' : 'Add module'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="field">
-                    <label htmlFor="module-code">Code <em>*</em></label>
-                    <input
-                      id="module-code"
-                      value={moduleDraft.code}
-                      onChange={(event) => setModuleDraft((current) => syncLinkedSectionFields(current, 'code', event.target.value))}
-                    />
-                  </div>
-                </div>
-                {error ? <div className="notice error">{error}</div> : null}
-                <div className={actionStyles.editModalActions}>
-                  <button type="button" className="button" onClick={() => setShowModuleModal(false)}>Cancel</button>
-                  <button type="button" className="button primary" onClick={applyModuleDraft}>
-                    {editingModuleKey ? 'Update module' : 'Add module'}
+                </div>,
+                document.body,
+              )
+            : null}
+        </>
+      )}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th className={styles.colCode}>Code</th>
+            <th className={styles.colProject}>Template</th>
+            <th>Modules</th>
+            <th className={styles.colStatus}>Default</th>
+            <th className={styles.colStatus}>Status</th>
+            <th className={actionStyles.actionsCell} aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((item) => {
+            const menuOpen = openMenuId === item.id;
+            const busy = busyId === item.id;
+            return (
+              <tr key={item.id}>
+                <td>
+                  <span className={`mono ${styles.projectCode}`}>{item.code}</span>
+                </td>
+                <td className={styles.projectCell}>
+                  <div className={styles.title}>{item.name}</div>
+                  <div className={styles.projectDescription}>{item.description || 'No description'}</div>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className={styles.projectCountBtn}
+                    onClick={() => setDetails(item)}
+                    title={`View modules in ${item.name}`}
+                  >
+                    {item.sections?.length ?? 0}
+                    <span>module{(item.sections?.length ?? 0) === 1 ? '' : 's'}</span>
                   </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
+                </td>
+                <td>{item.isDefault ? <StatusBadge value="DEFAULT" /> : <span className="secondary-text">—</span>}</td>
+                <td><StatusBadge value={item.active !== false ? 'ACTIVE' : 'INACTIVE'} /></td>
+                <td className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}>
+                  <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
+                    <button
+                      type="button"
+                      ref={(node) => {
+                        menuButtonRefs.current[item.id] = node;
+                        if (menuOpen) activeMenuAnchor.current = node;
+                      }}
+                      className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                      aria-label={`Actions for ${item.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      disabled={busy || saving}
+                      onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </ConfigurationListShell>
   );
 }

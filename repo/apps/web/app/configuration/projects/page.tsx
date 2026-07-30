@@ -4,15 +4,15 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FolderKanban, FileStack, MoreVertical, Plus, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
-import { Loading } from '@/components/loading';
-import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
+import {
+  ConfigurationListShell,
+  configurationListStyles as styles,
+} from '@/components/configuration-list-shell';
 import { CreateProjectModal } from '@/components/import/CreateProjectModal';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api, formatDate } from '@/lib/api';
-import styles from '../Configuration.module.css';
 import actionStyles from '@/components/row-actions.module.css';
 
 type ProjectRow = {
@@ -120,45 +120,37 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className={styles.page}>
-      <PageHeader
-        title="Project Registry"
-        description="The source of truth for every project, its configurable VPS directory and routing context."
-        action={{ label: 'Directory Templates', href: '/configuration/templates' }}
-      />
-
-      {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
-
-      <div className={styles.stats}>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconBlue}`}><FolderKanban size={18} /></div>
-          <div>
-            <span>Projects</span>
-            <strong>{stats.total}</strong>
-            <small>Registered VPS repositories</small>
-          </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconGreen}`}><ShieldCheck size={18} /></div>
-          <div>
-            <span>Active</span>
-            <strong>{stats.active}</strong>
-            <small>Ready for import and routing</small>
-          </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconOrange}`}><FileStack size={18} /></div>
-          <div>
-            <span>Documents</span>
-            <strong>{stats.documents}</strong>
-            <small>Across all registered projects</small>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.panelCard}>
-        <div className={styles.toolbar}>
+    <ConfigurationListShell
+      title="Project Registry"
+      description="The source of truth for every project, its configurable VPS directory and routing context."
+      headerAction={{ label: 'Directory Templates', href: '/configuration/templates' }}
+      error={error}
+      message={message}
+      stats={[
+        {
+          label: 'Projects',
+          value: stats.total,
+          hint: 'Registered VPS repositories',
+          icon: <FolderKanban size={18} />,
+          tone: 'blue',
+        },
+        {
+          label: 'Active',
+          value: stats.active,
+          hint: 'Ready for import and routing',
+          icon: <ShieldCheck size={18} />,
+          tone: 'green',
+        },
+        {
+          label: 'Documents',
+          value: stats.documents,
+          hint: 'Across all registered projects',
+          icon: <FileStack size={18} />,
+          tone: 'orange',
+        },
+      ]}
+      toolbar={(
+        <>
           <button
             type="button"
             className="button primary small"
@@ -200,141 +192,136 @@ export default function ProjectsPage() {
             Refresh
           </button>
           <span className={styles.count}>{stats.shown} shown</span>
-        </div>
+        </>
+      )}
+      loading={loading}
+      empty={filtered.length === 0 ? {
+        title: 'No projects found',
+        text: items.length === 0
+          ? 'Use Add project to create the first project and provision its VPS repository structure.'
+          : 'No projects match the current filters.',
+      } : null}
+      footer={(
+        <>
+          <RowActionsMenu
+            open={Boolean(openItem)}
+            anchorRef={activeMenuAnchor}
+            onClose={() => setOpenMenuId(null)}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busyId === openItem?.id}
+              onClick={() => openItem && editProject(openItem)}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={actionStyles.dangerItem}
+              disabled={busyId === openItem?.id}
+              onClick={() => openItem && void deleteProject(openItem)}
+            >
+              Delete
+            </button>
+          </RowActionsMenu>
 
-        {loading ? (
-          <div className={styles.stateWrap}><Loading /></div>
-        ) : filtered.length === 0 ? (
-          <div className={styles.stateWrap}>
-            <EmptyState
-              title="No projects found"
-              text={items.length === 0
-                ? 'Use Add project to create the first project and provision its VPS repository structure.'
-                : 'No projects match the current filters.'}
+          {showCreate ? (
+            <CreateProjectModal
+              onCancel={() => setShowCreate(false)}
+              onCreated={async (created) => {
+                setShowCreate(false);
+                setMessage(`Project “${created.name}” created.`);
+                await load();
+              }}
             />
-          </div>
-        ) : (
-          <div className={styles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th className={styles.colCode}>Code</th>
-                  <th className={styles.colProject}>Project</th>
-                  <th className={styles.colStatus}>Status</th>
-                  <th className={styles.colPath}>VPS directory</th>
-                  <th className={styles.colNum}>Documents</th>
-                  <th className={styles.colNum}>Imports</th>
-                  <th className={styles.colDate}>Updated</th>
-                  <th className={actionStyles.actionsCell} aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item) => {
-                  const menuOpen = openMenuId === item.id;
-                  const busy = busyId === item.id;
-                  return (
-                    <tr
-                      key={item.id}
-                      className="clickable-row"
-                      tabIndex={0}
-                      role="link"
-                      aria-label={`Open project ${item.code}`}
-                      onClick={() => router.push(`/configuration/projects/${item.id}`)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          router.push(`/configuration/projects/${item.id}`);
-                        }
+          ) : null}
+        </>
+      )}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th className={styles.colCode}>Code</th>
+            <th className={styles.colProject}>Project</th>
+            <th className={styles.colStatus}>Status</th>
+            <th className={styles.colPath}>VPS directory</th>
+            <th className={styles.colNum}>Documents</th>
+            <th className={styles.colNum}>Imports</th>
+            <th className={styles.colDate}>Updated</th>
+            <th className={actionStyles.actionsCell} aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((item) => {
+            const menuOpen = openMenuId === item.id;
+            const busy = busyId === item.id;
+            return (
+              <tr
+                key={item.id}
+                className="clickable-row"
+                tabIndex={0}
+                role="link"
+                aria-label={`Open project ${item.code}`}
+                onClick={() => router.push(`/configuration/projects/${item.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    router.push(`/configuration/projects/${item.id}`);
+                  }
+                }}
+              >
+                <td>
+                  <Link
+                    href={`/configuration/projects/${item.id}`}
+                    className={`primary-text ${styles.docLink} ${styles.projectCode}`}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {item.code}
+                  </Link>
+                </td>
+                <td className={styles.projectCell}>
+                  <div className={styles.title}>{item.name}</div>
+                  <div className={styles.projectDescription}>{item.description || 'No description'}</div>
+                </td>
+                <td><StatusBadge value={item.status} /></td>
+                <td>
+                  <span className={`mono ${styles.path}`} title={`repository/${item.repositoryRootPath}`}>
+                    repository/{item.repositoryRootPath}
+                  </span>
+                  <div className="secondary-text">{item.sections.length} sections</div>
+                </td>
+                <td>{item._count.documents}</td>
+                <td>{item._count.importJobs}</td>
+                <td>{formatDate(item.updatedAt)}</td>
+                <td
+                  className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
+                    <button
+                      type="button"
+                      ref={(node) => {
+                        menuButtonRefs.current[item.id] = node;
+                        if (menuOpen) activeMenuAnchor.current = node;
                       }}
+                      className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                      aria-label={`Actions for ${item.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      disabled={busy}
+                      onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
                     >
-                      <td>
-                        <Link
-                          href={`/configuration/projects/${item.id}`}
-                          className={`primary-text ${styles.docLink} ${styles.projectCode}`}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {item.code}
-                        </Link>
-                      </td>
-                      <td className={styles.projectCell}>
-                        <div className={styles.title}>{item.name}</div>
-                        <div className={styles.projectDescription}>{item.description || 'No description'}</div>
-                      </td>
-                      <td><StatusBadge value={item.status} /></td>
-                      <td>
-                        <span className={`mono ${styles.path}`} title={`repository/${item.repositoryRootPath}`}>
-                          repository/{item.repositoryRootPath}
-                        </span>
-                        <div className="secondary-text">{item.sections.length} sections</div>
-                      </td>
-                      <td>{item._count.documents}</td>
-                      <td>{item._count.importJobs}</td>
-                      <td>{formatDate(item.updatedAt)}</td>
-                      <td
-                        className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
-                          <button
-                            type="button"
-                            ref={(node) => {
-                              menuButtonRefs.current[item.id] = node;
-                              if (menuOpen) activeMenuAnchor.current = node;
-                            }}
-                            className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
-                            aria-label={`Actions for ${item.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            disabled={busy}
-                            onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <RowActionsMenu
-        open={Boolean(openItem)}
-        anchorRef={activeMenuAnchor}
-        onClose={() => setOpenMenuId(null)}
-      >
-        <button
-          type="button"
-          role="menuitem"
-          disabled={busyId === openItem?.id}
-          onClick={() => openItem && editProject(openItem)}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className={actionStyles.dangerItem}
-          disabled={busyId === openItem?.id}
-          onClick={() => openItem && void deleteProject(openItem)}
-        >
-          Delete
-        </button>
-      </RowActionsMenu>
-
-      {showCreate ? (
-        <CreateProjectModal
-          onCancel={() => setShowCreate(false)}
-          onCreated={async (created) => {
-            setShowCreate(false);
-            setMessage(`Project “${created.name}” created.`);
-            await load();
-          }}
-        />
-      ) : null}
-    </div>
+                      <MoreVertical size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </ConfigurationListShell>
   );
 }

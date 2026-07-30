@@ -5,14 +5,14 @@ import { createPortal } from 'react-dom';
 import {
   GitBranch, Link2, MoreVertical, Plus, RefreshCw, Search, ShieldCheck,
 } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
-import { Loading } from '@/components/loading';
-import { EmptyState } from '@/components/empty-state';
+import {
+  ConfigurationListShell,
+  configurationListStyles as configStyles,
+} from '@/components/configuration-list-shell';
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { useConfirm } from '@/components/confirm-dialog';
 import { api } from '@/lib/api';
-import configStyles from '../Configuration.module.css';
 import styles from '@/components/row-actions.module.css';
 
 type DocumentTypeOption = {
@@ -363,44 +363,36 @@ export default function RoutingRulesPage() {
   );
 
   return (
-    <div className={configStyles.page}>
-      <PageHeader
-        title="Routing Rules"
-        description="Configuration-based routing replaces hard-coded project logic. Lowest priority number is evaluated first."
-      />
-
-      {error && !showCreate && !editing ? <div className="notice error">{error}</div> : null}
-      {message && !showCreate && !editing ? <div className="notice success">{message}</div> : null}
-
-      <div className={configStyles.stats}>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconBlue}`}><GitBranch size={18} /></div>
-          <div>
-            <span>Rules</span>
-            <strong>{stats.total}</strong>
-            <small>Configured routing paths</small>
-          </div>
-        </div>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconGreen}`}><ShieldCheck size={18} /></div>
-          <div>
-            <span>Active</span>
-            <strong>{stats.active}</strong>
-            <small>Evaluated during import</small>
-          </div>
-        </div>
-        <div className={configStyles.statCard}>
-          <div className={`${configStyles.statIcon} ${configStyles.statIconOrange}`}><Link2 size={18} /></div>
-          <div>
-            <span>Global</span>
-            <strong>{stats.global}</strong>
-            <small>Apply across all projects</small>
-          </div>
-        </div>
-      </div>
-
-      <div className={configStyles.panelCard}>
-        <div className={configStyles.toolbar}>
+    <ConfigurationListShell
+      title="Routing Rules"
+      description="Configuration-based routing replaces hard-coded project logic. Lowest priority number is evaluated first."
+      error={!showCreate && !editing ? error : undefined}
+      message={!showCreate && !editing ? message : undefined}
+      stats={[
+        {
+          label: 'Rules',
+          value: stats.total,
+          hint: 'Configured routing paths',
+          icon: <GitBranch size={18} />,
+          tone: 'blue',
+        },
+        {
+          label: 'Active',
+          value: stats.active,
+          hint: 'Evaluated during import',
+          icon: <ShieldCheck size={18} />,
+          tone: 'green',
+        },
+        {
+          label: 'Global',
+          value: stats.global,
+          hint: 'Apply across all projects',
+          icon: <Link2 size={18} />,
+          tone: 'orange',
+        },
+      ]}
+      toolbar={(
+        <>
           <button type="button" className="button primary small" onClick={openCreate}>
             <Plus size={14} /> Add rule
           </button>
@@ -437,160 +429,155 @@ export default function RoutingRulesPage() {
             Refresh
           </button>
           <span className={configStyles.count}>{stats.shown} shown</span>
-        </div>
-
-        {loading ? (
-          <div className={configStyles.stateWrap}><Loading /></div>
-        ) : filtered.length === 0 ? (
-          <div className={configStyles.stateWrap}>
-            <EmptyState
-              title="No routing rules found"
-              text={rules.length === 0
-                ? 'Use Add rule to create the first routing path.'
-                : 'No rules match the current filters.'}
-            />
-          </div>
-        ) : (
-          <div className={configStyles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  <th className={configStyles.colNum}>Priority</th>
-                  <th className={configStyles.colProject}>Rule</th>
-                  <th>Conditions</th>
-                  <th>Target</th>
-                  <th className={configStyles.colStatus}>Status</th>
-                  <th className={styles.actionsCell} aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((rule) => {
-                  const menuOpen = openMenuId === rule.id;
-                  const busy = busyId === rule.id;
-                  return (
-                    <tr key={rule.id}>
-                      <td><span className="mono">{rule.priority}</span></td>
-                      <td className={configStyles.projectCell}>
-                        <div className={configStyles.title}>{rule.name}</div>
-                        <div className="secondary-text">{rule.project?.code || 'Global'}</div>
-                      </td>
-                      <td>
-                        <div>{rule.documentType || 'Any type'}</div>
-                        <div className="secondary-text">
-                          {rule.sourceSystem?.name || 'Any source'}
-                          {' · '}
-                          {rule.fileExtension ? `.${rule.fileExtension}` : 'Any file'}
-                        </div>
-                      </td>
-                      <td><span className="mono">{rule.targetSectionKey}</span></td>
-                      <td><StatusBadge value={rule.active !== false ? 'ACTIVE' : 'INACTIVE'} /></td>
-                      <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
-                        <div className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}>
-                          <button
-                            type="button"
-                            ref={(node) => {
-                              menuButtonRefs.current[rule.id] = node;
-                              if (menuOpen) activeMenuAnchor.current = node;
-                            }}
-                            className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
-                            aria-label={`Actions for ${rule.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={menuOpen}
-                            disabled={busy || saving}
-                            onClick={() => setOpenMenuId(menuOpen ? null : rule.id)}
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <RowActionsMenu
-        open={Boolean(openRule)}
-        anchorRef={activeMenuAnchor}
-        onClose={() => setOpenMenuId(null)}
-      >
-        <button
-          type="button"
-          role="menuitem"
-          disabled={busyId === openRule?.id}
-          onClick={() => openRule && openEdit(openRule)}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          className={styles.dangerItem}
-          disabled={busyId === openRule?.id}
-          onClick={() => openRule && void removeRule(openRule)}
-        >
-          Delete
-        </button>
-      </RowActionsMenu>
-
-      {mounted && showCreate
-        ? createPortal(
-            <div
-              className={styles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="routing-create-title"
-              onMouseDown={(event) => {
-                if (!saving && event.target === event.currentTarget) setShowCreate(false);
-              }}
+        </>
+      )}
+      loading={loading}
+      empty={filtered.length === 0 ? {
+        title: 'No routing rules found',
+        text: rules.length === 0
+          ? 'Use Add rule to create the first routing path.'
+          : 'No rules match the current filters.',
+      } : null}
+      footer={(
+        <>
+          <RowActionsMenu
+            open={Boolean(openRule)}
+            anchorRef={activeMenuAnchor}
+            onClose={() => setOpenMenuId(null)}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busyId === openRule?.id}
+              onClick={() => openRule && openEdit(openRule)}
             >
-              <form className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`} onSubmit={submit}>
-                <h3 id="routing-create-title">Add routing rule</h3>
-                <p>Define conditions and the target repository section for imports.</p>
-                {renderRuleFields(form, setForm, sections, 'create')}
-                {error ? <div className="notice error">{error}</div> : null}
-                <div className={styles.editModalActions}>
-                  <button type="button" className="button" disabled={saving} onClick={() => setShowCreate(false)}>Cancel</button>
-                  <button type="submit" className="button primary" disabled={saving}>
-                    {saving ? 'Creating…' : 'Create rule'}
-                  </button>
-                </div>
-              </form>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {mounted && editing
-        ? createPortal(
-            <div
-              className={styles.editModal}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="routing-edit-title"
-              onMouseDown={(event) => {
-                if (!saving && event.target === event.currentTarget) setEditing(null);
-              }}
+              Edit
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.dangerItem}
+              disabled={busyId === openRule?.id}
+              onClick={() => openRule && void removeRule(openRule)}
             >
-              <form className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`} onSubmit={saveEdit}>
-                <h3 id="routing-edit-title">Edit routing rule</h3>
-                <p>Update conditions and target for “{editing.name}”.</p>
-                {renderRuleFields(editForm, setEditForm, editSections, 'edit')}
-                {error ? <div className="notice error">{error}</div> : null}
-                <div className={styles.editModalActions}>
-                  <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
-                  <button type="submit" className="button primary" disabled={saving}>
-                    {saving ? 'Saving…' : 'Save changes'}
-                  </button>
-                </div>
-              </form>
-            </div>,
-            document.body,
-          )
-        : null}
-    </div>
+              Delete
+            </button>
+          </RowActionsMenu>
+
+          {mounted && showCreate
+            ? createPortal(
+                <div
+                  className={styles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="routing-create-title"
+                  onMouseDown={(event) => {
+                    if (!saving && event.target === event.currentTarget) setShowCreate(false);
+                  }}
+                >
+                  <form className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`} onSubmit={submit}>
+                    <h3 id="routing-create-title">Add routing rule</h3>
+                    <p>Define conditions and the target repository section for imports.</p>
+                    {renderRuleFields(form, setForm, sections, 'create')}
+                    {error ? <div className="notice error">{error}</div> : null}
+                    <div className={styles.editModalActions}>
+                      <button type="button" className="button" disabled={saving} onClick={() => setShowCreate(false)}>Cancel</button>
+                      <button type="submit" className="button primary" disabled={saving}>
+                        {saving ? 'Creating…' : 'Create rule'}
+                      </button>
+                    </div>
+                  </form>
+                </div>,
+                document.body,
+              )
+            : null}
+
+          {mounted && editing
+            ? createPortal(
+                <div
+                  className={styles.editModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="routing-edit-title"
+                  onMouseDown={(event) => {
+                    if (!saving && event.target === event.currentTarget) setEditing(null);
+                  }}
+                >
+                  <form className={`${styles.editModalCard} ${configStyles.moduleDetailsCard}`} onSubmit={saveEdit}>
+                    <h3 id="routing-edit-title">Edit routing rule</h3>
+                    <p>Update conditions and target for “{editing.name}”.</p>
+                    {renderRuleFields(editForm, setEditForm, editSections, 'edit')}
+                    {error ? <div className="notice error">{error}</div> : null}
+                    <div className={styles.editModalActions}>
+                      <button type="button" className="button" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                      <button type="submit" className="button primary" disabled={saving}>
+                        {saving ? 'Saving…' : 'Save changes'}
+                      </button>
+                    </div>
+                  </form>
+                </div>,
+                document.body,
+              )
+            : null}
+        </>
+      )}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th className={configStyles.colNum}>Priority</th>
+            <th className={configStyles.colProject}>Rule</th>
+            <th>Conditions</th>
+            <th>Target</th>
+            <th className={configStyles.colStatus}>Status</th>
+            <th className={styles.actionsCell} aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((rule) => {
+            const menuOpen = openMenuId === rule.id;
+            const busy = busyId === rule.id;
+            return (
+              <tr key={rule.id}>
+                <td><span className="mono">{rule.priority}</span></td>
+                <td className={configStyles.projectCell}>
+                  <div className={configStyles.title}>{rule.name}</div>
+                  <div className="secondary-text">{rule.project?.code || 'Global'}</div>
+                </td>
+                <td>
+                  <div>{rule.documentType || 'Any type'}</div>
+                  <div className="secondary-text">
+                    {rule.sourceSystem?.name || 'Any source'}
+                    {' · '}
+                    {rule.fileExtension ? `.${rule.fileExtension}` : 'Any file'}
+                  </div>
+                </td>
+                <td><span className="mono">{rule.targetSectionKey}</span></td>
+                <td><StatusBadge value={rule.active !== false ? 'ACTIVE' : 'INACTIVE'} /></td>
+                <td className={`${styles.actionsCell} ${menuOpen ? styles.actionsCellOpen : ''}`}>
+                  <div className={`${styles.menuWrap} ${menuOpen ? styles.menuWrapOpen : ''}`}>
+                    <button
+                      type="button"
+                      ref={(node) => {
+                        menuButtonRefs.current[rule.id] = node;
+                        if (menuOpen) activeMenuAnchor.current = node;
+                      }}
+                      className={`${styles.menuButton} ${menuOpen ? styles.menuButtonActive : ''}`}
+                      aria-label={`Actions for ${rule.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      disabled={busy || saving}
+                      onClick={() => setOpenMenuId(menuOpen ? null : rule.id)}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </ConfigurationListShell>
   );
 }
