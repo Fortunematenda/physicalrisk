@@ -58,9 +58,18 @@ docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-mcp ngin
 Verify (uses existing `repo.physicalrisk.com` DNS/TLS — no `repo-mcp` subdomain required):
 
 ```bash
+# Must show resource https://repo.physicalrisk.com/connector/mcp (not repo-mcp.*)
 curl -sS https://repo.physicalrisk.com/.well-known/oauth-protected-resource
-curl -sS https://repo.physicalrisk.com/connector/mcp -o /dev/null -w "%{http_code}\n"
+curl -sS https://repo.physicalrisk.com/connector/health
 ```
+
+If `resource` still says `repo-mcp.physicalrisk.com`, fix `.env.sso`:
+
+```bash
+PUBLIC_MCP_URL=https://repo.physicalrisk.com/connector
+```
+
+then `docker compose … up -d repo-mcp nginx`.
 
 Expected PRM JSON includes `authorization_servers` pointing at your Keycloak issuer (e.g. `https://auth.physicalrisk.com/realms/physicalrisk`).
 
