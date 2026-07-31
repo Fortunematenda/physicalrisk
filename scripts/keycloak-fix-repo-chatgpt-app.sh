@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
-# Fix Keycloak client repo-chatgpt-app for ChatGPT Connectors.
-# Fixes: CODE_TO_TOKEN_ERROR — Offline tokens not allowed for the user or client
+# Fix ChatGPT connector: grant offline_access (client scope + user roles).
+# Avoids bulk client JSON updates that hit Keycloak varchar(255) errors.
 #
 #   cd /opt/physicalrisk && bash scripts/keycloak-fix-repo-chatgpt-app.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
 COMPOSE=(docker compose -f docker-compose.sso.yml --env-file .env.sso)
 
 KEYCLOAK_ADMIN="$(grep -E '^KEYCLOAK_ADMIN=' .env.sso | head -1 | cut -d= -f2- | tr -d '\r"' )"
 KEYCLOAK_ADMIN_PASSWORD="$(grep -E '^KEYCLOAK_ADMIN_PASSWORD=' .env.sso | head -1 | cut -d= -f2- | tr -d '\r"' )"
 KEYCLOAK_ADMIN="${KEYCLOAK_ADMIN:-admin}"
-if [[ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]]; then
-  echo "KEYCLOAK_ADMIN_PASSWORD not found in .env.sso" >&2
-  exit 1
-fi
+[[ -n "${KEYCLOAK_ADMIN_PASSWORD:-}" ]] || { echo "KEYCLOAK_ADMIN_PASSWORD missing in .env.sso" >&2; exit 1; }
 
 kcadm() {
   "${COMPOSE[@]}" exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
@@ -29,55 +25,74 @@ kcadm config credentials \
   --user "$KEYCLOAK_ADMIN" \
   --password "$KEYCLOAK_ADMIN_PASSWORD"
 
-echo "==> Add offline_access to realm default roles…"
+echo "==> offline_access on realm default roles…"
 kcadm add-roles -r physicalrisk --rname default-roles-physicalrisk --rolename offline_access 2>/dev/null || true
 
-echo "==> Find client repo-chatgpt-app…"
 CLIENT_ID="$(
-  kcadm get clients -r physicalrisk -q clientId=repo-chatgpt-app --format csv --fields id --noquotes 2>/dev/null | tail -n +1 | head -1 | tr -d '\r'
+  kcadm get clients -r physicalrisk -q clientId=repo-chatgpt-app --format csv --fields id --noquotes \
+    | awk 'NR==1{print; exit}' | tr -d '\r'
 )"
 if [[ -z "$CLIENT_ID" || "$CLIENT_ID" == "id" ]]; then
-  echo "ERROR: Client repo-chatgpt-app not found. Create it in Keycloak UI first." >&2
+  echo "ERROR: repo-chatgpt-app not found" >&2
   exit 1
 fi
-echo "    CLIENT_ID=$CLIENT_ID"
+echo "==> Client UUID: $CLIENT_ID"
 
-echo "==> Redirect URIs + PKCE + confidential client…"
-kcadm update "clients/$CLIENT_ID" -r physicalrisk \
-  -s 'redirectUris=["https://chatgpt.com/connector/oauth/*","https://chatgpt.com/connector_platform_oauth_redirect","https://chat.openai.com/connector/oauth/*"]' \
-  -s 'webOrigins=["https://chatgpt.com","https://chat.openai.com"]' \
-  -s standardFlowEnabled=true \
-  -s directAccessGrantsEnabled=false \
-  -s publicClient=false \
-  -s fullScopeAllowed=true \
-  -s 'attributes.pkce.code.challenge.method=S256'
-
-echo "==> Attach offline_access as optional client scope…"
 SCOPE_ID="$(
-  kcadm get client-scopes -r physicalrisk --format csv --fields id,name --noquotes 2>/dev/null \
-    | awk -F',' '$2=="offline_access"{print $1; exit}'
+  kcadm get client-scopes -r physicalrisk --format csv --fields id,name --noquotes \
+    | awk -F',' '$2=="offline_access"{print $1; exit}' | tr -d '\r'
 )"
-if [[ -n "${SCOPE_ID:-}" ]]; then
-  echo "    SCOPE_ID=$SCOPE_ID"
-  kcadm create "clients/$CLIENT_ID/optional-client-scopes/$SCOPE_ID" -r physicalrisk 2>/dev/null || \
-    echo "    (scope may already be assigned — OK)"
+if [[ -z "${SCOPE_ID:-}" ]]; then
+  echo "ERROR: offline_access client scope not found in realm" >&2
+  exit 1
+fi
+echo "==> offline_access scope UUID: $SCOPE_ID"
+
+echo "==> Assign offline_access as OPTIONAL client scope…"
+set +e
+kcadm create "clients/$CLIENT_ID/optional-client-scopes/$SCOPE_ID" -r physicalrisk
+CREATE_RC=$?
+set -e
+if [[ $CREATE_RC -eq 0 ]]; then
+  echo "    assigned."
 else
-  echo "WARNING: could not find offline_access scope via CLI — assign it in UI (Client scopes tab)." >&2
+  echo "    create returned $CREATE_RC (often already assigned) — verifying…"
 fi
 
-echo "==> Grant offline_access role to all users (best-effort)…"
-kcadm get users -r physicalrisk --format csv --fields id --noquotes --max 500 2>/dev/null \
-  | tail -n +2 \
-  | while read -r UID; do
-      [[ -z "$UID" || "$UID" == "id" ]] && continue
-      kcadm add-roles -r physicalrisk --uid "$UID" --rolename offline_access 2>/dev/null || true
-    done
+echo "==> Currently assigned optional scopes:"
+kcadm get "clients/$CLIENT_ID/optional-client-scopes" -r physicalrisk --format csv --fields name --noquotes || true
+
+echo "==> Grant offline_access realm role to every user…"
+COUNT=0
+while read -r UID; do
+  [[ -z "$UID" || "$UID" == "id" ]] && continue
+  if kcadm add-roles -r physicalrisk --uid "$UID" --rolename offline_access 2>/dev/null; then
+    COUNT=$((COUNT + 1))
+  fi
+done < <(kcadm get users -r physicalrisk --format csv --fields id --noquotes --max 500 | tr -d '\r')
+echo "    updated ~$COUNT users"
+
+# Explicit user from prior CODE_TO_TOKEN_ERROR logs
+echo "==> Ensure user 88c58b81-3492-408d-9b6b-4fc6de90e1bf has offline_access…"
+kcadm add-roles -r physicalrisk --uid 88c58b81-3492-408d-9b6b-4fc6de90e1bf --rolename offline_access 2>/dev/null || true
 
 echo ""
-echo "OK. Now in ChatGPT:"
-echo "  1) Disconnect BretuneTech (if listed)"
-echo "  2) Connect again → complete SSO"
-echo "  3) New chat → @bretunetech → List repository projects"
+echo "=========================================="
+echo "SCRIPT DONE — finish these 2 UI steps:"
+echo "=========================================="
+echo "1) Keycloak → Clients → repo-chatgpt-app → Login settings"
+echo "   Valid redirect URIs (one per line):"
+echo "     https://chatgpt.com/connector/oauth/*"
+echo "     https://chatgpt.com/connector_platform_oauth_redirect"
+echo "   Web origins:"
+echo "     https://chatgpt.com"
+echo "   Save"
 echo ""
-echo "Watch for success (no Offline tokens error):"
-echo "  ${COMPOSE[*]} logs keycloak --tail 40"
+echo "2) Client scopes tab → confirm offline_access is under Assigned (Optional)"
+echo "   If not: Add → offline_access → Optional → Add"
+echo ""
+echo "3) ChatGPT → Disconnect BretuneTech → Connect → SSO login"
+echo "4) New chat → @bretunetech → List repository projects"
+echo ""
+echo "Then: ${COMPOSE[*]} logs keycloak --tail 20"
+echo "Expect NO: Offline tokens not allowed"
