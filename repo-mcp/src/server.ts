@@ -279,6 +279,10 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // Streamable HTTP requires Accept: application/json, text/event-stream.
+  // Browsers / some connector probes omit it → SDK returns "Not Acceptable".
+  normalizeMcpAcceptHeader(req);
+
   try {
     const server = createMcpServer(authHeader);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -291,6 +295,18 @@ const httpServer = createServer(async (req, res) => {
     }
   }
 });
+
+/** Ensure MCP Accept header is present for Streamable HTTP / SSE. */
+function normalizeMcpAcceptHeader(req: IncomingMessage) {
+  const current = String(req.headers.accept || '').toLowerCase();
+  const needsJson = !current.includes('application/json');
+  const needsSse = !current.includes('text/event-stream');
+  if (!needsJson && !needsSse) return;
+  const parts = [req.headers.accept, needsJson ? 'application/json' : '', needsSse ? 'text/event-stream' : '']
+    .filter((part) => typeof part === 'string' && part.trim())
+    .join(', ');
+  req.headers.accept = parts || 'application/json, text/event-stream';
+}
 
 httpServer.listen(config.port, '0.0.0.0', () => {
   console.log(
