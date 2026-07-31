@@ -20,7 +20,7 @@ import {
 import { RowActionsMenu } from '@/components/row-actions-menu';
 import { useConfirm } from '@/components/confirm-dialog';
 import { api, formatDate } from '@/lib/api';
-import { isAdmin } from '@/lib/permissions';
+import { canCreateConfiguration, isAdmin } from '@/lib/permissions';
 import actionStyles from '@/components/row-actions.module.css';
 
 type WorkspaceRow = {
@@ -64,17 +64,22 @@ export default function WorkspacesPage() {
   const [status, setStatus] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [creating, setCreating] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newProjectId, setNewProjectId] = useState('');
+  const [editing, setEditing] = useState<WorkspaceRow | null>(null);
+  const [editName, setEditName] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [admin, setAdmin] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setAdmin(isAdmin());
+    setCanEdit(canCreateConfiguration() || isAdmin());
   }, []);
 
   const load = async () => {
@@ -129,6 +134,33 @@ export default function WorkspacesPage() {
 
   const openWorkspace = (item: WorkspaceRow) => {
     router.push(`/workspaces/${encodeURIComponent(item.workspaceCode)}`);
+  };
+
+  const startEdit = (item: WorkspaceRow) => {
+    setOpenMenuId(null);
+    setEditing(item);
+    setEditName(item.name);
+  };
+
+  const saveEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editing || !editName.trim()) return;
+    setSavingEdit(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/workspaces/${encodeURIComponent(editing.workspaceCode)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: editName.trim() }),
+      });
+      setMessage(`Updated workspace ${editing.workspaceCode}.`);
+      setEditing(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to update workspace');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const deleteWorkspace = async (item: WorkspaceRow) => {
@@ -289,6 +321,16 @@ export default function WorkspacesPage() {
             >
               Continue
             </button>
+            {canEdit ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busyId === openItem?.id}
+                onClick={() => openItem && startEdit(openItem)}
+              >
+                Edit
+              </button>
+            ) : null}
             {admin ? (
               <button
                 type="button"
@@ -301,6 +343,33 @@ export default function WorkspacesPage() {
               </button>
             ) : null}
           </RowActionsMenu>
+
+          {editing ? (
+            <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="workspace-edit-title">
+              <form className={actionStyles.editModalCard} onSubmit={saveEdit}>
+                <h3 id="workspace-edit-title">Edit workspace</h3>
+                <p className="mono">{editing.workspaceCode}</p>
+                <div className="field">
+                  <label htmlFor="ws-edit-name">Name <em>*</em></label>
+                  <input
+                    id="ws-edit-name"
+                    required
+                    value={editName}
+                    onChange={(event) => setEditName(event.target.value)}
+                    placeholder="Workspace name"
+                  />
+                </div>
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" onClick={() => setEditing(null)} disabled={savingEdit}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button primary" disabled={savingEdit || !editName.trim()}>
+                    {savingEdit ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
 
           {showCreate ? (
             <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="workspace-create-title">
