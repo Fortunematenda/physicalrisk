@@ -431,13 +431,43 @@ export class VpsStorageService implements OnApplicationBootstrap {
     return { documents: documents.length, versions: versions.length };
   }
 
+  /**
+   * Light provisioning for Explorer reads. Never fails the tree response if register
+   * writes have a transient disk/DB issue (that previously surfaced as gateway 502s).
+   */
+  private async ensureExplorerReady(projectId: string) {
+    try {
+      await this.ensureSystemRegisterSections(projectId);
+    } catch (error) {
+      console.error('[vps-storage] ensureSystemRegisterSections failed', error);
+    }
+    const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
+    if (!project) return;
+    const rootRelative = this.projectRelativeRoot(project);
+    try {
+      await mkdir(this.resolveStoragePath(rootRelative), { recursive: true });
+      for (const section of (project.sections ?? []).filter((item) => item.active)) {
+        const path = join(rootRelative, this.normaliseRelativePath(section.relativePath)).replace(/\\/g, '/');
+        await mkdir(this.resolveStoragePath(path), { recursive: true });
+      }
+    } catch (error) {
+      console.error('[vps-storage] ensureExplorerReady mkdir failed', error);
+    }
+    try {
+      await this.refreshRegisters(projectId);
+    } catch (error) {
+      console.error('[vps-storage] refreshRegisters failed', error);
+    }
+  }
+
   async tree(projectId: string) {
-    // Provision Index + Version Register folders/files so Explorer matches Master Index.
-    await this.ensureProjectStructure(projectId);
+    // Provision Index + Version Register folders without taking the whole tree down on errors.
+    await this.ensureExplorerReady(projectId);
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) throw new NotFoundException('Project not found');
     const rootRelative = this.projectRelativeRoot(project).replace(/\\/g, '/');
     const rootAbsolute = this.resolveStoragePath(rootRelative);
+    await mkdir(rootAbsolute, { recursive: true });
     const lastSynchronisedAt = await this.readSyncMarker(rootRelative);
 
     const versions = await this.db.documentVersions.createQueryBuilder('version')
