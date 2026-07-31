@@ -242,7 +242,11 @@ export class McpToolsService {
   }
 
   async listRepositoryModules(integration: McpIntegration, input: ListRepositoryModulesDto) {
-    const projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
+    const projectId = await this.resolveProjectId(
+      integration,
+      input.projectId,
+      input.projectCode || (input as { project?: string }).project,
+    );
     const sections = await this.db.projectSections.find({
       where: { project: { id: projectId }, active: true },
       order: { position: 'ASC' },
@@ -276,7 +280,11 @@ export class McpToolsService {
    * and keys required by check_document_exists and submit_approved_document.
    */
   async resolveImportTargets(integration: McpIntegration, input: ResolveImportTargetsDto) {
-    const projectId = await this.resolveProjectId(integration, undefined, input.project);
+    const projectId = await this.resolveProjectId(
+      integration,
+      (input as { projectId?: string }).projectId,
+      input.project || (input as { projectCode?: string }).projectCode,
+    );
     const projects = await this.listRepositoryProjects(integration);
     const project = projects.find((item) => item.id === projectId)!;
     const modules = await this.listRepositoryModules(integration, { projectId });
@@ -1095,47 +1103,74 @@ export class McpToolsService {
     }
   }
 
-  /** Accept project UUID, code, or name (case-insensitive). */
+  /** Accept project UUID, code, or name (case-insensitive). Tries every candidate ChatGPT may send. */
   async resolveProjectId(
     integration: McpIntegration,
     projectId?: string,
     projectCode?: string,
   ): Promise<string> {
-    const id = (projectId || '').trim();
-    const code = (projectCode || '').trim();
     const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-    // Only treat projectId as a UUID when it actually looks like one — ChatGPT often
-    // sends a project code in projectId, which would otherwise crash Postgres (HTTP 500).
-    if (id && uuidLike.test(id)) {
-      this.assertProjectAccess(integration, id);
-      return id;
-    }
-
-    const needle = code || id;
-    if (!needle) {
+    const raw = [projectCode, projectId].map((value) => (value || '').trim()).filter(Boolean);
+    if (!raw.length) {
       throw new BadRequestException('Provide projectId (UUID) or projectCode / project name');
     }
 
+    // Expand "MCRD — Marketing…" / "MCRD (Marketing…)" into code candidates.
+    // Also try each field on its own — GPT often puts the module name in projectCode
+    // while the real code sits in projectId (or the reverse).
+    const candidates: string[] = [];
+    for (const value of raw) {
+      for (const part of this.expandProjectNeedle(value)) {
+        if (!candidates.includes(part)) candidates.push(part);
+      }
+    }
+
+    for (const candidate of candidates) {
+      if (uuidLike.test(candidate)) {
+        try {
+          this.assertProjectAccess(integration, candidate);
+          return candidate;
+        } catch {
+          // Stale UUID from an old chat — keep trying code/name candidates.
+        }
+      }
+    }
+
     const projects = await this.listRepositoryProjects(integration);
-    const lowered = needle.toLowerCase();
-    const exact = projects.find((project) =>
-      project.code.toLowerCase() === lowered
-      || project.name.toLowerCase() === lowered);
-    if (exact) return exact.id;
+    for (const needle of candidates) {
+      const lowered = needle.toLowerCase();
+      const exact = projects.find((project) =>
+        project.code.toLowerCase() === lowered
+        || project.name.toLowerCase() === lowered);
+      if (exact) return exact.id;
 
-    // ChatGPT often invents labels like "MARKETING"; match a unique name/code substring.
-    const fuzzy = projects.filter((project) =>
-      project.name.toLowerCase().includes(lowered)
-      || project.code.toLowerCase().includes(lowered)
-      || lowered.includes(project.code.toLowerCase()));
-    if (fuzzy.length === 1) return fuzzy[0].id;
+      const fuzzy = projects.filter((project) =>
+        project.name.toLowerCase().includes(lowered)
+        || project.code.toLowerCase().includes(lowered)
+        || lowered.includes(project.code.toLowerCase()));
+      if (fuzzy.length === 1) return fuzzy[0].id;
+    }
 
+    const shown = raw.join("' / '");
     throw new NotFoundException(
-      `Project '${needle}' was not found or is not allowed for this MCP integration. `
+      `Project '${shown}' was not found or is not allowed for this MCP integration. `
       + `Available: ${projects.map((item) => `${item.code} (${item.name})`).join(', ') || '(none)'}. `
       + 'Use a project code from list_repository_projects (e.g. MCRD).',
     );
+  }
+
+  /** Split ChatGPT project labels into matchable tokens (code, bare name, etc.). */
+  private expandProjectNeedle(value: string): string[] {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    const out = [trimmed];
+    const beforeDash = trimmed.split(/\s*[—–|:]\s+/)[0]?.trim();
+    if (beforeDash && beforeDash !== trimmed) out.push(beforeDash);
+    const beforeParen = trimmed.split(/\s*\(/)[0]?.trim();
+    if (beforeParen && beforeParen !== trimmed) out.push(beforeParen);
+    const codeToken = trimmed.match(/\b([A-Z][A-Z0-9]{1,12})\b/);
+    if (codeToken?.[1]) out.push(codeToken[1]);
+    return out;
   }
 
   private toolDescription(name: McpToolName): string {

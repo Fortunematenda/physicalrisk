@@ -59,7 +59,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       payload: {
         type: 'string',
         description:
-          'JSON with projectCode, module, documentType, title, documentContent; optional owner, description, approvedBy. '
+          'JSON with projectCode (exact code from list_repository_projects, e.g. MCRD — not the module name), '
+          + 'module, documentType, title, documentContent; optional owner, description, approvedBy. '
           + 'For revisions add mode=NEW_VERSION and existingDocumentId or documentCode. '
           + 'Server defaults date, MIME, filename, Rev.',
       },
