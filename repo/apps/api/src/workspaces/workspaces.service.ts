@@ -550,6 +550,56 @@ export class WorkspacesService {
   }
 
   /**
+   * Display path for workspace UI (ZIP members have zip-relative paths; MCP attach did not).
+   * Prefer version storagePath; else section/code/fileName.
+   */
+  private async resolveWorkspaceRelativePath(
+    documentId: string | undefined,
+    fileName: string,
+  ): Promise<{ relativePath: string; fileName: string; mimeType: string | null; storageReference: string | null }> {
+    const safeName = (fileName || 'document.pdf').replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!documentId) {
+      return {
+        relativePath: safeName,
+        fileName: safeName,
+        mimeType: 'application/pdf',
+        storageReference: null,
+      };
+    }
+    const doc = await this.db.documents.findOne({
+      where: { id: documentId },
+      relations: { section: true, versions: true },
+    });
+    const version = (doc?.versions ?? []).find((item) => item.versionNo === doc?.currentVersionNo)
+      ?? (doc?.versions ?? [])[0];
+    const storagePath = version?.storagePath?.replace(/\\/g, '/').replace(/\.\./g, '') || null;
+    const sectionPath = (doc?.section?.relativePath || doc?.section?.name || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const code = doc?.code || 'document';
+    const baseName = safeName.includes('.') ? safeName : `${safeName}.pdf`;
+
+    let relativePath: string;
+    if (storagePath) {
+      // Show path from module folder onward when under a project repository tree.
+      const marker = sectionPath ? `/${sectionPath}/` : null;
+      const idx = marker ? storagePath.toLowerCase().indexOf(marker.toLowerCase()) : -1;
+      relativePath = idx >= 0
+        ? storagePath.slice(idx + 1)
+        : storagePath.split('/').slice(-4).join('/');
+    } else if (sectionPath) {
+      relativePath = `${sectionPath}/${code}/${baseName}`;
+    } else {
+      relativePath = `${code}/${baseName}`;
+    }
+
+    return {
+      relativePath: relativePath.replace(/\\/g, '/').replace(/\.\./g, ''),
+      fileName: baseName,
+      mimeType: version?.mimeType || 'application/pdf',
+      storageReference: storagePath,
+    };
+  }
+
+  /**
    * Link an already-imported repository document (or import job) to a workspace.
    * Used when MCP/ChatGPT imported without workspaceCode, or to attach PROR-PA-00x after the fact.
    */
@@ -600,12 +650,22 @@ export class WorkspacesService {
       throw new BadRequestException('Provide documentId, documentCode, or importJobId');
     }
 
+    const pathInfo = await this.resolveWorkspaceRelativePath(documentId, fileName || 'document.pdf');
+
     if (documentId) {
       const existing = await this.db.workspaceDocuments.findOne({
         where: { workspace: { id: workspace.id }, document: { id: documentId } },
         relations: { document: true, importJob: true },
       });
       if (existing) {
+        // Backfill path for rows attached before MCP set relativePath.
+        if (!existing.relativePath) {
+          existing.relativePath = pathInfo.relativePath;
+          existing.storageReference = existing.storageReference || pathInfo.storageReference;
+          existing.mimeType = existing.mimeType || pathInfo.mimeType;
+          existing.fileName = existing.fileName || pathInfo.fileName;
+          await this.db.workspaceDocuments.save(existing);
+        }
         return {
           alreadyAttached: true,
           workspaceCode,
@@ -616,12 +676,12 @@ export class WorkspacesService {
 
     const docRow = await this.db.workspaceDocuments.save(this.db.workspaceDocuments.create({
       workspace,
-      fileName: fileName || 'document',
-      originalFileName: fileName || 'document',
-      relativePath: null,
-      storageReference: null,
-      mimeType: 'application/pdf',
-      fileExtension: 'pdf',
+      fileName: pathInfo.fileName,
+      originalFileName: pathInfo.fileName,
+      relativePath: pathInfo.relativePath,
+      storageReference: pathInfo.storageReference,
+      mimeType: pathInfo.mimeType,
+      fileExtension: pathInfo.fileName.includes('.') ? pathInfo.fileName.split('.').pop()! : 'pdf',
       checksum: null,
       metadataJson: null,
       status: documentId ? WorkspaceDocumentStatus.IMPORTED : WorkspaceDocumentStatus.PENDING,
@@ -716,14 +776,22 @@ export class WorkspacesService {
     }
 
     for (const member of options.members ?? []) {
+      const pathInfo = member.relativePath?.trim()
+        ? {
+            relativePath: member.relativePath.replace(/\\/g, '/').replace(/\.\./g, ''),
+            fileName: member.fileName,
+            mimeType: member.mimeType ?? null,
+            storageReference: member.storageReference ?? null,
+          }
+        : await this.resolveWorkspaceRelativePath(member.documentId, member.fileName);
       await this.db.workspaceDocuments.save(this.db.workspaceDocuments.create({
         workspace,
-        fileName: member.fileName,
+        fileName: pathInfo.fileName || member.fileName,
         originalFileName: member.fileName,
-        relativePath: member.relativePath?.replace(/\\/g, '/').replace(/\.\./g, '') ?? null,
-        mimeType: member.mimeType ?? null,
+        relativePath: pathInfo.relativePath,
+        mimeType: pathInfo.mimeType ?? member.mimeType ?? null,
         checksum: member.checksum ?? null,
-        storageReference: member.storageReference ?? null,
+        storageReference: pathInfo.storageReference ?? member.storageReference ?? null,
         status: member.status ?? WorkspaceDocumentStatus.EXTRACTED,
         importJob: job ?? null,
         document: member.documentId ? ({ id: member.documentId } as never) : null,
