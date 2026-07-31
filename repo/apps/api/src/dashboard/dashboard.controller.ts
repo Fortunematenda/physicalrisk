@@ -315,7 +315,7 @@ export class DashboardController {
     // 11. RECENT ACTIVITY (from audit logs, falling back to import jobs)
     // ──────────────────────────────────────────────────────────────────────────
     const recentLogs = await this.db.auditLogs.find({
-      take: 10,
+      take: 4,
       order: { createdAt: 'DESC' },
       where: { createdAt: Between(from, to) },
       relations: { user: true },
@@ -335,7 +335,7 @@ export class DashboardController {
     } else {
       // Fallback: use import jobs
       const recentImports = await this.db.importJobs.find({
-        take: 10,
+        take: 4,
         order: { createdAt: 'DESC' },
         relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, initiatedBy: true },
       });

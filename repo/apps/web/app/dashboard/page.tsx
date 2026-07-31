@@ -1308,7 +1308,7 @@ export default function DashboardPage() {
 
           {dashboard.recentActivity.length > 0 ? (
             <div className={styles.activityList}>
-              {dashboard.recentActivity.map((activity) => {
+              {dashboard.recentActivity.slice(0, 4).map((activity) => {
                 const ActivityIcon = getActivityIcon(activity.type);
 
                 return (
