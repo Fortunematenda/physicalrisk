@@ -294,6 +294,22 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // Browsers / paste-in-address-bar: MCP Streamable HTTP rejects text/html Accept.
+  // This is NOT a outage — ChatGPT uses POST + Accept: application/json, text/event-stream.
+  if (isBrowserStyleMcpGet(req)) {
+    sendJson(res, 200, {
+      status: 'ok',
+      service: 'repo-mcp',
+      message:
+        'This URL is an MCP endpoint for ChatGPT Connectors — it is not meant to be opened in a browser. '
+        + 'Paste it into ChatGPT → Settings → Apps/Connectors (OAuth).',
+      mcpUrl: mcpResourceUrl(),
+      health: '/health',
+      oauthMetadata: '/.well-known/oauth-protected-resource',
+    });
+    return;
+  }
+
   const authHeader = requireAuth(req);
   let parsedBody: unknown | undefined;
 
@@ -317,7 +333,6 @@ const httpServer = createServer(async (req, res) => {
   }
 
   // Streamable HTTP requires Accept: application/json, text/event-stream.
-  // Browsers / some connector probes omit it → SDK returns "Not Acceptable".
   normalizeMcpAcceptHeader(req);
 
   try {
@@ -332,6 +347,16 @@ const httpServer = createServer(async (req, res) => {
     }
   }
 });
+
+/** True for browser address-bar / plain curl GET — not ChatGPT MCP clients. */
+function isBrowserStyleMcpGet(req: IncomingMessage): boolean {
+  if ((req.method || 'GET').toUpperCase() !== 'GET') return false;
+  const accept = String(req.headers.accept || '').toLowerCase();
+  if (accept.includes('text/html')) return true;
+  // MCP clients always advertise event-stream and/or json
+  if (accept.includes('text/event-stream') || accept.includes('application/json')) return false;
+  return true;
+}
 
 /** Ensure MCP Accept header is present for Streamable HTTP / SSE. */
 function normalizeMcpAcceptHeader(req: IncomingMessage) {
