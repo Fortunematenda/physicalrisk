@@ -8,6 +8,7 @@ import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
 import { useConfirm } from '@/components/confirm-dialog';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from '../source-connections/SourceConnections.module.css';
 
 const MCP_TOOLS = [
@@ -390,7 +391,7 @@ export default function McpIntegrationsPage() {
       />
 
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} onDismiss={() => setMessage('')} />
 
       {revealedKey ? (
         <div className={styles.secretModalBackdrop} role="dialog" aria-modal="true" aria-labelledby="mcp-key-title">

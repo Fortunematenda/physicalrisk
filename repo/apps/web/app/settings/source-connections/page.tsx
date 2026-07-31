@@ -8,6 +8,7 @@ import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
 import { useConfirm } from '@/components/confirm-dialog';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from './SourceConnections.module.css';
 
 type Connection = {
@@ -89,7 +90,7 @@ export default function SourceConnectionsPage() {
       />
 
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} onDismiss={() => setMessage('')} />
 
       <div className="panel">
         <div className="panel-header">

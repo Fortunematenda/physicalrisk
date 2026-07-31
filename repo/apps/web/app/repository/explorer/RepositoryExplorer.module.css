@@ -34,7 +34,6 @@
 }
 .backLink:hover { color: #001b36; }
 .headerActions, .toolbar, .actions, .registerActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.syncMeta { color: #64748b; font-size: 11px; text-align: right; }
 .menuWrap { position: relative; }
 .menu {
   position: absolute;
@@ -923,7 +922,6 @@
 @media (max-width: 900px) {
   .explorer { padding: 12px 14px; }
   .header { flex-direction: column; }
-  .syncMeta { text-align: left; }
   .previewIframe { min-height: 480px; height: calc(100vh - 360px); }
 }
 

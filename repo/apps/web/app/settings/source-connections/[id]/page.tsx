@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/empty-state';
 import { api, formatBytes, formatDate } from '@/lib/api';
 import { ApiError } from '@/lib/api-error';
 import { useConfirm } from '@/components/confirm-dialog';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from '../SourceConnections.module.css';
 
 type ProjectRow = {
@@ -439,7 +440,7 @@ export default function SourceConnectionDetailPage() {
       />
 
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} onDismiss={() => setMessage('')} />
 
       <div className="grid two">
         <div className="detail-card">

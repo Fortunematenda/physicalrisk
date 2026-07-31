@@ -9,6 +9,7 @@ import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, formatDate } from '@/lib/api';
 import { useConfirm } from '@/components/confirm-dialog';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from './MasterDocumentIndex.module.css';
 
 function MasterDocumentIndexPageInner() {
@@ -121,7 +122,7 @@ function MasterDocumentIndexPageInner() {
         action={{ label: 'Import document', href: '/imports/new' }}
       />
       {error ? <div className="notice error">{error}</div> : null}
-      {notice ? <div className="notice success">{notice}</div> : null}
+      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
 
       <div className={styles.stats}>
         <div className={styles.statCard}>

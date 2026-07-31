@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/empty-state';
 import { useConfirm } from '@/components/confirm-dialog';
 import { api, formatDate } from '@/lib/api';
 import { isAdmin } from '@/lib/permissions';
+import { SuccessNotice } from '@/components/success-notice';
 
 type QueueItem = {
   id: string;
@@ -148,7 +149,7 @@ export default function ImportQueuePage() {
         action={{ label: 'Import document', href: '/imports/new' }}
       />
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} onDismiss={() => setMessage('')} />
 
       <div className="panel">
         <div className="tabs">

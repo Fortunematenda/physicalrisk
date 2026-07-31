@@ -14,6 +14,7 @@ import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api, formatDate } from '@/lib/api';
 import { getErrorMessage } from '@/lib/api-error';
 import { orderSectionsActiveFirst } from '@/lib/section-fields';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from './ProjectDetail.module.css';
 import actionStyles from '@/components/row-actions.module.css';
 
@@ -237,7 +238,7 @@ export default function ProjectDetailPage() {
       />
 
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} onDismiss={() => setMessage('')} />
 
       {item ? (
         <>

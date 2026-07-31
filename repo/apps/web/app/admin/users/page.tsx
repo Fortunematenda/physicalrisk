@@ -6,6 +6,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api, formatDate } from '@/lib/api';
 import { isSsoEnabled } from '@/lib/sso';
+import { SuccessNotice } from '@/components/success-notice';
 
 export default function UsersPage() {
   const [items, setItems] = useState<any[]>([]);
@@ -107,7 +108,7 @@ export default function UsersPage() {
               </div>
             </div>
             {error && <div className="notice error">{error}</div>}
-            {message && <div className="notice success">{message}</div>}
+            <SuccessNotice message={message} onDismiss={() => setMessage('')} />
             <div className="form-actions">
               <button className="button primary">Create user</button>
             </div>

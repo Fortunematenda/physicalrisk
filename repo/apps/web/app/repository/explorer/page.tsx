@@ -10,6 +10,7 @@ import {
 
 import { useConfirm } from '@/components/confirm-dialog';
 import { StatusBadge } from '@/components/status-badge';
+import { SuccessNotice } from '@/components/success-notice';
 import { API_URL, api, formatDate, getToken } from '@/lib/api';
 import { deriveSectionFields } from '@/lib/section-fields';
 import { DocumentDetailsInspector } from './components/DocumentDetailsInspector';
@@ -68,7 +69,6 @@ export default function RepositoryExplorerPage() {
   const [sort, setSort] = useState('updated');
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -324,29 +324,6 @@ export default function RepositoryExplorerPage() {
   };
 
   const currentStayPath = () => selected?.entry.path ?? searchParams.get('path');
-
-  const sync = async () => {
-    if (!projectId) return;
-    setSyncing(true);
-    setNotice('');
-    setError('');
-    setMenuOpen(false);
-    try {
-      const result = await api<{ lastSynchronisedAt?: string }>(`/storage/projects/${projectId}/sync`, {
-        method: 'POST',
-      });
-      await load(projectId, { selectPath: currentStayPath() });
-      if (result?.lastSynchronisedAt) {
-        setRepository((current) =>
-          (current ? { ...current, lastSynchronisedAt: result.lastSynchronisedAt! } : current));
-      }
-      setNotice('Repository structure and registers synchronised successfully.');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Repository synchronisation failed.');
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const expandAll = () => {
     setExpanded(new Set(allEntries.filter((entry) => entry.type === 'directory').map((entry) => entry.path)));
@@ -914,11 +891,6 @@ export default function RepositoryExplorerPage() {
           <p>Browse approved project documents stored in the configured Physical Risk VPS repository.</p>
         </div>
         <div className={styles.headerActions}>
-          <span className={styles.syncMeta}>
-            Last synchronised
-            <br />
-            {repository?.lastSynchronisedAt ? formatDate(repository.lastSynchronisedAt) : 'Not available'}
-          </span>
           <button
             type="button"
             className={styles.iconButton}
@@ -928,15 +900,6 @@ export default function RepositoryExplorerPage() {
             disabled={loading || !projectId}
           >
             <RefreshCw size={16} className={loading ? styles.spinning : undefined} />
-          </button>
-          <button
-            type="button"
-            className={`${styles.button} ${styles.buttonPrimary}`}
-            onClick={() => void sync()}
-            disabled={!projectId || syncing}
-          >
-            {syncing ? <span className={styles.spinner} /> : <RefreshCw size={15} />}
-            {syncing ? 'Synchronising…' : 'Synchronise Repository'}
           </button>
           <div className={styles.menuWrap}>
             <button
@@ -972,11 +935,12 @@ export default function RepositoryExplorerPage() {
         </div>
       </section>
 
-      {notice ? (
-        <div className={styles.notice} style={{ color: '#126b42', background: '#eefaf3', borderColor: '#ccebdc' }}>
-          {notice}
-        </div>
-      ) : null}
+      <SuccessNotice
+        message={notice}
+        onDismiss={() => setNotice('')}
+        className={styles.notice}
+        style={{ color: '#126b42', background: '#eefaf3', borderColor: '#ccebdc' }}
+      />
       {error ? (
         <div className={styles.notice}>
           <strong>Repository unavailable. </strong>

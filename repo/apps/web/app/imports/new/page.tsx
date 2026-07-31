@@ -12,6 +12,7 @@ import { CreateProjectModal, ProjectRecord } from '@/components/import/CreatePro
 import { CreateRepositorySectionModal, RepositorySectionRecord } from '@/components/import/CreateRepositorySectionModal';
 import { CreateSourceSystemModal, SourceSystemRecord } from '@/components/import/CreateSourceSystemModal';
 import { Loading } from '@/components/loading';
+import { SuccessNotice } from '@/components/success-notice';
 import { api, apiFormData } from '@/lib/api';
 import { ApiError, getErrorMessage } from '@/lib/api-error';
 import { friendlyErrorMessage } from '@/lib/user-errors';
@@ -454,7 +455,6 @@ function ImportDocumentPageContent() {
   const showSuccess = (message: string) => {
     setNotice(message);
     setError('');
-    window.setTimeout(() => setNotice(''), 4000);
   };
 
   const showDocTypeProjectWarning = (documentType: string, projectLabel?: string) => {
@@ -1038,7 +1038,7 @@ function ImportDocumentPageContent() {
               Continuing draft <strong>{draftFileName}</strong>. The previously uploaded file is ready to import.
             </div>
           ) : null}
-          {notice && <div className="notice success">{notice}</div>}
+          <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
           {structuredError?.code === 'DUPLICATE_DOCUMENT_CONTENT' && typeof document !== 'undefined'
             ? createPortal(
                 <DuplicateModal

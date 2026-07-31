@@ -4,6 +4,7 @@ import { ReactNode } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from '@/app/configuration/Configuration.module.css';
 
 export type ConfigStat = {
@@ -56,7 +57,7 @@ export function ConfigurationListShell({
       />
 
       {error ? <div className="notice error">{error}</div> : null}
-      {message ? <div className="notice success">{message}</div> : null}
+      <SuccessNotice message={message} />
 
       {stats.length ? (
         <div className={styles.stats}>

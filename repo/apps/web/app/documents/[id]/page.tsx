@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api, API_URL, formatBytes, formatDate, getToken } from '@/lib/api';
 import { useConfirm } from '@/components/confirm-dialog';
+import { SuccessNotice } from '@/components/success-notice';
 import styles from './DocumentDetails.module.css';
 
 type DocumentTypeRecord = { id: string; name: string; code: string; active: boolean };
@@ -470,7 +471,7 @@ export default function DocumentPage() {
         />
       )}
       {error && <div className="notice error">{error}</div>}
-      {notice && <div className="notice success">{notice}</div>}
+      <SuccessNotice message={notice} onDismiss={() => setNotice('')} />
       {item && (
         <div className="detail-grid">
           <div className="grid">
