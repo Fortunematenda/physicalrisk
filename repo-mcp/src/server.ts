@@ -159,6 +159,20 @@ function createMcpServer(authHeader?: string) {
     async (args) => toolResult(await mcpTool('attach_document_to_workspace', args)),
   );
 
+  server.tool(
+    'check_document_exists',
+    'Before import: check if a document with this title/code already exists. '
+      + 'If it exists, submit as NEW_VERSION with that documentCode (Rev 1.1+) — do NOT create another PA-00x.',
+    {
+      projectCode: z.string().optional().describe('e.g. PROR'),
+      projectId: z.string().optional(),
+      title: z.string().optional(),
+      documentCode: z.string().optional(),
+      fileName: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('check_document_exists', args)),
+  );
+
   // Flat fields preferred for ChatGPT connectors; payload kept for Custom GPT Actions.
   const submitDocSchema = {
     projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
@@ -166,6 +180,11 @@ function createMcpServer(authHeader?: string) {
     documentType: z.string().optional().describe('e.g. Research Note, Article'),
     title: z.string().optional(),
     documentContent: z.string().optional().describe('Full Markdown body of the document'),
+    documentCode: z.string().optional().describe('Existing code e.g. PROR-PA-003 for NEW_VERSION'),
+    mode: z.enum(['NEW', 'NEW_VERSION']).optional().describe(
+      'NEW_VERSION = same document, next Rev (1.1). NEW = brand-new document code. Omit to auto NEW_VERSION on same title.',
+    ),
+    versionNo: z.string().optional().describe('Optional; server suggests next Rev if omitted'),
     workspaceCode: z.string().optional().describe(
       'WS-YYYY-##### — REQUIRED when adding a document into a workspace so it attaches (not only Master Index)',
     ),
@@ -176,9 +195,10 @@ function createMcpServer(authHeader?: string) {
 
   server.tool(
     'submit_approved_document',
-    'IMPORT/SUBMIT an approved document into the repository (Markdown → PDF). '
-      + 'When the user is working in a workspace, ALWAYS pass workspaceCode so the file attaches there. '
-      + 'Prefer flat fields (projectCode, module, documentType, title, documentContent, workspaceCode).',
+    'IMPORT/SUBMIT an approved document (Markdown → PDF). '
+      + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode (adds Rev 1.1, not a new PA-00x). '
+      + 'When working in a workspace, ALWAYS pass workspaceCode. '
+      + 'Only use mode=NEW when the user explicitly wants a brand-new document ID.',
     submitDocSchema,
     async (args) => {
       const body = args.payload
@@ -189,6 +209,9 @@ function createMcpServer(authHeader?: string) {
             documentType: args.documentType,
             title: args.title,
             documentContent: args.documentContent,
+            documentCode: args.documentCode,
+            mode: args.mode,
+            versionNo: args.versionNo,
             workspaceCode: args.workspaceCode,
             owner: args.owner,
             description: args.description,
@@ -210,6 +233,9 @@ function createMcpServer(authHeader?: string) {
             documentType: args.documentType,
             title: args.title,
             documentContent: args.documentContent,
+            documentCode: args.documentCode,
+            mode: args.mode,
+            versionNo: args.versionNo,
             workspaceCode: args.workspaceCode,
             owner: args.owner,
             description: args.description,

@@ -817,7 +817,9 @@ export class McpToolsService {
     mode?: 'NEW' | 'NEW_VERSION';
     existingDocumentId?: string;
   }> {
-    const wantsNewVersion = input.mode === 'NEW_VERSION' || Boolean(input.existingDocumentId?.trim());
+    // Explicit mode=NEW always allocates a new document code.
+    // Otherwise: existingDocumentId / documentCode / same title → NEW_VERSION (Rev 1.1, …).
+    const forceNewDocument = input.mode === 'NEW';
     let document: Document | null = null;
 
     if (input.existingDocumentId?.trim()) {
@@ -833,13 +835,15 @@ export class McpToolsService {
         where: { project: { id: projectId }, code: input.documentCode.trim().toUpperCase() },
         relations: { versions: true },
       });
-    } else if (wantsNewVersion && input.title?.trim()) {
+    } else if (!forceNewDocument && input.title?.trim()) {
+      // Auto-version: same title in project → bump Rev (stops PROR-PA-001/002/003 duplicates).
       document = await this.db.documents
         .createQueryBuilder('document')
         .leftJoinAndSelect('document.versions', 'versions')
         .innerJoin('document.project', 'project')
         .where('project.id = :projectId', { projectId })
         .andWhere('LOWER(document.title) = LOWER(:title)', { title: input.title.trim() })
+        .orderBy('document.updatedAt', 'DESC')
         .getOne();
     }
 
@@ -1245,7 +1249,10 @@ export class McpToolsService {
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
         'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64. '
-        + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace.',
+        + 'If the same title already exists, submits as NEW_VERSION (e.g. Rev 1.1) unless mode=NEW. '
+        + 'For an intentional new document code, set mode=NEW. '
+        + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace. '
+        + 'Prefer check_document_exists first, then pass documentCode + mode=NEW_VERSION.',
       get_import_status: 'Get the processing status of an import job by id',
       create_workspace: 'Create a Repository Workspace (returns WS-YYYY-#####)',
       get_workspace: 'Get a workspace by workspaceCode',
