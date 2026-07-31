@@ -405,6 +405,19 @@ export class WorkspacesService {
       relations: { document: true, importJob: true },
       order: { createdAt: 'ASC' },
     });
+
+    // MCP attach left relativePath null — fill from linked document's repository storagePath.
+    for (const doc of docs) {
+      if (doc.relativePath?.trim()) continue;
+      const documentId = doc.document?.id;
+      if (!documentId) continue;
+      const pathInfo = await this.resolveWorkspaceRelativePath(documentId, doc.fileName);
+      doc.relativePath = pathInfo.relativePath;
+      doc.storageReference = doc.storageReference || pathInfo.storageReference;
+      if (!doc.mimeType && pathInfo.mimeType) doc.mimeType = pathInfo.mimeType;
+      await this.db.workspaceDocuments.save(doc);
+    }
+
     return docs.map((doc) => this.serializeDocument(doc));
   }
 
@@ -550,8 +563,8 @@ export class WorkspacesService {
   }
 
   /**
-   * Display path for workspace UI (ZIP members have zip-relative paths; MCP attach did not).
-   * Prefer version storagePath; else section/code/fileName.
+   * Workspace "Relative path" should match the repository file path
+   * (e.g. repository/PROR/Product Architecture/PROR-PA-003/vRev 1.0/file.pdf).
    */
   private async resolveWorkspaceRelativePath(
     documentId: string | undefined,
@@ -568,23 +581,26 @@ export class WorkspacesService {
     }
     const doc = await this.db.documents.findOne({
       where: { id: documentId },
-      relations: { section: true, versions: true },
+      relations: { section: true, versions: true, project: true },
     });
-    const version = (doc?.versions ?? []).find((item) => item.versionNo === doc?.currentVersionNo)
+    const version = (doc?.versions ?? []).find((item) => item.isCurrent)
+      ?? (doc?.versions ?? []).find((item) => item.versionNo === doc?.currentVersionNo)
       ?? (doc?.versions ?? [])[0];
     const storagePath = version?.storagePath?.replace(/\\/g, '/').replace(/\.\./g, '') || null;
-    const sectionPath = (doc?.section?.relativePath || doc?.section?.name || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const sectionPath = (doc?.section?.relativePath || doc?.section?.name || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+|\/+$/g, '');
     const code = doc?.code || 'document';
-    const baseName = safeName.includes('.') ? safeName : `${safeName}.pdf`;
+    const baseName = version?.originalFileName
+      || version?.storedFileName
+      || (safeName.includes('.') ? safeName : `${safeName}.pdf`);
 
     let relativePath: string;
     if (storagePath) {
-      // Show path from module folder onward when under a project repository tree.
-      const marker = sectionPath ? `/${sectionPath}/` : null;
-      const idx = marker ? storagePath.toLowerCase().indexOf(marker.toLowerCase()) : -1;
-      relativePath = idx >= 0
-        ? storagePath.slice(idx + 1)
-        : storagePath.split('/').slice(-4).join('/');
+      // Prefer the real VPS repository path stored on the document version.
+      relativePath = storagePath;
+    } else if (doc?.project?.repositoryRootPath && sectionPath) {
+      relativePath = `repository/${doc.project.repositoryRootPath}/${sectionPath}/${code}/${baseName}`;
     } else if (sectionPath) {
       relativePath = `${sectionPath}/${code}/${baseName}`;
     } else {
