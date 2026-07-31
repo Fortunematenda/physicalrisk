@@ -156,10 +156,12 @@ export class McpToolsService {
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
       case 'create_workspace': {
         const name = String(args.name ?? '').trim();
-        const projectCode = String(args.projectCode ?? '').trim();
-        const projectId = args.projectId
-          ? String(args.projectId)
-          : await this.resolveProjectId(integration, undefined, projectCode);
+        // ChatGPT often puts a project code into projectId; always resolve (UUID / code / name).
+        const projectId = await this.resolveProjectId(
+          integration,
+          args.projectId ? String(args.projectId) : undefined,
+          String(args.projectCode ?? args.project ?? '').trim() || undefined,
+        );
         return this.workspaces.create(
           { name, projectId, source: WorkspaceActivitySource.CHATGPT_ACTION },
           this.mcpActor(integration),
@@ -1093,15 +1095,20 @@ export class McpToolsService {
     projectId?: string,
     projectCode?: string,
   ): Promise<string> {
-    const needle = (projectId || projectCode || '').trim();
-    if (!needle) {
-      throw new BadRequestException('Provide projectId (UUID) or projectCode / project name');
+    const id = (projectId || '').trim();
+    const code = (projectCode || '').trim();
+    const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    // Only treat projectId as a UUID when it actually looks like one — ChatGPT often
+    // sends a project code in projectId, which would otherwise crash Postgres (HTTP 500).
+    if (id && uuidLike.test(id)) {
+      this.assertProjectAccess(integration, id);
+      return id;
     }
 
-    const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(needle);
-    if (uuidLike) {
-      this.assertProjectAccess(integration, needle);
-      return needle;
+    const needle = code || id;
+    if (!needle) {
+      throw new BadRequestException('Provide projectId (UUID) or projectCode / project name');
     }
 
     const projects = await this.listRepositoryProjects(integration);

@@ -222,7 +222,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         post: {
           operationId: 'create_workspace',
           summary: 'Create Repository Workspace (WS-YYYY-#####)',
-          description: 'Returns workspaceCode to resume from another chat. Repository is source of truth.',
+          description:
+            'Returns workspaceCode to resume from another chat. Repository is source of truth. '
+            + 'Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
+            + 'Do not invent codes like MARKETING.',
           security,
           requestBody: {
             required: true,
@@ -230,11 +233,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
               'application/json': {
                 schema: {
                   type: 'object',
-                  required: ['name'],
+                  required: ['name', 'projectCode'],
                   properties: {
                     name: { type: 'string' },
-                    projectId: { type: 'string' },
-                    projectCode: { type: 'string' },
+                    projectCode: {
+                      type: 'string',
+                      description: 'Project code from list_repository_projects (e.g. MCRD)',
+                    },
+                    projectId: {
+                      type: 'string',
+                      description: 'Optional project UUID — prefer projectCode',
+                    },
                   },
                 },
               },
