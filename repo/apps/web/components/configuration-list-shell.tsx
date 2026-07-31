@@ -36,7 +36,6 @@ export type ConfigurationListShellProps = {
 
 export function ConfigurationListShell({
   title,
-  description,
   headerAction,
   error,
   message,
@@ -47,11 +46,11 @@ export function ConfigurationListShell({
   children,
   footer,
 }: ConfigurationListShellProps) {
+  // `description` kept on the props type for callers; subtitles under titles are not shown.
   return (
     <div className={styles.page}>
       <PageHeader
         title={title}
-        description={description}
         action={headerAction}
       />
 

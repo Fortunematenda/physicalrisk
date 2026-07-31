@@ -4,7 +4,7 @@ import { FormEvent, Suspense, useEffect, useMemo, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  ArrowLeft, CheckCircle2, CloudUpload, FileText, Info, X,
+  ArrowLeft, CheckCircle2, CloudUpload, FileText, X,
 } from 'lucide-react';
 import { CreatableSelect } from '@/components/import/CreatableSelect';
 import { CreateDocumentTypeModal, DocumentTypeRecord } from '@/components/import/CreateDocumentTypeModal';
@@ -1029,23 +1029,10 @@ function ImportDocumentPageContent() {
               ? 'Continue import'
               : 'Import Approved Document'}
         </h1>
-        <p>
-          {routingOnlyContinue
-            ? 'Metadata and approval were validated in ChatGPT. Choose or confirm the repository module, then complete the import into the document index.'
-            : activeContinueJobId
-              ? (draftHasFile
-                ? 'Review the draft details. The previously uploaded file is kept — replace it only if needed.'
-                : 'Review the draft details, upload an approved file, and complete the import.')
-              : 'Import an approved source file, capture required metadata, and place it in the project repository.'}
-        </p>
       </div>
 
       <div className={styles.layout}>
         <form className={styles.formCard} onSubmit={submit}>
-          <div className={styles.banner}>
-            <Info className={styles.bannerIcon} size={16} />
-            <div><strong>Approved documents only.</strong> This gateway accepts files that have already been approved and records approval against the importing user. Unapproved items are blocked with a clear message.</div>
-          </div>
           {activeContinueJobId && draftHasFile ? (
             <div className="notice info">
               Continuing draft <strong>{draftFileName}</strong>. The previously uploaded file is ready to import.
