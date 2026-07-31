@@ -31,12 +31,36 @@ describe('ConfigurationService create-from-import', () => {
     findOne: jest.fn(),
   };
   const dataSource = {
-    transaction: jest.fn(async (callback: any) => callback({
-      getRepository: () => ({
-        create: (value: unknown) => value,
-        save: async (value: any) => Array.isArray(value) ? value : { id: 'project-1', ...value },
-      }),
-    })),
+    transaction: jest.fn(async (callback: any) => {
+      const rows: any[] = [];
+      return callback({
+        getRepository: () => ({
+          create: (value: unknown) => value,
+          find: async () => [...rows],
+          findOne: async ({ where }: { where: { id?: string } }) =>
+            rows.find((row) => row.id === where.id) ?? null,
+          save: async (value: any) => {
+            if (Array.isArray(value)) {
+              for (const item of value) {
+                if (!item.id) item.id = `section-${rows.length + 1}`;
+                const index = rows.findIndex((row) => row.id === item.id);
+                if (index >= 0) rows[index] = item;
+                else rows.push(item);
+              }
+              return value;
+            }
+            const row = {
+              id: value.id || (value.sectionKey ? `section-${rows.length + 1}` : 'project-1'),
+              ...value,
+            };
+            const index = rows.findIndex((item) => item.id === row.id);
+            if (index >= 0) rows[index] = row;
+            else rows.push(row);
+            return row;
+          },
+        }),
+      });
+    }),
   };
 
   const service = new ConfigurationService(
@@ -52,6 +76,7 @@ describe('ConfigurationService create-from-import', () => {
     } as any,
     audit as any,
     storage as any,
+    { purgeMissingStorage: jest.fn() } as any,
   );
 
   beforeEach(() => {

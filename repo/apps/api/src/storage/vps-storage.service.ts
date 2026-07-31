@@ -294,7 +294,74 @@ export class VpsStorageService implements OnApplicationBootstrap {
     return to;
   }
 
+  /**
+   * Every project must expose Master Document Index + Version Register folders in Explorer
+   * so the tree matches the Index/Version Register pages (never an empty “lie”).
+   */
+  async ensureSystemRegisterSections(projectId: string) {
+    const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
+    if (!project) throw new NotFoundException('Project not found');
+    const required = [
+      {
+        sectionKey: 'MASTER_DOCUMENT_INDEX',
+        code: 'MDI',
+        name: 'Master Document Index',
+        relativePath: 'Master Document Index',
+      },
+      {
+        sectionKey: 'VERSION_REGISTER',
+        code: 'VR',
+        name: 'Version Register',
+        relativePath: 'Version Register',
+      },
+    ] as const;
+
+    const existing = [...(project.sections ?? [])];
+    const taken = new Set(existing.map((section) => section.position));
+    let nextPosition = 1;
+    const allocatePosition = () => {
+      while (taken.has(nextPosition)) nextPosition += 1;
+      const value = nextPosition;
+      taken.add(value);
+      nextPosition += 1;
+      return value;
+    };
+
+    let changed = false;
+    for (const spec of required) {
+      const current = existing.find((section) => section.sectionKey === spec.sectionKey);
+      if (!current) {
+        const created = this.db.projectSections.create({
+          project,
+          sectionKey: spec.sectionKey,
+          code: spec.code,
+          name: spec.name,
+          slug: this.safeSegment(spec.name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+          relativePath: spec.relativePath,
+          position: allocatePosition(),
+          active: true,
+        });
+        existing.push(await this.db.projectSections.save(created));
+        changed = true;
+        continue;
+      }
+      if (!current.active || current.relativePath !== spec.relativePath || current.name !== spec.name) {
+        current.active = true;
+        current.name = spec.name;
+        current.code = spec.code;
+        current.relativePath = spec.relativePath;
+        await this.db.projectSections.save(current);
+        changed = true;
+      }
+    }
+
+    if (!changed) return project;
+    const refreshed = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
+    return refreshed ?? project;
+  }
+
   async ensureProjectStructure(projectId: string) {
+    await this.ensureSystemRegisterSections(projectId);
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) throw new NotFoundException('Project not found');
     const rootRelative = this.projectRelativeRoot(project);
@@ -365,11 +432,12 @@ export class VpsStorageService implements OnApplicationBootstrap {
   }
 
   async tree(projectId: string) {
+    // Provision Index + Version Register folders/files so Explorer matches Master Index.
+    await this.ensureProjectStructure(projectId);
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) throw new NotFoundException('Project not found');
-    const rootRelative = this.projectRelativeRoot(project);
+    const rootRelative = this.projectRelativeRoot(project).replace(/\\/g, '/');
     const rootAbsolute = this.resolveStoragePath(rootRelative);
-    await mkdir(rootAbsolute, { recursive: true });
     const lastSynchronisedAt = await this.readSyncMarker(rootRelative);
 
     const versions = await this.db.documentVersions.createQueryBuilder('version')
@@ -378,28 +446,88 @@ export class VpsStorageService implements OnApplicationBootstrap {
       .leftJoin('document.project', 'project')
       .where('project.id = :projectId', { projectId })
       .getMany();
-    const versionsByPath = new Map(versions.map((version) => [version.storagePath.replace(/\\/g, '/'), version]));
-    const documentsByDirectory = new Map<string, typeof versions[number]['document']>();
+
+    type VersionRow = (typeof versions)[number];
+    const displayPathFor = (version: VersionRow) => {
+      const storagePath = version.storagePath.replace(/\\/g, '/');
+      if (storagePath === rootRelative || storagePath.startsWith(`${rootRelative}/`)) return storagePath;
+      // Root path changed after import, or file stored under another prefix — show under current project modules.
+      const sectionPath = version.document?.section?.relativePath
+        ? this.normaliseRelativePath(version.document.section.relativePath)
+        : 'Unsorted';
+      return this.versionRelativePath(
+        project,
+        sectionPath,
+        version.document?.code || 'document',
+        version.versionNo || '1',
+        version.originalFileName || basename(storagePath),
+      ).replace(/\\/g, '/');
+    };
+
+    const versionsByPath = new Map<string, VersionRow>();
     for (const version of versions) {
       const storagePath = version.storagePath.replace(/\\/g, '/');
+      versionsByPath.set(storagePath, version);
+      versionsByPath.set(displayPathFor(version), version);
+    }
+
+    const documentsByDirectory = new Map<string, VersionRow['document']>();
+    for (const version of versions) {
+      const meta = version.metadata as Record<string, unknown> | null | undefined;
       // ZIP pack members live under a shared pack folder (no /vX/ segment). Mapping those
       // parents as "document" collapses the pack into one node and hides sibling files.
-      const meta = version.metadata as Record<string, unknown> | null | undefined;
       if (meta?.zipPack === true || meta?.zipEntry) continue;
-      const documentDirectory = dirname(storagePath).replace(/\/v[^/]+$/, '');
+      const displayPath = displayPathFor(version);
+      const documentDirectory = dirname(displayPath).replace(/\/v[^/]+$/, '');
       documentsByDirectory.set(documentDirectory, version.document);
+      const storagePath = version.storagePath.replace(/\\/g, '/');
+      if (storagePath.startsWith(`${rootRelative}/`)) {
+        documentsByDirectory.set(dirname(storagePath).replace(/\/v[^/]+$/, ''), version.document);
+      }
     }
     const modulePaths = new Map((project.sections ?? []).map((section) => [
       join(rootRelative, this.normaliseRelativePath(section.relativePath)).replace(/\\/g, '/'),
       section,
     ]));
 
+    const diskEntries = await this.readTree(rootAbsolute, rootRelative, 0, {
+      versionsByPath,
+      documentsByDirectory,
+      modulePaths,
+      rootPath: rootRelative,
+    });
+
+    // Master Index is DB-backed; always merge version paths so explorer matches Index even when
+    // the filesystem walk is empty (root rename, missing folders, or path drift).
+    const merged = await this.mergeVersionPathsIntoTree(diskEntries, versions, {
+      rootRelative,
+      displayPathFor,
+      documentsByDirectory,
+      modulePaths,
+    });
+    const entries = this.sortExplorerRoots(merged, modulePaths);
+
     return {
       project: { id: project.id, code: project.code, name: project.name, repositoryRootPath: project.repositoryRootPath },
       rootPath: rootRelative,
       lastSynchronisedAt,
-      entries: await this.readTree(rootAbsolute, rootRelative, 0, { versionsByPath, documentsByDirectory, modulePaths, rootPath: rootRelative }),
+      entries,
     };
+  }
+
+  /** Keep Master Document Index + Version Register visible at the top of the tree. */
+  private sortExplorerRoots(
+    entries: TreeEntry[],
+    modulePaths: Map<string, Project['sections'][number]>,
+  ) {
+    const rank = (entry: TreeEntry) => {
+      const section = modulePaths.get(entry.path);
+      if (section?.sectionKey === 'MASTER_DOCUMENT_INDEX') return 0;
+      if (section?.sectionKey === 'VERSION_REGISTER') return 1;
+      if (entry.nodeType === 'module' || entry.nodeType === 'register') return 2;
+      return 3;
+    };
+    return [...entries].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }
 
   async health() {
@@ -460,6 +588,141 @@ export class VpsStorageService implements OnApplicationBootstrap {
     await writeFile(join(directory, `${fileBase}.csv`), `${csv}\n`);
   }
 
+  private findTreeEntry(entries: TreeEntry[], path: string): TreeEntry | null {
+    const target = path.replace(/\\/g, '/');
+    for (const entry of entries) {
+      if (entry.path.replace(/\\/g, '/') === target) return entry;
+      if (entry.children?.length) {
+        const nested = this.findTreeEntry(entry.children, target);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  }
+
+  private ensureDirectoryNode(
+    entries: TreeEntry[],
+    directoryPath: string,
+    rootRelative: string,
+    documentsByDirectory: Map<string, import('../database/entities').Document>,
+    modulePaths: Map<string, Project['sections'][number]>,
+  ): TreeEntry[] {
+    const normalised = directoryPath.replace(/\\/g, '/');
+    if (!normalised.startsWith(`${rootRelative}/`) && normalised !== rootRelative) return entries;
+    if (normalised === rootRelative) return entries;
+
+    const parts = normalised.slice(rootRelative.length + 1).split('/').filter(Boolean);
+    let currentPath = rootRelative;
+    let siblings = entries;
+
+    for (const part of parts) {
+      currentPath = `${currentPath}/${part}`;
+      let node = siblings.find((entry) => entry.path === currentPath && entry.type === 'directory');
+      if (!node) {
+        const document = documentsByDirectory.get(currentPath);
+        const section = modulePaths.get(currentPath);
+        const isVersion = /\/v[^/]+$/.test(currentPath);
+        node = {
+          name: part,
+          path: currentPath,
+          type: 'directory',
+          nodeType: section
+            ? (section.sectionKey === 'MASTER_DOCUMENT_INDEX' || section.sectionKey === 'VERSION_REGISTER' ? 'register' : 'module')
+            : document ? 'document' : isVersion ? 'version' : 'folder',
+          documentId: document?.id,
+          sectionId: section?.id,
+          documentCode: document?.code,
+          status: document?.status,
+          versionNo: isVersion ? part.replace(/^v/i, '') : undefined,
+          childCount: 0,
+          children: [],
+        };
+        siblings.push(node);
+        siblings.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name));
+      }
+      node.children ??= [];
+      siblings = node.children;
+    }
+
+    const refreshCounts = (nodes: TreeEntry[]) => {
+      for (const node of nodes) {
+        if (node.type === 'directory') {
+          refreshCounts(node.children ?? []);
+          node.childCount = node.children?.length ?? 0;
+        }
+      }
+    };
+    refreshCounts(entries);
+    return entries;
+  }
+
+  private async mergeVersionPathsIntoTree(
+    entries: TreeEntry[],
+    versions: Array<import('../database/entities').DocumentVersion>,
+    options: {
+      rootRelative: string;
+      displayPathFor: (version: import('../database/entities').DocumentVersion) => string;
+      documentsByDirectory: Map<string, import('../database/entities').Document>;
+      modulePaths: Map<string, Project['sections'][number]>;
+    },
+  ): Promise<TreeEntry[]> {
+    let next = entries;
+    for (const version of versions) {
+      if (!version.document?.id) continue;
+      const displayPath = options.displayPathFor(version);
+      if (!displayPath.startsWith(`${options.rootRelative}/`)) continue;
+
+      const parentPath = dirname(displayPath).replace(/\\/g, '/');
+      next = this.ensureDirectoryNode(
+        next,
+        parentPath,
+        options.rootRelative,
+        options.documentsByDirectory,
+        options.modulePaths,
+      );
+
+      if (this.findTreeEntry(next, displayPath)) continue;
+
+      const parent = this.findTreeEntry(next, parentPath);
+      if (!parent || parent.type !== 'directory') continue;
+
+      let size: number | undefined;
+      let modifiedAt: Date | undefined;
+      try {
+        const info = await stat(this.resolveStoragePath(version.storagePath.replace(/\\/g, '/')));
+        size = info.size;
+        modifiedAt = info.mtime;
+      } catch {
+        try {
+          const info = await stat(this.resolveStoragePath(displayPath));
+          size = info.size;
+          modifiedAt = info.mtime;
+        } catch {
+          // Virtual node — file may live at a drifted path; actions still use versionId.
+        }
+      }
+
+      parent.children = parent.children ?? [];
+      parent.children.push({
+        name: basename(displayPath),
+        path: displayPath,
+        type: 'file',
+        nodeType: 'file',
+        documentId: version.document.id,
+        versionId: version.id,
+        documentCode: version.document.code,
+        versionNo: version.versionNo,
+        status: version.isCurrent ? 'CURRENT' : 'SUPERSEDED',
+        mimeType: version.mimeType,
+        size,
+        modifiedAt,
+      });
+      parent.children.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name));
+      parent.childCount = parent.children.length;
+    }
+    return next;
+  }
+
   private async readTree(
     absoluteDir: string,
     relativeDir: string,
@@ -502,20 +765,26 @@ export class VpsStorageService implements OnApplicationBootstrap {
       } else if (entry.isFile()) {
         if (entry.name.startsWith('.gateway-')) continue;
         const version = mappings.versionsByPath.get(relativePath);
-        // Production tree only exposes files mapped to imported document versions.
-        if (!version?.document?.id) continue;
+        const parentSection = mappings.modulePaths.get(relativeDir);
+        const isRegisterArtifact = Boolean(
+          parentSection
+          && (parentSection.sectionKey === 'MASTER_DOCUMENT_INDEX' || parentSection.sectionKey === 'VERSION_REGISTER'),
+        );
+        // Document files must be Index-mapped; register CSV/JSON are always shown.
+        if (!version?.document?.id && !isRegisterArtifact) continue;
         const info = await stat(absolutePath);
         output.push({
           name: entry.name,
           path: relativePath,
           type: 'file',
-          nodeType: 'file',
-          documentId: version.document.id,
-          versionId: version.id,
-          documentCode: version.document.code,
-          versionNo: version.versionNo,
-          status: version.isCurrent ? 'CURRENT' : 'SUPERSEDED',
-          mimeType: version.mimeType,
+          nodeType: isRegisterArtifact && !version ? 'register' : 'file',
+          documentId: version?.document?.id,
+          versionId: version?.id,
+          documentCode: version?.document?.code,
+          versionNo: version?.versionNo,
+          status: version ? (version.isCurrent ? 'CURRENT' : 'SUPERSEDED') : 'REGISTER',
+          mimeType: version?.mimeType
+            || (entry.name.endsWith('.json') ? 'application/json' : entry.name.endsWith('.csv') ? 'text/csv' : undefined),
           size: info.size,
           modifiedAt: info.mtime,
         });

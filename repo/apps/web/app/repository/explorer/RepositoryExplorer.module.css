@@ -741,6 +741,8 @@
 .tableWrap table { width: 100%; border-collapse: collapse; }
 .tableWrap th { padding: 10px 12px; background: #f8fafc; color: #64748b; font-size: 11px; text-align: left; text-transform: uppercase; }
 .tableWrap td { padding: 11px 12px; border-top: 1px solid #edf1f5; color: #334155; font-size: 13px; vertical-align: middle; }
+.clickableRow { cursor: pointer; }
+.clickableRow:hover td { background: #f8fafc; }
 .docLink { color: #165fc8; font-weight: 700; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 .gridItem { padding: 13px; border: 1px solid #e1e8ef; border-radius: 8px; background: #fff; text-align: left; cursor: pointer; }

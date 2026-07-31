@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { ApiError, getErrorMessage } from '@/lib/api-error';
+import { deriveSectionFields, toSectionCode } from '@/lib/section-fields';
 import { CreateEntityModal } from './CreateEntityModal';
 
 export interface RepositorySectionRecord {
@@ -20,7 +21,7 @@ type ProjectOption = {
   id: string;
   code: string;
   name: string;
-  sections?: Array<{ position: number }>;
+  sections?: Array<{ position: number; active?: boolean }>;
 };
 
 interface CreateRepositorySectionModalProps {
@@ -29,10 +30,6 @@ interface CreateRepositorySectionModalProps {
   nextPosition?: number;
   onCreated: (item: RepositorySectionRecord) => void;
   onCancel: () => void;
-}
-
-function slugifyPath(value: string) {
-  return value.trim().replace(/[\\/]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 export function CreateRepositorySectionModal({
@@ -45,6 +42,7 @@ export function CreateRepositorySectionModal({
   const [projectId, setProjectId] = useState(initialProjectId);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [codeTouched, setCodeTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [active, setActive] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,12 +53,11 @@ export function CreateRepositorySectionModal({
     setProjectId(initialProjectId);
   }, [initialProjectId]);
 
-  const suggestedPath = useMemo(() => slugifyPath(name), [name]);
-
   const nextPosition = useMemo(() => {
     if (initialProjectId && initialProjectId === projectId) return initialNextPosition;
     const selected = projects.find((project) => project.id === projectId);
-    const positions = (selected?.sections ?? []).map((section) => section.position || 0);
+    const activeSections = (selected?.sections ?? []).filter((section) => (section as { active?: boolean }).active !== false);
+    const positions = activeSections.map((section) => section.position || 0);
     if (!positions.length) return 1;
     return Math.max(...positions) + 1;
   }, [projects, projectId, initialProjectId, initialNextPosition]);
@@ -76,6 +73,7 @@ export function CreateRepositorySectionModal({
       setError('Select a project before adding a repository section.');
       return;
     }
+    const derived = deriveSectionFields(trimmedName);
     setFieldError('');
     setError('');
     setSaving(true);
@@ -83,9 +81,11 @@ export function CreateRepositorySectionModal({
       const created = await api<RepositorySectionRecord>(`/projects/${projectId}/sections`, {
         method: 'POST',
         body: JSON.stringify({
-          name: trimmedName,
-          code: code.trim() || undefined,
-          relativePath: suggestedPath,
+          name: derived.name,
+          sectionKey: derived.sectionKey,
+          code: code.trim() || derived.code,
+          relativePath: derived.relativePath,
+          slug: derived.slug,
           position: nextPosition,
           active,
           description: description.trim() || undefined,
@@ -141,12 +141,8 @@ export function CreateRepositorySectionModal({
             onChange={(event) => {
               const next = event.target.value;
               setName(next);
-              if (!code.trim()) {
-                const words = next.trim().split(/\s+/).filter(Boolean);
-                const generated = words.length >= 3
-                  ? words.map((word) => word[0] ?? '').join('').toUpperCase().slice(0, 6)
-                  : next.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3);
-                if (generated) setCode(generated);
+              if (!codeTouched) {
+                setCode(toSectionCode(next));
               }
             }}
             placeholder="e.g. Security Architecture"
@@ -160,7 +156,10 @@ export function CreateRepositorySectionModal({
           <input
             id="create-section-code"
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            onChange={(event) => {
+              setCodeTouched(true);
+              setCode(event.target.value);
+            }}
             placeholder="Optional — generated from name when blank"
             title="Section code"
             disabled={saving}

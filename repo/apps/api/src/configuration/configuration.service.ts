@@ -307,17 +307,56 @@ export class ConfigurationService {
       });
     }
 
-    const section = this.db.projectSections.create({
-      project,
-      sectionKey: key,
-      code,
-      name,
-      slug: slugify(input.slug ?? name),
-      position: Number(input.position ?? (await this.db.projectSections.count({ where: { project: { id: projectId } } })) + 1),
-      active: boolean(input.active),
-      relativePath,
+    const requestedActive = boolean(input.active);
+    const requestedPosition = input.position !== undefined ? Number(input.position) : undefined;
+    if (requestedPosition !== undefined && (!Number.isFinite(requestedPosition) || requestedPosition < 1)) {
+      throw new ConfigurationException('VALIDATION_ERROR', 'Section order must be a positive number');
+    }
+
+    // Same two-phase reorder as update — a raw INSERT at max+1 still collides with the
+    // unique (project, position) constraint when inactive rows already occupy that slot.
+    const saved = await this.db.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(ProjectSection);
+      const siblings = await repo.find({
+        where: { project: { id: projectId } },
+        order: { position: 'ASC', createdAt: 'ASC' },
+      });
+
+      const section = repo.create({
+        project,
+        sectionKey: key,
+        code,
+        name,
+        slug: slugify(input.slug ?? name),
+        // Temporary unique slot; persistSectionPositions renumbers to the final order.
+        position: -(siblings.length + 1),
+        active: requestedActive,
+        relativePath,
+      });
+      const created = await repo.save(section);
+
+      let active = siblings
+        .filter((item) => item.active)
+        .sort((a, b) => a.position - b.position);
+      let inactive = siblings
+        .filter((item) => !item.active)
+        .sort((a, b) => a.position - b.position);
+
+      if (created.active) {
+        const insertAt = requestedPosition === undefined
+          ? active.length
+          : Math.max(0, Math.min(active.length, Math.floor(requestedPosition) - 1));
+        active = [...active];
+        active.splice(insertAt, 0, created);
+      } else {
+        inactive = [...inactive, created];
+      }
+
+      await this.persistSectionPositions(repo, [...active, ...inactive]);
+      const refreshed = await repo.findOne({ where: { id: created.id }, relations: { project: true } });
+      return refreshed ?? created;
     });
-    const saved = await this.db.projectSections.save(section);
+
     const action = fromImport(input) ? 'REPOSITORY_SECTION_CREATED_FROM_IMPORT' : 'CONFIG_CHANGE';
     await this.audit.record({
       userId,

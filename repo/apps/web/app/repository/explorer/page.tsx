@@ -146,8 +146,12 @@ export default function RepositoryExplorerPage() {
         }
       }
 
-      // Keep the tree collapsed by default — admins expand folders they need.
-      setExpanded(new Set());
+      // Expand top-level modules so the tree is visibly populated after load.
+      setExpanded(new Set(
+        (tree.entries ?? [])
+          .filter((entry) => entry.type === 'directory')
+          .map((entry) => entry.path),
+      ));
       setSelected(null);
       setSelectedDocument(null);
     } catch (caught) {
@@ -273,7 +277,12 @@ export default function RepositoryExplorerPage() {
   }, [documents, files]);
 
   const selectEntry = async (entry: TreeEntry) => {
-    if (entry.type === 'file' && !entry.documentId) return;
+    const isRegisterArtifact =
+      entry.nodeType === 'register'
+      || entry.status === 'REGISTER'
+      || /^(master-document-index|version-register)\.(csv|json)$/i.test(entry.name);
+    // Unmapped loose files stay hidden from actions; register CSV/JSON are first-class.
+    if (entry.type === 'file' && !entry.documentId && !isRegisterArtifact) return;
 
     // Folder click: expand and show this folder's files (chevron alone toggles collapse).
     if (entry.type === 'directory') {
@@ -709,11 +718,72 @@ export default function RepositoryExplorerPage() {
               </div>
             </article>
           </div>
-          <div className={styles.empty}>
-            <Folder size={32} color="#2563eb" />
-            <strong>Select a repository item</strong>
-            <span>Choose a module, document or file from the repository tree to inspect its approved records and secure actions.</span>
-          </div>
+          {documents.length === 0 ? (
+            <div className={styles.empty}>
+              <Folder size={32} color="#2563eb" />
+              <strong>Select a repository item</strong>
+              <span>Choose a module, document or file from the repository tree to inspect its approved records and secure actions.</span>
+            </div>
+          ) : (
+            <>
+              <div className={styles.summary}>
+                <div>
+                  <h2>Project documents</h2>
+                  <div className={styles.breadcrumb}>
+                    {repository?.project.code ? `${repository.project.code} · ` : ''}
+                    {documents.length} document{documents.length === 1 ? '' : 's'} in Master Index
+                  </div>
+                </div>
+                <div className={styles.summaryStats}>
+                  <span><strong>{documents.length}</strong>Documents</span>
+                  <span><strong>{documents.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
+                </div>
+              </div>
+              <div className={styles.tableWrap}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Document</th>
+                      <th>Document code</th>
+                      <th>Section</th>
+                      <th>Current version</th>
+                      <th>Status</th>
+                      <th>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.map((document) => (
+                      <tr
+                        key={document.id}
+                        className={styles.clickableRow}
+                        onClick={() => {
+                          const match = allEntries.find((entry) => entry.documentId === document.id);
+                          if (match) void selectEntry(match);
+                          else {
+                            void selectEntry({
+                              name: document.title,
+                              path: document.section.relativePath,
+                              type: 'directory',
+                              nodeType: 'document',
+                              documentId: document.id,
+                              documentCode: document.code,
+                            });
+                          }
+                        }}
+                      >
+                        <td><strong>{document.title}</strong></td>
+                        <td>{document.code}</td>
+                        <td>{document.section?.name ?? '—'}</td>
+                        <td>v{document.currentVersionNo}</td>
+                        <td><StatusBadge value={document.status} /></td>
+                        <td>{formatDate(document.updatedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       ) : selected.kind === 'folder' ? (
         <>
@@ -723,16 +793,55 @@ export default function RepositoryExplorerPage() {
               <div className={styles.breadcrumb}>{selected.entry.path}</div>
             </div>
             <div className={styles.summaryStats}>
-              <span><strong>{displayedFolderDocs.length}</strong>Documents</span>
-              <span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
-              <span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span>
+              {selected.entry.nodeType === 'register' ? (
+                <>
+                  <span><strong>{selected.entry.children?.length ?? 0}</strong>Register files</span>
+                  <span><strong>{documents.length}</strong>Index documents</span>
+                  <span><strong>{documents.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
+                </>
+              ) : (
+                <>
+                  <span><strong>{displayedFolderDocs.length}</strong>Documents</span>
+                  <span><strong>{displayedFolderDocs.reduce((total, item) => total + item._count.versions, 0)}</strong>Versions</span>
+                  <span><strong>{formatDate(selected.entry.modifiedAt)}</strong>Updated</span>
+                </>
+              )}
             </div>
             <div className={styles.folderActions}>
+              {selected.entry.nodeType === 'register' ? (
+                <>
+                  <Link
+                    href={
+                      /version/i.test(selected.entry.name)
+                        ? `/repository/versions?projectId=${projectId}`
+                        : `/repository/index?projectId=${projectId}`
+                    }
+                    className={`${styles.button} ${styles.buttonPrimary}`}
+                  >
+                    <ExternalLink size={14} />
+                    {/version/i.test(selected.entry.name) ? 'Open Version Register' : 'Open Master Index'}
+                  </Link>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => exportRegister(/version/i.test(selected.entry.name) ? 'versions' : 'index', 'csv')}
+                  >
+                    <FileSpreadsheet size={14} /> CSV
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={() => exportRegister(/version/i.test(selected.entry.name) ? 'versions' : 'index', 'json')}
+                  >
+                    <FileJson size={14} /> JSON
+                  </button>
+                </>
+              ) : null}
               {selected.entry.sectionId || selected.entry.nodeType === 'module' ? (
                 <button
                   type="button"
                   className={styles.button}
-                  disabled={!selected.entry.sectionId}
+                  disabled={!selected.entry.sectionId || selected.entry.nodeType === 'register'}
                   onClick={() => {
                     setRenameFolderName(selected.entry.name);
                     setRenameFolderOpen(true);
@@ -741,40 +850,66 @@ export default function RepositoryExplorerPage() {
                   <Pencil size={14} /> Edit folder
                 </button>
               ) : null}
-              <div className={styles.menuWrap} ref={folderMenuRef}>
-                <button
-                  type="button"
-                  className={`${styles.iconButton} ${folderMenuOpen ? styles.iconButtonActive : ''}`}
-                  aria-label="Folder actions"
-                  aria-haspopup="menu"
-                  aria-expanded={folderMenuOpen}
-                  title="Folder actions"
-                  onClick={() => setFolderMenuOpen((open) => !open)}
-                >
-                  <MoreVertical size={16} />
-                </button>
-                {folderMenuOpen ? (
-                  <div className={styles.menu} role="menu">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.menuDanger}
-                      disabled={selected.entry.nodeType === 'register'}
-                      title={
-                        selected.entry.nodeType === 'register'
-                          ? 'System register folders cannot be deleted'
-                          : 'Delete this folder and all documents inside it'
-                      }
-                      onClick={() => void deleteFolder(selected.entry)}
-                    >
-                      Delete folder
-                    </button>
-                  </div>
-                ) : null}
-              </div>
+              {selected.entry.nodeType !== 'register' ? (
+                <div className={styles.menuWrap} ref={folderMenuRef}>
+                  <button
+                    type="button"
+                    className={`${styles.iconButton} ${folderMenuOpen ? styles.iconButtonActive : ''}`}
+                    aria-label="Folder actions"
+                    aria-haspopup="menu"
+                    aria-expanded={folderMenuOpen}
+                    title="Folder actions"
+                    onClick={() => setFolderMenuOpen((open) => !open)}
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                  {folderMenuOpen ? (
+                    <div className={styles.menu} role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={styles.menuDanger}
+                        onClick={() => void deleteFolder(selected.entry)}
+                      >
+                        Delete folder
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
-          {displayedFolderDocs.length === 0 ? (
+          {selected.entry.nodeType === 'register' ? (
+            <div className={styles.tableWrap}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Register file</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selected.entry.children ?? []).filter((child) => child.type === 'file').map((file) => (
+                    <tr key={file.path}>
+                      <td><strong>{file.name}</strong></td>
+                      <td>{extensionOf(file.name).toUpperCase() || '—'}</td>
+                      <td>{file.size != null ? `${Math.max(1, Math.round(file.size / 1024))} KB` : '—'}</td>
+                      <td>{formatDate(file.modifiedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {(selected.entry.children ?? []).every((child) => child.type !== 'file') ? (
+                <div className={styles.empty}>
+                  <TableProperties size={30} color="#64748b" />
+                  <strong>Register folder is ready.</strong>
+                  <span>Export CSV/JSON above to refresh the on-disk register files for this project.</span>
+                </div>
+              ) : null}
+            </div>
+          ) : displayedFolderDocs.length === 0 ? (
             <div className={styles.empty}>
               <Folder size={30} color="#64748b" />
               <strong>This repository module does not contain any imported documents yet.</strong>
@@ -866,6 +1001,28 @@ export default function RepositoryExplorerPage() {
         <div className={styles.empty}>
           {selectedDocument ? (
             <strong>Loading selected document…</strong>
+          ) : selected.entry.nodeType === 'register' || selected.entry.status === 'REGISTER' ? (
+            <>
+              <TableProperties size={30} color="#2563eb" />
+              <strong>{selected.entry.name}</strong>
+              <span>This is a system register export that mirrors Master Index / Version Register for this project.</span>
+              <div className={styles.registerActions}>
+                <button
+                  type="button"
+                  className={styles.registerPrimary}
+                  onClick={() => exportRegister(/version/i.test(selected.entry.name) ? 'versions' : 'index', 'csv')}
+                >
+                  <FileSpreadsheet size={14} /> Export CSV
+                </button>
+                <button
+                  type="button"
+                  className={styles.registerExport}
+                  onClick={() => exportRegister(/version/i.test(selected.entry.name) ? 'versions' : 'index', 'json')}
+                >
+                  <FileJson size={14} /> Export JSON
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <File size={30} />
