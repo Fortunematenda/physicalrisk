@@ -331,9 +331,11 @@
       NODE_ENV: production
       PORT: 3100
       REPO_API_URL: http://repo-api:4000/api
+      PUBLIC_MCP_URL: ${PUBLIC_MCP_URL:-https://repo-mcp.physicalrisk.com}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_AUDIENCE: ${REPO_MCP_AUDIENCE:-physicalrisk-repo}
       KEYCLOAK_CLIENT_ID: ${REPO_MCP_CLIENT_ID:-repo-chatgpt-app}
+      MCP_OAUTH_REQUIRED: ${MCP_OAUTH_REQUIRED:-true}
       REPO_MCP_API_KEY: ${REPO_MCP_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:

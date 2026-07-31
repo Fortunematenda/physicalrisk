@@ -1,9 +1,20 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { createHash, randomBytes } from 'node:crypto';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash, createPublicKey, createVerify, randomBytes } from 'node:crypto';
+import * as http from 'http';
+import * as https from 'https';
 import { AuditService } from '../common/audit.service';
-import { McpIntegration, McpIntegrationStatus } from '../database/entities';
+import { McpIntegration, McpIntegrationStatus, User, UserRole } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
-import { CreateMcpIntegrationDto, MCP_TOOL_NAMES, McpToolName, mcpAllowsAllProjects, normalizeMcpAllowedProjectIds } from './mcp.dto';
+import { SsoUserSyncService } from '../users/sso-user-sync.service';
+import {
+  CreateMcpIntegrationDto,
+  MCP_ALL_PROJECTS_SCOPE,
+  MCP_TOOL_NAMES,
+  McpToolName,
+  mcpAllowsAllProjects,
+  normalizeMcpAllowedProjectIds,
+} from './mcp.dto';
 import { McpForbiddenException, McpToolException } from './mcp.exceptions';
 
 /** Tools added after many ChatGPT integrations were created with a frozen allow-list. */
@@ -43,9 +54,14 @@ export interface CreatedMcpIntegration extends McpIntegrationView {
 
 @Injectable()
 export class McpAuthService {
+  private readonly logger = new Logger(McpAuthService.name);
+  private jwksCache: { keys: any[]; expiresAt: number } | null = null;
+
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
+    private readonly ssoUsers: SsoUserSyncService,
   ) {}
 
   listIntegrations(): Promise<McpIntegration[]> {
@@ -208,6 +224,18 @@ export class McpAuthService {
     return { deleted: true, id };
   }
 
+  /**
+   * Accept either a classic `mcp_…` API key (Custom GPT Actions) or a Keycloak
+   * user access token (Notion-style ChatGPT connector / repo-mcp OAuth).
+   */
+  async validateBearer(rawBearer: string): Promise<McpIntegration> {
+    const trimmed = rawBearer.trim();
+    if (trimmed.startsWith(API_KEY_PREFIX)) {
+      return this.validateApiKey(trimmed);
+    }
+    return this.validateUserAccessToken(trimmed);
+  }
+
   async validateApiKey(rawKey: string): Promise<McpIntegration> {
     const trimmed = rawKey.trim();
     if (!trimmed.startsWith(API_KEY_PREFIX)) {
@@ -227,6 +255,114 @@ export class McpAuthService {
     match.lastUsedAt = new Date();
     await this.db.mcpIntegrations.save(match);
     return match;
+  }
+
+  /** Build an in-memory MCP integration for a signed-in SSO user (all projects + tools). */
+  async validateUserAccessToken(token: string): Promise<McpIntegration> {
+    if (this.config.get<string>('KEYCLOAK_ENABLED') !== 'true') {
+      throw new Error('keycloak disabled');
+    }
+    const payload = await this.verifyKeycloakToken(token);
+    const realmRoles: string[] = payload.realm_roles ?? payload.realm_access?.roles ?? [];
+    const repoRole = this.mapKeycloakRoleToRepo(realmRoles);
+    const name =
+      (typeof payload.name === 'string' && payload.name.trim())
+      || [payload.given_name, payload.family_name].filter(Boolean).join(' ').trim()
+      || (typeof payload.preferred_username === 'string' && payload.preferred_username.trim())
+      || undefined;
+    const email = typeof payload.email === 'string' ? payload.email : '';
+    const local = await this.ssoUsers.sync({ email, name, role: repoRole });
+    if (!local?.id) throw new Error('sso user sync failed');
+
+    return this.syntheticSsoIntegration(local);
+  }
+
+  private syntheticSsoIntegration(user: User): McpIntegration {
+    const now = new Date();
+    return {
+      id: `sso:${user.id}`,
+      name: `ChatGPT SSO (${user.email})`,
+      status: McpIntegrationStatus.ACTIVE,
+      apiKeyHash: '',
+      apiKeyPrefix: 'sso_',
+      allowedProjectIds: [MCP_ALL_PROJECTS_SCOPE],
+      allowedTools: [...MCP_TOOL_NAMES],
+      expiresAt: null,
+      lastUsedAt: now,
+      createdBy: user,
+      rotatedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    } as McpIntegration;
+  }
+
+  private mapKeycloakRoleToRepo(realmRoles: string[]): string {
+    if (realmRoles.includes('repo_admin')) return UserRole.ADMIN;
+    if (realmRoles.includes('repo_importer')) return UserRole.IMPORTER;
+    if (realmRoles.includes('repo_reviewer')) return UserRole.REVIEWER;
+    return UserRole.VIEWER;
+  }
+
+  private async verifyKeycloakToken(token: string): Promise<any> {
+    const jwksUrl = this.config.get<string>('KEYCLOAK_JWKS_URL');
+    const issuer = this.config.get<string>('KEYCLOAK_ISSUER');
+    if (!jwksUrl) throw new Error('KEYCLOAK_JWKS_URL not configured');
+
+    const keys = await this.fetchJwks(jwksUrl);
+    const signingKey = keys.find((k: any) => k.use === 'sig' && k.kty === 'RSA');
+    if (!signingKey) throw new Error('No RSA signing key in JWKS');
+
+    const pem = this.jwkToPem(signingKey);
+    const parts = token.split('.');
+    if (parts.length !== 3) throw new Error('Cannot decode token');
+    const [headerB64, payloadB64, signatureB64] = parts;
+    const signatureBuffer = Buffer.from(
+      padBase64(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
+      'base64',
+    );
+    const verifier = createVerify('RSA-SHA256');
+    verifier.update(`${headerB64}.${payloadB64}`);
+    verifier.end();
+    if (!verifier.verify(pem, signatureBuffer)) {
+      throw new Error('Invalid token signature');
+    }
+
+    const payload = JSON.parse(Buffer.from(padBase64(payloadB64.replace(/-/g, '+').replace(/_/g, '/')), 'base64').toString('utf8'));
+    if (issuer && payload.iss !== issuer) throw new Error(`Issuer mismatch: ${payload.iss}`);
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) throw new Error('Token expired');
+    return payload;
+  }
+
+  private async fetchJwks(url: string): Promise<any[]> {
+    if (this.jwksCache && Date.now() < this.jwksCache.expiresAt) {
+      return this.jwksCache.keys;
+    }
+    return new Promise((resolve, reject) => {
+      const fetcher = url.startsWith('https') ? https : http;
+      fetcher.get(url, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            const jwks = JSON.parse(data);
+            this.jwksCache = { keys: jwks.keys, expiresAt: Date.now() + 300_000 };
+            resolve(jwks.keys);
+          } catch (e) {
+            reject(e);
+          }
+        });
+        res.on('error', reject);
+      }).on('error', reject);
+    });
+  }
+
+  private jwkToPem(jwk: any): string {
+    if (jwk.x5c?.[0]) {
+      const body = String(jwk.x5c[0]).match(/.{1,64}/g)?.join('\n') ?? jwk.x5c[0];
+      return `-----BEGIN CERTIFICATE-----\n${body}\n-----END CERTIFICATE-----`;
+    }
+    const keyObject = createPublicKey({ key: jwk, format: 'jwk' });
+    return keyObject.export({ type: 'spki', format: 'pem' }).toString();
   }
 
   assertProjectAllowed(integration: McpIntegration, projectId: string): void {
@@ -300,4 +436,10 @@ export class McpAuthService {
     }
     return normalized;
   }
+}
+
+function padBase64(value: string): string {
+  const mod = value.length % 4;
+  if (mod === 0) return value;
+  return value + '='.repeat(4 - mod);
 }

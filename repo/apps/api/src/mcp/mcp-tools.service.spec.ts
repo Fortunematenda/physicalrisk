@@ -39,6 +39,8 @@ describe('McpToolsService project permissions', () => {
     { fetchApprovedDocument: jest.fn() } as any,
     { render: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4')) } as any,
     { get: jest.fn().mockReturnValue('https://repo.physicalrisk.com') } as any,
+    {} as any,
+    {} as any,
   );
 
   beforeEach(() => {
@@ -71,7 +73,9 @@ describe('McpAuthService project permissions', () => {
     users: { findOne: jest.fn() },
   };
   const audit = { record: jest.fn() };
-  const service = new McpAuthService(db as any, audit as any);
+  const config = { get: jest.fn() };
+  const ssoUsers = { sync: jest.fn() };
+  const service = new McpAuthService(db as any, audit as any, config as any, ssoUsers as any);
 
   const integration: McpIntegration = {
     id: 'integration-1',
@@ -94,7 +98,7 @@ describe('McpAuthService project permissions', () => {
   });
 
   it('blocks disallowed project ids', () => {
-    expect(() => service.assertProjectAllowed(integration, 'project-denied')).toThrow('project project-denied not allowed');
+    expect(() => service.assertProjectAllowed(integration, 'project-denied')).toThrow(McpForbiddenException);
   });
 
   it('permits every project when scope is *', () => {

@@ -13,6 +13,9 @@ Standalone service: `repo-mcp/`
 - Local: `http://localhost:3100/mcp`
 - Production: `https://repo-mcp.physicalrisk.com/mcp`
 - Health: `/health`
+- OAuth PRM: `/.well-known/oauth-protected-resource`
+
+Notion-style connect guide: [chatgpt-repo-connector-notion-style.md](./chatgpt-repo-connector-notion-style.md)
 
 ## Env
 
@@ -20,9 +23,10 @@ Standalone service: `repo-mcp/`
 |----------|---------|
 | `PORT` | Default 3100 |
 | `REPO_API_URL` | e.g. `http://repo-api:4000/api` |
+| `PUBLIC_MCP_URL` | `https://repo-mcp.physicalrisk.com` |
 | `REPO_MCP_API_KEY` | Optional fallback `mcp_…` key |
-| `KEYCLOAK_ISSUER` | Documented for OIDC client setup |
-| `KEYCLOAK_AUDIENCE` / `KEYCLOAK_CLIENT_ID` | Future user-token validation |
+| `KEYCLOAK_ISSUER` | Authorization server for PRM / OAuth |
+| `MCP_OAUTH_REQUIRED` | `true` → 401 + WWW-Authenticate on tool calls without Bearer |
 
 ## Docker
 

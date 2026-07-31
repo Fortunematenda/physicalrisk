@@ -26,12 +26,12 @@ export class McpAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const rawKey = this.extractApiKey(request);
-    if (!rawKey) throw new McpAuthException();
+    const rawBearer = this.extractBearer(request);
+    if (!rawBearer) throw new McpAuthException();
 
     let integration;
     try {
-      integration = await this.auth.validateApiKey(rawKey);
+      integration = await this.auth.validateBearer(rawBearer);
     } catch {
       throw new McpAuthException();
     }
@@ -53,7 +53,7 @@ export class McpAuthGuard implements CanActivate {
     return true;
   }
 
-  private extractApiKey(request: { headers?: Record<string, string | string[] | undefined> }): string | undefined {
+  private extractBearer(request: { headers?: Record<string, string | string[] | undefined> }): string | undefined {
     const headerKey = request.headers?.['x-mcp-api-key'];
     if (typeof headerKey === 'string' && headerKey.trim()) return headerKey.trim();
     if (Array.isArray(headerKey) && headerKey[0]?.trim()) return headerKey[0].trim();
@@ -63,10 +63,9 @@ export class McpAuthGuard implements CanActivate {
     if (typeof authValue === 'string') {
       const value = authValue.trim();
       if (/^bearer\s+/i.test(value)) {
-        const bearer = value.replace(/^bearer\s+/i, '').trim();
-        if (bearer.startsWith('mcp_')) return bearer;
+        return value.replace(/^bearer\s+/i, '').trim();
       }
-      // Some Action clients send the raw key in Authorization without Bearer.
+      // Some Action clients send the raw mcp_ key in Authorization without Bearer.
       if (value.startsWith('mcp_')) return value;
     }
     return undefined;

@@ -1,16 +1,22 @@
 /**
- * Physical Risk Repository MCP service.
- * Proxies all tools to repo-api — no direct PostgreSQL or storage access.
+ * Physical Risk Repository MCP — Notion-style ChatGPT connector.
  *
- * Transport: Streamable HTTP at /mcp (official MCP SDK).
- * Auth: forward Authorization Bearer (user OIDC or mcp_ API key) to repo-api.
+ * - Streamable HTTP at /mcp
+ * - OAuth 2.1 Protected Resource Metadata (RFC 9728) for ChatGPT Connectors
+ * - Forwards Authorization Bearer (Keycloak user token or mcp_ API key) to repo-api
  */
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { config } from './config.js';
 import { RepositoryApiClient } from './clients/repository-api.client.js';
+import {
+  isUnauthenticatedMcpMethod,
+  mcpResourceUrl,
+  protectedResourceMetadata,
+  wwwAuthenticateHeader,
+} from './oauth.js';
 
 function toolResult(data: unknown) {
   return {
@@ -22,117 +28,273 @@ function toolResult(data: unknown) {
 function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
-    name: 'physicalrisk-repo-mcp',
-    version: '1.0.0',
+    name: 'physicalrisk-repo',
+    version: '1.1.0',
+    instructions:
+      'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
+      + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
+      + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent.',
   });
 
-  server.tool('list_repository_workspaces', 'List Repository Workspaces for the current user', {
-    projectCode: z.string().optional(),
-    status: z.string().optional(),
-    name: z.string().optional(),
-  }, async (args) => {
-    const qs = new URLSearchParams({ mine: 'true' });
-    if (args.projectCode) qs.set('projectCode', args.projectCode);
-    if (args.status) qs.set('status', args.status);
-    if (args.name) qs.set('name', args.name);
-    return toolResult(await api.request('GET', `/workspaces?${qs}`));
-  });
+  const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
+    api.request('POST', `/mcp/tools/${name}`, args);
 
-  server.tool('get_repository_workspace', 'Get workspace by code', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('GET', `/workspaces/${encodeURIComponent(workspaceCode)}`)));
+  server.tool(
+    'list_repository_projects',
+    'List repository projects. Use this when choosing a projectCode (e.g. MCRD).',
+    {},
+    async () => toolResult(await mcpTool('list_repository_projects')),
+  );
 
-  server.tool('get_latest_repository_workspace', 'Latest pending workspace for current user', {}, async () =>
-    toolResult(await api.request('GET', '/workspaces/my/latest-pending')));
+  server.tool(
+    'list_repository_modules',
+    'List modules/sections for a project. Use projectCode from list_repository_projects.',
+    {
+      projectCode: z.string().optional().describe('Project code e.g. MCRD'),
+      projectId: z.string().optional().describe('Project UUID if known'),
+    },
+    async (args) => toolResult(await mcpTool('list_repository_modules', args)),
+  );
 
-  server.tool('get_workspace_summary', 'Workspace summary with documents', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('GET', `/workspaces/${encodeURIComponent(workspaceCode)}/summary`)));
+  server.tool(
+    'list_document_types',
+    'List active document types (e.g. Article).',
+    {},
+    async () => toolResult(await mcpTool('list_document_types')),
+  );
 
-  server.tool('list_workspace_documents', 'List workspace documents', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('GET', `/workspaces/${encodeURIComponent(workspaceCode)}/documents`)));
+  server.tool(
+    'create_repository_workspace',
+    'Create a Repository Workspace. Returns workspaceCode WS-YYYY-##### to resume later.',
+    {
+      name: z.string(),
+      projectCode: z.string().optional().describe('Prefer this — e.g. MCRD'),
+      projectId: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('create_workspace', args)),
+  );
 
-  server.tool('get_workspace_activity', 'Workspace activity trail', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('GET', `/workspaces/${encodeURIComponent(workspaceCode)}/activity`)));
+  server.tool(
+    'list_repository_workspaces',
+    'List Repository Workspaces for the signed-in user',
+    {
+      projectCode: z.string().optional(),
+      status: z.string().optional(),
+      name: z.string().optional(),
+    },
+    async (args) => {
+      const qs = new URLSearchParams({ mine: 'true' });
+      if (args.projectCode) qs.set('projectCode', args.projectCode);
+      if (args.status) qs.set('status', args.status);
+      if (args.name) qs.set('name', args.name);
+      return toolResult(await api.request('GET', `/workspaces?${qs}`));
+    },
+  );
 
-  server.tool('create_repository_workspace', 'Create a workspace', {
-    name: z.string(),
-    projectId: z.string().uuid(),
-  }, async (args) =>
-    toolResult(await api.request('POST', '/workspaces', args)));
+  server.tool(
+    'get_repository_workspace',
+    'Get workspace by code (WS-YYYY-#####)',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('get_workspace', { workspaceCode })),
+  );
 
-  server.tool('resume_repository_workspace', 'Resume a workspace', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('POST', `/workspaces/${encodeURIComponent(workspaceCode)}/resume`)));
+  server.tool(
+    'get_latest_repository_workspace',
+    'Latest pending workspace for the signed-in user — use when resuming without a code',
+    {},
+    async () => toolResult(await mcpTool('get_latest_pending_workspace')),
+  );
 
-  server.tool('validate_repository_workspace', 'Validate workspace', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('POST', `/workspaces/${encodeURIComponent(workspaceCode)}/validate`)));
+  server.tool(
+    'get_workspace_summary',
+    'Workspace progress + documents',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('get_workspace_summary', { workspaceCode })),
+  );
 
-  server.tool('submit_repository_workspace', 'Submit workspace import', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('POST', `/workspaces/${encodeURIComponent(workspaceCode)}/submit`)));
+  server.tool(
+    'list_workspace_documents',
+    'List documents attached to a workspace',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('list_workspace_documents', { workspaceCode })),
+  );
 
-  server.tool('archive_repository_workspace', 'Archive workspace (soft close)', {
-    workspaceCode: z.string(),
-  }, async ({ workspaceCode }) =>
-    toolResult(await api.request('POST', `/workspaces/${encodeURIComponent(workspaceCode)}/archive`)));
+  server.tool(
+    'resume_repository_workspace',
+    'Resume / continue a paused workspace',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('resume_workspace', { workspaceCode })),
+  );
 
-  server.tool('list_repository_projects', 'List projects via repo-api MCP tool', {}, async () =>
-    toolResult(await api.request('POST', '/mcp/tools/list_repository_projects', {})));
+  server.tool(
+    'validate_repository_workspace',
+    'Validate workspace before submit',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('validate_workspace', { workspaceCode })),
+  );
 
-  server.tool('find_repository_documents', 'Search documents', {
-    search: z.string().optional(),
-    projectId: z.string().uuid().optional(),
-  }, async (args) => {
-    const qs = new URLSearchParams();
-    if (args.search) qs.set('search', args.search);
-    if (args.projectId) qs.set('projectId', args.projectId);
-    return toolResult(await api.request('GET', `/documents?${qs}`));
-  });
+  server.tool(
+    'submit_repository_workspace',
+    'Submit workspace import',
+    { workspaceCode: z.string() },
+    async ({ workspaceCode }) =>
+      toolResult(await mcpTool('submit_workspace', { workspaceCode })),
+  );
 
-  server.tool('get_repository_document', 'Get document by id', {
-    documentId: z.string().uuid(),
-  }, async ({ documentId }) =>
-    toolResult(await api.request('GET', `/documents/${encodeURIComponent(documentId)}`)));
+  server.tool(
+    'submit_approved_document',
+    'Submit an approved document (Markdown → PDF). Prefer projectCode MCRD/MOSS/PROR — never invent codes.',
+    {
+      payload: z.string().describe(
+        'JSON string: projectCode, module, documentType, title, documentContent; optional workspaceCode, owner, description',
+      ),
+    },
+    async (args) => toolResult(await mcpTool('submit_approved_document', args)),
+  );
 
-  server.tool('get_import_job', 'Get import job status', {
-    importJobId: z.string().uuid(),
-  }, async ({ importJobId }) =>
-    toolResult(await api.request('GET', `/imports/${encodeURIComponent(importJobId)}`)));
+  server.tool(
+    'prepare_approved_document',
+    'Prepare or submit (alias of submit_approved_document)',
+    {
+      payload: z.string(),
+    },
+    async (args) => toolResult(await mcpTool('prepare_approved_document', args)),
+  );
+
+  server.tool(
+    'get_import_status',
+    'Get import job status',
+    { importJobId: z.string() },
+    async (args) => toolResult(await mcpTool('get_import_status', args)),
+  );
+
+  server.tool(
+    'find_repository_documents',
+    'Search repository documents',
+    {
+      search: z.string().optional(),
+      projectId: z.string().optional(),
+    },
+    async (args) => {
+      const qs = new URLSearchParams();
+      if (args.search) qs.set('search', args.search);
+      if (args.projectId) qs.set('projectId', args.projectId);
+      return toolResult(await api.request('GET', `/documents?${qs}`));
+    },
+  );
+
+  server.tool(
+    'get_repository_document',
+    'Get document by UUID',
+    { documentId: z.string() },
+    async ({ documentId }) =>
+      toolResult(await api.request('GET', `/documents/${encodeURIComponent(documentId)}`)),
+  );
 
   return server;
 }
 
+async function readJsonBody(req: IncomingMessage): Promise<unknown | undefined> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  if (!chunks.length) return undefined;
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown, extraHeaders?: Record<string, string>) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    ...extraHeaders,
+  });
+  res.end(JSON.stringify(body));
+}
+
+function requireAuth(req: IncomingMessage): string | undefined {
+  const authorization = req.headers.authorization;
+  if (typeof authorization === 'string' && authorization.trim()) return authorization.trim();
+  return undefined;
+}
+
 const httpServer = createServer(async (req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', service: 'repo-mcp' }));
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/health') {
+    sendJson(res, 200, {
+      status: 'ok',
+      service: 'repo-mcp',
+      resource: mcpResourceUrl(),
+      oauth: Boolean(config.keycloakIssuer),
+    });
     return;
   }
 
-  if (!req.url?.startsWith('/mcp')) {
+  // RFC 9728 — ChatGPT discovers Keycloak from this document (Notion-style connect).
+  if (
+    url.pathname === '/.well-known/oauth-protected-resource'
+    || url.pathname === '/.well-known/oauth-protected-resource/mcp'
+  ) {
+    sendJson(res, 200, protectedResourceMetadata());
+    return;
+  }
+
+  if (!url.pathname.startsWith('/mcp')) {
     res.writeHead(404);
     res.end('Not found');
     return;
   }
 
-  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined;
-  const server = createMcpServer(authHeader);
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  await server.connect(transport);
-  await transport.handleRequest(req, res);
+  const authHeader = requireAuth(req);
+  let parsedBody: unknown | undefined;
+
+  if (req.method === 'POST' || req.method === 'PUT') {
+    parsedBody = await readJsonBody(req);
+  }
+
+  const rpcMethod =
+    parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)
+      ? (parsedBody as { method?: unknown }).method
+      : undefined;
+
+  const allowAnonymous = isUnauthenticatedMcpMethod(rpcMethod);
+  if (config.oauthRequired && !authHeader && !allowAnonymous) {
+    sendJson(res, 401, {
+      error: 'unauthorized',
+      message: 'Sign in with Physical Risk SSO to use Repository tools (same pattern as Notion).',
+    }, {
+      'WWW-Authenticate': wwwAuthenticateHeader(),
+    });
+    return;
+  }
+
+  try {
+    const server = createMcpServer(authHeader);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, parsedBody);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'MCP handler failed';
+    if (!res.headersSent) {
+      sendJson(res, 500, { error: 'mcp_error', message });
+    }
+  }
 });
 
 httpServer.listen(config.port, '0.0.0.0', () => {
-  console.log(`repo-mcp listening on :${config.port} → ${config.repoApiUrl}`);
+  console.log(
+    `repo-mcp listening on :${config.port} → ${config.repoApiUrl} | resource=${mcpResourceUrl()} | oauth=${config.oauthRequired}`,
+  );
 });
