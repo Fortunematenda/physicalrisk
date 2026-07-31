@@ -30,7 +30,7 @@ function createMcpServer(authHeader?: string) {
   const server = new McpServer({
     name: 'physicalrisk-repo',
     version: '1.1.0',
-    instructions:
+    description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
       + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent.',
