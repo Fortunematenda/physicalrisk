@@ -540,6 +540,24 @@ export default function DashboardPage() {
     );
   }, [dashboard]);
 
+  /** Always show Current / Superseded / Archived so the card never looks half-empty. */
+  const statusRows = useMemo(() => {
+    const order = ["CURRENT", "SUPERSEDED", "ARCHIVED"] as const;
+    const byStatus = new Map(
+      (dashboard?.statusDistribution ?? []).map((item) => [item.status, item]),
+    );
+    return order.map((status) => {
+      const found = byStatus.get(status);
+      const count = found?.count ?? 0;
+      return {
+        status,
+        label: found?.label || normaliseStatusLabel(status),
+        count,
+        percentage: statusTotal > 0 ? (count / statusTotal) * 100 : 0,
+      };
+    });
+  }, [dashboard, statusTotal]);
+
   const maximumProjectCount = useMemo(() => {
     if (!dashboard?.projectDistribution.length) {
       return 1;
@@ -844,18 +862,18 @@ export default function DashboardPage() {
           <div className={styles.panelHeader}>
             <div>
               <h2>Documents by Status</h2>
-              <p>Current repository status distribution</p>
+              <p>Current, superseded, and archived repository documents</p>
             </div>
           </div>
 
           <div className={styles.statusChartLayout}>
-            <div className={styles.donutWrapper}>
-              {dashboard.statusDistribution.length > 0 ? (
+            <div className={styles.statusDonut}>
+              {statusTotal > 0 ? (
                 <>
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={dashboard.statusDistribution}
+                        data={statusRows.filter((row) => row.count > 0)}
                         dataKey="count"
                         nameKey="label"
                         innerRadius="62%"
@@ -863,14 +881,13 @@ export default function DashboardPage() {
                         paddingAngle={1}
                         stroke="none"
                       >
-                        {dashboard.statusDistribution.map((item) => (
+                        {statusRows.filter((row) => row.count > 0).map((item) => (
                           <Cell
                             key={item.status}
                             fill={STATUS_COLOURS[item.status]}
                           />
                         ))}
                       </Pie>
-
                       <Tooltip
                         formatter={(value) => [
                           formatNumber(Number(value)),
@@ -885,7 +902,6 @@ export default function DashboardPage() {
                       />
                     </PieChart>
                   </ResponsiveContainer>
-
                   <div className={styles.donutCentre}>
                     <strong>{formatNumber(statusTotal)}</strong>
                     <span>Total</span>
@@ -894,28 +910,35 @@ export default function DashboardPage() {
               ) : (
                 <EmptyState
                   icon={FolderOpen}
-                  title="No document statuses"
-                  description="Status distribution will appear after documents are imported."
+                  title="No documents yet"
+                  description="Status totals will appear after documents are imported."
                 />
               )}
             </div>
 
-            <div className={styles.statusLegend}>
-              {dashboard.statusDistribution.map((item) => (
-                <div key={item.status} className={styles.statusLegendItem}>
-                  <span
-                    className={styles.statusLegendColour}
-                    style={{
-                      backgroundColor: STATUS_COLOURS[item.status],
-                    }}
-                  />
-
-                  <span className={styles.statusLegendLabel}>{item.label}</span>
-
-                  <strong>
-                    {item.percentage.toFixed(0)}%{" "}
-                    <small>({formatNumber(item.count)})</small>
-                  </strong>
+            <div className={styles.statusBars}>
+              {statusRows.map((item) => (
+                <div key={item.status} className={styles.statusBarRow}>
+                  <div className={styles.statusBarMeta}>
+                    <span
+                      className={styles.statusLegendColour}
+                      style={{ backgroundColor: STATUS_COLOURS[item.status] }}
+                    />
+                    <span className={styles.statusLegendLabel}>{item.label}</span>
+                    <strong>
+                      {formatNumber(item.count)}
+                      <small> · {item.percentage.toFixed(0)}%</small>
+                    </strong>
+                  </div>
+                  <span className={styles.progressTrack}>
+                    <span
+                      className={styles.progressFill}
+                      style={{
+                        width: `${item.percentage}%`,
+                        backgroundColor: STATUS_COLOURS[item.status],
+                      }}
+                    />
+                  </span>
                 </div>
               ))}
             </div>

@@ -354,16 +354,52 @@
 }
 
 .statusChartLayout {
-  min-height: 274px;
+  min-height: 220px;
   display: grid;
-  grid-template-columns: minmax(210px, 0.9fr) minmax(190px, 1.1fr);
+  grid-template-columns: 150px minmax(0, 1fr);
   align-items: center;
-  gap: 16px;
+  gap: 18px;
+  padding: 4px 2px 8px;
+}
+
+.statusDonut {
+  height: 150px;
+  position: relative;
 }
 
 .donutWrapper {
   height: 240px;
   position: relative;
+}
+
+.statusBars {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statusBarRow {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.statusBarMeta {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.statusBarMeta strong {
+  color: #263449;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.statusBarMeta small {
+  color: #8390a0;
+  font-weight: 500;
 }
 
 .donutCentre {
@@ -1097,8 +1133,11 @@
     grid-template-columns: 1fr;
   }
 
+  .statusDonut,
   .donutWrapper {
-    height: 220px;
+    height: 180px;
+    max-width: 180px;
+    margin: 0 auto;
   }
 
   .statusLegend {
