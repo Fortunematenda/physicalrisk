@@ -108,25 +108,31 @@ echo "    role grants succeeded for $COUNT users"
 # Known ChatGPT SSO user from prior CODE_TO_TOKEN_ERROR logs
 KNOWN_USER=88c58b81-3492-408d-9b6b-4fc6de90e1bf
 echo "==> Ensure role on known ChatGPT user $KNOWN_USER…"
-if kcadm add-roles -r physicalrisk --uid "$KNOWN_USER" --rolename offline_access 2>&1; then
-  echo "    granted OK"
+kcadm add-roles -r physicalrisk --uid "$KNOWN_USER" --rolename offline_access 2>&1 || true
+echo "==> Roles for known user (must include offline_access):"
+kcadm get-roles -r physicalrisk --uid "$KNOWN_USER" 2>&1 | tr -d '\r' | grep -E '"name"|offline' || \
+  kcadm get-roles -r physicalrisk --uid "$KNOWN_USER" 2>&1 | head -40
+
+echo "==> Set ChatGPT redirect URIs / web origins (fixes invalid_redirect_uri)…"
+# Only touch these fields — full client PUT historically failed on this realm.
+if kcadm update "clients/$CLIENT_ID" -r physicalrisk \
+  -s 'redirectUris=["https://chatgpt.com/connector/oauth/*","https://chatgpt.com/connector_platform_oauth_redirect"]' \
+  -s 'webOrigins=["https://chatgpt.com"]' 2>&1; then
+  echo "    redirect URIs updated OK"
 else
-  echo "    grant failed or already present — check UI: Users → Role mapping → offline_access"
+  echo "    CLI update failed — set in UI: Clients → repo-chatgpt-app → Login settings"
 fi
+
+echo "==> Client login settings now:"
+kcadm get "clients/$CLIENT_ID" -r physicalrisk --fields redirectUris,webOrigins,clientId 2>&1 | tr -d '\r' | head -40
 
 echo ""
 echo "=========================================="
-echo "DONE — finish Login settings in UI:"
+echo "DONE — next in ChatGPT (fresh SSO required):"
 echo "=========================================="
-echo "Clients → repo-chatgpt-app → Settings/Login:"
-echo "  Valid redirect URIs:"
-echo "    https://chatgpt.com/connector/oauth/*"
-echo "    https://chatgpt.com/connector_platform_oauth_redirect"
-echo "  Web origins: https://chatgpt.com"
-echo "  Save"
+echo "1. Disconnect the connector completely"
+echo "2. Connect again → complete SSO login (new code; old retries will keep failing)"
+echo "3. New chat: @bretunetech List repository projects"
 echo ""
-echo "ChatGPT: Disconnect → Connect → SSO"
-echo "New chat: @bretunetech List repository projects"
-echo ""
-echo "Verify logs after Connect:"
-echo "  docker compose -f docker-compose.sso.yml --env-file .env.sso logs keycloak --tail 15"
+echo "Fresh logs only (after Connect):"
+echo "  docker compose -f docker-compose.sso.yml --env-file .env.sso logs keycloak --since 2m"
