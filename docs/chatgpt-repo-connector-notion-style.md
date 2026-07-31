@@ -46,14 +46,35 @@ Map realm roles as usual: `repo_admin`, `repo_importer`, `repo_reviewer`.
 
 ChatGPT will show the exact redirect URI on the app page — add that URI if it differs.
 
+### Fix Connect error: `Offline tokens not allowed`
+
+ChatGPT always requests `scope=offline_access`. Keycloak logs show:
+
+`CODE_TO_TOKEN_ERROR … Offline tokens not allowed for the user or client`
+
+**Automated (VPS):**
+
+```bash
+cd /opt/physicalrisk && bash scripts/deploy-sso-rsync.sh
+bash scripts/keycloak-fix-repo-chatgpt-app.sh
+```
+
+**Manual (Keycloak Admin):**
+
+1. Clients → `repo-chatgpt-app` → **Client scopes**  
+   - Assign **`offline_access`** under **Optional** (Assigned)
+2. Realm roles → ensure users have **`offline_access`**  
+   - Easiest: Realm settings → **User registration** / **Default roles** → add `offline_access`  
+   - Or each user → Role mapping → assign `offline_access`
+3. Login settings redirect URIs include `https://chatgpt.com/connector/oauth/*`
+4. ChatGPT → Disconnect → Connect again → SSO login
+
 ### Fixing `Trusted Hosts` / DCR 403 (optional)
 
 Prefer static Client ID (above). Only if you want DCR to work:
 
-1. Keycloak Admin → realm **physicalrisk** → **Clients** → **Client registration** → **Client registration policies** (or Realm settings → Client registration)
-2. Open **Trusted Hosts**
-3. Either add ChatGPT / OpenAI hosts, or temporarily allow broader hosts for anonymous DCR  
-4. Or disable Trusted Hosts for anonymous registration (less secure)
+1. Keycloak Admin → realm **physicalrisk** → **Client registration** policies  
+2. Open **Trusted Hosts** and adjust (less secure if opened widely)
 
 Do **not** expand shared TLS certs for this — OAuth client setup is Keycloak-only.
 
