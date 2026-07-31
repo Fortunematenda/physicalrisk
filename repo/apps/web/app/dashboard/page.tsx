@@ -1177,7 +1177,7 @@ export default function DashboardPage() {
                 </thead>
 
                 <tbody>
-                  {dashboard.recentDocuments.map((document) => (
+                  {dashboard.recentDocuments.slice(0, 4).map((document) => (
                     <tr key={document.id}>
                       <td>
                         <Link

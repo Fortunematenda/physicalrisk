@@ -167,7 +167,7 @@ export class DashboardController {
     // 5. RECENT DOCUMENTS
     // ──────────────────────────────────────────────────────────────────────────
     const recentDocuments = await this.db.documents.find({
-      take: 8,
+      take: 4,
       order: { updatedAt: 'DESC' },
       relations: { project: true, section: true, versions: true },
     });
