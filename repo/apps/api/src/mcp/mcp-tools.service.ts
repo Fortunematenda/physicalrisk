@@ -46,7 +46,13 @@ export class McpToolsService {
   ) {}
 
   private mcpActor(integration: McpIntegration) {
-    return { id: integration.createdBy?.id };
+    const id = integration.createdBy?.id;
+    if (!id) {
+      throw new BadRequestException(
+        'This MCP integration has no owner user. Recreate it in Settings → MCP while signed in as a repository user.',
+      );
+    }
+    return { id };
   }
 
   listToolDefinitions() {
@@ -1112,16 +1118,24 @@ export class McpToolsService {
     }
 
     const projects = await this.listRepositoryProjects(integration);
-    const match = projects.find((project) =>
-      project.code.toLowerCase() === needle.toLowerCase()
-      || project.name.toLowerCase() === needle.toLowerCase());
-    if (!match) {
-      throw new NotFoundException(
-        `Project '${needle}' was not found or is not allowed for this MCP integration. `
-        + `Available: ${projects.map((item) => `${item.code} (${item.name})`).join(', ') || '(none)'}`,
-      );
-    }
-    return match.id;
+    const lowered = needle.toLowerCase();
+    const exact = projects.find((project) =>
+      project.code.toLowerCase() === lowered
+      || project.name.toLowerCase() === lowered);
+    if (exact) return exact.id;
+
+    // ChatGPT often invents labels like "MARKETING"; match a unique name/code substring.
+    const fuzzy = projects.filter((project) =>
+      project.name.toLowerCase().includes(lowered)
+      || project.code.toLowerCase().includes(lowered)
+      || lowered.includes(project.code.toLowerCase()));
+    if (fuzzy.length === 1) return fuzzy[0].id;
+
+    throw new NotFoundException(
+      `Project '${needle}' was not found or is not allowed for this MCP integration. `
+      + `Available: ${projects.map((item) => `${item.code} (${item.name})`).join(', ') || '(none)'}. `
+      + 'Use a project code from list_repository_projects (e.g. MCRD).',
+    );
   }
 
   private toolDescription(name: McpToolName): string {

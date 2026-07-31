@@ -4,6 +4,22 @@ import { AuditService } from '../common/audit.service';
 import { McpIntegration, McpIntegrationStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { CreateMcpIntegrationDto, MCP_TOOL_NAMES, McpToolName, mcpAllowsAllProjects, normalizeMcpAllowedProjectIds } from './mcp.dto';
+import { McpForbiddenException, McpToolException } from './mcp.exceptions';
+
+/** Tools added after many ChatGPT integrations were created with a frozen allow-list. */
+const WORKSPACE_TOOLS = new Set<McpToolName>([
+  'create_workspace',
+  'get_workspace',
+  'find_workspaces',
+  'get_latest_pending_workspace',
+  'resume_workspace',
+  'list_workspace_documents',
+  'get_workspace_summary',
+  'validate_workspace',
+  'submit_workspace',
+  'search_documents',
+  'get_document',
+]);
 
 const API_KEY_PREFIX = 'mcp_';
 
@@ -217,7 +233,10 @@ export class McpAuthService {
     const allowed = integration.allowedProjectIds ?? [];
     if (mcpAllowsAllProjects(allowed)) return;
     if (!allowed.includes(projectId)) {
-      throw new Error(`project ${projectId} not allowed`);
+      throw new McpForbiddenException(
+        `Project ${projectId} is not allowed for this MCP integration`,
+        'MCP_PROJECT_NOT_ALLOWED',
+      );
     }
   }
 
@@ -233,9 +252,18 @@ export class McpAuthService {
     }
 
     const allowed = integration.allowedTools?.length ? integration.allowedTools : [...MCP_TOOL_NAMES];
-    if (!allowed.includes(toolName)) {
-      throw new Error(`tool ${toolName} not allowed`);
+    if (allowed.includes(toolName)) return;
+
+    // Older GPT keys store an explicit allow-list from before workspaces shipped.
+    // If they already have core repo access, grant the new workspace tools instead of HTTP 500.
+    if (
+      WORKSPACE_TOOLS.has(toolName)
+      && (allowed.includes('list_repository_projects') || allowed.includes('submit_approved_document'))
+    ) {
+      return;
     }
+
+    throw new McpToolException(toolName);
   }
 
   hashApiKey(rawKey: string): string {
