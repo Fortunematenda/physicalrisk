@@ -45,9 +45,11 @@
 }
 
 .searchWrap {
-  position: relative;
-  width: min(380px, 34vw);
-  flex-shrink: 1;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, 42vw);
+  flex-shrink: 0;
   z-index: 1100;
 }
 
@@ -479,6 +481,15 @@
 @media (max-width: 820px) {
   .brand {
     min-width: auto;
+  }
+
+  .searchWrap {
+    position: relative;
+    left: auto;
+    transform: none;
+    flex: 1;
+    width: auto;
+    max-width: none;
   }
 
   .searchForm {
