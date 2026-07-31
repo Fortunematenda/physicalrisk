@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { Briefcase, RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
@@ -151,9 +151,8 @@ export default function WorkspacesPage() {
       {loading ? <Loading /> : null}
       {!loading && filtered.length === 0 ? (
         <EmptyState
-          icon={<Briefcase size={22} />}
           title="No workspaces yet"
-          description="Create a workspace or import a ZIP pack — ZIP imports automatically create a workspace."
+          text="Create a workspace or import a ZIP pack — ZIP imports automatically create a workspace."
         />
       ) : null}
 
