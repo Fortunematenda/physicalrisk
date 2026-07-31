@@ -90,7 +90,7 @@ export default function WorkspaceDetailPage() {
     }
   };
 
-  if (loading && !summary) return <Loading label="Loading workspace…" />;
+  if (loading && !summary) return <Loading />;
   if (!summary) {
     return (
       <div className={styles.page}>

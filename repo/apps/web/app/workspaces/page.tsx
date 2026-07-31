@@ -148,7 +148,7 @@ export default function WorkspacesPage() {
         </div>
       </div>
 
-      {loading ? <Loading label="Loading workspaces…" /> : null}
+      {loading ? <Loading /> : null}
       {!loading && filtered.length === 0 ? (
         <EmptyState
           icon={<Briefcase size={22} />}
