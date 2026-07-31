@@ -36,10 +36,8 @@ if [[ -z "$CLIENT_ID" || "$CLIENT_ID" == "id" ]]; then
 fi
 echo "==> Client UUID: $CLIENT_ID"
 
-echo "==> Listing client-scopes (debug)…"
+echo "==> Resolving offline_access client-scope…"
 SCOPES_RAW="$(kcadm get client-scopes -r physicalrisk 2>&1)" || true
-echo "$SCOPES_RAW" | head -c 2000
-echo ""
 
 SCOPE_ID="$(
   echo "$SCOPES_RAW" \
@@ -83,35 +81,38 @@ if [[ -z "${SCOPE_ID:-}" ]]; then
 fi
 echo "==> offline_access scope UUID: $SCOPE_ID"
 
-echo "==> Assign as OPTIONAL client scope…"
-if kcadm create "clients/$CLIENT_ID/optional-client-scopes/$SCOPE_ID" -r physicalrisk 2>&1; then
-  echo "    assigned OK"
+echo "==> Default scopes now:"
+DEFAULT_SCOPES="$(kcadm get "clients/$CLIENT_ID/default-client-scopes" -r physicalrisk 2>&1 | tr -d '\r' || true)"
+echo "$DEFAULT_SCOPES" | grep -E '"name"|offline' || true
+
+if echo "$DEFAULT_SCOPES" | grep -q '"name"[[:space:]]*:[[:space:]]*"offline_access"'; then
+  echo "    offline_access already on DEFAULT scopes — OK"
 else
-  echo "    already assigned or create failed — checking list…"
+  echo "==> Assign offline_access as DEFAULT client scope…"
+  kcadm create "clients/$CLIENT_ID/default-client-scopes/$SCOPE_ID" -r physicalrisk 2>&1 || \
+    kcadm create "clients/$CLIENT_ID/optional-client-scopes/$SCOPE_ID" -r physicalrisk 2>&1 || true
 fi
 
-echo "==> Optional scopes now:"
-kcadm get "clients/$CLIENT_ID/optional-client-scopes" -r physicalrisk 2>&1 | tr -d '\r' | grep -E '"name"|offline' || \
-  kcadm get "clients/$CLIENT_ID/optional-client-scopes" -r physicalrisk 2>&1 | head -40
-
-echo "==> Default scopes now:"
-kcadm get "clients/$CLIENT_ID/default-client-scopes" -r physicalrisk 2>&1 | tr -d '\r' | grep -E '"name"|offline' || true
-
-# Also try as DEFAULT scope (stronger — always included)
-echo "==> Also try assign as DEFAULT client scope…"
-kcadm create "clients/$CLIENT_ID/default-client-scopes/$SCOPE_ID" -r physicalrisk 2>&1 || true
-
 echo "==> Grant offline_access realm role to users…"
+# Do not use UID — bash treats UID as readonly.
 COUNT=0
-while read -r UID; do
-  [[ -z "$UID" || "$UID" == "id" ]] && continue
-  if kcadm add-roles -r physicalrisk --uid "$UID" --rolename offline_access 2>/dev/null; then
+while read -r USER_UUID; do
+  [[ -z "$USER_UUID" || "$USER_UUID" == "id" ]] && continue
+  if kcadm add-roles -r physicalrisk --uid "$USER_UUID" --rolename offline_access 2>/dev/null; then
     COUNT=$((COUNT + 1))
+    echo "    granted → $USER_UUID"
   fi
 done < <(kcadm get users -r physicalrisk --format csv --fields id --noquotes --max 500 2>/dev/null | tr -d '\r')
-echo "    role grants attempted for $COUNT users"
+echo "    role grants succeeded for $COUNT users"
 
-kcadm add-roles -r physicalrisk --uid 88c58b81-3492-408d-9b6b-4fc6de90e1bf --rolename offline_access 2>/dev/null || true
+# Known ChatGPT SSO user from prior CODE_TO_TOKEN_ERROR logs
+KNOWN_USER=88c58b81-3492-408d-9b6b-4fc6de90e1bf
+echo "==> Ensure role on known ChatGPT user $KNOWN_USER…"
+if kcadm add-roles -r physicalrisk --uid "$KNOWN_USER" --rolename offline_access 2>&1; then
+  echo "    granted OK"
+else
+  echo "    grant failed or already present — check UI: Users → Role mapping → offline_access"
+fi
 
 echo ""
 echo "=========================================="
