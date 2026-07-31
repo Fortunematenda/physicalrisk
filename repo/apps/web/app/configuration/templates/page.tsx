@@ -518,7 +518,7 @@ export default function TemplatesPage() {
   return (
     <ConfigurationListShell
       title="Directory Templates"
-      description="Reusable directory blueprints that provision repository modules for new projects."
+      description="Reusable templates that define the module structure for new projects."
       error={!showModuleModal && !showCreate && !editing ? error : undefined}
       message={!showModuleModal ? message : undefined}
       stats={[

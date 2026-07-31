@@ -27,7 +27,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Settings" description="System health, storage, integrations, and administrator logs." />
+      <PageHeader title="Settings" description="System health, storage, integrations, and audit activity." />
       <SettingsTabs />
 
       <div className="panel" style={{ marginBottom: 16 }}>

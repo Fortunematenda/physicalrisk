@@ -334,7 +334,7 @@ export default function SectionsPage() {
   return (
     <ConfigurationListShell
       title="Repository Modules"
-      description="Repository folders (modules) used across projects — for example Articles or Research Library. Click a project count to inspect where a module is used."
+      description="Repository modules shared across projects, such as Research Library or Product Architecture."
       error={error}
       message={message}
       stats={[

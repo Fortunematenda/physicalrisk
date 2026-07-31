@@ -117,7 +117,7 @@ function MasterDocumentIndexPageInner() {
     <div className={styles.page}>
       <PageHeader
         title="Master Document Index"
-        description="The central register of approved repository documents, current versions, projects, sections and relationship counts."
+        description="The master register of approved documents, current versions, and relationship counts."
         action={{ label: 'Import document', href: '/imports/new' }}
       />
       {error ? <div className="notice error">{error}</div> : null}

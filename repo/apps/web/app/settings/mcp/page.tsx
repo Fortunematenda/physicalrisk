@@ -385,7 +385,7 @@ export default function McpIntegrationsPage() {
     <div className={styles.page}>
       <PageHeader
         title="MCP Integrations"
-        description="Create API keys for ChatGPT to import approved documents into the repository."
+        description="Manage integrations that allow approved documents to be imported into the repository."
         action={{ label: 'Back to Source Connections', href: '/settings/source-connections' }}
       />
 

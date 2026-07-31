@@ -122,7 +122,7 @@ export default function ProjectsPage() {
   return (
     <ConfigurationListShell
       title="Project Registry"
-      description="The source of truth for every project, its configurable VPS directory and routing context."
+      description="Register and manage projects, repository structure, and routing context."
       headerAction={{ label: 'Directory Templates', href: '/configuration/templates' }}
       error={error}
       message={message}

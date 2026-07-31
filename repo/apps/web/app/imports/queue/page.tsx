@@ -144,7 +144,7 @@ export default function ImportQueuePage() {
     <>
       <PageHeader
         title="Import Queue"
-        description="Saved drafts and External Imports waiting for review before they become Approved Documents."
+        description="Drafts and external imports awaiting review before entering the repository."
         action={{ label: 'Import document', href: '/imports/new' }}
       />
       {error ? <div className="notice error">{error}</div> : null}

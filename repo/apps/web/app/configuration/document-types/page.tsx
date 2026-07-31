@@ -168,7 +168,7 @@ export default function DocumentTypesPage() {
   return (
     <ConfigurationListShell
       title="Document Types"
-      description="Classify what a document is (Article, Technical Specification, Decision Record). When adding a type, create a routing rule so imports can resolve a repository section automatically."
+      description="Classify documents by type and support automatic placement into the correct repository module."
       error={!modalOpen ? error : undefined}
       message={!modalOpen ? message : undefined}
       stats={[

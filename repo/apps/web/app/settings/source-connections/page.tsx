@@ -85,7 +85,7 @@ export default function SourceConnectionsPage() {
     <div className={styles.page}>
       <PageHeader
         title="Source Connections"
-        description="Manage ChatGPT MCP integrations and review connected sources."
+        description="Manage connected sources and repository integrations."
       />
 
       {error ? <div className="notice error">{error}</div> : null}

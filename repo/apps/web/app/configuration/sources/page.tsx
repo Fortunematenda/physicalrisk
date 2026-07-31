@@ -4,7 +4,7 @@ export default function SourcesPage() {
   return (
     <SimpleCrud
       title="Source Systems"
-      description="Configure current and future document origins without changing the import engine."
+      description="Configure approved document sources used by the import process."
       recordLabel="Source system"
       endpoint="/source-systems"
       fields={[

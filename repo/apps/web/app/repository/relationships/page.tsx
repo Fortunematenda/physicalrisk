@@ -218,7 +218,7 @@ export default function RelationshipsPage() {
   return (
     <ConfigurationListShell
       title="Document Relationships"
-      description="Create and maintain controlled links between approved documents. Relationships stay independent of folder paths."
+      description="Define controlled links between approved documents across the repository."
       headerAction={{ label: 'Master Document Index', href: '/repository/index' }}
       error={error}
       message={message}

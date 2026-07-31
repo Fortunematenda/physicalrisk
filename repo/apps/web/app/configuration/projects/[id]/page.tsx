@@ -231,7 +231,7 @@ export default function ProjectDetailPage() {
     <div className={styles.page}>
       <PageHeader
         title="Project details"
-        description="Configure repository identity, modules and directory templates for this VPS project."
+        description="Configure project identity, repository modules, and directory structure."
         backHref="/configuration/projects"
         action={{ label: 'Open explorer', href: `/repository/explorer?projectId=${id}` }}
       />

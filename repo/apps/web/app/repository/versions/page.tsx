@@ -130,7 +130,7 @@ export default function VersionRegisterPage() {
     <div className={styles.page}>
       <PageHeader
         title="Version Register"
-        description="Traceable history of every VPS-stored document version. Current releases are marked clearly and earlier versions stay retained."
+        description="Version history for repository documents, including current and retained releases."
         action={{ label: 'Master Document Index', href: '/repository/index' }}
       />
 

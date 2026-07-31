@@ -398,7 +398,7 @@ export default function RoutingRulesPage() {
   return (
     <ConfigurationListShell
       title="Routing Rules"
-      description="Configuration-based routing replaces hard-coded project logic. Lowest priority number is evaluated first."
+      description="Define how imported documents are routed into repository modules. Lower priority numbers are evaluated first."
       error={!showCreate && !editing ? error : undefined}
       message={!showCreate && !editing ? message : undefined}
       stats={[

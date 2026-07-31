@@ -146,7 +146,7 @@ export default function WorkspacesPage() {
   return (
     <ConfigurationListShell
       title="Repository Workspaces"
-      description="Resumable import and review units. Use workspace codes (WS-YYYY-#####) across web, Repo GPT Actions, and MCP."
+      description="Manage staged imports from draft through validation and submission into the repository."
       error={error}
       message={message}
       stats={[
