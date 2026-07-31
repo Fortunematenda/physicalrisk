@@ -12,7 +12,7 @@ Do **not** assume every ChatGPT Plus account can add a private custom MCP app.
 ## MODE B — Notion-style ChatGPT connector (preferred UX)
 
 - Same pattern as Notion: Settings → Apps / Connectors → OAuth → use in normal chats
-- URL: `https://repo-mcp.physicalrisk.com/mcp`
+- URL: `https://repo.physicalrisk.com/connector/mcp`
 - Auth: Physical Risk SSO (Keycloak) — user identity, not a shared `mcp_…` key
 - Setup guide: [chatgpt-repo-connector-notion-style.md](./chatgpt-repo-connector-notion-style.md)
 - Plus can work when Developer mode / custom connectors are available on the account (test on Wayne’s login)

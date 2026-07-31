@@ -1,8 +1,12 @@
 export const config = {
   port: Number(process.env.PORT || 3100),
   repoApiUrl: (process.env.REPO_API_URL || 'http://repo-api:4000/api').replace(/\/$/, ''),
-  /** Public HTTPS origin for this MCP service (no trailing slash), e.g. https://repo-mcp.physicalrisk.com */
-  publicMcpUrl: (process.env.PUBLIC_MCP_URL || process.env.REPO_MCP_PUBLIC_URL || 'https://repo-mcp.physicalrisk.com')
+  /**
+   * Public MCP base (no trailing slash). Prefer path on repo host so DNS/TLS already work:
+   *   https://repo.physicalrisk.com/connector  → resource …/connector/mcp
+   * Dedicated subdomain (needs DNS A/CNAME): https://repo-mcp.physicalrisk.com
+   */
+  publicMcpUrl: (process.env.PUBLIC_MCP_URL || process.env.REPO_MCP_PUBLIC_URL || 'https://repo.physicalrisk.com/connector')
     .replace(/\/+$/, ''),
   keycloakIssuer: process.env.KEYCLOAK_ISSUER || '',
   keycloakAudience: process.env.KEYCLOAK_AUDIENCE || process.env.REPO_MCP_AUDIENCE || '',

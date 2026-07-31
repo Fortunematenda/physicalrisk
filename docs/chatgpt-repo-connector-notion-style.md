@@ -9,8 +9,10 @@ Mode A (Custom GPT + Actions + `mcp_…` key) remains available as a fallback.
 1. ChatGPT (web) → **Settings → Security and login** (or **Apps → Advanced**) → turn on **Developer mode**.
 2. **Settings → Apps / Connectors** → create / add connector:
    - **Name:** Physical Risk Repository  
-   - **URL:** `https://repo-mcp.physicalrisk.com/mcp`  
+   - **URL:** `https://repo.physicalrisk.com/connector/mcp`  
    - **Auth:** OAuth  
+
+   (Optional later: `https://repo-mcp.physicalrisk.com/mcp` if you add a DNS A/CNAME for that host.)
 3. Sign in with **Physical Risk SSO** (Keycloak) when prompted — same account as Repo web.
 4. Start a chat → enable **Developer mode** tools → select **Physical Risk Repository**.
 5. Example prompts:
@@ -42,22 +44,22 @@ ChatGPT will show the exact redirect URI on the app page — add that URI if it 
 
 ### Resource indicator
 
-ChatGPT sends `resource=https://repo-mcp.physicalrisk.com/mcp`.  
+ChatGPT sends `resource=https://repo.physicalrisk.com/connector/mcp`.  
 Keycloak 25+ can map audience; Repo API currently accepts realm access tokens for SSO users (same as web).
 
 ## Deploy checklist
 
 ```bash
 cd /opt/physicalrisk && bash scripts/deploy-sso-rsync.sh
-DOCKER_BUILDKIT=1 docker compose -f docker-compose.sso.yml --env-file .env.sso build repo-mcp repo-api
-docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-mcp repo-api nginx
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.sso.yml --env-file .env.sso build repo-mcp
+docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-mcp nginx
 ```
 
-Verify:
+Verify (uses existing `repo.physicalrisk.com` DNS/TLS — no `repo-mcp` subdomain required):
 
 ```bash
-curl -sS https://repo-mcp.physicalrisk.com/.well-known/oauth-protected-resource
-curl -sS https://repo-mcp.physicalrisk.com/health
+curl -sS https://repo.physicalrisk.com/.well-known/oauth-protected-resource
+curl -sS https://repo.physicalrisk.com/connector/mcp -o /dev/null -w "%{http_code}\n"
 ```
 
 Expected PRM JSON includes `authorization_servers` pointing at your Keycloak issuer (e.g. `https://auth.physicalrisk.com/realms/physicalrisk`).
@@ -66,10 +68,14 @@ Expected PRM JSON includes `authorization_servers` pointing at your Keycloak iss
 
 | Variable | Purpose |
 |----------|---------|
-| `PUBLIC_MCP_URL` | `https://repo-mcp.physicalrisk.com` |
+| `PUBLIC_MCP_URL` | Default `https://repo.physicalrisk.com/connector` |
 | `KEYCLOAK_ISSUER` | Realm issuer URL |
 | `MCP_OAUTH_REQUIRED` | `true` — tool calls need Bearer; `initialize` / `tools/list` stay open for discovery |
 | `REPO_MCP_API_KEY` | Optional fallback `mcp_…` for non-OAuth clients |
+
+## Optional: dedicated DNS `repo-mcp.physicalrisk.com`
+
+Only needed if you want a short hostname. Create an **A** (or CNAME) record → same IP as `repo.physicalrisk.com`, issue/include TLS, set `PUBLIC_MCP_URL=https://repo-mcp.physicalrisk.com`, then use `https://repo-mcp.physicalrisk.com/mcp`. Until then use `/connector/mcp` on `repo`.
 
 ## Difference vs Notion directory app
 

@@ -1,9 +1,14 @@
 import { config } from './config.js';
 
-/** Canonical MCP resource URL ChatGPT uses as OAuth `resource` parameter. */
+/**
+ * Canonical MCP resource URL ChatGPT uses as OAuth `resource` parameter.
+ * Prefer path on existing host (no extra DNS): https://repo.physicalrisk.com/connector/mcp
+ * Or dedicated host: https://repo-mcp.physicalrisk.com/mcp
+ */
 export function mcpResourceUrl(): string {
-  const base = (config.publicMcpUrl || 'https://repo-mcp.physicalrisk.com').replace(/\/+$/, '');
-  return `${base}/mcp`;
+  const configured = (config.publicMcpUrl || 'https://repo.physicalrisk.com/connector').replace(/\/+$/, '');
+  if (configured.endsWith('/mcp')) return configured;
+  return `${configured}/mcp`;
 }
 
 export function protectedResourceMetadata() {
@@ -19,8 +24,15 @@ export function protectedResourceMetadata() {
 }
 
 export function wwwAuthenticateHeader(): string {
-  const base = (config.publicMcpUrl || 'https://repo-mcp.physicalrisk.com').replace(/\/+$/, '');
-  const metadataUrl = `${base}/.well-known/oauth-protected-resource`;
+  const resource = mcpResourceUrl();
+  // Origin of the public URL (strip path) for well-known discovery.
+  let origin = 'https://repo.physicalrisk.com';
+  try {
+    origin = new URL(resource).origin;
+  } catch {
+    /* keep default */
+  }
+  const metadataUrl = `${origin}/.well-known/oauth-protected-resource`;
   return `Bearer realm="physicalrisk-repo-mcp", resource_metadata="${metadataUrl}", scope="openid profile email offline_access"`;
 }
 
