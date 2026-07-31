@@ -54,6 +54,8 @@ export default function RepositoryExplorerPage() {
   const confirm = useConfirm();
   const [projects, setProjects] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [projectId, setProjectId] = useState(searchParams.get('projectId') ?? '');
+  /** Restore folder/file selection once after refresh / first project load. */
+  const restorePathRef = useRef((searchParams.get('path') ?? '').trim() || null);
   const [repository, setRepository] = useState<RepositoryResponse | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selected, setSelected] = useState<Selection>(null);
@@ -85,6 +87,22 @@ export default function RepositoryExplorerPage() {
   const isTablet = useMediaQuery('(max-width: 1100px)');
   const isMobile = useMediaQuery('(max-width: 680px)');
 
+  const replaceExplorerUrl = useCallback((nextProjectId: string, nextPath?: string | null) => {
+    if (!nextProjectId) return;
+    const params = new URLSearchParams();
+    params.set('projectId', nextProjectId);
+    const path = nextPath?.replace(/\\/g, '/').trim();
+    if (path) params.set('path', path);
+    const next = params.toString();
+    const current = new URLSearchParams();
+    const existingProject = searchParams.get('projectId');
+    const existingPath = searchParams.get('path');
+    if (existingProject) current.set('projectId', existingProject);
+    if (existingPath) current.set('path', existingPath);
+    if (current.toString() === next) return;
+    router.replace(`/repository/explorer?${next}`, { scroll: false });
+  }, [router, searchParams]);
+
   const load = useCallback(async (id: string, options?: { selectPath?: string | null }) => {
     if (!id) return;
     setLoading(true);
@@ -99,7 +117,7 @@ export default function RepositoryExplorerPage() {
 
       const stayPath = options?.selectPath?.replace(/\\/g, '/') || null;
       if (stayPath) {
-        // Only expand ancestors of the folder we should stay on (e.g. after delete).
+        // Expand ancestors of the selection we should restore (refresh / after delete).
         const ancestors = new Set<string>();
         let prefix = '';
         for (const part of stayPath.split('/')) {
@@ -107,11 +125,24 @@ export default function RepositoryExplorerPage() {
           if (prefix) ancestors.add(prefix);
         }
         const entry = findTreeEntry(tree.entries, stayPath);
-        if (entry && entry.type === 'directory') {
-          setExpanded(ancestors);
-          setSelected({ entry, kind: 'folder' });
-          setSelectedDocument(null);
-          return;
+        if (entry) {
+          if (entry.type === 'directory') {
+            setExpanded(ancestors);
+            setSelected({ entry, kind: 'folder' });
+            setSelectedDocument(null);
+            return;
+          }
+          if (entry.documentId) {
+            ancestors.delete(stayPath);
+            setExpanded(ancestors);
+            setSelected({ entry, kind: entry.type === 'file' ? 'file' : 'document' });
+            try {
+              setSelectedDocument(await api(`/documents/${entry.documentId}`));
+            } catch {
+              setSelectedDocument(null);
+            }
+            return;
+          }
         }
       }
 
@@ -134,7 +165,20 @@ export default function RepositoryExplorerPage() {
       })
       .catch((caught) => setError(caught.message));
   }, []);
-  useEffect(() => { void load(projectId); }, [projectId, load]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const path = restorePathRef.current;
+    restorePathRef.current = null;
+    void load(projectId, { selectPath: path });
+  }, [projectId, load]);
+
+  // Keep ?projectId= in the URL whenever a project is active (e.g. deep-links without path).
+  useEffect(() => {
+    if (!projectId) return;
+    if (searchParams.get('projectId') === projectId) return;
+    replaceExplorerUrl(projectId, searchParams.get('path'));
+  }, [projectId, replaceExplorerUrl, searchParams]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -249,6 +293,7 @@ export default function RepositoryExplorerPage() {
         setFolderMenuOpen(false);
         setTreeSheetOpen(false);
         if (isTablet) setInspectorSheetOpen(false);
+        if (projectId) replaceExplorerUrl(projectId, entry.path);
         return;
       }
     }
@@ -260,6 +305,7 @@ export default function RepositoryExplorerPage() {
     setFolderMenuOpen(false);
     setTreeSheetOpen(false);
     if (isTablet) setInspectorSheetOpen(false);
+    if (projectId) replaceExplorerUrl(projectId, entry.path);
     if (entry.documentId) {
       try {
         setSelectedDocument(await api(`/documents/${entry.documentId}`));
@@ -277,6 +323,8 @@ export default function RepositoryExplorerPage() {
     });
   };
 
+  const currentStayPath = () => selected?.entry.path ?? searchParams.get('path');
+
   const sync = async () => {
     if (!projectId) return;
     setSyncing(true);
@@ -287,7 +335,7 @@ export default function RepositoryExplorerPage() {
       const result = await api<{ lastSynchronisedAt?: string }>(`/storage/projects/${projectId}/sync`, {
         method: 'POST',
       });
-      await load(projectId);
+      await load(projectId, { selectPath: currentStayPath() });
       if (result?.lastSynchronisedAt) {
         setRepository((current) =>
           (current ? { ...current, lastSynchronisedAt: result.lastSynchronisedAt! } : current));
@@ -358,6 +406,7 @@ export default function RepositoryExplorerPage() {
       setNotice(`Deleted file “${title}”.`);
       setSelectedDocument(null);
       await load(projectId, { selectPath: stayPath });
+      replaceExplorerUrl(projectId, stayPath);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete file.');
     }
@@ -396,6 +445,7 @@ export default function RepositoryExplorerPage() {
       );
       setSelected(null);
       setSelectedDocument(null);
+      replaceExplorerUrl(projectId, null);
       await load(projectId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete folder.');
@@ -874,7 +924,7 @@ export default function RepositoryExplorerPage() {
             className={styles.iconButton}
             aria-label="Refresh repository"
             title="Refresh repository"
-            onClick={() => void load(projectId)}
+            onClick={() => void load(projectId, { selectPath: currentStayPath() })}
             disabled={loading || !projectId}
           >
             <RefreshCw size={16} className={loading ? styles.spinning : undefined} />
@@ -931,7 +981,7 @@ export default function RepositoryExplorerPage() {
         <div className={styles.notice}>
           <strong>Repository unavailable. </strong>
           {error}{' '}
-          <button type="button" className={styles.buttonLink} onClick={() => void load(projectId)}>Retry</button>{' '}
+          <button type="button" className={styles.buttonLink} onClick={() => void load(projectId, { selectPath: currentStayPath() })}>Retry</button>{' '}
           <Link href="/configuration/projects" className={styles.buttonLink}>Repository configuration</Link>
         </div>
       ) : null}
@@ -949,7 +999,19 @@ export default function RepositoryExplorerPage() {
             Expand tree
           </button>
         ) : null}
-        <select aria-label="Project" className={styles.select} value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+        <select
+          aria-label="Project"
+          className={styles.select}
+          value={projectId}
+          onChange={(event) => {
+            const next = event.target.value;
+            restorePathRef.current = null;
+            setSelected(null);
+            setSelectedDocument(null);
+            setProjectId(next);
+            replaceExplorerUrl(next, null);
+          }}
+        >
           {projects.map((project) => (
             <option key={project.id} value={project.id}>{project.code} — {project.name}</option>
           ))}
