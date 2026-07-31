@@ -26,7 +26,7 @@ import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 import { DocumentsService } from '../documents/documents.service';
-import { WorkspaceActivitySource } from '../database/entities';
+import { WorkspaceActivitySource, WorkspaceDocumentStatus } from '../database/entities';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 
 @Injectable()
@@ -206,6 +206,18 @@ export class McpToolsService {
           String(args.workspaceCode ?? ''),
           this.mcpActor(integration),
           WorkspaceActivitySource.CHATGPT_ACTION,
+        );
+      case 'attach_document_to_workspace':
+        return this.workspaces.attachRepositoryDocument(
+          String(args.workspaceCode ?? ''),
+          {
+            documentId: args.documentId ? String(args.documentId) : undefined,
+            documentCode: args.documentCode ? String(args.documentCode) : undefined,
+            importJobId: args.importJobId ? String(args.importJobId) : undefined,
+            fileName: args.fileName ? String(args.fileName) : undefined,
+          },
+          this.mcpActor(integration),
+          WorkspaceActivitySource.CHATGPT_MCP,
         );
       case 'search_documents':
         return this.documents.list({
@@ -655,6 +667,42 @@ export class McpToolsService {
         ipAddress,
       });
 
+      let workspaceAttached: string | null = null;
+      const workspaceCode = input.workspaceCode?.trim();
+      if (workspaceCode) {
+        try {
+          const job = await this.db.importJobs.findOne({
+            where: { id: result.importJobId },
+            relations: { document: true },
+          });
+          await this.workspaces.attachImportJob({
+            workspaceCode,
+            importJobId: result.importJobId,
+            userId: this.mcpActor(integration).id,
+            source: WorkspaceActivitySource.CHATGPT_MCP,
+            members: [{
+              fileName: result.fileName,
+              mimeType: mimeType || undefined,
+              checksum: result.checksum,
+              documentId: job?.document?.id,
+              status: result.imported
+                ? WorkspaceDocumentStatus.IMPORTED
+                : WorkspaceDocumentStatus.IMPORTING,
+            }],
+          });
+          workspaceAttached = workspaceCode;
+        } catch (attachError) {
+          const attachMessage = attachError instanceof Error ? attachError.message : String(attachError);
+          await this.audit.record({
+            action: 'MCP_WORKSPACE_ATTACH_FAILED',
+            entityType: 'ImportJob',
+            entityId: result.importJobId,
+            message: `Imported but failed to attach to ${workspaceCode}: ${attachMessage}`,
+            ipAddress,
+          });
+        }
+      }
+
       return {
         accepted: true,
         importJobId: result.importJobId,
@@ -666,6 +714,7 @@ export class McpToolsService {
         needsReview: result.needsReview === true,
         documentCode: result.documentCode ?? null,
         sectionName: result.sectionName ?? null,
+        workspaceCode: workspaceAttached,
         message: result.message
           ?? (result.imported
             ? 'Imported into the repository; Master Document Index updated.'
@@ -673,6 +722,11 @@ export class McpToolsService {
         projectId,
         sectionKey: sectionKey ?? null,
         documentType: versioned.documentType,
+        hint: workspaceAttached
+          ? `Attached to workspace ${workspaceAttached}.`
+          : (workspaceCode
+            ? `Imported, but could not attach to ${workspaceCode}. Use attach_document_to_workspace with documentCode.`
+            : 'To attach to a workspace, pass workspaceCode (e.g. WS-2026-00004) or call attach_document_to_workspace.'),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Submission rejected';
@@ -966,6 +1020,7 @@ export class McpToolsService {
       relationshipsJson: str('relationshipsJson'),
       mode,
       existingDocumentId: str('existingDocumentId') || str('existing_document_id') || str('documentId'),
+      workspaceCode: str('workspaceCode') || str('workspace_code') || str('workspace'),
     };
   }
 
@@ -1189,7 +1244,8 @@ export class McpToolsService {
       check_document_exists:
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
-        'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64; without those returns uploadUrl',
+        'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64. '
+        + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace.',
       get_import_status: 'Get the processing status of an import job by id',
       create_workspace: 'Create a Repository Workspace (returns WS-YYYY-#####)',
       get_workspace: 'Get a workspace by workspaceCode',
@@ -1200,6 +1256,8 @@ export class McpToolsService {
       get_workspace_summary: 'Workspace summary with progress and documents',
       validate_workspace: 'Validate workspace documents before submit',
       submit_workspace: 'Submit a ready workspace for import processing',
+      attach_document_to_workspace:
+        'Attach an already-imported repository document to a workspace by documentCode (e.g. PROR-PA-002) or documentId',
       search_documents: 'Search Master Document Index',
       get_document: 'Get a document by id',
     };
@@ -1331,6 +1389,10 @@ export class McpToolsService {
           fileContentBase64: { type: 'string', description: 'Optional if documentContent, fileUrl, or uploadId provided' },
           mimeType: { type: 'string' },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
+          workspaceCode: {
+            type: 'string',
+            description: 'Optional WS-YYYY-##### — attach this import to the workspace after submit',
+          },
         },
       },
       get_import_status: {
@@ -1390,6 +1452,16 @@ export class McpToolsService {
         type: 'object',
         required: ['workspaceCode'],
         properties: { workspaceCode: { type: 'string' } },
+      },
+      attach_document_to_workspace: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: {
+          workspaceCode: { type: 'string', description: 'e.g. WS-2026-00004' },
+          documentCode: { type: 'string', description: 'e.g. PROR-PA-002' },
+          documentId: { type: 'string', format: 'uuid' },
+          importJobId: { type: 'string', format: 'uuid' },
+        },
       },
       search_documents: {
         type: 'object',

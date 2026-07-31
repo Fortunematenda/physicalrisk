@@ -146,6 +146,19 @@ function createMcpServer(authHeader?: string) {
       toolResult(await mcpTool('submit_workspace', { workspaceCode })),
   );
 
+  server.tool(
+    'attach_document_to_workspace',
+    'Attach an already-imported repository document to a workspace '
+      + '(e.g. link PROR-PA-002 into WS-2026-00004). Use when import created a doc but workspace still has 0 attachments.',
+    {
+      workspaceCode: z.string().describe('e.g. WS-2026-00004'),
+      documentCode: z.string().optional().describe('e.g. PROR-PA-002'),
+      documentId: z.string().optional(),
+      importJobId: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('attach_document_to_workspace', args)),
+  );
+
   // Flat fields preferred for ChatGPT connectors; payload kept for Custom GPT Actions.
   const submitDocSchema = {
     projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
@@ -153,17 +166,19 @@ function createMcpServer(authHeader?: string) {
     documentType: z.string().optional().describe('e.g. Research Note, Article'),
     title: z.string().optional(),
     documentContent: z.string().optional().describe('Full Markdown body of the document'),
-    workspaceCode: z.string().optional().describe('Optional WS-YYYY-#####'),
+    workspaceCode: z.string().optional().describe(
+      'WS-YYYY-##### — REQUIRED when adding a document into a workspace so it attaches (not only Master Index)',
+    ),
     owner: z.string().optional(),
     description: z.string().optional(),
-    payload: z.string().optional().describe('JSON string alternative: projectCode, module, documentType, title, documentContent'),
+    payload: z.string().optional().describe('JSON string alternative: projectCode, module, documentType, title, documentContent, workspaceCode'),
   };
 
   server.tool(
     'submit_approved_document',
     'IMPORT/SUBMIT an approved document into the repository (Markdown → PDF). '
-      + 'Call this when the user asks to import or submit a document. '
-      + 'Prefer flat fields (projectCode, module, documentType, title, documentContent).',
+      + 'When the user is working in a workspace, ALWAYS pass workspaceCode so the file attaches there. '
+      + 'Prefer flat fields (projectCode, module, documentType, title, documentContent, workspaceCode).',
     submitDocSchema,
     async (args) => {
       const body = args.payload

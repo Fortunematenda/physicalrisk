@@ -38,6 +38,7 @@ export const MCP_TOOL_NAMES = [
   'get_workspace_summary',
   'validate_workspace',
   'submit_workspace',
+  'attach_document_to_workspace',
   'search_documents',
   'get_document',
 ] as const;
@@ -276,6 +277,12 @@ export class SubmitApprovedDocumentDto {
   @Transform(trimString)
   @IsString()
   mimeType?: string;
+
+  /** When set, successful import is attached to this workspace (WS-YYYY-#####). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  workspaceCode?: string;
 }
 
 export class ListRepositoryModulesDto {
@@ -401,6 +408,12 @@ export class PrepareApprovedDocumentDto {
   @IsString()
   mimeType?: string;
 
+  /** When set, import is also attached to this Repository Workspace (WS-YYYY-#####). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  workspaceCode?: string;
+
   @IsOptional()
   metadataJson?: string;
 
@@ -415,6 +428,28 @@ export class PrepareApprovedDocumentDto {
   @Transform(trimString)
   @IsUUID('4')
   existingDocumentId?: string;
+}
+
+export class AttachDocumentToWorkspaceDto {
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  workspaceCode!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  documentId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  documentCode?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  importJobId?: string;
 }
 
 export class UploadDocumentChunkDto {

@@ -28,6 +28,7 @@ const WORKSPACE_TOOLS = new Set<McpToolName>([
   'get_workspace_summary',
   'validate_workspace',
   'submit_workspace',
+  'attach_document_to_workspace',
   'search_documents',
   'get_document',
 ]);

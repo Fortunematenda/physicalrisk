@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
@@ -546,6 +546,121 @@ export class WorkspacesService {
       ...workspace,
       documentsByStatus: byStatus,
       documents,
+    };
+  }
+
+  /**
+   * Link an already-imported repository document (or import job) to a workspace.
+   * Used when MCP/ChatGPT imported without workspaceCode, or to attach PROR-PA-00x after the fact.
+   */
+  async attachRepositoryDocument(
+    workspaceCode: string,
+    input: {
+      documentId?: string;
+      documentCode?: string;
+      importJobId?: string;
+      fileName?: string;
+    },
+    user?: { id?: string } | null,
+    source = WorkspaceActivitySource.API,
+  ) {
+    const userId = this.assertUser(user);
+    const { workspace } = await this.requireWorkspace(workspaceCode, userId);
+
+    let documentId = input.documentId?.trim() || undefined;
+    let fileName = input.fileName?.trim() || undefined;
+    let importJobId = input.importJobId?.trim() || undefined;
+
+    if (!documentId && input.documentCode?.trim()) {
+      const doc = await this.db.documents.findOne({
+        where: { code: input.documentCode.trim() },
+        relations: { project: true },
+      });
+      if (!doc) throw new NotFoundException(`Document ${input.documentCode} was not found`);
+      if (doc.project?.id && workspace.project?.id && doc.project.id !== workspace.project.id) {
+        throw new BadRequestException(
+          `Document ${doc.code} belongs to a different project than workspace ${workspaceCode}`,
+        );
+      }
+      documentId = doc.id;
+      fileName = fileName || doc.title;
+    }
+
+    if (!documentId && importJobId) {
+      const job = await this.db.importJobs.findOne({
+        where: { id: importJobId },
+        relations: { document: true },
+      });
+      if (!job) throw new NotFoundException(`Import job ${importJobId} was not found`);
+      documentId = job.document?.id;
+      fileName = fileName || job.fileName;
+    }
+
+    if (!documentId && !importJobId) {
+      throw new BadRequestException('Provide documentId, documentCode, or importJobId');
+    }
+
+    if (documentId) {
+      const existing = await this.db.workspaceDocuments.findOne({
+        where: { workspace: { id: workspace.id }, document: { id: documentId } },
+        relations: { document: true, importJob: true },
+      });
+      if (existing) {
+        return {
+          alreadyAttached: true,
+          workspaceCode,
+          document: this.serializeDocument(existing),
+        };
+      }
+    }
+
+    const docRow = await this.db.workspaceDocuments.save(this.db.workspaceDocuments.create({
+      workspace,
+      fileName: fileName || 'document',
+      originalFileName: fileName || 'document',
+      relativePath: null,
+      storageReference: null,
+      mimeType: 'application/pdf',
+      fileExtension: 'pdf',
+      checksum: null,
+      metadataJson: null,
+      status: documentId ? WorkspaceDocumentStatus.IMPORTED : WorkspaceDocumentStatus.PENDING,
+      importJob: importJobId ? ({ id: importJobId } as never) : null,
+      document: documentId ? ({ id: documentId } as never) : null,
+    }));
+
+    if (importJobId) {
+      const job = await this.db.importJobs.findOne({ where: { id: importJobId } });
+      if (job) {
+        job.workspace = workspace;
+        await this.db.importJobs.save(job);
+      }
+    }
+
+    if (
+      workspace.status === WorkspaceStatus.DRAFT
+      || workspace.currentStep === WorkspaceStep.UPLOAD
+    ) {
+      workspace.status = WorkspaceStatus.METADATA_REVIEW;
+      workspace.currentStep = WorkspaceStep.METADATA;
+      await this.db.workspaces.save(workspace);
+    }
+    await this.refreshProgress(workspace.id);
+    await this.recordActivity(workspace, 'WORKSPACE_DOCUMENT_ATTACHED', source, userId, {
+      documentId,
+      documentCode: input.documentCode,
+      importJobId,
+    });
+
+    const saved = await this.db.workspaceDocuments.findOne({
+      where: { id: docRow.id },
+      relations: { document: true, importJob: true },
+    });
+    return {
+      alreadyAttached: false,
+      workspaceCode,
+      document: this.serializeDocument(saved!),
+      workspace: await this.get(workspaceCode, user),
     };
   }
 
