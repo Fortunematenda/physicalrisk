@@ -397,6 +397,37 @@ export class WorkspacesService {
     return this.get(workspaceCode, user);
   }
 
+  /** Hard-delete a workspace (admin only). Does not delete imported Master Index documents. */
+  async remove(workspaceCode: string, user?: { id?: string } | null) {
+    const userId = this.assertUser(user);
+    const { workspace, user: actor } = await this.requireWorkspace(workspaceCode, userId);
+    if (actor.role !== UserRole.ADMIN) {
+      throw WorkspaceErrors.accessDenied();
+    }
+
+    await this.db.importJobs
+      .createQueryBuilder()
+      .update()
+      .set({ workspace: null })
+      .where('workspace_id = :workspaceId', { workspaceId: workspace.id })
+      .execute();
+
+    const code = workspace.workspaceCode;
+    const name = workspace.name;
+    await this.db.workspaces.remove(workspace);
+
+    await this.audit.record({
+      userId,
+      action: 'WORKSPACE_DELETED',
+      entityType: 'RepositoryWorkspace',
+      entityId: workspace.id,
+      message: `Deleted workspace ${code}`,
+      before: { workspaceCode: code, name },
+    });
+
+    return { deleted: true, workspaceCode: code };
+  }
+
   async listDocuments(workspaceCode: string, user?: { id?: string } | null) {
     const userId = this.assertUser(user);
     const { workspace } = await this.requireWorkspace(workspaceCode, userId);

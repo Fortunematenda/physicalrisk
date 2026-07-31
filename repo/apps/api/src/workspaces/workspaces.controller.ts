@@ -118,6 +118,13 @@ export class WorkspacesController {
     return this.workspaces.archive(workspaceCode, user);
   }
 
+  @Delete(':workspaceCode')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  remove(@Param('workspaceCode') workspaceCode: string, @CurrentUser() user?: { id?: string } | null) {
+    return this.workspaces.remove(workspaceCode, user);
+  }
+
   @Get(':workspaceCode/documents')
   documents(@Param('workspaceCode') workspaceCode: string, @CurrentUser() user?: { id?: string } | null) {
     return this.workspaces.listDocuments(workspaceCode, user);

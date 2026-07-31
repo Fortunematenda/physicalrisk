@@ -18,7 +18,9 @@ import {
   configurationListStyles as styles,
 } from '@/components/configuration-list-shell';
 import { RowActionsMenu } from '@/components/row-actions-menu';
+import { useConfirm } from '@/components/confirm-dialog';
 import { api, formatDate } from '@/lib/api';
+import { isAdmin } from '@/lib/permissions';
 import actionStyles from '@/components/row-actions.module.css';
 
 type WorkspaceRow = {
@@ -52,6 +54,7 @@ const STATUS_OPTIONS = [
 
 export default function WorkspacesPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [items, setItems] = useState<WorkspaceRow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,8 +68,14 @@ export default function WorkspacesPage() {
   const [newName, setNewName] = useState('');
   const [newProjectId, setNewProjectId] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
   const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    setAdmin(isAdmin());
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -120,6 +129,32 @@ export default function WorkspacesPage() {
 
   const openWorkspace = (item: WorkspaceRow) => {
     router.push(`/workspaces/${encodeURIComponent(item.workspaceCode)}`);
+  };
+
+  const deleteWorkspace = async (item: WorkspaceRow) => {
+    setOpenMenuId(null);
+    const ok = await confirm({
+      title: 'Delete workspace',
+      message:
+        `Delete workspace ${item.workspaceCode} (“${item.name}”)? `
+        + 'Workspace documents and activity will be removed. '
+        + 'Documents already in the Master Document Index are kept.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setBusyId(item.id);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/workspaces/${encodeURIComponent(item.workspaceCode)}`, { method: 'DELETE' });
+      setMessage(`Deleted workspace ${item.workspaceCode}.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to delete workspace');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const create = async (event: FormEvent) => {
@@ -254,6 +289,17 @@ export default function WorkspacesPage() {
             >
               Continue
             </button>
+            {admin ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={actionStyles.dangerItem}
+                disabled={busyId === openItem?.id}
+                onClick={() => openItem && void deleteWorkspace(openItem)}
+              >
+                Delete
+              </button>
+            ) : null}
           </RowActionsMenu>
 
           {showCreate ? (
@@ -316,6 +362,7 @@ export default function WorkspacesPage() {
         <tbody>
           {filtered.map((item) => {
             const menuOpen = openMenuId === item.id;
+            const busy = busyId === item.id;
             return (
               <tr
                 key={item.id}
@@ -369,6 +416,7 @@ export default function WorkspacesPage() {
                       aria-label={`Actions for ${item.workspaceCode}`}
                       aria-haspopup="menu"
                       aria-expanded={menuOpen}
+                      disabled={busy}
                       onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
                     >
                       <MoreVertical size={16} />
