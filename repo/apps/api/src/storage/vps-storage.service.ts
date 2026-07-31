@@ -431,37 +431,31 @@ export class VpsStorageService implements OnApplicationBootstrap {
     return { documents: documents.length, versions: versions.length };
   }
 
+  private isSystemRegisterSection(section?: { sectionKey?: string } | null) {
+    const key = section?.sectionKey;
+    return key === 'MASTER_DOCUMENT_INDEX' || key === 'VERSION_REGISTER';
+  }
+
   /**
-   * Light provisioning for Explorer reads. Never fails the tree response if register
-   * writes have a transient disk/DB issue (that previously surfaced as gateway 502s).
+   * Light provisioning for Explorer reads. Creates module folders only — system register
+   * CSV/JSON folders stay on disk for sync/export but are never shown in the tree.
    */
   private async ensureExplorerReady(projectId: string) {
-    try {
-      await this.ensureSystemRegisterSections(projectId);
-    } catch (error) {
-      console.error('[vps-storage] ensureSystemRegisterSections failed', error);
-    }
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) return;
     const rootRelative = this.projectRelativeRoot(project);
     try {
       await mkdir(this.resolveStoragePath(rootRelative), { recursive: true });
-      for (const section of (project.sections ?? []).filter((item) => item.active)) {
+      for (const section of (project.sections ?? []).filter((item) => item.active && !this.isSystemRegisterSection(item))) {
         const path = join(rootRelative, this.normaliseRelativePath(section.relativePath)).replace(/\\/g, '/');
         await mkdir(this.resolveStoragePath(path), { recursive: true });
       }
     } catch (error) {
       console.error('[vps-storage] ensureExplorerReady mkdir failed', error);
     }
-    try {
-      await this.refreshRegisters(projectId);
-    } catch (error) {
-      console.error('[vps-storage] refreshRegisters failed', error);
-    }
   }
 
   async tree(projectId: string) {
-    // Provision Index + Version Register folders without taking the whole tree down on errors.
     await this.ensureExplorerReady(projectId);
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) throw new NotFoundException('Project not found');
@@ -515,10 +509,15 @@ export class VpsStorageService implements OnApplicationBootstrap {
         documentsByDirectory.set(dirname(storagePath).replace(/\/v[^/]+$/, ''), version.document);
       }
     }
-    const modulePaths = new Map((project.sections ?? []).map((section) => [
-      join(rootRelative, this.normaliseRelativePath(section.relativePath)).replace(/\\/g, '/'),
-      section,
-    ]));
+    // Exclude system registers from Explorer — they are Index/Version pages, not tree folders.
+    const modulePaths = new Map(
+      (project.sections ?? [])
+        .filter((section) => !this.isSystemRegisterSection(section))
+        .map((section) => [
+          join(rootRelative, this.normaliseRelativePath(section.relativePath)).replace(/\\/g, '/'),
+          section,
+        ]),
+    );
 
     const diskEntries = await this.readTree(rootAbsolute, rootRelative, 0, {
       versionsByPath,
@@ -535,7 +534,9 @@ export class VpsStorageService implements OnApplicationBootstrap {
       documentsByDirectory,
       modulePaths,
     });
-    const entries = this.sortExplorerRoots(merged, modulePaths);
+    const entries = merged
+      .filter((entry) => entry.nodeType !== 'register')
+      .sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name));
 
     return {
       project: { id: project.id, code: project.code, name: project.name, repositoryRootPath: project.repositoryRootPath },
@@ -543,21 +544,6 @@ export class VpsStorageService implements OnApplicationBootstrap {
       lastSynchronisedAt,
       entries,
     };
-  }
-
-  /** Keep Master Document Index + Version Register visible at the top of the tree. */
-  private sortExplorerRoots(
-    entries: TreeEntry[],
-    modulePaths: Map<string, Project['sections'][number]>,
-  ) {
-    const rank = (entry: TreeEntry) => {
-      const section = modulePaths.get(entry.path);
-      if (section?.sectionKey === 'MASTER_DOCUMENT_INDEX') return 0;
-      if (section?.sectionKey === 'VERSION_REGISTER') return 1;
-      if (entry.nodeType === 'module' || entry.nodeType === 'register') return 2;
-      return 3;
-    };
-    return [...entries].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }
 
   async health() {
@@ -656,9 +642,7 @@ export class VpsStorageService implements OnApplicationBootstrap {
           name: part,
           path: currentPath,
           type: 'directory',
-          nodeType: section
-            ? (section.sectionKey === 'MASTER_DOCUMENT_INDEX' || section.sectionKey === 'VERSION_REGISTER' ? 'register' : 'module')
-            : document ? 'document' : isVersion ? 'version' : 'folder',
+          nodeType: section ? 'module' : document ? 'document' : isVersion ? 'version' : 'folder',
           documentId: document?.id,
           sectionId: section?.id,
           documentCode: document?.code,
@@ -771,19 +755,21 @@ export class VpsStorageService implements OnApplicationBootstrap {
       const absolutePath = join(absoluteDir, entry.name);
       const relativePath = join(relativeDir, entry.name).replace(/\\/g, '/');
       if (entry.isDirectory()) {
-        // Hide pack version history and internal gateway folders from the explorer.
+        // Hide pack version history, gateway folders, and system register folders from the explorer.
         if (entry.name === '_history' || entry.name.startsWith('.gateway-')) continue;
+        if (/^(master document index|version register)$/i.test(entry.name)) continue;
         const children = await this.readTree(absolutePath, relativePath, depth + 1, mappings);
         const document = mappings.documentsByDirectory.get(relativePath);
         const section = mappings.modulePaths.get(relativePath);
+        if (this.isSystemRegisterSection(section)) continue;
         const isVersion = /\/v[^/]+$/.test(relativePath);
-        // Keep configured modules/registers even when empty; hide empty orphan folders.
+        // Keep configured modules even when empty; hide empty orphan folders.
         if (!section && children.length === 0) continue;
         output.push({
           name: entry.name,
           path: relativePath,
           type: 'directory',
-          nodeType: section ? (section.sectionKey === 'MASTER_DOCUMENT_INDEX' || section.sectionKey === 'VERSION_REGISTER' ? 'register' : 'module') : document ? 'document' : isVersion ? 'version' : 'folder',
+          nodeType: section ? 'module' : document ? 'document' : isVersion ? 'version' : 'folder',
           documentId: document?.id,
           sectionId: section?.id,
           documentCode: document?.code,
@@ -794,27 +780,23 @@ export class VpsStorageService implements OnApplicationBootstrap {
         });
       } else if (entry.isFile()) {
         if (entry.name.startsWith('.gateway-')) continue;
+        // Hide on-disk register exports from the tree (Index/Version pages own those).
+        if (/^(master-document-index|version-register)\.(csv|json)$/i.test(entry.name)) continue;
         const version = mappings.versionsByPath.get(relativePath);
-        const parentSection = mappings.modulePaths.get(relativeDir);
-        const isRegisterArtifact = Boolean(
-          parentSection
-          && (parentSection.sectionKey === 'MASTER_DOCUMENT_INDEX' || parentSection.sectionKey === 'VERSION_REGISTER'),
-        );
-        // Document files must be Index-mapped; register CSV/JSON are always shown.
-        if (!version?.document?.id && !isRegisterArtifact) continue;
+        // Production tree only exposes files mapped to imported document versions.
+        if (!version?.document?.id) continue;
         const info = await stat(absolutePath);
         output.push({
           name: entry.name,
           path: relativePath,
           type: 'file',
-          nodeType: isRegisterArtifact && !version ? 'register' : 'file',
-          documentId: version?.document?.id,
-          versionId: version?.id,
-          documentCode: version?.document?.code,
-          versionNo: version?.versionNo,
-          status: version ? (version.isCurrent ? 'CURRENT' : 'SUPERSEDED') : 'REGISTER',
-          mimeType: version?.mimeType
-            || (entry.name.endsWith('.json') ? 'application/json' : entry.name.endsWith('.csv') ? 'text/csv' : undefined),
+          nodeType: 'file',
+          documentId: version.document.id,
+          versionId: version.id,
+          documentCode: version.document.code,
+          versionNo: version.versionNo,
+          status: version.isCurrent ? 'CURRENT' : 'SUPERSEDED',
+          mimeType: version.mimeType,
           size: info.size,
           modifiedAt: info.mtime,
         });
