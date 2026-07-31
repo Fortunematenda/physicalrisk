@@ -7,15 +7,19 @@ Mode A (Custom GPT + Actions + `mcp_…` key) remains available as a fallback.
 ## What Wayne does (Plus)
 
 1. ChatGPT (web) → **Settings → Security and login** (or **Apps → Advanced**) → turn on **Developer mode**.
-2. **Settings → Apps / Connectors** → create / add connector:
+2. **Admin first:** create Keycloak client `repo-chatgpt-app` (section below).  
+   ChatGPT tries **dynamic client registration (DCR)** by default; Keycloak’s **Trusted Hosts** policy rejects that (`403 insufficient_scope`). Use a **static Client ID** instead of DCR.
+3. **Settings → Apps / Connectors** → create / add connector:
    - **Name:** Physical Risk Repository  
    - **URL:** `https://repo.physicalrisk.com/connector/mcp`  
    - **Auth:** OAuth  
+   - **Client ID:** `repo-chatgpt-app` (predefined / static)  
+   - Client secret: only if the Keycloak client has authentication **On**
 
-   (Optional later: `https://repo-mcp.physicalrisk.com/mcp` if you add a DNS A/CNAME for that host.)
-3. Sign in with **Physical Risk SSO** (Keycloak) when prompted — same account as Repo web.
-4. Start a chat → enable **Developer mode** tools → select **Physical Risk Repository**.
-5. Example prompts:
+   (Optional later: `https://repo-mcp.physicalrisk.com/mcp` if you add DNS + a dedicated cert.)
+4. Sign in with **Physical Risk SSO** (Keycloak) when prompted — same account as Repo web.
+5. Start a chat → enable **Developer mode** tools → select **Physical Risk Repository**.
+6. Example prompts:
    - List repository projects  
    - Create a workspace named Marketing Campaign for project MCRD  
    - Resume workspace WS-2026-00003  
@@ -30,7 +34,7 @@ Create (or update) a Keycloak client in realm `physicalrisk`:
 | Setting | Value |
 |--------|--------|
 | Client ID | `repo-chatgpt-app` |
-| Client authentication | **Off** (public) preferred for PKCE, or On if you paste a secret into ChatGPT |
+| Client authentication | **Off** (public + PKCE) |
 | Standard flow | ON |
 | Direct access grants | OFF |
 | Valid redirect URIs | `https://chatgpt.com/connector/oauth/*` and `https://chatgpt.com/connector_platform_oauth_redirect` |
@@ -41,6 +45,17 @@ Create (or update) a Keycloak client in realm `physicalrisk`:
 Map realm roles as usual: `repo_admin`, `repo_importer`, `repo_reviewer`.
 
 ChatGPT will show the exact redirect URI on the app page — add that URI if it differs.
+
+### Fixing `Trusted Hosts` / DCR 403 (optional)
+
+Prefer static Client ID (above). Only if you want DCR to work:
+
+1. Keycloak Admin → realm **physicalrisk** → **Clients** → **Client registration** → **Client registration policies** (or Realm settings → Client registration)
+2. Open **Trusted Hosts**
+3. Either add ChatGPT / OpenAI hosts, or temporarily allow broader hosts for anonymous DCR  
+4. Or disable Trusted Hosts for anonymous registration (less secure)
+
+Do **not** expand shared TLS certs for this — OAuth client setup is Keycloak-only.
 
 ### Resource indicator
 
