@@ -146,24 +146,61 @@ function createMcpServer(authHeader?: string) {
       toolResult(await mcpTool('submit_workspace', { workspaceCode })),
   );
 
+  // Flat fields preferred for ChatGPT connectors; payload kept for Custom GPT Actions.
+  const submitDocSchema = {
+    projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
+    module: z.string().optional().describe('Module/section name e.g. Research Library'),
+    documentType: z.string().optional().describe('e.g. Research Note, Article'),
+    title: z.string().optional(),
+    documentContent: z.string().optional().describe('Full Markdown body of the document'),
+    workspaceCode: z.string().optional().describe('Optional WS-YYYY-#####'),
+    owner: z.string().optional(),
+    description: z.string().optional(),
+    payload: z.string().optional().describe('JSON string alternative: projectCode, module, documentType, title, documentContent'),
+  };
+
   server.tool(
     'submit_approved_document',
-    'Submit an approved document (Markdown → PDF). Prefer projectCode MCRD/MOSS/PROR — never invent codes.',
-    {
-      payload: z.string().describe(
-        'JSON string: projectCode, module, documentType, title, documentContent; optional workspaceCode, owner, description',
-      ),
+    'IMPORT/SUBMIT an approved document into the repository (Markdown → PDF). '
+      + 'Call this when the user asks to import or submit a document. '
+      + 'Prefer flat fields (projectCode, module, documentType, title, documentContent).',
+    submitDocSchema,
+    async (args) => {
+      const body = args.payload
+        ? { payload: args.payload }
+        : {
+            projectCode: args.projectCode,
+            module: args.module,
+            documentType: args.documentType,
+            title: args.title,
+            documentContent: args.documentContent,
+            workspaceCode: args.workspaceCode,
+            owner: args.owner,
+            description: args.description,
+          };
+      return toolResult(await mcpTool('submit_approved_document', body));
     },
-    async (args) => toolResult(await mcpTool('submit_approved_document', args)),
   );
 
   server.tool(
     'prepare_approved_document',
-    'Prepare or submit (alias of submit_approved_document)',
-    {
-      payload: z.string(),
+    'Prepare or submit (alias of submit_approved_document) — same fields as submit.',
+    submitDocSchema,
+    async (args) => {
+      const body = args.payload
+        ? { payload: args.payload }
+        : {
+            projectCode: args.projectCode,
+            module: args.module,
+            documentType: args.documentType,
+            title: args.title,
+            documentContent: args.documentContent,
+            workspaceCode: args.workspaceCode,
+            owner: args.owner,
+            description: args.description,
+          };
+      return toolResult(await mcpTool('prepare_approved_document', body));
     },
-    async (args) => toolResult(await mcpTool('prepare_approved_document', args)),
   );
 
   server.tool(
