@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { RepositoryApiClient } from './clients/repository-api.client.js';
 import {
-  isUnauthenticatedMcpMethod,
+  mcpRequestRequiresAuth,
   mcpResourceUrl,
   protectedResourceMetadata,
   wwwAuthenticateHeader,
@@ -269,8 +269,7 @@ const httpServer = createServer(async (req, res) => {
       ? (parsedBody as { method?: unknown }).method
       : undefined;
 
-  const allowAnonymous = isUnauthenticatedMcpMethod(rpcMethod);
-  if (config.oauthRequired && !authHeader && !allowAnonymous) {
+  if (config.oauthRequired && !authHeader && mcpRequestRequiresAuth(req.method || 'GET', rpcMethod)) {
     sendJson(res, 401, {
       error: 'unauthorized',
       message: 'Sign in with Physical Risk SSO to use Repository tools (same pattern as Notion).',

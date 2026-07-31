@@ -42,9 +42,27 @@ export function isUnauthenticatedMcpMethod(method: unknown): boolean {
   return (
     method === 'initialize'
     || method === 'notifications/initialized'
+    || method === 'notifications/cancelled'
     || method === 'ping'
     || method === 'tools/list'
     || method === 'resources/list'
+    || method === 'resources/templates/list'
     || method === 'prompts/list'
   );
+}
+
+/**
+ * Mixed auth (Notion-style): discover + list tools without a token;
+ * only tool execution requires SSO Bearer.
+ */
+export function mcpRequestRequiresAuth(httpMethod: string, rpcMethod: unknown): boolean {
+  const verb = httpMethod.toUpperCase();
+  // Streamable HTTP / SSE session opens often use GET with no JSON-RPC method.
+  if (verb === 'GET' || verb === 'HEAD' || verb === 'OPTIONS') return false;
+  if (isUnauthenticatedMcpMethod(rpcMethod)) return false;
+  // tools/call (and unknown mutating RPC) need a user token.
+  if (rpcMethod === 'tools/call') return true;
+  // Empty / non-JSON probes should not force OAuth.
+  if (rpcMethod == null || rpcMethod === '') return false;
+  return true;
 }
