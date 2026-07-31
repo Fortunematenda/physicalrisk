@@ -1,15 +1,25 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, GitBranch, Link2, RefreshCw, Search, Trash2 } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
-import { Loading } from '@/components/loading';
-import { EmptyState } from '@/components/empty-state';
+import {
+  ArrowRight,
+  GitBranch,
+  Link2,
+  MoreVertical,
+  Plus,
+  RefreshCw,
+  Search,
+} from 'lucide-react';
+import {
+  ConfigurationListShell,
+  configurationListStyles as styles,
+} from '@/components/configuration-list-shell';
+import { RowActionsMenu } from '@/components/row-actions-menu';
 import { api, formatDate } from '@/lib/api';
 import { useConfirm } from '@/components/confirm-dialog';
-import styles from './Relationships.module.css';
+import actionStyles from '@/components/row-actions.module.css';
 
 const RELATIONSHIP_TYPES = [
   'RELATED_TO',
@@ -55,12 +65,16 @@ export default function RelationshipsPage() {
   const [projectId, setProjectId] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [query, setQuery] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({
     fromDocumentId: '',
     toDocumentId: '',
     type: 'RELATED_TO',
     description: '',
   });
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -93,7 +107,12 @@ export default function RelationshipsPage() {
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    activeMenuAnchor.current = openMenuId ? menuButtonRefs.current[openMenuId] ?? null : null;
+  }, [openMenuId]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -116,6 +135,10 @@ export default function RelationshipsPage() {
       return haystack.includes(needle);
     });
   }, [items, typeFilter, query]);
+
+  const openItem = openMenuId
+    ? filtered.find((item) => item.id === openMenuId) ?? items.find((item) => item.id === openMenuId) ?? null
+    : null;
 
   const stats = useMemo(() => {
     const linked = new Set<string>();
@@ -160,6 +183,7 @@ export default function RelationshipsPage() {
       });
       setMessage('Relationship saved.');
       setForm((current) => ({ ...current, description: '' }));
+      setShowCreate(false);
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to save relationship');
@@ -169,6 +193,7 @@ export default function RelationshipsPage() {
   };
 
   const remove = async (item: RelationshipRow) => {
+    setOpenMenuId(null);
     const ok = await confirm({
       title: 'Remove relationship',
       message: `Remove relationship ${item.fromDocument.code} → ${item.toDocument.code} (${item.type})?`,
@@ -191,274 +216,298 @@ export default function RelationshipsPage() {
   };
 
   return (
-    <div className={styles.page}>
-      <PageHeader
-        title="Document Relationships"
-        description="Create and maintain controlled links between approved documents. Relationships stay independent of folder paths."
-        action={{ label: 'Master Document Index', href: '/repository/index' }}
-      />
-
-      {message ? <div className="notice success">{message}</div> : null}
-      {error ? <div className="notice error">{error}</div> : null}
-
-      <div className={styles.stats}>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconTotal}`}><Link2 size={18} /></div>
-          <div>
-            <span>Relationships</span>
-            <strong>{stats.total}</strong>
-            <small>Controlled document links</small>
+    <ConfigurationListShell
+      title="Document Relationships"
+      description="Create and maintain controlled links between approved documents. Relationships stay independent of folder paths."
+      headerAction={{ label: 'Master Document Index', href: '/repository/index' }}
+      error={error}
+      message={message}
+      stats={[
+        {
+          label: 'Relationships',
+          value: stats.total,
+          hint: 'Controlled document links',
+          icon: <Link2 size={18} />,
+          tone: 'blue',
+        },
+        {
+          label: 'Linked documents',
+          value: stats.linked,
+          hint: 'Unique documents in use',
+          icon: <GitBranch size={18} />,
+          tone: 'green',
+        },
+        {
+          label: 'Relationship types',
+          value: stats.types,
+          hint: 'Active link categories',
+          icon: <ArrowRight size={18} />,
+          tone: 'orange',
+        },
+      ]}
+      toolbar={(
+        <>
+          <button
+            type="button"
+            className="button primary small"
+            onClick={() => setShowCreate(true)}
+            disabled={documents.length < 2}
+            title={documents.length < 2 ? 'Import at least two documents first' : 'Create relationship'}
+          >
+            <Plus size={14} /> Add relationship
+          </button>
+          <select
+            className={styles.select}
+            value={projectId}
+            onChange={(event) => setProjectId(event.target.value)}
+            aria-label="Filter by project"
+            title="Filter by project"
+          >
+            <option value="">All projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.code} — {project.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className={styles.select}
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+            aria-label="Filter by relationship type"
+            title="Filter by relationship type"
+          >
+            <option value="ALL">All types</option>
+            {RELATIONSHIP_TYPES.map((type) => (
+              <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>
+            ))}
+          </select>
+          <div className={styles.searchWrap}>
+            <Search size={15} className={styles.searchIcon} />
+            <input
+              className={styles.search}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search documents, type or description"
+              aria-label="Search relationships"
+            />
           </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconLinked}`}><GitBranch size={18} /></div>
-          <div>
-            <span>Linked documents</span>
-            <strong>{stats.linked}</strong>
-            <small>Unique documents in use</small>
-          </div>
-        </div>
-        <div className={styles.statCard}>
-          <div className={`${styles.statIcon} ${styles.statIconTypes}`}><ArrowRight size={18} /></div>
-          <div>
-            <span>Relationship types</span>
-            <strong>{stats.types}</strong>
-            <small>Active link categories</small>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.layout}>
-        <form className={styles.createCard} onSubmit={submit}>
-          <div className={styles.createHead}>
-            <h2>Create relationship</h2>
-            <p>Link two documents with a controlled relationship type. Existing pairs of the same type are updated.</p>
-          </div>
-
-          <div className={styles.createBody}>
-            <div className="field">
-              <label htmlFor="rel-from">From document <em>*</em></label>
-              <select
-                id="rel-from"
-                required
-                value={form.fromDocumentId}
-                onChange={(event) => setForm((current) => ({
-                  ...current,
-                  fromDocumentId: event.target.value,
-                  toDocumentId: current.toDocumentId === event.target.value ? '' : current.toDocumentId,
-                }))}
-                disabled={documents.length === 0}
-              >
-                <option value="">Select document</option>
-                {fromOptions.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {doc.code} — {doc.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label htmlFor="rel-type">Relationship type <em>*</em></label>
-              <select
-                id="rel-type"
-                value={form.type}
-                onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
-              >
-                {RELATIONSHIP_TYPES.map((type) => (
-                  <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className={styles.arrowHint} aria-hidden="true">
-              <ArrowRight size={16} />
-            </div>
-
-            <div className="field">
-              <label htmlFor="rel-to">To document <em>*</em></label>
-              <select
-                id="rel-to"
-                required
-                value={form.toDocumentId}
-                onChange={(event) => setForm((current) => ({ ...current, toDocumentId: event.target.value }))}
-                disabled={toOptions.length === 0}
-              >
-                <option value="">Select document</option>
-                {toOptions.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {doc.code} — {doc.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className={`field ${styles.full}`}>
-              <label htmlFor="rel-description">Description</label>
-              <textarea
-                id="rel-description"
-                rows={4}
-                value={form.description}
-                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                className={styles.description}
-                placeholder="Optional note about why these documents are linked"
-              />
-            </div>
-          </div>
-
-          <div className={styles.createActions}>
-            <button
-              type="submit"
-              className="button primary"
-              disabled={saving || documents.length < 2}
-            >
-              {saving ? 'Saving…' : 'Save relationship'}
-            </button>
-            {documents.length < 2 ? (
-              <span className="secondary-text">Import at least two documents to create links.</span>
-            ) : null}
-          </div>
-        </form>
-
-        <div className={`panel ${styles.registerPanel}`}>
-          <div className={styles.toolbar}>
-            <select
-              className={styles.select}
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
-              aria-label="Filter by project"
-              title="Filter by project"
-            >
-              <option value="">All projects</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.code} — {project.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              className={styles.select}
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              aria-label="Filter by relationship type"
-              title="Filter by relationship type"
-            >
-              <option value="ALL">All types</option>
-              {RELATIONSHIP_TYPES.map((type) => (
-                <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>
-              ))}
-            </select>
-
-            <div className={styles.searchWrap}>
-              <Search size={15} className={styles.searchIcon} />
-              <input
-                className={styles.search}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search documents, type or description"
-                aria-label="Search relationships"
-              />
-            </div>
-
+          <button
+            type="button"
+            className={`button small ${styles.refresh}`}
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh relationships"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? styles.spinning : undefined} />
+            Refresh
+          </button>
+          <span className={styles.count}>{stats.shown} shown</span>
+        </>
+      )}
+      loading={loading}
+      empty={filtered.length === 0 ? {
+        title: 'No relationships found',
+        text: items.length === 0
+          ? 'Create the first controlled link between two approved documents.'
+          : 'No relationships match the current filters.',
+      } : null}
+      footer={(
+        <>
+          <RowActionsMenu
+            open={Boolean(openItem)}
+            anchorRef={activeMenuAnchor}
+            onClose={() => setOpenMenuId(null)}
+          >
             <button
               type="button"
-              className={`button small ${styles.refresh}`}
-              onClick={() => void load()}
-              disabled={loading}
-              aria-label="Refresh relationships"
-              title="Refresh"
+              role="menuitem"
+              onClick={() => {
+                if (!openItem) return;
+                setOpenMenuId(null);
+                router.push(`/documents/${openItem.fromDocument.id}`);
+              }}
             >
-              <RefreshCw size={14} className={loading ? styles.spinning : undefined} />
-              Refresh
+              View from document
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                if (!openItem) return;
+                setOpenMenuId(null);
+                router.push(`/documents/${openItem.toDocument.id}`);
+              }}
+            >
+              View to document
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={actionStyles.dangerItem}
+              disabled={deletingId === openItem?.id}
+              onClick={() => openItem && void remove(openItem)}
+            >
+              Delete
+            </button>
+          </RowActionsMenu>
 
-            <span className={styles.count}>{stats.shown} shown</span>
-          </div>
-
-          {loading ? (
-            <div className={styles.stateWrap}><Loading /></div>
-          ) : filtered.length === 0 ? (
-            <div className={styles.stateWrap}>
-              <EmptyState
-                title="No relationships found"
-                text={items.length === 0
-                  ? 'Create the first controlled link between two approved documents.'
-                  : 'No relationships match the current filters.'}
-              />
+          {showCreate ? (
+            <div className={actionStyles.editModal} role="dialog" aria-modal="true" aria-labelledby="rel-create-title">
+              <form className={actionStyles.editModalCard} onSubmit={submit}>
+                <h3 id="rel-create-title">Create relationship</h3>
+                <p>Link two documents with a controlled relationship type. Existing pairs of the same type are updated.</p>
+                <div className="field">
+                  <label htmlFor="rel-from">From document <em>*</em></label>
+                  <select
+                    id="rel-from"
+                    required
+                    value={form.fromDocumentId}
+                    onChange={(event) => setForm((current) => ({
+                      ...current,
+                      fromDocumentId: event.target.value,
+                      toDocumentId: current.toDocumentId === event.target.value ? '' : current.toDocumentId,
+                    }))}
+                    disabled={documents.length === 0}
+                  >
+                    <option value="">Select document</option>
+                    {fromOptions.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.code} — {doc.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="rel-type">Relationship type <em>*</em></label>
+                  <select
+                    id="rel-type"
+                    value={form.type}
+                    onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
+                  >
+                    {RELATIONSHIP_TYPES.map((type) => (
+                      <option key={type} value={type}>{type.replaceAll('_', ' ')}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="rel-to">To document <em>*</em></label>
+                  <select
+                    id="rel-to"
+                    required
+                    value={form.toDocumentId}
+                    onChange={(event) => setForm((current) => ({ ...current, toDocumentId: event.target.value }))}
+                    disabled={toOptions.length === 0}
+                  >
+                    <option value="">Select document</option>
+                    {toOptions.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.code} — {doc.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="rel-description">Description</label>
+                  <textarea
+                    id="rel-description"
+                    rows={3}
+                    value={form.description}
+                    onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                    placeholder="Optional note about why these documents are linked"
+                  />
+                </div>
+                <div className={actionStyles.editModalActions}>
+                  <button type="button" className="button" onClick={() => setShowCreate(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button primary" disabled={saving || documents.length < 2}>
+                    {saving ? 'Saving…' : 'Save relationship'}
+                  </button>
+                </div>
+              </form>
             </div>
-          ) : (
-            <div className={styles.tableWrap}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>From</th>
-                    <th>Type</th>
-                    <th>To</th>
-                    <th>Created</th>
-                    <th className={styles.actionsHeading}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <Link className={`primary-text mono ${styles.docLink}`} href={`/documents/${item.fromDocument.id}`}>
-                          {item.fromDocument.code}
-                        </Link>
-                        <div className={styles.title}>{item.fromDocument.title}</div>
-                        {item.fromDocument.project?.code ? (
-                          <div className="secondary-text">{item.fromDocument.project.code}</div>
-                        ) : null}
-                      </td>
-                      <td>
-                        <div className={styles.typeRow}>
-                          <span className={styles.typeBadge}>{item.type.replaceAll('_', ' ')}</span>
-                          <ArrowRight size={14} className={styles.typeArrow} />
-                        </div>
-                        {item.description ? <div className={styles.descriptionText}>{item.description}</div> : null}
-                      </td>
-                      <td>
-                        <Link className={`primary-text mono ${styles.docLink}`} href={`/documents/${item.toDocument.id}`}>
-                          {item.toDocument.code}
-                        </Link>
-                        <div className={styles.title}>{item.toDocument.title}</div>
-                        {item.toDocument.project?.code ? (
-                          <div className="secondary-text">{item.toDocument.project.code}</div>
-                        ) : null}
-                      </td>
-                      <td>
-                        <div>{formatDate(item.createdAt)}</div>
-                        {item.createdBy?.name ? (
-                          <div className="secondary-text">{item.createdBy.name}</div>
-                        ) : null}
-                      </td>
-                      <td className={styles.actionsCell}>
-                        <button
-                          type="button"
-                          className={`button small ${styles.viewButton}`}
-                          onClick={() => router.push(`/documents/${item.fromDocument.id}`)}
-                        >
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          className={`button small danger ${styles.deleteButton}`}
-                          disabled={deletingId === item.id}
-                          onClick={() => void remove(item)}
-                        >
-                          <Trash2 size={13} />
-                          {deletingId === item.id ? '…' : 'Delete'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+          ) : null}
+        </>
+      )}
+    >
+      <table>
+        <thead>
+          <tr>
+            <th>From</th>
+            <th>Type</th>
+            <th>To</th>
+            <th className={styles.colDate}>Created</th>
+            <th className={actionStyles.actionsCell} aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((item) => {
+            const menuOpen = openMenuId === item.id;
+            const busy = deletingId === item.id;
+            return (
+              <tr key={item.id}>
+                <td>
+                  <Link
+                    className={`primary-text mono ${styles.docLink}`}
+                    href={`/documents/${item.fromDocument.id}`}
+                  >
+                    {item.fromDocument.code}
+                  </Link>
+                  <div className={styles.title}>{item.fromDocument.title}</div>
+                  {item.fromDocument.project?.code ? (
+                    <div className="secondary-text">{item.fromDocument.project.code}</div>
+                  ) : null}
+                </td>
+                <td>
+                  <span className="badge">{item.type.replaceAll('_', ' ')}</span>
+                  {item.description ? (
+                    <div className="secondary-text" style={{ marginTop: 6 }}>{item.description}</div>
+                  ) : null}
+                </td>
+                <td>
+                  <Link
+                    className={`primary-text mono ${styles.docLink}`}
+                    href={`/documents/${item.toDocument.id}`}
+                  >
+                    {item.toDocument.code}
+                  </Link>
+                  <div className={styles.title}>{item.toDocument.title}</div>
+                  {item.toDocument.project?.code ? (
+                    <div className="secondary-text">{item.toDocument.project.code}</div>
+                  ) : null}
+                </td>
+                <td>
+                  <div>{formatDate(item.createdAt)}</div>
+                  {item.createdBy?.name ? (
+                    <div className="secondary-text">{item.createdBy.name}</div>
+                  ) : null}
+                </td>
+                <td className={`${actionStyles.actionsCell} ${menuOpen ? actionStyles.actionsCellOpen : ''}`}>
+                  <div className={`${actionStyles.menuWrap} ${menuOpen ? actionStyles.menuWrapOpen : ''}`}>
+                    <button
+                      type="button"
+                      ref={(node) => {
+                        menuButtonRefs.current[item.id] = node;
+                        if (menuOpen) activeMenuAnchor.current = node;
+                      }}
+                      className={`${actionStyles.menuButton} ${menuOpen ? actionStyles.menuButtonActive : ''}`}
+                      aria-label={`Actions for ${item.fromDocument.code} → ${item.toDocument.code}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      disabled={busy}
+                      onClick={() => setOpenMenuId(menuOpen ? null : item.id)}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </ConfigurationListShell>
   );
 }
