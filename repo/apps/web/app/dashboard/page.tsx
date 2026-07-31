@@ -273,28 +273,6 @@ function normaliseStatusLabel(status: string): string {
     .join(" ");
 }
 
-function getFileTypeClass(fileType?: string | null): string {
-  const normalised = fileType?.replace(".", "").toLowerCase();
-
-  if (normalised === "pdf") {
-    return styles.filePdf;
-  }
-
-  if (normalised === "doc" || normalised === "docx") {
-    return styles.fileWord;
-  }
-
-  if (normalised === "xls" || normalised === "xlsx") {
-    return styles.fileExcel;
-  }
-
-  if (normalised === "ppt" || normalised === "pptx") {
-    return styles.filePowerPoint;
-  }
-
-  return styles.fileDefault;
-}
-
 function getActivityIcon(type: ActivityType) {
   switch (type) {
     case "DOCUMENT_IMPORTED":
@@ -385,21 +363,6 @@ function KpiCard({
         )}
       </div>
     </article>
-  );
-}
-
-function StatusBadge({ status }: { status: DocumentStatus }) {
-  return (
-    <span
-      className={styles.statusBadge}
-      style={{
-        color: STATUS_COLOURS[status],
-        backgroundColor: `${STATUS_COLOURS[status]}16`,
-        borderColor: `${STATUS_COLOURS[status]}35`,
-      }}
-    >
-      {normaliseStatusLabel(status)}
-    </span>
   );
 }
 
@@ -1146,90 +1109,6 @@ export default function DashboardPage() {
             View full report
             <ChevronRight size={15} />
           </Link>
-        </article>
-      </section>
-
-      <section className={styles.tablesGridFull}>
-        <article className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <h2>Recent Documents</h2>
-              <p>Recently imported and updated files</p>
-            </div>
-
-            <Link href="/repository/index" className={styles.viewButton}>
-              View all
-              <ChevronRight size={15} />
-            </Link>
-          </div>
-
-          {dashboard.recentDocuments.length > 0 ? (
-            <div className={styles.tableWrapper}>
-              <table className={styles.dataTable}>
-                <thead>
-                  <tr>
-                    <th>Document</th>
-                    <th>Project</th>
-                    <th>Version</th>
-                    <th>Status</th>
-                    <th>Imported</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {dashboard.recentDocuments.slice(0, 4).map((document) => (
-                    <tr key={document.id}>
-                      <td>
-                        <Link
-                          href={`/documents/${document.id}`}
-                          className={styles.documentCell}
-                        >
-                          <span
-                            className={`${styles.fileIcon} ${getFileTypeClass(
-                              document.fileType,
-                            )}`}
-                          >
-                            {document.fileType
-                              ?.replace(".", "")
-                              .slice(0, 3)
-                              .toUpperCase() || "FILE"}
-                          </span>
-
-                          <span>
-                            <strong>{document.title}</strong>
-                            <small>
-                              {document.repositorySection ??
-                                document.documentCode ??
-                                "Repository document"}
-                            </small>
-                          </span>
-                        </Link>
-                      </td>
-
-                      <td>{document.projectName}</td>
-                      <td>{document.version}</td>
-
-                      <td>
-                        <StatusBadge status={document.status} />
-                      </td>
-
-                      <td>
-                        <span className={styles.dateCell}>
-                          {formatDateTime(document.importedAt)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState
-              icon={FileText}
-              title="No recent documents"
-              description="Imported repository documents will appear here."
-            />
-          )}
         </article>
       </section>
 
