@@ -256,6 +256,13 @@
   grid-template-columns: 1fr 1fr;
 }
 
+.tablesGridFull {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: 0.9fr 1fr 1fr;

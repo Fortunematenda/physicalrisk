@@ -960,7 +960,7 @@ export default function DashboardPage() {
         </article>
       </section>
 
-      <section className={styles.tablesGrid}>
+      <section className={styles.tablesGridFull}>
         <article className={styles.panel}>
           <div className={styles.panelHeader}>
             <div>
@@ -1039,80 +1039,6 @@ export default function DashboardPage() {
               icon={FileText}
               title="No recent documents"
               description="Imported repository documents will appear here."
-            />
-          )}
-        </article>
-
-        <article className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <h2>Documents Requiring Attention</h2>
-              <p>Import jobs with unresolved validation or routing issues</p>
-            </div>
-
-            <Link href="/imports/queue" className={styles.viewButton}>
-              View all
-              <ChevronRight size={15} />
-            </Link>
-          </div>
-
-          {dashboard.documentsRequiringAttention.length > 0 ? (
-            <div className={styles.tableWrapper}>
-              <table className={styles.dataTable}>
-                <thead>
-                  <tr>
-                    <th>Document</th>
-                    <th>Project</th>
-                    <th>Stage</th>
-                    <th>Submitted by</th>
-                    <th>Received</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {dashboard.documentsRequiringAttention.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <Link
-                          href={item.documentId ? `/documents/${item.documentId}` : `/imports/queue`}
-                          className={styles.documentCell}
-                        >
-                          <span
-                            className={`${styles.fileIcon} ${styles.fileDefault}`}
-                          >
-                            IMP
-                          </span>
-
-                          <span>
-                            <strong>{item.title}</strong>
-                            <small>{item.reason}</small>
-                          </span>
-                        </Link>
-                      </td>
-
-                      <td>{item.projectName}</td>
-                      <td>
-                        <span className={styles.statusBadge} style={{ color: "#b77900", backgroundColor: "#fff6d916", borderColor: "#b7790035" }}>
-                          {item.stage}
-                        </span>
-                      </td>
-                      <td>{item.submittedBy}</td>
-
-                      <td>
-                        <span className={styles.dateCell}>
-                          {formatDateTime(item.receivedAt)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState
-              icon={CheckCircle2}
-              title="No documents require attention"
-              description="All current imports have completed validation successfully."
             />
           )}
         </article>
