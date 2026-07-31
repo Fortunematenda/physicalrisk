@@ -862,7 +862,7 @@ export default function DashboardPage() {
           <div className={styles.panelHeader}>
             <div>
               <h2>Documents by Status</h2>
-              <p>Current, superseded, and archived repository documents</p>
+              <p>Current and superseded versions across the repository</p>
             </div>
           </div>
 

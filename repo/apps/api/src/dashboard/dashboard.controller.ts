@@ -147,21 +147,36 @@ export class DashboardController {
     const documentsOverTime = await this.getDocumentsOverTime(from, to, grouping);
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 4. STATUS DISTRIBUTION (current state, not time-filtered)
+    // 4. STATUS DISTRIBUTION — version lifecycle (matches Version Register)
+    // Current / Superseded come from document_versions.is_current.
+    // Document.status SUPERSEDED is rarely set on NEW_VERSION imports (doc stays CURRENT).
     // ──────────────────────────────────────────────────────────────────────────
-    const statusCounts = await this.db.documents
-      .createQueryBuilder('document')
-      .select('document.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .groupBy('document.status')
-      .getRawMany();
-
-    const statusDistribution = statusCounts.map(item => ({
-      status: item.status,
-      label: item.status.toLowerCase().split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-      count: parseInt(item.count),
-      percentage: totalDocuments > 0 ? (parseInt(item.count) / totalDocuments) * 100 : 0,
-    }));
+    const [currentVersionCount, supersededVersionCount, archivedDocumentCount] = await Promise.all([
+      this.db.documentVersions.count({ where: { isCurrent: true } }),
+      this.db.documentVersions.count({ where: { isCurrent: false } }),
+      this.db.documents.count({ where: { status: DocumentStatus.ARCHIVED } }),
+    ]);
+    const statusTotal = currentVersionCount + supersededVersionCount + archivedDocumentCount;
+    const statusDistribution = [
+      {
+        status: DocumentStatus.CURRENT,
+        label: 'Current',
+        count: currentVersionCount,
+        percentage: statusTotal > 0 ? (currentVersionCount / statusTotal) * 100 : 0,
+      },
+      {
+        status: DocumentStatus.SUPERSEDED,
+        label: 'Superseded',
+        count: supersededVersionCount,
+        percentage: statusTotal > 0 ? (supersededVersionCount / statusTotal) * 100 : 0,
+      },
+      {
+        status: DocumentStatus.ARCHIVED,
+        label: 'Archived',
+        count: archivedDocumentCount,
+        percentage: statusTotal > 0 ? (archivedDocumentCount / statusTotal) * 100 : 0,
+      },
+    ];
 
     // ──────────────────────────────────────────────────────────────────────────
     // 5. RECENT DOCUMENTS
