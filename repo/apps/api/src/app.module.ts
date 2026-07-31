@@ -14,6 +14,7 @@ import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
 import { SsoUserSyncModule } from './users/sso-user-sync.module';
 import { McpModule } from './mcp/mcp.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { McpModule } from './mcp/mcp.module';
     ConnectorsModule,
     UsersModule,
     McpModule,
+    WorkspacesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })

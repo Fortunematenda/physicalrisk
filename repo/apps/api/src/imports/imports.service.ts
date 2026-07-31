@@ -20,9 +20,12 @@ import {
   RelationshipType,
   SourceSystem,
   User,
+  WorkspaceActivitySource,
+  WorkspaceDocumentStatus,
 } from '../database/entities';
 import { mimeTypeAllowed } from '../connectors/connector-validation.util';
 import { VpsStorageService } from '../storage/vps-storage.service';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ImportBusinessException } from './import.exception';
 import { compareVersions, suggestNextVersion } from './version.util';
 
@@ -43,6 +46,8 @@ interface ImportMetadata {
   relationshipsJson?: string;
   mode?: 'NEW' | 'NEW_VERSION';
   existingDocumentId?: string;
+  /** Optional existing Repository Workspace code (WS-YYYY-#####). */
+  workspaceCode?: string;
 }
 
 interface RelationshipInput {
@@ -64,6 +69,7 @@ export class ImportsService {
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
     private readonly storage: VpsStorageService,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   list(status?: ImportStatus, reviewStatuses?: ImportStatus[]) {
@@ -1265,6 +1271,34 @@ export class ImportsService {
       message: `ZIP “${job.fileName}” → ${createdCount} new, ${versionedCount} versioned, ${unchangedCount} unchanged under ${section.name}/${packFolder}`,
       after: storageResult,
     });
+
+    // Link ZIP pack members into a Repository Workspace (create if needed).
+    if (userId) {
+      const docsByCode = new Map(
+        (await this.db.documents.find({
+          where: { project: { id: job.project.id }, code: In(importedMembers.map((m) => m.documentCode)) },
+        })).map((document) => [document.code, document.id]),
+      );
+      const workspaceCodeHint = typeof metadata.workspaceCode === 'string'
+        ? metadata.workspaceCode.trim()
+        : '';
+      await this.workspaces.attachImportJob({
+        workspaceCode: workspaceCodeHint || undefined,
+        createIfMissing: workspaceCodeHint
+          ? undefined
+          : { name: metadata.title.trim() || job.fileName, projectId: job.project.id },
+        importJobId: finalJob.id,
+        userId,
+        source: WorkspaceActivitySource.SYSTEM,
+        members: importedMembers.map((member) => ({
+          fileName: member.zipEntry.split('/').pop() || member.zipEntry,
+          relativePath: `${packFolder}/${member.zipEntry}`,
+          storageReference: member.path,
+          documentId: docsByCode.get(member.documentCode),
+          status: WorkspaceDocumentStatus.IMPORTED,
+        })),
+      }).catch(() => undefined);
+    }
 
     return this.get(id);
   }

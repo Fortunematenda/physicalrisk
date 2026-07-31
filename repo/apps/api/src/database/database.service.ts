@@ -4,8 +4,9 @@ import { DataSource, Repository } from 'typeorm';
 import {
   AuditLog, ConnectorSyncRun, DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote,
   DocumentRelationship, DocumentType, DocumentVersion, ExternalImportReference, FileType, ImportJob,
-  McpIntegration, MetadataField, Project, ProjectSection, RoutingRule, SourceConnection,
-  SourceFolderMapping, SourceSystem, SystemSetting, User,
+  McpIntegration, MetadataField, Project, ProjectSection, RepositoryWorkspace, RoutingRule,
+  SequenceCounter, SourceConnection, SourceFolderMapping, SourceSystem, SystemSetting, User,
+  WorkspaceActivity, WorkspaceDocument,
 } from './entities';
 
 @Injectable()
@@ -34,5 +35,9 @@ export class DatabaseService {
     @InjectRepository(ConnectorSyncRun) public readonly connectorSyncRuns: Repository<ConnectorSyncRun>,
     @InjectRepository(ExternalImportReference) public readonly externalImportReferences: Repository<ExternalImportReference>,
     @InjectRepository(McpIntegration) public readonly mcpIntegrations: Repository<McpIntegration>,
+    @InjectRepository(SequenceCounter) public readonly sequenceCounters: Repository<SequenceCounter>,
+    @InjectRepository(RepositoryWorkspace) public readonly workspaces: Repository<RepositoryWorkspace>,
+    @InjectRepository(WorkspaceDocument) public readonly workspaceDocuments: Repository<WorkspaceDocument>,
+    @InjectRepository(WorkspaceActivity) public readonly workspaceActivities: Repository<WorkspaceActivity>,
   ) {}
 }

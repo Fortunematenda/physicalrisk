@@ -62,6 +62,48 @@ export enum ExternalImportStatus {
 export enum McpIntegrationStatus { ACTIVE = 'ACTIVE', DISABLED = 'DISABLED' }
 export enum RelationshipType { SUPERSEDES = 'SUPERSEDES', RELATED_TO = 'RELATED_TO', DEPENDS_ON = 'DEPENDS_ON', SUPPORTS = 'SUPPORTS', PARENT_OF = 'PARENT_OF', CHILD_OF = 'CHILD_OF', REFERENCES = 'REFERENCES', IMPLEMENTS = 'IMPLEMENTS' }
 
+export enum WorkspaceStatus {
+  DRAFT = 'DRAFT',
+  UPLOADING = 'UPLOADING',
+  METADATA_REVIEW = 'METADATA_REVIEW',
+  VALIDATION_REQUIRED = 'VALIDATION_REQUIRED',
+  READY_TO_IMPORT = 'READY_TO_IMPORT',
+  IMPORTING = 'IMPORTING',
+  COMPLETED = 'COMPLETED',
+  PARTIALLY_COMPLETED = 'PARTIALLY_COMPLETED',
+  PAUSED = 'PAUSED',
+  CANCELLED = 'CANCELLED',
+  ARCHIVED = 'ARCHIVED',
+}
+export enum WorkspaceStep {
+  UPLOAD = 'UPLOAD',
+  EXTRACTION = 'EXTRACTION',
+  METADATA = 'METADATA',
+  APPROVAL = 'APPROVAL',
+  VALIDATION = 'VALIDATION',
+  ROUTING = 'ROUTING',
+  IMPORT = 'IMPORT',
+  COMPLETE = 'COMPLETE',
+}
+export enum WorkspaceDocumentStatus {
+  PENDING = 'PENDING',
+  EXTRACTED = 'EXTRACTED',
+  METADATA_REQUIRED = 'METADATA_REQUIRED',
+  VALIDATION_FAILED = 'VALIDATION_FAILED',
+  READY = 'READY',
+  IMPORTING = 'IMPORTING',
+  IMPORTED = 'IMPORTED',
+  FAILED = 'FAILED',
+  REMOVED = 'REMOVED',
+}
+export enum WorkspaceActivitySource {
+  WEB = 'WEB',
+  API = 'API',
+  CHATGPT_ACTION = 'CHATGPT_ACTION',
+  CHATGPT_MCP = 'CHATGPT_MCP',
+  SYSTEM = 'SYSTEM',
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid') id!: string;
@@ -78,6 +120,8 @@ export class User {
   @OneToMany(() => DocumentRelationship, (rel) => rel.createdBy) relationships!: DocumentRelationship[];
   @OneToMany(() => SourceConnection, (connection) => connection.createdBy) sourceConnections!: SourceConnection[];
   @OneToMany(() => McpIntegration, (integration) => integration.createdBy) mcpIntegrations!: McpIntegration[];
+  @OneToMany(() => RepositoryWorkspace, (workspace) => workspace.createdBy) workspaces!: RepositoryWorkspace[];
+  @OneToMany(() => WorkspaceActivity, (activity) => activity.user) workspaceActivities!: WorkspaceActivity[];
 }
 
 @Entity('directory_templates')
@@ -126,6 +170,7 @@ export class Project {
   @OneToMany(() => RoutingRule, (rule) => rule.project) routingRules!: RoutingRule[];
   @OneToMany(() => Document, (document) => document.project) documents!: Document[];
   @OneToMany(() => ImportJob, (job) => job.project) importJobs!: ImportJob[];
+  @OneToMany(() => RepositoryWorkspace, (workspace) => workspace.project) workspaces!: RepositoryWorkspace[];
   @OneToMany(() => SourceConnection, (connection) => connection.defaultProject) sourceConnections!: SourceConnection[];
   @OneToMany(() => SourceFolderMapping, (mapping) => mapping.project) folderMappings!: SourceFolderMapping[];
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
@@ -443,10 +488,82 @@ export class ImportJob {
   @Column({ name: 'external_import_status', type: 'enum', enum: ExternalImportStatus, nullable: true }) externalImportStatus!: ExternalImportStatus | null;
   @ManyToOne(() => SourceConnection, (connection) => connection.importJobs, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'source_connection_id' }) sourceConnection!: SourceConnection | null;
+  @ManyToOne(() => RepositoryWorkspace, (workspace) => workspace.importJobs, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'workspace_id' }) workspace!: RepositoryWorkspace | null;
   @CreateDateColumn({ name: 'started_at' }) startedAt!: Date;
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true }) completedAt!: Date | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('sequence_counters')
+@Unique(['name', 'year'])
+export class SequenceCounter {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column() name!: string;
+  @Column({ type: 'int' }) year!: number;
+  @Column({ name: 'next_value', type: 'int', default: 1 }) nextValue!: number;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('repository_workspaces')
+export class RepositoryWorkspace {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'workspace_code', unique: true }) workspaceCode!: string;
+  @Column() name!: string;
+  @ManyToOne(() => Project, (project) => project.workspaces, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'project_id' }) project!: Project;
+  @ManyToOne(() => User, (user) => user.workspaces, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'created_by_user_id' }) createdBy!: User;
+  @Column({ type: 'enum', enum: WorkspaceStatus, default: WorkspaceStatus.DRAFT }) status!: WorkspaceStatus;
+  @Column({ name: 'current_step', type: 'enum', enum: WorkspaceStep, default: WorkspaceStep.UPLOAD }) currentStep!: WorkspaceStep;
+  @Column({ name: 'total_documents', type: 'int', default: 0 }) totalDocuments!: number;
+  @Column({ name: 'completed_documents', type: 'int', default: 0 }) completedDocuments!: number;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+  @OneToMany(() => WorkspaceDocument, (document) => document.workspace) documents!: WorkspaceDocument[];
+  @OneToMany(() => WorkspaceActivity, (activity) => activity.workspace) activities!: WorkspaceActivity[];
+  @OneToMany(() => ImportJob, (job) => job.workspace) importJobs!: ImportJob[];
+}
+
+@Entity('workspace_documents')
+export class WorkspaceDocument {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @ManyToOne(() => RepositoryWorkspace, (workspace) => workspace.documents, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'workspace_id' }) workspace!: RepositoryWorkspace;
+  @ManyToOne(() => Document, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'document_id' }) document!: Document | null;
+  @ManyToOne(() => ImportJob, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'import_job_id' }) importJob!: ImportJob | null;
+  @Column({ name: 'file_name' }) fileName!: string;
+  @Column({ name: 'original_file_name', type: 'text', nullable: true }) originalFileName!: string | null;
+  @Column({ name: 'relative_path', type: 'text', nullable: true }) relativePath!: string | null;
+  @Column({ name: 'storage_reference', type: 'text', nullable: true }) storageReference!: string | null;
+  @Column({ name: 'mime_type', type: 'text', nullable: true }) mimeType!: string | null;
+  @Column({ name: 'file_extension', type: 'text', nullable: true }) fileExtension!: string | null;
+  @Column({ type: 'text', nullable: true }) checksum!: string | null;
+  @Column({ type: 'enum', enum: WorkspaceDocumentStatus, default: WorkspaceDocumentStatus.PENDING }) status!: WorkspaceDocumentStatus;
+  @Column({ name: 'metadata_json', type: 'jsonb', nullable: true }) metadataJson!: Record<string, unknown> | null;
+  @Column({ name: 'validation_json', type: 'jsonb', nullable: true }) validationJson!: Record<string, unknown> | null;
+  @Column({ name: 'routing_json', type: 'jsonb', nullable: true }) routingJson!: Record<string, unknown> | null;
+  @Column({ name: 'error_json', type: 'jsonb', nullable: true }) errorJson!: Record<string, unknown> | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+@Entity('workspace_activities')
+@Index(['workspace', 'createdAt'])
+export class WorkspaceActivity {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @ManyToOne(() => RepositoryWorkspace, (workspace) => workspace.activities, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'workspace_id' }) workspace!: RepositoryWorkspace;
+  @ManyToOne(() => User, (user) => user.workspaceActivities, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'user_id' }) user!: User | null;
+  @Column() action!: string;
+  @Column({ type: 'enum', enum: WorkspaceActivitySource, default: WorkspaceActivitySource.SYSTEM }) source!: WorkspaceActivitySource;
+  @Column({ name: 'details_json', type: 'jsonb', nullable: true }) detailsJson!: Record<string, unknown> | null;
+  @Column({ name: 'correlation_id', type: 'text', nullable: true }) correlationId!: string | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
 }
 
 @Entity('audit_logs')
@@ -481,4 +598,5 @@ export const ENTITIES = [
   SourceConnection, SourceFolderMapping, ConnectorSyncRun, ExternalImportReference, McpIntegration,
   SourceSystem, DocumentType, FileType, MetadataField, RoutingRule, Document, DocumentVersion, DocumentNote, DocumentRelationship,
   ImportJob, AuditLog, SystemSetting,
+  SequenceCounter, RepositoryWorkspace, WorkspaceDocument, WorkspaceActivity,
 ];

@@ -9,6 +9,7 @@ import { CreateDocumentTypes1721400000000 } from './migrations/1721400000000-Cre
 import { AddImportDraftStatus1721500000000 } from './migrations/1721500000000-AddImportDraftStatus';
 import { AddConnectorInfrastructure1721600000000 } from './migrations/1721600000000-AddConnectorInfrastructure';
 import { AddFolderMappingReviewFields1721600000001 } from './migrations/1721600000001-AddFolderMappingReviewFields';
+import { AddRepositoryWorkspaces1721700000000 } from './migrations/1721700000000-AddRepositoryWorkspaces';
 
 @Global()
 @Module({
@@ -27,6 +28,7 @@ import { AddFolderMappingReviewFields1721600000001 } from './migrations/17216000
             AddImportDraftStatus1721500000000,
             AddConnectorInfrastructure1721600000000,
             AddFolderMappingReviewFields1721600000001,
+            AddRepositoryWorkspaces1721700000000,
           ],
           migrationsRun: !synchronize,
           synchronize,

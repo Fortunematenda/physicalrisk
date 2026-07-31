@@ -218,6 +218,103 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           responses,
         },
       },
+      '/api/mcp/tools/create_workspace': {
+        post: {
+          operationId: 'create_workspace',
+          summary: 'Create Repository Workspace (WS-YYYY-#####)',
+          description: 'Returns workspaceCode to resume from another chat. Repository is source of truth.',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['name'],
+                  properties: {
+                    name: { type: 'string' },
+                    projectId: { type: 'string' },
+                    projectCode: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/get_workspace': {
+        post: {
+          operationId: 'get_workspace',
+          summary: 'Get workspace by code',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['workspaceCode'],
+                  properties: { workspaceCode: { type: 'string' } },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/get_latest_pending_workspace': {
+        post: {
+          operationId: 'get_latest_pending_workspace',
+          summary: 'Latest pending workspace for current user',
+          security,
+          requestBody: {
+            required: false,
+            content: { 'application/json': { schema: { type: 'object', properties: {} } } },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/get_workspace_summary': {
+        post: {
+          operationId: 'get_workspace_summary',
+          summary: 'Workspace summary with documents',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['workspaceCode'],
+                  properties: { workspaceCode: { type: 'string' } },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
+      '/api/mcp/tools/resume_workspace': {
+        post: {
+          operationId: 'resume_workspace',
+          summary: 'Resume workspace by code',
+          security,
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['workspaceCode'],
+                  properties: { workspaceCode: { type: 'string' } },
+                },
+              },
+            },
+          },
+          responses,
+        },
+      },
     },
     components: {
       schemas: {
@@ -320,4 +417,10 @@ NEW VERSION
 Example payload after user picks Project=MOSS, Type=Article, Module=Articles (omit approvedBy so the server uses the MCP key owner):
 {"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Goat","description":"Overview of goats as domestic animals.","documentContent":"# The Goat\\n\\n...full markdown..."}
 
-Tools: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, submit_approved_document, get_import_status.`;
+WORKSPACES (resume across chats)
+- Repository is the source of truth — never rely on ChatGPT chat history alone.
+- create_workspace → tell the user Workspace ID WS-YYYY-##### to resume later.
+- get_latest_pending_workspace / get_workspace / resume_workspace / get_workspace_summary for continue flows.
+- Phrases: "Resume workspace WS-…", "Continue my latest pending import".
+
+Tools: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, submit_approved_document, get_import_status, create_workspace, get_workspace, get_latest_pending_workspace, get_workspace_summary, resume_workspace.`;

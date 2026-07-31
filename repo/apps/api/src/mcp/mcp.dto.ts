@@ -29,6 +29,17 @@ export const MCP_TOOL_NAMES = [
   'upload_document_chunk',
   'submit_approved_document',
   'get_import_status',
+  'create_workspace',
+  'get_workspace',
+  'find_workspaces',
+  'get_latest_pending_workspace',
+  'resume_workspace',
+  'list_workspace_documents',
+  'get_workspace_summary',
+  'validate_workspace',
+  'submit_workspace',
+  'search_documents',
+  'get_document',
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];

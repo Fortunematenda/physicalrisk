@@ -25,6 +25,9 @@ import { McpBrowserUploadService } from './mcp-browser-upload.service';
 import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
+import { DocumentsService } from '../documents/documents.service';
+import { WorkspaceActivitySource } from '../database/entities';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 
 @Injectable()
 export class McpToolsService {
@@ -38,7 +41,13 @@ export class McpToolsService {
     private readonly remoteFiles: McpRemoteFileService,
     private readonly markdownPdf: McpMarkdownPdfService,
     private readonly config: ConfigService,
+    private readonly workspaces: WorkspacesService,
+    private readonly documents: DocumentsService,
   ) {}
+
+  private mcpActor(integration: McpIntegration) {
+    return { id: integration.createdBy?.id };
+  }
 
   listToolDefinitions() {
     return MCP_TOOL_NAMES.map((name) => ({
@@ -145,6 +154,58 @@ export class McpToolsService {
       }
       case 'get_import_status':
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
+      case 'create_workspace': {
+        const name = String(args.name ?? '').trim();
+        const projectCode = String(args.projectCode ?? '').trim();
+        const projectId = args.projectId
+          ? String(args.projectId)
+          : await this.resolveProjectId(integration, undefined, projectCode);
+        return this.workspaces.create(
+          { name, projectId, source: WorkspaceActivitySource.CHATGPT_ACTION },
+          this.mcpActor(integration),
+        );
+      }
+      case 'get_workspace':
+        return this.workspaces.get(String(args.workspaceCode ?? ''), this.mcpActor(integration));
+      case 'find_workspaces':
+        return this.workspaces.list({
+          workspaceCode: args.workspaceCode ? String(args.workspaceCode) : undefined,
+          name: args.name ? String(args.name) : undefined,
+          projectCode: args.projectCode ? String(args.projectCode) : undefined,
+          status: args.status ? String(args.status) : undefined,
+          mine: true,
+        }, this.mcpActor(integration));
+      case 'get_latest_pending_workspace':
+        return this.workspaces.latestPending(this.mcpActor(integration));
+      case 'resume_workspace':
+        return this.workspaces.resume(
+          String(args.workspaceCode ?? ''),
+          this.mcpActor(integration),
+          WorkspaceActivitySource.CHATGPT_ACTION,
+        );
+      case 'list_workspace_documents':
+        return this.workspaces.listDocuments(String(args.workspaceCode ?? ''), this.mcpActor(integration));
+      case 'get_workspace_summary':
+        return this.workspaces.summary(String(args.workspaceCode ?? ''), this.mcpActor(integration));
+      case 'validate_workspace':
+        return this.workspaces.validate(
+          String(args.workspaceCode ?? ''),
+          this.mcpActor(integration),
+          WorkspaceActivitySource.CHATGPT_ACTION,
+        );
+      case 'submit_workspace':
+        return this.workspaces.submit(
+          String(args.workspaceCode ?? ''),
+          this.mcpActor(integration),
+          WorkspaceActivitySource.CHATGPT_ACTION,
+        );
+      case 'search_documents':
+        return this.documents.list({
+          projectId: args.projectId ? String(args.projectId) : undefined,
+          search: args.search ? String(args.search) : undefined,
+        });
+      case 'get_document':
+        return this.documents.get(String(args.documentId ?? args.id ?? ''));
       default:
         throw new BadRequestException(`Unknown MCP tool: ${toolName}`);
     }
@@ -1074,6 +1135,17 @@ export class McpToolsService {
       submit_approved_document:
         'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64; without those returns uploadUrl',
       get_import_status: 'Get the processing status of an import job by id',
+      create_workspace: 'Create a Repository Workspace (returns WS-YYYY-#####)',
+      get_workspace: 'Get a workspace by workspaceCode',
+      find_workspaces: 'Find workspaces for the current user',
+      get_latest_pending_workspace: 'Latest pending workspace for the authenticated MCP key owner',
+      resume_workspace: 'Resume a paused or in-progress workspace',
+      list_workspace_documents: 'List documents in a workspace',
+      get_workspace_summary: 'Workspace summary with progress and documents',
+      validate_workspace: 'Validate workspace documents before submit',
+      submit_workspace: 'Submit a ready workspace for import processing',
+      search_documents: 'Search Master Document Index',
+      get_document: 'Get a document by id',
     };
     return descriptions[name];
   }
@@ -1209,6 +1281,71 @@ export class McpToolsService {
         type: 'object',
         required: ['importJobId'],
         properties: { importJobId: { type: 'string', format: 'uuid' } },
+      },
+      create_workspace: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string' },
+          projectId: { type: 'string', format: 'uuid' },
+          projectCode: { type: 'string' },
+        },
+      },
+      get_workspace: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string', description: 'e.g. WS-2026-00045' } },
+      },
+      find_workspaces: {
+        type: 'object',
+        properties: {
+          workspaceCode: { type: 'string' },
+          name: { type: 'string' },
+          projectCode: { type: 'string' },
+          status: { type: 'string' },
+        },
+      },
+      get_latest_pending_workspace: {
+        type: 'object',
+        properties: { unused: { type: 'boolean' } },
+        additionalProperties: false,
+      },
+      resume_workspace: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string' } },
+      },
+      list_workspace_documents: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string' } },
+      },
+      get_workspace_summary: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string' } },
+      },
+      validate_workspace: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string' } },
+      },
+      submit_workspace: {
+        type: 'object',
+        required: ['workspaceCode'],
+        properties: { workspaceCode: { type: 'string' } },
+      },
+      search_documents: {
+        type: 'object',
+        properties: {
+          search: { type: 'string' },
+          projectId: { type: 'string', format: 'uuid' },
+        },
+      },
+      get_document: {
+        type: 'object',
+        required: ['documentId'],
+        properties: { documentId: { type: 'string', format: 'uuid' } },
       },
     };
     return schemas[name];

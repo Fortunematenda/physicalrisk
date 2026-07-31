@@ -321,6 +321,28 @@
       - "3002:3000"
     networks: [physicalrisk-network]
 
+  # Standalone MCP proxy → repo-api only (no DB / storage access)
+  repo-mcp:
+    build:
+      context: ./repo-mcp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      REPO_API_URL: http://repo-api:4000/api
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
+      KEYCLOAK_AUDIENCE: ${REPO_MCP_AUDIENCE:-physicalrisk-repo}
+      KEYCLOAK_CLIENT_ID: ${REPO_MCP_CLIENT_ID:-repo-chatgpt-app}
+      REPO_MCP_API_KEY: ${REPO_MCP_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      - repo-api
+      - keycloak
+    ports:
+      - "3100:3100"
+    networks: [physicalrisk-network]
+
   # â”€â”€â”€ Reverse Proxy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   nginx:
     image: nginx:1.27-alpine
@@ -341,6 +363,7 @@
       - moss-api
       - repo-web
       - repo-api
+      - repo-mcp
     networks:
       physicalrisk-network:
         aliases:
@@ -348,11 +371,13 @@
           - apps.localhost
           - moss.localhost
           - repo.localhost
+          - repo-mcp.localhost
           - test.physicalrisk.com
           - auth.physicalrisk.com
           - apps.physicalrisk.com
           - moss.physicalrisk.com
           - repo.physicalrisk.com
+          - repo-mcp.physicalrisk.com
 
 volumes:
   wordpress_mysql:

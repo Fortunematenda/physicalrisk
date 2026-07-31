@@ -1,0 +1,36 @@
+# Repository MCP Service
+
+Standalone service: `repo-mcp/`
+
+## Rules
+
+- Calls **repo-api only**
+- No PostgreSQL, no VPS filesystem, no document-code generation
+- Forwards `Authorization` (OIDC Bearer or `mcp_…` API key)
+
+## Endpoint
+
+- Local: `http://localhost:3100/mcp`
+- Production: `https://repo-mcp.physicalrisk.com/mcp`
+- Health: `/health`
+
+## Env
+
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | Default 3100 |
+| `REPO_API_URL` | e.g. `http://repo-api:4000/api` |
+| `REPO_MCP_API_KEY` | Optional fallback `mcp_…` key |
+| `KEYCLOAK_ISSUER` | Documented for OIDC client setup |
+| `KEYCLOAK_AUDIENCE` / `KEYCLOAK_CLIENT_ID` | Future user-token validation |
+
+## Docker
+
+```bash
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.sso.yml --env-file .env.sso build repo-mcp
+docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-mcp
+```
+
+## Tools (proxy)
+
+`list_repository_workspaces`, `get_repository_workspace`, `get_latest_repository_workspace`, `get_workspace_summary`, `list_workspace_documents`, `get_workspace_activity`, `create_repository_workspace`, `resume_repository_workspace`, `validate_repository_workspace`, `submit_repository_workspace`, `archive_repository_workspace`, `list_repository_projects`, `find_repository_documents`, `get_repository_document`, `get_import_job`

@@ -483,7 +483,9 @@ export class ConfigurationService {
   }
 
   /** Normalise create/update payload: active first, then inactive, positions 1..N. */
-  private normaliseTemplateSectionInputs(rawSections: Array<Record<string, unknown>>) {
+  private normaliseTemplateSectionInputs(
+    rawSections: Array<Record<string, unknown>>,
+  ): Array<Record<string, unknown>> {
     const mapped = rawSections.map((raw, index) => ({
       raw,
       index,

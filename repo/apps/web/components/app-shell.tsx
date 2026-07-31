@@ -13,6 +13,7 @@ const groups = [
     ['Dashboard', '/', '⌂'],
     ['Master Document Index', '/repository/index', '▤'],
     ['Import Queue', '/imports/queue', '≡'],
+    ['Repository Workspaces', '/workspaces', '▦'],
   ]},
   { label: 'Repository', items: [
     ['VPS Repository Explorer', '/repository/explorer', '▣'],

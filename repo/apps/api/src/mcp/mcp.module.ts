@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { RolesGuard } from '../common/roles.guard';
+import { DocumentsModule } from '../documents/documents.module';
 import { ImportsModule } from '../imports/imports.module';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { McpAuthGuard } from './mcp-auth.guard';
 import { McpAuthService } from './mcp-auth.service';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
@@ -11,7 +13,7 @@ import { McpToolsService } from './mcp-tools.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 
 @Module({
-  imports: [ImportsModule],
+  imports: [ImportsModule, WorkspacesModule, DocumentsModule],
   controllers: [McpController],
   providers: [
     McpAuthService,
