@@ -26,6 +26,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
                 exists: { type: 'boolean' },
                 instructions: { type: 'string' },
                 message: { type: 'string' },
+                total: { type: 'integer' },
+                count: { type: 'integer' },
               },
             },
             message: { type: 'string' },
@@ -52,6 +54,28 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
   const responses = { '200': ok, '400': err, '401': err, '403': err };
   const security = [{ McpBearer: [] }];
 
+  const emptyBody = {
+    required: true,
+    content: {
+      'application/json': {
+        schema: { type: 'object', properties: { unused: { type: 'boolean' } } },
+      },
+    },
+  };
+
+  const workspaceCodeBody = {
+    required: true,
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          required: ['workspaceCode'],
+          properties: { workspaceCode: { type: 'string', description: 'e.g. WS-2026-00003' } },
+        },
+      },
+    },
+  };
+
   const payloadSchema = {
     type: 'object',
     required: ['payload'],
@@ -67,6 +91,22 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     },
   };
 
+  const post = (
+    operationId: string,
+    summary: string,
+    requestBody: unknown,
+    description?: string,
+  ) => ({
+    post: {
+      operationId,
+      summary,
+      ...(description ? { description } : {}),
+      security,
+      requestBody,
+      responses,
+    },
+  });
+
   return {
     openapi: '3.1.0',
     info: {
@@ -75,256 +115,259 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Same-chat: research → generate → approve → submit with documentContent. '
         + 'Supports NEW documents and NEW_VERSION revisions of existing documents '
         + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
+        + 'search_documents lists the Master Document Index. '
         + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.15.1',
+      version: '1.16.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
-      '/api/mcp/tools/list_repository_projects': {
-        post: {
-          operationId: 'list_repository_projects',
-          summary: 'List repository projects',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: { type: 'object', properties: { unused: { type: 'boolean' } } },
+      '/api/mcp/tools/list_repository_projects': post(
+        'list_repository_projects',
+        'List repository projects',
+        emptyBody,
+      ),
+      '/api/mcp/tools/list_document_types': post(
+        'list_document_types',
+        'List document types',
+        emptyBody,
+      ),
+      '/api/mcp/tools/list_repository_modules': post(
+        'list_repository_modules',
+        'List project modules',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  projectCode: { type: 'string' },
+                  projectId: { type: 'string' },
+                },
               },
             },
           },
-          responses,
         },
-      },
-      '/api/mcp/tools/list_document_types': {
-        post: {
-          operationId: 'list_document_types',
-          summary: 'List document types',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: { type: 'object', properties: { unused: { type: 'boolean' } } },
+      ),
+      '/api/mcp/tools/resolve_import_targets': post(
+        'resolve_import_targets',
+        'Resolve project/module/type names to IDs',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['project'],
+                properties: {
+                  project: { type: 'string', description: 'Project code or name (e.g. MCRD)' },
+                  module: { type: 'string', description: 'Folder/module name' },
+                  documentType: { type: 'string' },
+                },
               },
             },
           },
-          responses,
         },
-      },
-      '/api/mcp/tools/list_repository_modules': {
-        post: {
-          operationId: 'list_repository_modules',
-          summary: 'List project modules',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    projectCode: { type: 'string' },
-                    projectId: { type: 'string' },
+        'Map human labels to projectId/sectionKey/documentType before submit.',
+      ),
+      '/api/mcp/tools/search_documents': post(
+        'search_documents',
+        'List/search Master Document Index',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  search: { type: 'string', description: 'Title, code, or type text' },
+                  projectCode: { type: 'string', description: 'e.g. MCRD' },
+                  projectId: { type: 'string' },
+                  status: { type: 'string' },
+                  limit: { type: 'integer', minimum: 1, maximum: 200 },
+                },
+              },
+            },
+          },
+        },
+        'Use for how many / list all / what was imported. Returns compact index rows.',
+      ),
+      '/api/mcp/tools/get_document': post(
+        'get_document',
+        'Get one document by id or code',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  documentId: { type: 'string' },
+                  documentCode: { type: 'string', description: 'e.g. MCRD-AS1-012' },
+                },
+              },
+            },
+          },
+        },
+      ),
+      '/api/mcp/tools/check_document_exists': post(
+        'check_document_exists',
+        'Check duplicates; returns newVersionSubmitHints',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  projectCode: { type: 'string' },
+                  title: { type: 'string' },
+                  documentCode: { type: 'string' },
+                  fileName: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
+      ),
+      '/api/mcp/tools/submit_approved_document': post(
+        'submit_approved_document',
+        'Submit approved document (new or next version)',
+        {
+          required: true,
+          content: { 'application/json': { schema: payloadSchema } },
+        },
+        'Pass only payload. After approve: list project/type/module, then submit. '
+          + 'Do not ask date/MIME/filename/version. Put full Markdown in documentContent. '
+          + 'NEW_VERSION needs mode + existingDocumentId or documentCode.',
+      ),
+      '/api/mcp/tools/prepare_approved_document': post(
+        'prepare_approved_document',
+        'Prepare or submit (alias)',
+        {
+          required: true,
+          content: { 'application/json': { schema: payloadSchema } },
+        },
+        'Same as submit_approved_document.',
+      ),
+      '/api/mcp/tools/get_import_status': post(
+        'get_import_status',
+        'Get import job status',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['importJobId'],
+                properties: { importJobId: { type: 'string' } },
+              },
+            },
+          },
+        },
+      ),
+      '/api/mcp/tools/create_workspace': post(
+        'create_workspace',
+        'Create Repository Workspace (WS-YYYY-#####)',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name', 'projectCode'],
+                properties: {
+                  name: { type: 'string' },
+                  projectCode: {
+                    type: 'string',
+                    description: 'Project code from list_repository_projects (e.g. MCRD)',
                   },
+                  projectId: { type: 'string' },
                 },
               },
             },
           },
-          responses,
         },
-      },
-      '/api/mcp/tools/check_document_exists': {
-        post: {
-          operationId: 'check_document_exists',
-          summary: 'Check duplicates; returns newVersionSubmitHints',
-          description:
-            'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    projectCode: { type: 'string' },
-                    title: { type: 'string' },
-                    documentCode: { type: 'string' },
-                    fileName: { type: 'string' },
-                  },
+        'Returns workspaceCode to resume from another chat. Prefer projectCode (MCRD/MOSS/PROR).',
+      ),
+      '/api/mcp/tools/get_workspace': post('get_workspace', 'Get workspace by code', workspaceCodeBody),
+      '/api/mcp/tools/find_workspaces': post(
+        'find_workspaces',
+        'Find workspaces for current user',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  workspaceCode: { type: 'string' },
+                  name: { type: 'string' },
+                  projectCode: { type: 'string' },
+                  status: { type: 'string' },
                 },
               },
             },
           },
-          responses,
         },
-      },
-      '/api/mcp/tools/submit_approved_document': {
-        post: {
-          operationId: 'submit_approved_document',
-          summary: 'Submit approved document (new or next version)',
-          description:
-            'Pass only payload. After approve: list project/type/module, then submit. '
-            + 'Do not ask date/MIME/filename/version. Put full Markdown in documentContent. '
-            + 'NEW_VERSION needs mode + existingDocumentId or documentCode.',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: payloadSchema,
-              },
-            },
-          },
-          responses,
+      ),
+      '/api/mcp/tools/get_latest_pending_workspace': post(
+        'get_latest_pending_workspace',
+        'Latest pending workspace for current user',
+        {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: {} } } },
         },
-      },
-      '/api/mcp/tools/prepare_approved_document': {
-        post: {
-          operationId: 'prepare_approved_document',
-          summary: 'Prepare or submit (alias)',
-          description: 'Same as submit_approved_document.',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: payloadSchema,
-              },
-            },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/get_import_status': {
-        post: {
-          operationId: 'get_import_status',
-          summary: 'Get import job status',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['importJobId'],
-                  properties: { importJobId: { type: 'string' } },
+      ),
+      '/api/mcp/tools/get_workspace_summary': post(
+        'get_workspace_summary',
+        'Workspace summary with documents',
+        workspaceCodeBody,
+      ),
+      '/api/mcp/tools/list_workspace_documents': post(
+        'list_workspace_documents',
+        'List documents in a workspace',
+        workspaceCodeBody,
+      ),
+      '/api/mcp/tools/resume_workspace': post(
+        'resume_workspace',
+        'Resume workspace by code',
+        workspaceCodeBody,
+      ),
+      '/api/mcp/tools/validate_workspace': post(
+        'validate_workspace',
+        'Validate workspace before submit',
+        workspaceCodeBody,
+      ),
+      '/api/mcp/tools/submit_workspace': post(
+        'submit_workspace',
+        'Submit ready workspace for import',
+        workspaceCodeBody,
+      ),
+      '/api/mcp/tools/attach_document_to_workspace': post(
+        'attach_document_to_workspace',
+        'Attach imported document to workspace',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['workspaceCode'],
+                properties: {
+                  workspaceCode: { type: 'string' },
+                  documentCode: { type: 'string', description: 'e.g. MCRD-AS1-012' },
+                  documentId: { type: 'string' },
+                  importJobId: { type: 'string' },
                 },
               },
             },
           },
-          responses,
         },
-      },
-      '/api/mcp/tools/create_workspace': {
-        post: {
-          operationId: 'create_workspace',
-          summary: 'Create Repository Workspace (WS-YYYY-#####)',
-          description:
-            'Returns workspaceCode to resume from another chat. Repository is source of truth. '
-            + 'Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
-            + 'Do not invent codes like MARKETING.',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['name', 'projectCode'],
-                  properties: {
-                    name: { type: 'string' },
-                    projectCode: {
-                      type: 'string',
-                      description: 'Project code from list_repository_projects (e.g. MCRD)',
-                    },
-                    projectId: {
-                      type: 'string',
-                      description: 'Optional project UUID — prefer projectCode',
-                    },
-                  },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/get_workspace': {
-        post: {
-          operationId: 'get_workspace',
-          summary: 'Get workspace by code',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['workspaceCode'],
-                  properties: { workspaceCode: { type: 'string' } },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/get_latest_pending_workspace': {
-        post: {
-          operationId: 'get_latest_pending_workspace',
-          summary: 'Latest pending workspace for current user',
-          security,
-          requestBody: {
-            required: false,
-            content: { 'application/json': { schema: { type: 'object', properties: {} } } },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/get_workspace_summary': {
-        post: {
-          operationId: 'get_workspace_summary',
-          summary: 'Workspace summary with documents',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['workspaceCode'],
-                  properties: { workspaceCode: { type: 'string' } },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
-      '/api/mcp/tools/resume_workspace': {
-        post: {
-          operationId: 'resume_workspace',
-          summary: 'Resume workspace by code',
-          security,
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  required: ['workspaceCode'],
-                  properties: { workspaceCode: { type: 'string' } },
-                },
-              },
-            },
-          },
-          responses,
-        },
-      },
+      ),
     },
     components: {
       schemas: {
@@ -349,6 +392,16 @@ FIELD MAPPING (never swap — be accurate and consistent)
 - documentType = Document classification (e.g. Article, Technical Specification). From list_document_types. NOT the folder name.
 - Correct pair example: module=Articles + documentType=Article.
 - Wrong: documentType=Articles (that is a folder) or module=Article (that is a type).
+
+════════════════════════════════════
+LIST / SEARCH / COUNT (mandatory)
+════════════════════════════════════
+When the user asks how many documents, list documents, what was imported, imported today, or show the index:
+1) Call search_documents NOW (optional projectCode / search / limit).
+2) Report total + a compact table: documentCode, title, projectCode, module, currentVersion, updatedAt.
+3) For one document detail, call get_document with documentCode (preferred) or documentId.
+Never invent or omit documents — only report tool results.
+Never say the connector cannot list documents.
 
 ════════════════════════════════════
 APPROVAL / IMPORT FLOW (mandatory)
@@ -417,6 +470,7 @@ FORBIDDEN
 - Asking for Approval date, MIME type, Original filename, Version, Approved by, Owner, or "the document itself" after you already wrote it in chat.
 - Submitting before project + documentType + module are selected (unless the user already provided all three).
 - Claiming Import Queue always needs a human, or that versioning is unsupported.
+- Claiming you cannot list/search repository documents.
 - Swapping module and documentType.
 - Hardcoding a fixed person name (e.g. Wayne) as approvedBy unless that person is the user.
 
@@ -430,7 +484,7 @@ Example payload after user picks Project=MOSS, Type=Article, Module=Articles (om
 WORKSPACES (resume across chats)
 - Repository is the source of truth — never rely on ChatGPT chat history alone.
 - create_workspace → tell the user Workspace ID WS-YYYY-##### to resume later.
-- get_latest_pending_workspace / get_workspace / resume_workspace / get_workspace_summary for continue flows.
+- find_workspaces / get_latest_pending_workspace / get_workspace / resume_workspace / get_workspace_summary / list_workspace_documents for continue flows.
 - Phrases: "Resume workspace WS-…", "Continue my latest pending import".
 
-Tools: list_repository_projects, list_document_types, list_repository_modules, check_document_exists, submit_approved_document, get_import_status, create_workspace, get_workspace, get_latest_pending_workspace, get_workspace_summary, resume_workspace.`;
+Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;

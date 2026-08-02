@@ -220,15 +220,158 @@ export class McpToolsService {
           WorkspaceActivitySource.CHATGPT_MCP,
         );
       case 'search_documents':
-        return this.documents.list({
+        return this.searchDocuments(integration, {
           projectId: args.projectId ? String(args.projectId) : undefined,
+          projectCode: args.projectCode ? String(args.projectCode) : undefined,
           search: args.search ? String(args.search) : undefined,
+          status: args.status ? String(args.status) : undefined,
+          limit: args.limit != null ? Number(args.limit) : undefined,
         });
       case 'get_document':
-        return this.documents.get(String(args.documentId ?? args.id ?? ''));
+        return this.getDocument(integration, {
+          documentId: args.documentId ? String(args.documentId) : args.id ? String(args.id) : undefined,
+          documentCode: args.documentCode ? String(args.documentCode) : undefined,
+        });
       default:
         throw new BadRequestException(`Unknown MCP tool: ${toolName}`);
     }
+  }
+
+  /**
+   * Compact Master Document Index rows for ChatGPT/Cursor (full document graphs
+   * overflow Actions validation and blow response size limits).
+   */
+  async searchDocuments(
+    integration: McpIntegration,
+    input: {
+      projectId?: string;
+      projectCode?: string;
+      search?: string;
+      status?: string;
+      limit?: number;
+    },
+  ) {
+    const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 200);
+    let projectId: string | undefined;
+    if (input.projectId || input.projectCode) {
+      projectId = await this.resolveProjectId(integration, input.projectId, input.projectCode);
+    }
+
+    const allowedIds = integration.allowedProjectIds ?? [];
+    const qb = this.db.documents.createQueryBuilder('document')
+      .leftJoinAndSelect('document.project', 'project')
+      .leftJoinAndSelect('document.section', 'section')
+      .leftJoinAndSelect('document.versions', 'versions')
+      .orderBy('document.updatedAt', 'DESC')
+      .take(limit);
+
+    if (projectId) {
+      qb.andWhere('project.id = :projectId', { projectId });
+    } else if (!mcpAllowsAllProjects(allowedIds)) {
+      if (!allowedIds.length) {
+        return { total: 0, count: 0, documents: [] };
+      }
+      qb.andWhere('project.id IN (:...allowedIds)', { allowedIds });
+    }
+
+    if (input.status) qb.andWhere('document.status = :status', { status: input.status });
+    if (input.search?.trim()) {
+      qb.andWhere(
+        '(document.title ILIKE :search OR document.code ILIKE :search OR document.documentType ILIKE :search)',
+        { search: `%${input.search.trim()}%` },
+      );
+    }
+
+    const [rows, total] = await qb.getManyAndCount();
+    const documents = rows.map((doc) => {
+      const current = [...(doc.versions ?? [])].find((v) => v.isCurrent)
+        ?? [...(doc.versions ?? [])].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+      return {
+        id: doc.id,
+        documentCode: doc.code,
+        title: doc.title,
+        projectCode: doc.project?.code ?? null,
+        projectName: doc.project?.name ?? null,
+        module: doc.section?.name ?? null,
+        sectionKey: doc.section?.sectionKey ?? null,
+        documentType: doc.documentType,
+        status: doc.status,
+        currentVersion: current?.versionNo ?? null,
+        owner: doc.owner ?? null,
+        updatedAt: doc.updatedAt,
+        createdAt: doc.createdAt,
+      };
+    });
+
+    return {
+      total,
+      count: documents.length,
+      truncated: total > documents.length,
+      documents,
+      message: total === 0
+        ? 'No documents matched.'
+        : `Found ${total} document(s)${total > documents.length ? ` (showing ${documents.length})` : ''}.`,
+    };
+  }
+
+  async getDocument(
+    integration: McpIntegration,
+    input: { documentId?: string; documentCode?: string },
+  ) {
+    const id = (input.documentId || '').trim();
+    const code = (input.documentCode || '').trim();
+    if (!id && !code) {
+      throw new BadRequestException('Provide documentId or documentCode');
+    }
+
+    const document = id
+      ? await this.db.documents.findOne({
+        where: { id },
+        relations: { project: true, section: true, versions: true },
+      })
+      : await this.db.documents.findOne({
+        where: { code },
+        relations: { project: true, section: true, versions: true },
+      });
+
+    if (!document) {
+      throw new NotFoundException(
+        id ? `Document '${id}' was not found` : `Document code '${code}' was not found`,
+      );
+    }
+
+    this.assertProjectAccess(integration, document.project.id);
+    const current = [...(document.versions ?? [])].find((v) => v.isCurrent)
+      ?? [...(document.versions ?? [])].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+
+    return {
+      id: document.id,
+      documentCode: document.code,
+      title: document.title,
+      description: document.description,
+      projectCode: document.project?.code ?? null,
+      projectName: document.project?.name ?? null,
+      module: document.section?.name ?? null,
+      sectionKey: document.section?.sectionKey ?? null,
+      documentType: document.documentType,
+      status: document.status,
+      owner: document.owner ?? null,
+      currentVersion: current
+        ? {
+          id: current.id,
+          versionNo: current.versionNo,
+          approvalStatus: current.approvalStatus,
+          approvedBy: current.approvedBy,
+          approvalDate: current.approvalDate,
+          originalFileName: current.originalFileName,
+          mimeType: current.mimeType,
+          fileSize: current.fileSize,
+          createdAt: current.createdAt,
+        }
+        : null,
+      updatedAt: document.updatedAt,
+      createdAt: document.createdAt,
+    };
   }
 
   async listRepositoryProjects(integration: McpIntegration) {
@@ -1265,8 +1408,10 @@ export class McpToolsService {
       submit_workspace: 'Submit a ready workspace for import processing',
       attach_document_to_workspace:
         'Attach an already-imported repository document to a workspace by documentCode (e.g. PROR-PA-002) or documentId',
-      search_documents: 'Search Master Document Index',
-      get_document: 'Get a document by id',
+      search_documents:
+        'Search / list Master Document Index (compact). Use for "how many documents", "list documents", "what did I import". '
+        + 'Optional projectCode, search text, status, limit.',
+      get_document: 'Get one document by documentId or documentCode (e.g. MCRD-AS1-012)',
     };
     return descriptions[name];
   }
@@ -1473,14 +1618,19 @@ export class McpToolsService {
       search_documents: {
         type: 'object',
         properties: {
-          search: { type: 'string' },
+          search: { type: 'string', description: 'Match title, document code, or document type' },
+          projectCode: { type: 'string', description: 'e.g. MCRD, MOSS, PROR' },
           projectId: { type: 'string', format: 'uuid' },
+          status: { type: 'string', description: 'Optional status filter (e.g. CURRENT)' },
+          limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Max rows (default 50)' },
         },
       },
       get_document: {
         type: 'object',
-        required: ['documentId'],
-        properties: { documentId: { type: 'string', format: 'uuid' } },
+        properties: {
+          documentId: { type: 'string', format: 'uuid' },
+          documentCode: { type: 'string', description: 'e.g. MCRD-AS1-012' },
+        },
       },
     };
     return schemas[name];

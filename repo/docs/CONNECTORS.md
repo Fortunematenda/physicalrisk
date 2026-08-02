@@ -100,9 +100,12 @@ MCP is hosted inside the NestJS API (not a separate service):
 - `list_repository_modules`
 - `list_document_types`
 - `resolve_import_targets` (map names like MOSS / Enterprise Architecture / Articles → IDs)
+- `search_documents` (Master Document Index list/search — compact rows)
+- `get_document` (by `documentId` or `documentCode`)
 - `check_document_exists`
 - `submit_approved_document` (APPROVED only)
 - `get_import_status`
+- Workspace tools: `create_workspace`, `get_workspace`, `find_workspaces`, `get_latest_pending_workspace`, `resume_workspace`, `list_workspace_documents`, `get_workspace_summary`, `validate_workspace`, `submit_workspace`, `attach_document_to_workspace`
 
 ### Authentication
 
