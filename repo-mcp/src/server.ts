@@ -18,10 +18,22 @@ import {
   wwwAuthenticateHeader,
 } from './oauth.js';
 
+/**
+ * ChatGPT connectors require structuredContent to be a JSON object (not an array).
+ * GET /documents previously returned a bare array → "invalid response-format".
+ */
 function toolResult(data: unknown) {
+  const payload =
+    data && typeof data === 'object' && !Array.isArray(data) && 'result' in (data as object)
+      ? (data as { result: unknown }).result
+      : data;
+  const structured =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : { items: payload };
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-    structuredContent: data as Record<string, unknown>,
+    content: [{ type: 'text' as const, text: JSON.stringify(structured, null, 2) }],
+    structuredContent: structured,
   };
 }
 
@@ -29,9 +41,10 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.1.0',
+    version: '1.16.0',
     description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
+      + 'Use find_repository_documents / search_documents to list Master Document Index. '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
       + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent.',
   });
@@ -251,27 +264,46 @@ function createMcpServer(authHeader?: string) {
     async (args) => toolResult(await mcpTool('get_import_status', args)),
   );
 
+  const searchDocsSchema = {
+    search: z.string().optional().describe('Match title, document code, or type'),
+    projectCode: z.string().optional().describe('e.g. MCRD, MOSS, PROR'),
+    projectId: z.string().optional(),
+    status: z.string().optional().describe('e.g. CURRENT'),
+    limit: z.number().int().min(1).max(200).optional().describe('Max rows (default 50)'),
+  };
+
   server.tool(
     'find_repository_documents',
-    'Search repository documents',
-    {
-      search: z.string().optional(),
-      projectId: z.string().optional(),
-    },
-    async (args) => {
-      const qs = new URLSearchParams();
-      if (args.search) qs.set('search', args.search);
-      if (args.projectId) qs.set('projectId', args.projectId);
-      return toolResult(await api.request('GET', `/documents?${qs}`));
-    },
+    'List/search Master Document Index (compact). Use for how many / list all / what was imported.',
+    searchDocsSchema,
+    async (args) => toolResult(await mcpTool('search_documents', args)),
+  );
+
+  server.tool(
+    'search_documents',
+    'Alias of find_repository_documents — list/search Master Document Index.',
+    searchDocsSchema,
+    async (args) => toolResult(await mcpTool('search_documents', args)),
   );
 
   server.tool(
     'get_repository_document',
-    'Get document by UUID',
-    { documentId: z.string() },
-    async ({ documentId }) =>
-      toolResult(await api.request('GET', `/documents/${encodeURIComponent(documentId)}`)),
+    'Get one document by UUID or documentCode (e.g. MCRD-AS1-012)',
+    {
+      documentId: z.string().optional(),
+      documentCode: z.string().optional().describe('e.g. MCRD-AS1-012'),
+    },
+    async (args) => toolResult(await mcpTool('get_document', args)),
+  );
+
+  server.tool(
+    'get_document',
+    'Alias of get_repository_document — get one document by id or code.',
+    {
+      documentId: z.string().optional(),
+      documentCode: z.string().optional().describe('e.g. MCRD-AS1-012'),
+    },
+    async (args) => toolResult(await mcpTool('get_document', args)),
   );
 
   return server;
