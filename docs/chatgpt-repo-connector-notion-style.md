@@ -87,9 +87,11 @@ Keycloak 25+ can map audience; Repo API currently accepts realm access tokens fo
 
 ```bash
 cd /opt/physicalrisk && bash scripts/deploy-sso-rsync.sh
-DOCKER_BUILDKIT=1 docker compose -f docker-compose.sso.yml --env-file .env.sso build repo-mcp
-docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-mcp nginx
+DOCKER_BUILDKIT=1 docker compose -f docker-compose.sso.yml --env-file .env.sso build --no-cache repo-api repo-mcp
+docker compose -f docker-compose.sso.yml --env-file .env.sso up -d repo-api repo-mcp nginx
 ```
+
+Rebuild **both** `repo-api` and `repo-mcp` when document listing changes. The ChatGPT connector must use compact `search_documents` — bare `GET /documents` arrays cause "invalid response-format" errors.
 
 Verify (uses existing `repo.physicalrisk.com` DNS/TLS — no `repo-mcp` subdomain required):
 
