@@ -42,6 +42,11 @@ export interface McpApprovedDocumentRequest {
   fileContentBase64: string;
   mimeType?: string;
   mcpIntegrationId?: string;
+  /**
+   * When true (default for ChatGPT MCP), stage the import and return immediately.
+   * Repository placement runs in a background worker so nginx/ChatGPT timeouts cannot kill the job.
+   */
+  processAsync?: boolean;
 }
 
 export interface McpExternalImportResult {

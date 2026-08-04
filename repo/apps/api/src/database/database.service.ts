@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import {
-  AuditLog, ConnectorSyncRun, DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote,
+  AuditLog, ConnectorIdempotencyKey, ConnectorImportJob, ConnectorSession, ConnectorSyncRun,
+  DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote,
   DocumentRelationship, DocumentType, DocumentVersion, ExternalImportReference, FileType, ImportJob,
   McpIntegration, MetadataField, Project, ProjectSection, RepositoryWorkspace, RoutingRule,
   SequenceCounter, SourceConnection, SourceFolderMapping, SourceSystem, SystemSetting, User,
@@ -39,5 +40,8 @@ export class DatabaseService {
     @InjectRepository(RepositoryWorkspace) public readonly workspaces: Repository<RepositoryWorkspace>,
     @InjectRepository(WorkspaceDocument) public readonly workspaceDocuments: Repository<WorkspaceDocument>,
     @InjectRepository(WorkspaceActivity) public readonly workspaceActivities: Repository<WorkspaceActivity>,
+    @InjectRepository(ConnectorSession) public readonly connectorSessions: Repository<ConnectorSession>,
+    @InjectRepository(ConnectorIdempotencyKey) public readonly connectorIdempotencyKeys: Repository<ConnectorIdempotencyKey>,
+    @InjectRepository(ConnectorImportJob) public readonly connectorImportJobs: Repository<ConnectorImportJob>,
   ) {}
 }

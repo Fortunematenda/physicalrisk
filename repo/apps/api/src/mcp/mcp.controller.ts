@@ -293,7 +293,7 @@ export class McpController {
   ) {
     this.assertKnownTool(toolName);
     const integration = request[MCP_INTEGRATION_KEY]!;
-    const args = this.normalizeToolArgs(body);
+    const args = this.withIdempotencyKey(this.normalizeToolArgs(body), request);
     const result = await this.tools.dispatchTool(
       integration,
       toolName,
@@ -322,7 +322,10 @@ export class McpController {
     this.assertKnownTool(toolName);
 
     try {
-      const args = this.extractToolArguments(body.method, body.params);
+      const args = this.withIdempotencyKey(
+        this.extractToolArguments(body.method, body.params),
+        request,
+      );
       const result = await this.tools.dispatchTool(integration, toolName, args, request.ip);
       return {
         jsonrpc: '2.0',
@@ -471,5 +474,19 @@ export class McpController {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
     const { unused: _unused, ...rest } = body;
     return rest;
+  }
+
+  /** Prefer body idempotencyKey; fall back to Idempotency-Key header. */
+  private withIdempotencyKey(
+    args: Record<string, unknown>,
+    request: McpRequest,
+  ): Record<string, unknown> {
+    if (typeof args.idempotencyKey === 'string' && args.idempotencyKey.trim()) return args;
+    const header = request.headers?.['idempotency-key'];
+    const value = Array.isArray(header) ? header[0] : header;
+    if (typeof value === 'string' && value.trim()) {
+      return { ...args, idempotencyKey: value.trim() };
+    }
+    return args;
   }
 }

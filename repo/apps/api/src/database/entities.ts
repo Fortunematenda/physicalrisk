@@ -302,6 +302,71 @@ export class McpIntegration {
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 }
 
+export enum ConnectorImportJobStatus {
+  QUEUED = 'QUEUED',
+  PROCESSING = 'PROCESSING',
+  COMPLETED = 'COMPLETED',
+  PARTIALLY_COMPLETED = 'PARTIALLY_COMPLETED',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
+}
+
+/** Durable ChatGPT / MCP OAuth session (survives API restarts). Tokens are encrypted at rest. */
+@Entity('connector_sessions')
+@Index(['userId'])
+@Index(['lastUsedAt'])
+export class ConnectorSession {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'session_id', unique: true }) sessionId!: string;
+  @Column({ name: 'user_id' }) userId!: string;
+  @Column({ name: 'access_token_encrypted', type: 'text', nullable: true }) accessTokenEncrypted!: string | null;
+  @Column({ name: 'refresh_token_encrypted', type: 'text', nullable: true }) refreshTokenEncrypted!: string | null;
+  @Column({ name: 'access_token_expires_at', type: 'timestamptz', nullable: true }) accessTokenExpiresAt!: Date | null;
+  @Column({ name: 'refresh_token_expires_at', type: 'timestamptz', nullable: true }) refreshTokenExpiresAt!: Date | null;
+  @Column({ name: 'last_successful_request_at', type: 'timestamptz', nullable: true }) lastSuccessfulRequestAt!: Date | null;
+  @Column({ name: 'last_used_at', type: 'timestamptz', nullable: true }) lastUsedAt!: Date | null;
+  @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true }) revokedAt!: Date | null;
+  @Column({ name: 'keycloak_sub', type: 'text', nullable: true }) keycloakSub!: string | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+/** Idempotency store for connector write operations. */
+@Entity('connector_idempotency_keys')
+@Unique(['idempotencyKey'])
+export class ConnectorIdempotencyKey {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'idempotency_key' }) idempotencyKey!: string;
+  @Column({ name: 'user_id', type: 'text', nullable: true }) userId!: string | null;
+  @Column({ name: 'operation' }) operation!: string;
+  @Column({ name: 'request_hash', type: 'text', nullable: true }) requestHash!: string | null;
+  @Column({ name: 'response_json', type: 'jsonb' }) responseJson!: unknown;
+  @Column({ name: 'http_status', type: 'int', default: 200 }) httpStatus!: number;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
+/** Multi-document import batch (continues after ChatGPT disconnects). */
+@Entity('connector_import_jobs')
+@Index(['workspaceCode'])
+@Index(['status'])
+export class ConnectorImportJob {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'job_code', unique: true }) jobCode!: string;
+  @Column({ type: 'enum', enum: ConnectorImportJobStatus, default: ConnectorImportJobStatus.QUEUED })
+  status!: ConnectorImportJobStatus;
+  @Column({ name: 'workspace_code', type: 'text', nullable: true }) workspaceCode!: string | null;
+  @Column({ name: 'user_id', type: 'text', nullable: true }) userId!: string | null;
+  @Column({ name: 'total_documents', type: 'int', default: 0 }) totalDocuments!: number;
+  @Column({ name: 'completed_documents', type: 'int', default: 0 }) completedDocuments!: number;
+  @Column({ name: 'failed_documents', type: 'int', default: 0 }) failedDocuments!: number;
+  @Column({ name: 'import_job_ids', type: 'jsonb', default: [] }) importJobIds!: string[];
+  @Column({ name: 'error_message', type: 'text', nullable: true }) errorMessage!: string | null;
+  @Column({ type: 'jsonb', nullable: true }) metadata!: Record<string, unknown> | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
 @Entity('source_systems')
 export class SourceSystem {
   @PrimaryGeneratedColumn('uuid') id!: string;
@@ -599,4 +664,5 @@ export const ENTITIES = [
   SourceSystem, DocumentType, FileType, MetadataField, RoutingRule, Document, DocumentVersion, DocumentNote, DocumentRelationship,
   ImportJob, AuditLog, SystemSetting,
   SequenceCounter, RepositoryWorkspace, WorkspaceDocument, WorkspaceActivity,
+  ConnectorSession, ConnectorIdempotencyKey, ConnectorImportJob,
 ];

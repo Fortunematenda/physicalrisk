@@ -26,8 +26,10 @@ import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 import { DocumentsService } from '../documents/documents.service';
-import { WorkspaceActivitySource, WorkspaceDocumentStatus } from '../database/entities';
+import { WorkspaceActivitySource } from '../database/entities';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { ConnectorIdempotencyService } from './connector-idempotency.service';
+import { ConnectorImportJobService } from './connector-import-job.service';
 
 @Injectable()
 export class McpToolsService {
@@ -43,6 +45,8 @@ export class McpToolsService {
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
     private readonly documents: DocumentsService,
+    private readonly idempotency: ConnectorIdempotencyService,
+    private readonly connectorImports: ConnectorImportJobService,
   ) {}
 
   private mcpActor(integration: McpIntegration) {
@@ -162,16 +166,31 @@ export class McpToolsService {
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
       case 'create_workspace': {
         const name = String(args.name ?? '').trim();
-        // ChatGPT often puts a project code into projectId; always resolve (UUID / code / name).
         const projectId = await this.resolveProjectId(
           integration,
           args.projectId ? String(args.projectId) : undefined,
           String(args.projectCode ?? args.project ?? '').trim() || undefined,
         );
-        return this.workspaces.create(
-          { name, projectId, source: WorkspaceActivitySource.CHATGPT_ACTION },
-          this.mcpActor(integration),
-        );
+        const idempotencyKey = args.idempotencyKey
+          ? String(args.idempotencyKey)
+          : undefined;
+        const { result } = await this.idempotency.beginOrReplay({
+          idempotencyKey,
+          operation: 'create_workspace',
+          userId: integration.createdBy?.id,
+          requestPayload: { name, projectId },
+          execute: () => this.workspaces.create(
+            { name, projectId, source: WorkspaceActivitySource.CHATGPT_ACTION },
+            this.mcpActor(integration),
+          ),
+        });
+        return {
+          ...result,
+          // Explicit: workspace creation is not document import completion.
+          imported: false,
+          documentImportComplete: false,
+          hint: 'Workspace created. Submit documents separately; poll get_import_status for import completion.',
+        };
       }
       case 'get_workspace':
         return this.workspaces.get(String(args.workspaceCode ?? ''), this.mcpActor(integration));
@@ -778,99 +797,89 @@ export class McpToolsService {
     try {
       this.orchestrator.assertApprovedStatus(input.approvalStatus);
       const versioned = await this.resolveNewVersionSubmit(projectId, input);
-      const result = await this.orchestrator.queueMcpApprovedDocument({
-        provider: ConnectorProvider.CHATGPT_MCP,
-        projectId,
-        title: versioned.title,
-        documentCode: versioned.documentCode,
-        documentType: versioned.documentType,
-        description: versioned.description,
-        owner: versioned.owner,
-        versionNo: versioned.versionNo,
-        approvalStatus: input.approvalStatus,
-        approvedBy: input.approvedBy?.trim() || this.defaultApproverName(integration),
-        approvalDate: input.approvalDate,
-        sectionKey,
-        metadataJson: input.metadataJson,
-        relationshipsJson: input.relationshipsJson,
-        mode: versioned.mode,
-        existingDocumentId: versioned.existingDocumentId,
-        fileName,
-        fileContentBase64,
-        mimeType,
-        mcpIntegrationId: integration.id,
-      });
+      const idempotencyKey = (input as { idempotencyKey?: string }).idempotencyKey
+        || (input as { idempotency_key?: string }).idempotency_key;
 
-      await this.audit.record({
-        action: 'MCP_SUBMISSION_ACCEPTED',
-        entityType: 'ImportJob',
-        entityId: result.importJobId,
-        message: `MCP submission accepted for ${input.fileName}`,
-        after: { integrationId: integration.id, checksum: result.checksum },
-        ipAddress,
-      });
+      const { result, replayed } = await this.idempotency.beginOrReplay({
+        idempotencyKey,
+        operation: 'submit_approved_document',
+        userId: integration.createdBy?.id,
+        requestPayload: {
+          projectId,
+          title: versioned.title,
+          documentCode: versioned.documentCode,
+          versionNo: versioned.versionNo,
+          fileName,
+          checksumHint: fileContentBase64.slice(0, 64),
+        },
+        execute: async () => {
+          const queued = await this.orchestrator.queueMcpApprovedDocument({
+            provider: ConnectorProvider.CHATGPT_MCP,
+            projectId,
+            title: versioned.title,
+            documentCode: versioned.documentCode,
+            documentType: versioned.documentType,
+            description: versioned.description,
+            owner: versioned.owner,
+            versionNo: versioned.versionNo,
+            approvalStatus: input.approvalStatus,
+            approvedBy: input.approvedBy?.trim() || this.defaultApproverName(integration),
+            approvalDate: input.approvalDate,
+            sectionKey,
+            metadataJson: input.metadataJson,
+            relationshipsJson: input.relationshipsJson,
+            mode: versioned.mode,
+            existingDocumentId: versioned.existingDocumentId,
+            fileName,
+            fileContentBase64,
+            mimeType,
+            mcpIntegrationId: integration.id,
+            processAsync: true,
+          });
 
-      let workspaceAttached: string | null = null;
-      const workspaceCode = input.workspaceCode?.trim();
-      if (workspaceCode) {
-        try {
-          const job = await this.db.importJobs.findOne({
-            where: { id: result.importJobId },
-            relations: { document: true },
-          });
-          await this.workspaces.attachImportJob({
-            workspaceCode,
-            importJobId: result.importJobId,
-            userId: this.mcpActor(integration).id,
-            source: WorkspaceActivitySource.CHATGPT_MCP,
-            members: [{
-              fileName: result.fileName,
-              mimeType: mimeType || undefined,
-              checksum: result.checksum,
-              documentId: job?.document?.id,
-              status: result.imported
-                ? WorkspaceDocumentStatus.IMPORTED
-                : WorkspaceDocumentStatus.IMPORTING,
-            }],
-          });
-          workspaceAttached = workspaceCode;
-        } catch (attachError) {
-          const attachMessage = attachError instanceof Error ? attachError.message : String(attachError);
+          const workspaceCode = input.workspaceCode?.trim() || null;
+          if (!queued.needsReview) {
+            this.connectorImports.enqueueSingleImport(queued.importJobId, {
+              workspaceCode,
+              userId: this.mcpActor(integration).id,
+            });
+          }
+
           await this.audit.record({
-            action: 'MCP_WORKSPACE_ATTACH_FAILED',
+            action: 'MCP_SUBMISSION_ACCEPTED',
             entityType: 'ImportJob',
-            entityId: result.importJobId,
-            message: `Imported but failed to attach to ${workspaceCode}: ${attachMessage}`,
+            entityId: queued.importJobId,
+            message: `MCP submission accepted for ${input.fileName} (async queue)`,
+            after: { integrationId: integration.id, checksum: queued.checksum, async: true },
             ipAddress,
           });
-        }
-      }
 
-      return {
-        accepted: true,
-        importJobId: result.importJobId,
-        status: result.status,
-        externalImportStatus: result.externalImportStatus,
-        checksum: result.checksum,
-        fileName: result.fileName,
-        imported: result.imported === true,
-        needsReview: result.needsReview === true,
-        documentCode: result.documentCode ?? null,
-        sectionName: result.sectionName ?? null,
-        workspaceCode: workspaceAttached,
-        message: result.message
-          ?? (result.imported
-            ? 'Imported into the repository; Master Document Index updated.'
-            : 'Queued for Import Queue review.'),
-        projectId,
-        sectionKey: sectionKey ?? null,
-        documentType: versioned.documentType,
-        hint: workspaceAttached
-          ? `Attached to workspace ${workspaceAttached}.`
-          : (workspaceCode
-            ? `Imported, but could not attach to ${workspaceCode}. Use attach_document_to_workspace with documentCode.`
-            : 'To attach to a workspace, pass workspaceCode (e.g. WS-2026-00004) or call attach_document_to_workspace.'),
-      };
+          return {
+            accepted: true,
+            importJobId: queued.importJobId,
+            status: 'QUEUED',
+            importStatus: queued.status,
+            externalImportStatus: queued.externalImportStatus,
+            checksum: queued.checksum,
+            fileName: queued.fileName,
+            imported: false,
+            needsReview: queued.needsReview === true,
+            documentCode: queued.documentCode ?? null,
+            sectionName: queued.sectionName ?? null,
+            workspaceCode,
+            message: queued.message
+              ?? 'Import accepted and processing in the background. Poll get_import_status; workspace creation is not import completion.',
+            projectId,
+            sectionKey: sectionKey ?? null,
+            documentType: versioned.documentType,
+            hint: workspaceCode
+              ? `Queued for workspace ${workspaceCode}. Use get_import_status with importJobId.`
+              : 'Pass workspaceCode to attach after import, or call attach_document_to_workspace later.',
+          };
+        },
+      });
+
+      return { ...result, idempotentReplay: replayed };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Submission rejected';
       await this.audit.record({

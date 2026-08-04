@@ -46,6 +46,12 @@ Map realm roles as usual: `repo_admin`, `repo_importer`, `repo_reviewer`.
 
 ChatGPT will show the exact redirect URI on the app page — add that URI if it differs.
 
+### Session stability
+
+Document imports are **queued asynchronously**. After `submit_approved_document`, poll `get_import_status` — do not treat workspace creation as import completion.
+
+See [connector-session-lifecycle.md](./connector-session-lifecycle.md) for token refresh, session persistence, structured errors, and health endpoints.
+
 ### Fix Connect error: `Offline tokens not allowed`
 
 ChatGPT always requests `scope=offline_access`. Keycloak logs show:

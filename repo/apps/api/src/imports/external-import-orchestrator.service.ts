@@ -341,6 +341,22 @@ export class ExternalImportOrchestratorService {
       };
     }
 
+    // Async path: return immediately so ChatGPT / nginx do not time out mid-import.
+    if (request.processAsync !== false) {
+      return {
+        importJobId: saved.id,
+        status: saved.status,
+        externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.READY_FOR_REVIEW,
+        checksum,
+        fileName,
+        imported: false,
+        needsReview: false,
+        message:
+          'Import accepted and queued for background processing. '
+          + 'Poll get_import_status with this importJobId; do not treat workspace creation as import completion.',
+      };
+    }
+
     // Auto-complete: admin routing rules / MCP module place the file and update Master Document Index.
     try {
       const completed = await this.imports.process(saved.id);

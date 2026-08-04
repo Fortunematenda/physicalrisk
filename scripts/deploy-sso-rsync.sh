@@ -22,7 +22,17 @@ rsync -a --delete \
   "$PULL_DIR/" "$ROOT/"
 
 cp -a /root/.env.sso.bak .env.sso
-rm -f infrastructure/nginx/conf.d/crm.conf
+
+# Only drop CRM nginx config when its dedicated cert is missing — otherwise
+# crm.physicalrisk.com falls through to the apps cert and Chrome shows
+# ERR_CERT_COMMON_NAME_INVALID (HSTS).
+CRM_CERT="/etc/letsencrypt/live/crm.physicalrisk.com/fullchain.pem"
+if [[ ! -f "$CRM_CERT" ]]; then
+  rm -f infrastructure/nginx/conf.d/crm.conf
+  echo "Note: crm.conf removed (no cert at $CRM_CERT). Issue one with certbot, then restore crm.conf."
+else
+  echo "Keeping crm.conf (found $CRM_CERT)."
+fi
 
 echo "Synced. Example: docker compose -f docker-compose.sso.yml --env-file .env.sso build --no-cache repo-api"
 echo "Live wordpress/ tree was left untouched."

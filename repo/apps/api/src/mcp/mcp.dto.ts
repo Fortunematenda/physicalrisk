@@ -283,6 +283,12 @@ export class SubmitApprovedDocumentDto {
   @Transform(trimString)
   @IsString()
   workspaceCode?: string;
+
+  /** Client-supplied idempotency key (also accepted via Idempotency-Key header). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  idempotencyKey?: string;
 }
 
 export class ListRepositoryModulesDto {

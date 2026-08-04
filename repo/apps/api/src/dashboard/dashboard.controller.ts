@@ -56,7 +56,20 @@ export class DashboardController {
 
   @Public()
   @Get('health')
-  health() { return { status: 'ok', service: 'repository-import-gateway', timestamp: new Date().toISOString() }; }
+  health() {
+    return {
+      status: 'ok',
+      service: 'repository-import-gateway',
+      timestamp: new Date().toISOString(),
+      containerInstance: process.env.HOSTNAME || process.env.COMPUTERNAME || 'unknown',
+      checks: {
+        auth: '/api/health/auth',
+        database: '/api/health/database',
+        storage: '/api/health/storage',
+        importWorker: '/api/health/import-worker',
+      },
+    };
+  }
 
   @Get('dashboard')
   async dashboard(

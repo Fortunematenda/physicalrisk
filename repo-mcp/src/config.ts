@@ -20,4 +20,6 @@ export const config = {
     ?? (process.env.KEYCLOAK_ISSUER ? 'true' : 'false')) === 'true',
   /** Optional service API key for MCP → repo-api (mcp_…) when no user Bearer is forwarded. */
   repoMcpApiKey: process.env.REPO_MCP_API_KEY || '',
+  /** Outbound timeout to repo-api (ms). Imports are async so this can stay moderate. */
+  requestTimeoutMs: Number(process.env.REPO_MCP_REQUEST_TIMEOUT_MS || 120_000),
 };

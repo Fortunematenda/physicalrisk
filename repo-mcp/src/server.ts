@@ -41,16 +41,19 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.16.0',
+    version: '1.17.0',
     description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
       + 'Use find_repository_documents / search_documents to list Master Document Index. '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
-      + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent.',
+      + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent. '
+      + 'submit_approved_document returns QUEUED immediately — poll get_import_status; workspace creation is not import completion.',
   });
 
   const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
-    api.request('POST', `/mcp/tools/${name}`, args);
+    api.requestWithAuthRetry('POST', `/mcp/tools/${name}`, args, {
+      idempotencyKey: typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined,
+    });
 
   server.tool(
     'list_repository_projects',
@@ -100,7 +103,7 @@ function createMcpServer(authHeader?: string) {
       if (args.projectCode) qs.set('projectCode', args.projectCode);
       if (args.status) qs.set('status', args.status);
       if (args.name) qs.set('name', args.name);
-      return toolResult(await api.request('GET', `/workspaces?${qs}`));
+      return toolResult(await api.requestWithAuthRetry('GET', `/workspaces?${qs}`));
     },
   );
 
@@ -348,7 +351,94 @@ const httpServer = createServer(async (req, res) => {
       service: 'repo-mcp',
       resource: mcpResourceUrl(),
       oauth: Boolean(config.keycloakIssuer),
+      checks: {
+        auth: '/health/auth',
+        database: '/health/database',
+        storage: '/health/storage',
+        importWorker: '/health/import-worker',
+      },
     });
+    return;
+  }
+
+  if (url.pathname === '/health/auth'
+    || url.pathname === '/health/database'
+    || url.pathname === '/health/storage'
+    || url.pathname === '/health/import-worker') {
+    try {
+      const api = new RepositoryApiClient();
+      const data = await api.request('GET', url.pathname);
+      sendJson(res, 200, data);
+    } catch (error) {
+      sendJson(res, 503, {
+        status: 'error',
+        service: 'repo-mcp',
+        path: url.pathname,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return;
+  }
+
+  if (url.pathname === '/connector/session/status' || url.pathname === '/session/status') {
+    const authorization = requireAuth(req);
+    if (!authorization) {
+      sendJson(res, 401, {
+        success: false,
+        errorCode: 'MCP_AUTH_FAILED',
+        message: 'Authorization Bearer required',
+        retryable: false,
+        requiresLogin: true,
+      }, { 'WWW-Authenticate': wwwAuthenticateHeader() });
+      return;
+    }
+    try {
+      const api = new RepositoryApiClient(authorization);
+      sendJson(res, 200, await api.requestWithAuthRetry('GET', '/connector/session/status'));
+    } catch (error) {
+      const err = error as { errorCode?: string; message?: string; status?: number; retryable?: boolean; requiresLogin?: boolean; requestId?: string };
+      sendJson(res, err.status || 503, {
+        success: false,
+        errorCode: err.errorCode || 'REPOSITORY_API_UNAVAILABLE',
+        message: err.message || 'Session status failed',
+        retryable: err.retryable ?? true,
+        requiresLogin: err.requiresLogin ?? false,
+        requestId: err.requestId,
+      });
+    }
+    return;
+  }
+
+  if (
+    (url.pathname === '/connector/session/heartbeat' || url.pathname === '/session/heartbeat')
+    && req.method === 'POST'
+  ) {
+    const authorization = requireAuth(req);
+    if (!authorization) {
+      sendJson(res, 401, {
+        success: false,
+        errorCode: 'MCP_AUTH_FAILED',
+        message: 'Authorization Bearer required',
+        retryable: false,
+        requiresLogin: true,
+      }, { 'WWW-Authenticate': wwwAuthenticateHeader() });
+      return;
+    }
+    try {
+      const body = await readJsonBody(req);
+      const api = new RepositoryApiClient(authorization);
+      sendJson(res, 200, await api.requestWithAuthRetry('POST', '/connector/session/heartbeat', body ?? {}));
+    } catch (error) {
+      const err = error as { errorCode?: string; message?: string; status?: number; retryable?: boolean; requiresLogin?: boolean; requestId?: string };
+      sendJson(res, err.status || 503, {
+        success: false,
+        errorCode: err.errorCode || 'REPOSITORY_API_UNAVAILABLE',
+        message: err.message || 'Heartbeat failed',
+        retryable: err.retryable ?? true,
+        requiresLogin: err.requiresLogin ?? false,
+        requestId: err.requestId,
+      });
+    }
     return;
   }
 

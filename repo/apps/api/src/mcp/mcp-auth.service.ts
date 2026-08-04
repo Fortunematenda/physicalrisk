@@ -330,7 +330,11 @@ export class McpAuthService {
 
     const payload = JSON.parse(Buffer.from(padBase64(payloadB64.replace(/-/g, '+').replace(/_/g, '/')), 'base64').toString('utf8'));
     if (issuer && payload.iss !== issuer) throw new Error(`Issuer mismatch: ${payload.iss}`);
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) throw new Error('Token expired');
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      const err = new Error('Token expired');
+      (err as Error & { code?: string }).code = 'ACCESS_TOKEN_EXPIRED';
+      throw err;
+    }
     return payload;
   }
 

@@ -41,6 +41,8 @@ describe('McpToolsService project permissions', () => {
     { get: jest.fn().mockReturnValue('https://repo.physicalrisk.com') } as any,
     {} as any,
     {} as any,
+    { beginOrReplay: jest.fn(async ({ execute }) => ({ result: await execute(), replayed: false })) } as any,
+    { enqueueSingleImport: jest.fn(), createJob: jest.fn(), getByCodeOrId: jest.fn(), retry: jest.fn(), toView: jest.fn() } as any,
   );
 
   beforeEach(() => {
