@@ -194,6 +194,8 @@ function ImportDocumentPageContent() {
   const [contentMode, setContentMode] = useState<'file' | 'paste'>('file');
   const [pasteContent, setPasteContent] = useState('');
   const [pasteFileName, setPasteFileName] = useState('pasted-content.txt');
+  /** When a ZIP is uploaded: extract pack (yes) or store archive as-is (no). */
+  const [zipExtractChoice, setZipExtractChoice] = useState<'yes' | 'no' | null>(null);
   const [relDraft, setRelDraft] = useState({ toDocumentId: '', type: 'RELATED_TO', description: '' });
 
   useEffect(() => {
@@ -285,6 +287,14 @@ function ImportDocumentPageContent() {
         setDraftFileName(hasStagedFile ? stagedName : '');
         setDraftFileSize(Number(job.fileSize) || 0);
         setDraftHasFile(hasStagedFile);
+        const priorExtract = metadata.extractZip;
+        if (priorExtract === true || priorExtract === 'true' || priorExtract === 'YES' || priorExtract === '1') {
+          setZipExtractChoice('yes');
+        } else if (priorExtract === false || priorExtract === 'false' || priorExtract === 'NO' || priorExtract === '0') {
+          setZipExtractChoice('no');
+        } else {
+          setZipExtractChoice(null);
+        }
         setForm((current) => ({
           ...current,
           projectId: String(metadata.projectId || job.project?.id || ''),
@@ -510,6 +520,12 @@ function ImportDocumentPageContent() {
       setError(`Import blocked. Complete required fields first: ${missingRequiredLabels.join(', ')}`);
       return;
     }
+    const uploadName = uploadFile?.name || (draftHasFile ? draftFileName : '');
+    const isZipUpload = /\.zip$/i.test(uploadName);
+    if (isZipUpload && zipExtractChoice == null) {
+      setError('This file is a ZIP archive. Choose whether to extract it or save it as uploaded.');
+      return;
+    }
     setSaving(true);
     try {
       const body = new FormData();
@@ -520,6 +536,9 @@ function ImportDocumentPageContent() {
         approvalStatus: form.approvalStatus,
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
+        ...(isZipUpload && zipExtractChoice
+          ? { extractZip: zipExtractChoice === 'yes' ? 'true' : 'false' }
+          : {}),
       }).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') body.append(key, String(value));
       });
@@ -555,6 +574,12 @@ function ImportDocumentPageContent() {
     }
     const pasteFile = contentMode === 'paste' ? buildPasteFile() : null;
     const uploadFile = contentMode === 'file' ? file : pasteFile;
+    const uploadName = uploadFile?.name || (draftHasFile ? draftFileName : '');
+    const isZipUpload = /\.zip$/i.test(uploadName);
+    if (isZipUpload && zipExtractChoice == null) {
+      setError('This file is a ZIP archive. Choose whether to extract it or save it as uploaded.');
+      return;
+    }
     setSavingDraft(true);
     try {
       const body = new FormData();
@@ -565,6 +590,9 @@ function ImportDocumentPageContent() {
         approvalStatus: form.approvalStatus || 'APPROVED',
         approvalDate: form.approvalDate || new Date().toISOString().slice(0, 10),
         draftJobId: activeContinueJobId || undefined,
+        ...(isZipUpload && zipExtractChoice
+          ? { extractZip: zipExtractChoice === 'yes' ? 'true' : 'false' }
+          : {}),
       }).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== '') body.append(key, String(value));
       });
@@ -634,6 +662,7 @@ function ImportDocumentPageContent() {
     setDraftHasFile(false);
     setDraftFileName('');
     setDraftFileSize(0);
+    setZipExtractChoice(null);
     setStructuredError(null);
     autoTitleRef.current = '';
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -645,9 +674,13 @@ function ImportDocumentPageContent() {
     setStructuredError(null);
     if (!next) {
       autoTitleRef.current = '';
+      setZipExtractChoice(null);
       return;
     }
     setDraftHasFile(false);
+    if (!/\.zip$/i.test(next.name)) {
+      setZipExtractChoice(null);
+    }
     // New Version identity comes from the existing document, not the file name.
     if (form.mode === 'NEW_VERSION') return;
     const suggested = titleFromFileName(next.name);
@@ -804,11 +837,23 @@ function ImportDocumentPageContent() {
             value: selectedDocument ? `${selectedDocument.code} — ${selectedDocument.title}` : 'Select the existing document',
           }]
         : []),
+      ...(fileExtension === 'zip'
+        ? [{
+            key: 'extractZip',
+            label: 'Extract ZIP',
+            done: zipExtractChoice === 'yes' || zipExtractChoice === 'no',
+            value: zipExtractChoice === 'yes'
+              ? 'Yes — extract contents'
+              : zipExtractChoice === 'no'
+                ? 'No — save ZIP as uploaded'
+                : 'Choose Yes or No',
+          }]
+        : []),
     ];
 
     const fromDb = metadataFields
       .filter((field) => field.required && field.active !== false)
-      .filter((field) => !['projectId', 'sourceSystemId', 'file', 'existingDocumentId', 'fileName', 'relationships', 'relationshipsJson'].includes(field.key))
+      .filter((field) => !['projectId', 'sourceSystemId', 'file', 'existingDocumentId', 'fileName', 'relationships', 'relationshipsJson', 'extractZip'].includes(field.key))
       .map((field) => {
         const value = formValueForMetadataKey(field.key);
         return {
@@ -822,7 +867,7 @@ function ImportDocumentPageContent() {
     const byKey = new Map<string, { key: string; label: string; done: boolean; value: string }>();
     [...core, ...fromDb].forEach((item) => byKey.set(item.key, item));
     return Array.from(byKey.values());
-  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize, contentMode, pasteContent, routingOnlyContinue, activeSections]);
+  }, [file, draftHasFile, draftFileName, draftFileSize, form, metadataFields, selectedDocument, selectedProjectLabel, selectedSource, hasApprovedFile, displayFileName, displayFileSize, contentMode, pasteContent, routingOnlyContinue, activeSections, fileExtension, zipExtractChoice]);
 
   const requiredComplete = useMemo(
     () => requiredChecks.length > 0 && requiredChecks.every((item) => item.done),
@@ -1413,6 +1458,42 @@ function ImportDocumentPageContent() {
               )}
             </div>
             )}
+            {contentMode === 'file' && fileExtension === 'zip' && hasApprovedFile ? (
+              <fieldset className={styles.zipOptions}>
+                <legend>Extract ZIP archive?</legend>
+                <p className={styles.zipOptionsHint}>
+                  Choose whether to unpack this ZIP into repository files, or keep the archive as a single downloadable file.
+                </p>
+                <div className={styles.zipRadioRow} role="radiogroup" aria-label="Extract ZIP archive">
+                  <label className={`${styles.zipRadio} ${zipExtractChoice === 'yes' ? styles.zipRadioActive : ''}`}>
+                    <input
+                      type="radio"
+                      name="extractZip"
+                      value="yes"
+                      checked={zipExtractChoice === 'yes'}
+                      onChange={() => setZipExtractChoice('yes')}
+                    />
+                    <span>
+                      <strong>Yes</strong>
+                      <small>Extract contents into the selected module</small>
+                    </span>
+                  </label>
+                  <label className={`${styles.zipRadio} ${zipExtractChoice === 'no' ? styles.zipRadioActive : ''}`}>
+                    <input
+                      type="radio"
+                      name="extractZip"
+                      value="no"
+                      checked={zipExtractChoice === 'no'}
+                      onChange={() => setZipExtractChoice('no')}
+                    />
+                    <span>
+                      <strong>No</strong>
+                      <small>Save the ZIP file as uploaded (viewing will download it)</small>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            ) : null}
           </section>
 
           <section className={styles.section}>

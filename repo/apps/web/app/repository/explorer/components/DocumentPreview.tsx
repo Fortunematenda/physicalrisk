@@ -4,7 +4,7 @@ import { useCallback, type RefObject } from 'react';
 import { FileText } from 'lucide-react';
 import styles from '../RepositoryExplorer.module.css';
 import {
-  isDocx, isImage, isInlineType, isPdf, isSpreadsheet, isTextPreview,
+  isDocx, isImage, isInlineType, isPdf, isSpreadsheet, isTextPreview, isZipArchive,
 } from '../helpers';
 import type { VersionItem } from '../types';
 import type { ViewerControls } from './DocumentViewerToolbar';
@@ -37,6 +37,17 @@ export function DocumentPreview({
   const handlePageCount = useCallback((count: number) => {
     onPageCount(count);
   }, [onPageCount]);
+
+  if (isZipArchive(version)) {
+    return (
+      <div className={styles.previewUnavailable}>
+        <FileText size={22} />
+        <span>
+          This ZIP was stored without extraction. Use Open or Download to save it to your computer.
+        </span>
+      </div>
+    );
+  }
 
   if (!isInlineType(version.mimeType, version.originalFileName)) {
     return (

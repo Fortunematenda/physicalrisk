@@ -8,6 +8,14 @@ export function extensionOf(name: string) {
   return name.split('.').pop()?.toLowerCase() ?? '';
 }
 
+export function isZipArchive(version?: { mimeType?: string | null; originalFileName?: string | null } | null) {
+  if (!version) return false;
+  const mime = String(version.mimeType ?? '').toLowerCase();
+  if (mime.includes('zip')) return true;
+  const name = String(version.originalFileName ?? '');
+  return extensionOf(name) === 'zip';
+}
+
 export function fileTypeLabel(mimeType?: string, fileName?: string) {
   if (mimeType === 'application/pdf') return 'PDF';
   if (mimeType?.startsWith('image/')) return mimeType.replace('image/', '').toUpperCase();

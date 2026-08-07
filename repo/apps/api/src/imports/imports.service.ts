@@ -48,6 +48,17 @@ interface ImportMetadata {
   existingDocumentId?: string;
   /** Optional existing Repository Workspace code (WS-YYYY-#####). */
   workspaceCode?: string;
+  /**
+   * ZIP handling: true = extract pack, false = store archive as-is.
+   * Multipart may send "true"/"false" strings.
+   */
+  extractZip?: boolean | 'true' | 'false';
+}
+
+function wantsZipExtraction(value: unknown): boolean | null {
+  if (value === true || value === 'true' || value === 'YES' || value === '1') return true;
+  if (value === false || value === 'false' || value === 'NO' || value === '0') return false;
+  return null;
 }
 
 interface RelationshipInput {
@@ -620,9 +631,13 @@ export class ImportsService {
       };
       await this.db.importJobs.save(job);
 
-      // ZIP packs are expanded into individual repository files/folders for the explorer.
+      // ZIP: extract into a pack folder (default / MCP), or store the archive as-is when extractZip=false.
       if (extension === 'zip') {
-        return this.processZipPack(id, job, section, metadata, userId);
+        const shouldExtract = wantsZipExtraction(metadata.extractZip);
+        if (shouldExtract !== false) {
+          return this.processZipPack(id, job, section, metadata, userId);
+        }
+        // Fall through: import the .zip file itself (unextracted).
       }
 
       const { document, documentCode, mode } = await this.resolveLogicalDocument(job.project.id, section, metadata);
@@ -785,6 +800,7 @@ export class ImportsService {
           }
 
           const createdBy = userId ? await userRepo.findOne({ where: { id: userId } }) : null;
+          const storedAsArchive = extension === 'zip' && wantsZipExtraction(metadata.extractZip) === false;
           const version = await versionRepo.save(versionRepo.create({
             document: documentRecord,
             versionNo: metadata.versionNo.trim(),
@@ -798,7 +814,12 @@ export class ImportsService {
             approvedBy: String(metadata.approvedBy ?? '').trim(),
             approvalDate: new Date(metadata.approvalDate),
             isCurrent: true,
-            metadata: metadata.customMetadata ?? {},
+            metadata: {
+              ...(metadata.customMetadata ?? {}),
+              ...(storedAsArchive
+                ? { extractZip: false, storedAsArchive: true }
+                : {}),
+            },
             createdBy,
           }));
 

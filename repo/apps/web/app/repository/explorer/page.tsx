@@ -20,7 +20,7 @@ import { DocumentViewerToolbar, type ViewerControls } from './components/Documen
 import { RepositoryExplorerLayout } from './components/RepositoryExplorerLayout';
 import { RepositoryTreePanel } from './components/RepositoryTreePanel';
 import {
-  downloadText, extensionOf, findTreeEntry, flatten, canUseViewerControls,
+  downloadText, extensionOf, findTreeEntry, flatten, canUseViewerControls, isZipArchive,
   parentTreePath, subtreeDocuments,
 } from './helpers';
 import styles from './RepositoryExplorer.module.css';
@@ -357,6 +357,19 @@ export default function RepositoryExplorerPage() {
   };
 
   const viewFile = async (version: VersionItem) => {
+    // Unextracted ZIP archives cannot be previewed — prompt the user to save locally.
+    if (isZipArchive(version)) {
+      const ok = await confirm({
+        title: 'Save ZIP archive',
+        message:
+          'This ZIP was stored without extraction and cannot be opened in the browser. Save it to your computer (for example your Desktop) to open it.',
+        confirmLabel: 'Save to computer',
+        cancelLabel: 'Cancel',
+      });
+      if (!ok) return;
+      await download(version);
+      return;
+    }
     try {
       const response = await fetch(`${API_URL}/versions/${version.id}/view`, {
         headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},

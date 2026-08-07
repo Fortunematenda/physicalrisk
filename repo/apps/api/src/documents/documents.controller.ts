@@ -108,6 +108,11 @@ export class DocumentsController {
   @Get('versions/:id/view')
   async view(@Param('id') id: string, @Res() response: Response) {
     const version = await this.documents.versionFile(id);
+    const mime = version.version.mimeType || 'application/octet-stream';
+    const fileName = version.version.originalFileName || 'download';
+    const isZip =
+      mime.toLowerCase().includes('zip')
+      || fileName.toLowerCase().endsWith('.zip');
     const safeInlineTypes = [
       'application/pdf',
       'image/png',
@@ -127,9 +132,10 @@ export class DocumentsController {
       'application/xml',
       'text/xml',
     ];
-    const disposition = safeInlineTypes.includes(version.version.mimeType) ? 'inline' : 'attachment';
-    response.setHeader('Content-Type', version.version.mimeType);
-    response.setHeader('Content-Disposition', `${disposition}; filename="${version.version.originalFileName.replace(/"/g, '')}"`);
+    // ZIP archives (stored unextracted) must download — never open inline.
+    const disposition = !isZip && safeInlineTypes.includes(mime) ? 'inline' : 'attachment';
+    response.setHeader('Content-Type', mime);
+    response.setHeader('Content-Disposition', `${disposition}; filename="${fileName.replace(/"/g, '')}"`);
     createReadStream(version.absolutePath).pipe(response);
   }
 

@@ -270,11 +270,87 @@
   gap: 12px;
   text-align: left;
   background: #fff;
-  border: 1px solid var(--line);
+  border: 1px solid #d7e6f3;
   border-radius: 10px;
   padding: 12px 14px;
   position: relative;
-  z-index: 2;
+  z-index: 1;
+}
+
+.zipOptions {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.zipOptions legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.zipOptionsHint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.zipRadioRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.zipRadio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.zipRadio input {
+  margin-top: 3px;
+  accent-color: var(--blue);
+}
+
+.zipRadio span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.zipRadio strong {
+  font-size: 13px;
+  color: var(--navy);
+}
+
+.zipRadio small {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.zipRadioActive {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
+  background: #f0f7ff;
+}
+
+@media (max-width: 720px) {
+  .zipRadioRow {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fileIcon {

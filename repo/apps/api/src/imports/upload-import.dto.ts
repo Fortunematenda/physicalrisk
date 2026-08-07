@@ -84,6 +84,19 @@ export class UploadImportDto {
   @Transform(trimString)
   @IsString()
   draftJobId?: string;
+
+  /**
+   * When the uploaded file is a ZIP: "true" = extract into pack folder,
+   * "false" = store the archive as a single repository file.
+   */
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true' || value === '1' || value === 'YES') return 'true';
+    if (value === false || value === 'false' || value === '0' || value === 'NO') return 'false';
+    return typeof value === 'string' ? value.trim() : value;
+  })
+  @IsIn(['true', 'false'])
+  extractZip?: 'true' | 'false';
 }
 
 export class DraftImportDto {
@@ -112,4 +125,12 @@ export class DraftImportDto {
   @IsOptional() @IsIn(['NEW', 'NEW_VERSION']) mode?: 'NEW' | 'NEW_VERSION';
   @IsOptional() @Transform(trimString) @IsString() existingDocumentId?: string;
   @IsOptional() @Transform(trimString) @IsString() draftJobId?: string;
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === true || value === 'true' || value === '1' || value === 'YES') return 'true';
+    if (value === false || value === 'false' || value === '0' || value === 'NO') return 'false';
+    return typeof value === 'string' ? value.trim() : value;
+  })
+  @IsIn(['true', 'false'])
+  extractZip?: 'true' | 'false';
 }
