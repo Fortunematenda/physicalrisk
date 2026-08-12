@@ -4,7 +4,7 @@ describe('buildChatGptActionsOpenApi', () => {
   it('uses a single payload string for submit to avoid UnrecognizedKwargsError', () => {
     const doc = buildChatGptActionsOpenApi('https://repo.physicalrisk.com/');
     expect(doc.openapi).toBe('3.1.0');
-    expect(doc.info.version).toBe('1.19.0');
+    expect(doc.info.version).toBe('1.20.0');
     expect((doc.paths as any)['/api/mcp/tools/search_documents']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/get_document']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/find_workspaces']).toBeDefined();

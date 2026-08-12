@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
+import { alignStoredFileIdentity } from '../common/document-format.util';
 
 const MAX_BYTES = 100 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
@@ -15,7 +16,7 @@ export type FetchedRemoteFile = {
 
 /**
  * Fetch a remote Approved Document URL with basic SSRF protections.
- * Intended for ChatGPT `fileUrl` submit (public https links only).
+ * Supports PDF, Office (docx/xlsx/pptx), and plain text for ChatGPT `fileUrl` submit.
  */
 @Injectable()
 export class McpRemoteFileService {
@@ -35,7 +36,12 @@ export class McpRemoteFileService {
           redirect: 'manual',
           signal: controller.signal,
           headers: {
-            Accept: 'application/pdf,application/octet-stream,*/*',
+            Accept:
+              'application/pdf,'
+              + 'application/vnd.openxmlformats-officedocument.wordprocessingml.document,'
+              + 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,'
+              + 'application/vnd.openxmlformats-officedocument.presentationml.presentation,'
+              + 'text/plain,text/csv,application/octet-stream,*/*',
             'User-Agent': 'PhysicalRisk-Repo-MCP/1.0',
           },
         });
@@ -82,24 +88,23 @@ export class McpRemoteFileService {
     }
 
     const headerType = (response.headers.get('content-type') || '').split(';')[0]?.trim().toLowerCase() || '';
-    const looksPdf =
-      buffer.subarray(0, 5).toString('utf8') === '%PDF-'
-      || headerType === 'application/pdf'
-      || /\.pdf($|\?)/i.test(current.pathname);
+    const urlName = this.fileNameFromUrl(current);
+    const aligned = alignStoredFileIdentity({
+      buffer,
+      fileName: preferredFileName?.trim() || urlName || 'document',
+      mimeType: headerType || undefined,
+    });
 
-    if (!looksPdf) {
-      throw new BadRequestException('fileUrl must point to a PDF document');
+    if (aligned.format === 'other') {
+      throw new BadRequestException(
+        'fileUrl must point to a supported document (PDF, Word, Excel, PowerPoint, or text)',
+      );
     }
-
-    const fileName =
-      preferredFileName?.trim()
-      || this.fileNameFromUrl(current)
-      || 'document.pdf';
 
     return {
       buffer,
-      fileName: fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`,
-      mimeType: headerType || 'application/pdf',
+      fileName: aligned.fileName,
+      mimeType: aligned.mimeType,
       sourceUrl: current.toString(),
     };
   }
@@ -147,7 +152,6 @@ export class McpRemoteFileService {
       const results = await dns.lookup(host, { all: true, verbatim: true });
       addresses = results.map((item) => item.address);
     } catch {
-      // Fall back to resolve4/resolve6 for broader coverage
       const [v4, v6] = await Promise.all([
         dns.resolve4(host).catch(() => [] as string[]),
         dns.resolve6(host).catch(() => [] as string[]),
@@ -176,13 +180,13 @@ export class McpRemoteFileService {
       if (a === 169 && b === 254) return true;
       if (a === 172 && b >= 16 && b <= 31) return true;
       if (a === 192 && b === 168) return true;
-      if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+      if (a === 100 && b >= 64 && b <= 127) return true;
       return false;
     }
 
     if (net.isIPv6(normalized)) {
-      if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true; // ULA
-      if (normalized.startsWith('fe80')) return true; // link-local
+      if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+      if (normalized.startsWith('fe80')) return true;
       if (normalized === '::' || normalized.startsWith('::ffff:127.')) return true;
       const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
       if (mapped?.[1]) return this.isPrivateOrLocalIp(mapped[1]);

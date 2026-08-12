@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { extname } from 'path';
 import { In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
+import { alignStoredFileIdentity } from '../common/document-format.util';
 import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
@@ -652,7 +653,7 @@ export class McpToolsService {
       approvedBy,
       approvalDate: input.approvalDate,
       fileName: input.fileName,
-      mimeType: input.mimeType || 'application/pdf',
+      mimeType: input.mimeType || undefined,
     });
 
     const baseUrl = this.publicBaseUrl();
@@ -667,7 +668,7 @@ export class McpToolsService {
       documentType: input.documentType,
       title: input.title,
       instructions:
-        'Open uploadUrl in a browser, choose the PDF, and click Upload. '
+        'Open uploadUrl in a browser, choose the approved file (PDF, Word, Excel, PowerPoint, or text), and click Upload. '
         + 'That queues the Approved Document into the Import Queue. '
         + 'Then call get_import_status after the user confirms upload completed, or ask them for the import job id shown on the success page.',
     };
@@ -689,6 +690,9 @@ export class McpToolsService {
     }
 
     const consumed = this.browserUploads.consume(token);
+    // Prefer the uploaded file's real name/MIME — pending often still has a PDF placeholder.
+    const uploadedName = file.originalname?.trim();
+    const uploadedMime = file.mimetype?.trim();
     const result = await this.submitApprovedDocument(
       integration,
       {
@@ -702,8 +706,8 @@ export class McpToolsService {
         approvalDate: consumed.approvalDate,
         module: consumed.module,
         sectionKey: consumed.sectionKey,
-        fileName: consumed.fileName || file.originalname,
-        mimeType: consumed.mimeType || file.mimetype,
+        fileName: uploadedName || consumed.fileName,
+        mimeType: uploadedMime || consumed.mimeType,
         fileContentBase64: file.buffer.toString('base64'),
       },
       ipAddress,
@@ -829,6 +833,18 @@ export class McpToolsService {
       throw new BadRequestException(
         'Provide documentContent (same-chat), fileUrl, uploadId, or fileContentBase64',
       );
+    }
+    // Final channel: sniff bytes + align extension/MIME so Repo stores the real format
+    // (defeats ChatGPT sending application/pdf with an .xlsx body, etc.).
+    {
+      const aligned = alignStoredFileIdentity({
+        buffer: Buffer.from(fileContentBase64, 'base64'),
+        fileName,
+        mimeType,
+        title: input.title,
+      });
+      fileName = aligned.fileName;
+      mimeType = aligned.mimeType;
     }
     if (!fileName) {
       throw new BadRequestException('fileName is required');

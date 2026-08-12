@@ -65,7 +65,7 @@ export function DocumentViewerHeader({
   return (
     <header className={styles.docHeader}>
       <div className={styles.docHeaderLeft}>
-        <span className={styles.docHeaderIconPdf} aria-hidden>
+        <span className={styles.docHeaderIconPdf} aria-hidden title={fileTypeLabel(version.mimeType, version.originalFileName)}>
           <FileText size={18} />
         </span>
         <div className={styles.docHeaderText}>

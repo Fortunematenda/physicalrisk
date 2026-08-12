@@ -4,7 +4,7 @@ import { useCallback, type RefObject } from 'react';
 import { FileText } from 'lucide-react';
 import styles from '../RepositoryExplorer.module.css';
 import {
-  isDocx, isImage, isInlineType, isPdf, isSpreadsheet, isTextPreview, isZipArchive,
+  isDocx, isImage, isInlineType, isPdf, isPptx, isSpreadsheet, isTextPreview, isZipArchive, officeAppLabel,
 } from '../helpers';
 import type { VersionItem } from '../types';
 import type { ViewerControls } from './DocumentViewerToolbar';
@@ -49,12 +49,27 @@ export function DocumentPreview({
     );
   }
 
-  if (!isInlineType(version.mimeType, version.originalFileName)) {
+  if (isPptx(version)) {
+    const app = officeAppLabel(version) || 'PowerPoint';
     return (
       <div className={styles.previewUnavailable}>
         <FileText size={22} />
         <span>
-          No inline preview for this file type yet. Use Open in new tab or Download.
+          PowerPoint files are stored in their original format. Use Download, then open in {app}.
+        </span>
+      </div>
+    );
+  }
+
+  if (!isInlineType(version.mimeType, version.originalFileName)) {
+    const app = officeAppLabel(version);
+    return (
+      <div className={styles.previewUnavailable}>
+        <FileText size={22} />
+        <span>
+          {app
+            ? `This file is stored as ${app} format. Use Download, then open in ${app}.`
+            : 'No inline preview for this file type yet. Use Open in new tab or Download.'}
         </span>
       </div>
     );

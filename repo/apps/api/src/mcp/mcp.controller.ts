@@ -153,7 +153,7 @@ export class McpController {
   <p class="meta"><strong>${title}</strong><br/>Project: ${project}<br/>Type: ${pending.documentType}</p>
   <p>Select the approved file (PDF, Word, Excel, PowerPoint, or text) and upload. This queues it into the Repository Import Queue.</p>
   <form id="f" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain" required />
+    <input type="file" name="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,text/markdown" required />
     <button type="submit">Upload to Import Queue</button>
   </form>
   <p id="msg"></p>

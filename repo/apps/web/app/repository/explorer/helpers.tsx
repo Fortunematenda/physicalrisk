@@ -17,9 +17,23 @@ export function isZipArchive(version?: { mimeType?: string | null; originalFileN
 }
 
 export function fileTypeLabel(mimeType?: string, fileName?: string) {
-  if (mimeType === 'application/pdf') return 'PDF';
-  if (mimeType?.startsWith('image/')) return mimeType.replace('image/', '').toUpperCase();
   const ext = fileName ? extensionOf(fileName) : '';
+  // Prefer real extension — ChatGPT/MCP sometimes stores wrong MIME (e.g. application/pdf on .xlsx).
+  if (ext === 'pdf') return 'PDF';
+  if (ext === 'docx' || ext === 'doc') return ext.toUpperCase();
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return ext.toUpperCase();
+  if (ext === 'pptx' || ext === 'ppt') return ext.toUpperCase();
+  if (ext === 'txt' || ext === 'md') return ext.toUpperCase();
+  if (ext === 'zip') return 'ZIP';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return ext.toUpperCase();
+
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime === 'application/pdf') return 'PDF';
+  if (mime.includes('wordprocessingml') || mime.includes('msword')) return 'DOCX';
+  if (mime.includes('spreadsheetml') || mime.includes('ms-excel')) return 'XLSX';
+  if (mime.includes('presentationml') || mime.includes('ms-powerpoint')) return 'PPTX';
+  if (mime === 'text/plain') return 'TXT';
+  if (mime?.startsWith('image/')) return mime.replace('image/', '').toUpperCase();
   return ext ? ext.toUpperCase() : (mimeType || 'File');
 }
 
@@ -54,29 +68,45 @@ function versionExt(version?: VersionItem | null) {
 
 export function isPdf(version?: VersionItem | null) {
   if (!version) return false;
-  if (version.mimeType === 'application/pdf') return true;
-  return versionExt(version) === 'pdf';
+  const ext = versionExt(version);
+  // Extension wins — never treat .xlsx/.docx as PDF just because MIME is wrong.
+  if (ext && ext !== 'pdf') return false;
+  if (ext === 'pdf') return true;
+  return version.mimeType === 'application/pdf';
 }
 
 export function isDocx(version?: VersionItem | null) {
   if (!version) return false;
-  if (version.mimeType === DOCX_MIME) return true;
-  return versionExt(version) === 'docx';
+  const ext = versionExt(version);
+  if (ext === 'docx' || ext === 'doc') return true;
+  if (ext && ext !== 'docx' && ext !== 'doc') return false;
+  return version.mimeType === DOCX_MIME;
+}
+
+export function isPptx(version?: VersionItem | null) {
+  if (!version) return false;
+  const ext = versionExt(version);
+  if (ext === 'pptx' || ext === 'ppt') return true;
+  if (ext && ext !== 'pptx' && ext !== 'ppt') return false;
+  const mime = String(version.mimeType ?? '').toLowerCase();
+  return mime.includes('presentationml') || mime.includes('ms-powerpoint');
 }
 
 export function isImage(version?: VersionItem | null) {
   if (!version) return false;
-  if (/^image\//.test(version.mimeType ?? '')) return true;
-  return IMAGE_EXTS.has(versionExt(version));
+  const ext = versionExt(version);
+  if (IMAGE_EXTS.has(ext)) return true;
+  if (ext) return false;
+  return /^image\//.test(version.mimeType ?? '');
 }
 
 export function isSpreadsheet(version?: VersionItem | null) {
   if (!version) return false;
+  const ext = versionExt(version);
+  if (SPREADSHEET_EXTS.has(ext)) return true;
+  if (ext) return false;
   const mime = version.mimeType ?? '';
-  if (mime === XLSX_MIME || mime === XLS_MIME || mime === 'text/csv' || mime === 'text/tab-separated-values') {
-    return true;
-  }
-  return SPREADSHEET_EXTS.has(versionExt(version));
+  return mime === XLSX_MIME || mime === XLS_MIME || mime === 'text/csv' || mime === 'text/tab-separated-values';
 }
 
 export function isTextPreview(version?: VersionItem | null) {
@@ -93,6 +123,14 @@ export function isTextPreview(version?: VersionItem | null) {
 export function isInlineType(mimeType?: string, fileName?: string) {
   const version = { mimeType: mimeType ?? '', originalFileName: fileName ?? '' } as VersionItem;
   return isPdf(version) || isDocx(version) || isImage(version) || isSpreadsheet(version) || isTextPreview(version);
+}
+
+export function officeAppLabel(version?: VersionItem | null): string | null {
+  if (!version) return null;
+  if (isSpreadsheet(version)) return 'Excel';
+  if (isDocx(version)) return 'Word';
+  if (isPptx(version)) return 'PowerPoint';
+  return null;
 }
 
 export function canUseViewerControls(version?: VersionItem | null) {

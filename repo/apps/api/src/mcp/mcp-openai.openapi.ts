@@ -130,7 +130,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.19.0',
+      version: '1.20.0',
     },
     servers: [{ url: baseUrl }],
     paths: {

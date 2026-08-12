@@ -12,6 +12,32 @@ import { useConfirm } from '@/components/confirm-dialog';
 import { SuccessNotice } from '@/components/success-notice';
 import styles from './DocumentDetails.module.css';
 
+function fileTypeBadge(mimeType?: string | null, fileName?: string | null) {
+  const name = String(fileName || '');
+  const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
+  if (ext === 'pdf') return 'PDF';
+  if (ext === 'docx' || ext === 'doc') return ext.toUpperCase();
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return ext.toUpperCase();
+  if (ext === 'pptx' || ext === 'ppt') return ext.toUpperCase();
+  if (ext === 'txt' || ext === 'md' || ext === 'zip') return ext.toUpperCase();
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime.includes('pdf')) return 'PDF';
+  if (mime.includes('wordprocessingml') || mime.includes('msword')) return 'DOCX';
+  if (mime.includes('spreadsheetml') || mime.includes('ms-excel')) return 'XLSX';
+  if (mime.includes('presentationml') || mime.includes('ms-powerpoint')) return 'PPTX';
+  if (mime === 'text/plain') return 'TXT';
+  return ext ? ext.toUpperCase() : 'FILE';
+}
+
+function openInAppHint(fileName?: string | null, mimeType?: string | null) {
+  const badge = fileTypeBadge(mimeType, fileName);
+  if (badge === 'XLSX' || badge === 'XLS' || badge === 'CSV') return 'Download and open in Excel';
+  if (badge === 'DOCX' || badge === 'DOC') return 'Download and open in Word';
+  if (badge === 'PPTX' || badge === 'PPT') return 'Download and open in PowerPoint';
+  if (badge === 'PDF') return 'Preview in browser or download PDF';
+  return 'Download original file';
+}
+
 type DocumentTypeRecord = { id: string; name: string; code: string; active: boolean };
 type FileTypeRecord = { id: string; label: string; extension: string; maxSizeMb: number; active: boolean };
 type ProjectRecord = {
@@ -282,6 +308,7 @@ export default function DocumentPage() {
     const token = getToken();
     fetch(`${API_URL}/versions/${version.id}/download`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'same-origin',
     })
       .then((response) => {
         if (!response.ok) throw new Error('Download failed');
@@ -296,6 +323,24 @@ export default function DocumentPage() {
         URL.revokeObjectURL(url);
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : 'Download failed'));
+  };
+
+  const previewPdf = (version: DocumentRecord['versions'][number]) => {
+    const token = getToken();
+    fetch(`${API_URL}/versions/${version.id}/view`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'same-origin',
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Preview failed');
+        return response.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank', 'noopener,noreferrer');
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Preview failed'));
   };
 
   const beginEdit = () => {
@@ -501,13 +546,25 @@ export default function DocumentPage() {
                     <span className="secondary-text">
                       {replacementFile
                         ? `New file selected · ${formatBytes(replacementFile.size)}`
-                        : `v${currentVersion.versionNo}${currentVersion.mimeType ? ` · ${currentVersion.mimeType}` : ''} · ${formatBytes(currentVersion.fileSize)} · ${formatDate(currentVersion.createdAt)}`}
+                        : `v${currentVersion.versionNo} · ${fileTypeBadge(currentVersion.mimeType, currentVersion.originalFileName)} · ${formatBytes(currentVersion.fileSize)} · ${formatDate(currentVersion.createdAt)}`}
                     </span>
+                    {!replacementFile ? (
+                      <span className="secondary-text" style={{ display: 'block', marginTop: 4 }}>
+                        {openInAppHint(currentVersion.originalFileName, currentVersion.mimeType)}
+                      </span>
+                    ) : null}
                   </div>
                   {!replacementFile ? (
-                    <button type="button" className="button small" onClick={() => download(currentVersion)}>
-                      Download
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {fileTypeBadge(currentVersion.mimeType, currentVersion.originalFileName) === 'PDF' ? (
+                        <button type="button" className="button small" onClick={() => previewPdf(currentVersion)}>
+                          Preview
+                        </button>
+                      ) : null}
+                      <button type="button" className="button small" onClick={() => download(currentVersion)}>
+                        Download
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               ) : (
