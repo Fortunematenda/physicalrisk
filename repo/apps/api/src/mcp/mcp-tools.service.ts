@@ -693,6 +693,7 @@ export class McpToolsService {
     // Prefer the uploaded file's real name/MIME — pending often still has a PDF placeholder.
     const uploadedName = file.originalname?.trim();
     const uploadedMime = file.mimetype?.trim();
+    const fileName = uploadedName || consumed.fileName?.trim() || 'document';
     const result = await this.submitApprovedDocument(
       integration,
       {
@@ -706,7 +707,7 @@ export class McpToolsService {
         approvalDate: consumed.approvalDate,
         module: consumed.module,
         sectionKey: consumed.sectionKey,
-        fileName: uploadedName || consumed.fileName,
+        fileName,
         mimeType: uploadedMime || consumed.mimeType,
         fileContentBase64: file.buffer.toString('base64'),
       },
