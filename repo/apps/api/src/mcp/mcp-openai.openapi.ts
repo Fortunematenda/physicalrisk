@@ -83,11 +83,20 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       payload: {
         type: 'string',
         description:
-          'JSON with projectCode (exact code from list_repository_projects, e.g. MCRD — not the module name), '
-          + 'module, documentType, title, documentContent; optional owner, description, approvedBy, '
-          + 'fileName (use .docx / .xlsx / .pptx / .txt; default PDF), outputFormat (pdf|docx|xlsx|pptx|txt). '
-          + 'For revisions add mode=NEW_VERSION and existingDocumentId or documentCode. '
-          + 'Server defaults date, MIME, filename, Rev.',
+          'JSON: projectCode, module, documentType, title, documentContent; optional owner, description, '
+          + 'approvedBy, fileName, outputFormat (pdf|docx|xlsx|pptx|txt). '
+          + 'Spreadsheet/.xlsx → outputFormat=xlsx + fileName=*.xlsx (never PDF). '
+          + 'Revisions: mode=NEW_VERSION + existingDocumentId/documentCode.',
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
+        description:
+          'Set xlsx when chat has Spreadsheet/.xlsx. Also include inside payload.',
+      },
+      fileName: {
+        type: 'string',
+        description: 'e.g. Plan.xlsx / Report.docx / Deck.pptx / Notes.txt',
       },
     },
   };
@@ -121,7 +130,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.17.0',
+      version: '1.18.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -242,9 +251,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Pass only payload. After approve: list project/type/module, then submit. '
-          + 'Do not ask date/MIME/filename/version. Put full Markdown in documentContent. '
-          + 'NEW_VERSION needs mode + existingDocumentId or documentCode.',
+        'Pass payload. Set top-level outputFormat when not PDF (xlsx/docx/pptx/txt). '
+          + 'Spreadsheet/.xlsx → outputFormat=xlsx (never PDF). '
+          + 'Put Markdown in documentContent. NEW_VERSION: mode + existingDocumentId/documentCode.',
       ),
       '/api/mcp/tools/prepare_approved_document': post(
         'prepare_approved_document',
@@ -253,7 +262,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Same as submit_approved_document.',
+        'Same as submit_approved_document. Set outputFormat=xlsx for spreadsheets.',
       ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
@@ -447,15 +456,26 @@ Rules for menus:
 - End each menu with exactly: "Reply with the number only (e.g. 2)."
 - Prefer short messages so ChatGPT can offer suggested-reply chips when available.
 
+════════════════════════════════════
+OUTPUT FORMAT (critical — read every time)
+════════════════════════════════════
+ChatGPT may show a downloadable .xlsx in the chat UI. That file is NOT sent to Repo automatically.
+You MUST set the format explicitly on submit_approved_document:
+- Top-level Action field outputFormat = xlsx|docx|pptx|txt|pdf
+- AND inside payload: "outputFormat":"…" and "fileName":"….xlsx" (or .docx/.pptx/.txt/.pdf)
+
+Rules:
+- If you created/showed a Spreadsheet or .xlsx/.xls, or the user asked for Excel: outputFormat=xlsx, fileName=*.xlsx. NEVER PDF.
+- If Word / .docx: outputFormat=docx. NEVER PDF.
+- If PowerPoint / .pptx: outputFormat=pptx. NEVER PDF.
+- If plain text / .txt: outputFormat=txt. NEVER PDF.
+- PDF only when the user asked for PDF or did not ask for Office/TXT.
+- NEVER send mimeType=application/pdf when using xlsx/docx/pptx/txt.
+- On success, tell the user the stored fileName extension (must match the requested format).
+
 STEP C — Auto fields (NEVER ask the user)
 - approvalDate = today (server default if omitted)
-- Output format:
-  - Default: mimeType = application/pdf, fileName = title.pdf (Markdown → PDF)
-  - If the user asked for Word / .doc / .docx: fileName = title.docx, outputFormat = docx (Markdown → Word)
-  - If the user asked for Excel / .xls / .xlsx: fileName = title.xlsx, outputFormat = xlsx (Markdown → Excel)
-  - If the user asked for PowerPoint / slides / .ppt / .pptx: fileName = title.pptx, outputFormat = pptx (Markdown → PowerPoint)
-  - If the user asked for plain text / .txt: fileName = title.txt, outputFormat = txt (store as text/plain — not PDF)
-  - Never convert Word/Excel/PowerPoint/TXT requests to PDF
+- Output format: follow OUTPUT FORMAT rules above (default PDF only when no Office/TXT was requested)
 - versionNo = Rev 1.0 for NEW (or server bump for NEW_VERSION)
 - approvalStatus = APPROVED
 - approvedBy = the ChatGPT user's real name if they told you it in this chat; otherwise OMIT approvedBy (the server fills it from the MCP key owner's repo profile)
@@ -466,11 +486,14 @@ STEP C — Auto fields (NEVER ask the user)
 STEP D — Import immediately after selections are complete
 As soon as project + documentType + module are known:
 1) Optional: check_document_exists (title or code) — if exists and user wants another version, use matches[0].newVersionSubmitHints (mode=NEW_VERSION).
-2) Call submit_approved_document ONCE with payload JSON string containing at least:
-   projectCode, module, documentType, title, documentContent, description
+2) Call submit_approved_document ONCE with:
+   - top-level outputFormat when not PDF (especially xlsx for spreadsheets)
+   - payload JSON string containing at least:
+     projectCode, module, documentType, title, documentContent, description
+     and when not PDF: fileName + outputFormat (same as top-level)
    Include owner and approvedBy only when you know the user's real name.
 3) Do NOT ask for date, MIME, filename, version, or content again.
-4) On success report: imported, documentCode, sectionName, importJobId, result.message.
+4) On success report: imported, documentCode, sectionName, importJobId, result.fileName (must show .xlsx/.docx/.pptx/.txt/.pdf), result.message.
 5) Only mention Import Queue if needsReview=true.
 
 FORBIDDEN
@@ -480,6 +503,7 @@ FORBIDDEN
 - Claiming you cannot list/search repository documents.
 - Swapping module and documentType.
 - Hardcoding a fixed person name (e.g. Wayne) as approvedBy unless that person is the user.
+- Converting a chat Spreadsheet/.xlsx (or Word/PPT/TXT request) to PDF.
 
 NEW VERSION
 - If user asks for another version of an existing document: check_document_exists → newVersionSubmitHints → submit with mode=NEW_VERSION after the same project/type/module confirmation if needed.

@@ -85,31 +85,34 @@ export class McpMarkdownOfficeService {
     if (/\.txt$/i.test(name)) return 'txt';
 
     const mime = String(input.mimeType || '').trim().toLowerCase();
-    if (
-      mime.includes('wordprocessingml')
-      || mime.includes('msword')
-      || mime === 'application/doc'
-      || mime === 'application/ms-word'
-    ) {
-      return 'docx';
-    }
-    if (
-      mime.includes('spreadsheetml')
-      || mime.includes('ms-excel')
-      || mime.includes('excel')
-      || mime === 'text/csv'
-    ) {
-      return 'xlsx';
-    }
-    if (
-      mime.includes('presentationml')
-      || mime.includes('ms-powerpoint')
-      || mime.includes('powerpoint')
-    ) {
-      return 'pptx';
-    }
-    if (mime === 'text/plain') {
-      return 'txt';
+    // Ignore ChatGPT's habitual application/pdf default — only trust office/text MIME types.
+    if (mime && mime !== 'application/pdf' && mime !== 'application/octet-stream') {
+      if (
+        mime.includes('wordprocessingml')
+        || mime.includes('msword')
+        || mime === 'application/doc'
+        || mime === 'application/ms-word'
+      ) {
+        return 'docx';
+      }
+      if (
+        mime.includes('spreadsheetml')
+        || mime.includes('ms-excel')
+        || mime.includes('excel')
+        || mime === 'text/csv'
+      ) {
+        return 'xlsx';
+      }
+      if (
+        mime.includes('presentationml')
+        || mime.includes('ms-powerpoint')
+        || mime.includes('powerpoint')
+      ) {
+        return 'pptx';
+      }
+      if (mime === 'text/plain') {
+        return 'txt';
+      }
     }
     return 'pdf';
   }

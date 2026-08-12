@@ -13,6 +13,15 @@ describe('McpMarkdownOfficeService', () => {
     expect(McpMarkdownOfficeService.resolveFormat({ mimeType: 'text/plain' })).toBe('txt');
     expect(McpMarkdownOfficeService.resolveFormat({ outputFormat: 'word' })).toBe('docx');
     expect(McpMarkdownOfficeService.resolveFormat({ mimeType: 'application/msword' })).toBe('docx');
+    // ChatGPT habitually sends application/pdf — must not block .xlsx from fileName/outputFormat.
+    expect(McpMarkdownOfficeService.resolveFormat({
+      fileName: 'Plan.xlsx',
+      mimeType: 'application/pdf',
+    })).toBe('xlsx');
+    expect(McpMarkdownOfficeService.resolveFormat({
+      outputFormat: 'xlsx',
+      mimeType: 'application/pdf',
+    })).toBe('xlsx');
     expect(McpMarkdownOfficeService.resolveFormat({})).toBe('pdf');
   });
 

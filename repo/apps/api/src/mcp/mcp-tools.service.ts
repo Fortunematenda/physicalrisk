@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { extname } from 'path';
 import { In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
@@ -764,8 +765,8 @@ export class McpToolsService {
         );
       }
       const format = McpMarkdownOfficeService.resolveFormat({
-        fileName,
-        mimeType,
+        fileName: fileName || this.inferFileNameHint(fileName, input.title, input.description, content),
+        mimeType: this.effectiveMimeForFormat(mimeType),
         outputFormat: (input as { outputFormat?: string }).outputFormat,
       });
       const author = input.approvedBy || 'Physical Risk Repository';
@@ -896,13 +897,15 @@ export class McpToolsService {
             externalImportStatus: queued.externalImportStatus,
             checksum: queued.checksum,
             fileName: queued.fileName,
+            outputFormat: (extname(queued.fileName).replace('.', '') || 'bin').toLowerCase(),
+            mimeType,
             imported: false,
             needsReview: queued.needsReview === true,
             documentCode: queued.documentCode ?? null,
             sectionName: queued.sectionName ?? null,
             workspaceCode,
             message: queued.message
-              ?? 'Import accepted and processing in the background. Poll get_import_status; workspace creation is not import completion.',
+              ?? `Import accepted as ${queued.fileName}. Poll get_import_status; workspace creation is not import completion.`,
             projectId,
             sectionKey: sectionKey ?? null,
             documentType: versioned.documentType,
@@ -968,21 +971,32 @@ export class McpToolsService {
 
   /** Unwrap optional ChatGPT `payload` JSON string into a plain object. */
   private unwrapPayloadObject(args: Record<string, unknown>): Record<string, unknown> {
-    let source: Record<string, unknown> = args ?? {};
-    const rawPayload = source.payload;
+    const outer: Record<string, unknown> = args ?? {};
+    const rawPayload = outer.payload;
     if (typeof rawPayload === 'string' && rawPayload.trim()) {
       try {
         const parsed = JSON.parse(rawPayload) as unknown;
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           throw new BadRequestException('payload must be a JSON object string');
         }
-        source = parsed as Record<string, unknown>;
+        // Merge inner payload with top-level Action fields (outputFormat/fileName).
+        // Outer non-empty values win so ChatGPT can set format outside the JSON string.
+        const { payload: _ignored, ...rest } = outer;
+        const merged: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+        for (const [key, value] of Object.entries(rest)) {
+          if (typeof value === 'string' && value.trim()) {
+            merged[key] = value.trim();
+          } else if (value !== undefined && value !== null && typeof value !== 'string') {
+            merged[key] = value;
+          }
+        }
+        return merged;
       } catch (error) {
         if (error instanceof BadRequestException) throw error;
         throw new BadRequestException('payload must be valid JSON');
       }
     }
-    return source;
+    return outer;
   }
 
   /**
@@ -1206,7 +1220,14 @@ export class McpToolsService {
       sectionKey: str('sectionKey'),
       fileName: str('fileName') || str('originalFilename') || str('original_filename'),
       mimeType: str('mimeType'),
-      outputFormat: str('outputFormat') || str('output_format') || str('format'),
+      outputFormat:
+        str('outputFormat')
+        || str('output_format')
+        || str('format')
+        || str('fileType')
+        || str('file_type')
+        || str('extension')
+        || str('fileExtension'),
       metadataJson: str('metadataJson'),
       relationshipsJson: str('relationshipsJson'),
       mode,
@@ -1234,10 +1255,12 @@ export class McpToolsService {
     const description = input.description?.trim()
       || this.deriveDescription(documentContent, title)
       || title;
+    // ChatGPT often sends mimeType=application/pdf even for Excel — ignore that weak default.
+    const hintedName = this.inferFileNameHint(input.fileName, title, description, documentContent);
     const format = hasMarkdown
       ? McpMarkdownOfficeService.resolveFormat({
-        fileName: input.fileName,
-        mimeType: input.mimeType,
+        fileName: hintedName || input.fileName,
+        mimeType: this.effectiveMimeForFormat(input.mimeType),
         outputFormat: (input as { outputFormat?: string }).outputFormat,
       })
       : 'pdf';
@@ -1251,13 +1274,38 @@ export class McpToolsService {
       approvalStatus: input.approvalStatus?.trim() || 'APPROVED',
       approvedBy,
       approvalDate: input.approvalDate?.trim() || today,
+      outputFormat: format,
       fileName:
         input.fileName?.trim()
+        || hintedName
         || (hasMarkdown ? McpMarkdownOfficeService.fileNameFor(title, format) : undefined),
-      mimeType:
-        input.mimeType?.trim()
-        || (hasMarkdown ? McpMarkdownOfficeService.mimeFor(format) : undefined),
+      // Always align MIME with resolved format for Markdown submits (do not keep GPT's pdf default).
+      mimeType: hasMarkdown
+        ? McpMarkdownOfficeService.mimeFor(format)
+        : (input.mimeType?.trim() || undefined),
     };
+  }
+
+  /** Drop ChatGPT's habitual application/pdf so it cannot override .xlsx/.docx intent. */
+  private effectiveMimeForFormat(mimeType?: string): string | undefined {
+    const mime = String(mimeType || '').trim().toLowerCase().split(';')[0].trim();
+    if (!mime || mime === 'application/pdf' || mime === 'application/octet-stream') {
+      return undefined;
+    }
+    return mimeType?.trim();
+  }
+
+  /** Recover Excel/Word/PPT/TXT intent from title/description when GPT omits fileName/outputFormat. */
+  private inferFileNameHint(
+    fileName?: string,
+    title?: string,
+    description?: string,
+    documentContent?: string,
+  ): string | undefined {
+    if (fileName?.trim()) return fileName.trim();
+    const blob = [title, description, documentContent?.slice(0, 500)].filter(Boolean).join('\n');
+    const match = blob.match(/([\w .-]+?\.(xlsx|xls|docx|doc|pptx|ppt|txt))\b/i);
+    return match?.[1]?.trim();
   }
 
   /** Prefer the repo user who owns the MCP API key; ChatGPT does not send end-user identity. */

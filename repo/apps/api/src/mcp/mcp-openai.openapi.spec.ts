@@ -4,14 +4,18 @@ describe('buildChatGptActionsOpenApi', () => {
   it('uses a single payload string for submit to avoid UnrecognizedKwargsError', () => {
     const doc = buildChatGptActionsOpenApi('https://repo.physicalrisk.com/');
     expect(doc.openapi).toBe('3.1.0');
-    expect(doc.info.version).toBe('1.17.0');
+    expect(doc.info.version).toBe('1.18.0');
     expect((doc.paths as any)['/api/mcp/tools/search_documents']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/get_document']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/find_workspaces']).toBeDefined();
     const submit = (doc.paths as any)['/api/mcp/tools/submit_approved_document'].post;
     expect(submit.requestBody.content['application/json'].schema.required).toEqual(['payload']);
     expect(submit.requestBody.content['application/json'].schema.properties.payload.type).toBe('string');
+    expect(submit.requestBody.content['application/json'].schema.properties.outputFormat.enum).toEqual([
+      'pdf', 'docx', 'xlsx', 'pptx', 'txt',
+    ]);
     expect(submit.requestBody.content['application/json'].schema.properties.payload.description).toContain('documentContent');
+    expect(submit.requestBody.content['application/json'].schema.properties.payload.description).toContain('xlsx');
     expect(submit.requestBody.content['application/json'].schema.properties.payload.description).toContain('NEW_VERSION');
     expect(submit.requestBody.content['application/json'].schema.properties.payload.description).toContain('owner');
     const check = (doc.paths as any)['/api/mcp/tools/check_document_exists'].post;
