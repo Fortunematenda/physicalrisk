@@ -677,6 +677,10 @@ export class DocumentsService {
   async versionFile(versionId: string) {
     const version = await this.db.documentVersions.findOne({ where: { id: versionId }, relations: { document: true } });
     if (!version) throw new NotFoundException('Document version not found');
-    return { version, absolutePath: this.storage.resolveStoragePath(version.storagePath) };
+    const absolutePath = this.storage.resolveStoragePath(version.storagePath);
+    if (!(await this.storage.exists(absolutePath))) {
+      throw new NotFoundException('Stored file is missing on the server');
+    }
+    return { version, absolutePath };
   }
 }

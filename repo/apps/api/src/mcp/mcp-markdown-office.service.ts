@@ -137,6 +137,7 @@ export class McpMarkdownOfficeService {
     const raw = String(titleOrName || 'document').trim();
     const withoutExt = raw.replace(/\.(md|markdown|txt|pdf|docx?|xlsx?|csv|pptx?)$/i, '');
     const base = withoutExt
+      .replace(/[\u2010-\u2015\u2212]/g, '-') // normalize en/em dashes (breaks HTTP headers if left raw)
       .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '')
       .replace(/\s+/g, ' ')
       .slice(0, 120)

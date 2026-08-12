@@ -4,6 +4,7 @@ import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { DocumentStatus, RelationshipType, UserRole } from '../database/entities';
 import type { Response } from 'express';
 import { createReadStream } from 'node:fs';
+import { buildContentDisposition } from '../common/content-disposition.util';
 import { CurrentUser } from '../common/current-user.decorator';
 import { Roles } from '../common/roles.decorator';
 import { RolesGuard } from '../common/roles.guard';
@@ -133,17 +134,38 @@ export class DocumentsController {
       'text/xml',
     ];
     // ZIP archives (stored unextracted) must download — never open inline.
-    const disposition = !isZip && safeInlineTypes.includes(mime) ? 'inline' : 'attachment';
+    // Office files download as attachment — browsers cannot reliably preview xlsx/docx inline.
+    const officeMime = /spreadsheetml|wordprocessingml|ms-excel|msword|ms-powerpoint|presentationml/i.test(mime);
+    const disposition = !isZip && !officeMime && safeInlineTypes.includes(mime) ? 'inline' : 'attachment';
     response.setHeader('Content-Type', mime);
-    response.setHeader('Content-Disposition', `${disposition}; filename="${fileName.replace(/"/g, '')}"`);
-    createReadStream(version.absolutePath).pipe(response);
+    response.setHeader('Content-Disposition', buildContentDisposition(disposition, fileName));
+    const stream = createReadStream(version.absolutePath);
+    stream.on('error', () => {
+      if (!response.headersSent) {
+        response.status(404).json({ message: 'Stored file is missing on the server' });
+      } else {
+        response.destroy();
+      }
+    });
+    stream.pipe(response);
   }
 
   @Get('versions/:id/download')
   async download(@Param('id') id: string, @Res() response: Response) {
     const version = await this.documents.versionFile(id);
-    response.setHeader('Content-Type', version.version.mimeType);
-    response.setHeader('Content-Disposition', `attachment; filename="${version.version.originalFileName.replace(/"/g, '')}"`);
-    createReadStream(version.absolutePath).pipe(response);
+    response.setHeader('Content-Type', version.version.mimeType || 'application/octet-stream');
+    response.setHeader(
+      'Content-Disposition',
+      buildContentDisposition('attachment', version.version.originalFileName || 'download'),
+    );
+    const stream = createReadStream(version.absolutePath);
+    stream.on('error', () => {
+      if (!response.headersSent) {
+        response.status(404).json({ message: 'Stored file is missing on the server' });
+      } else {
+        response.destroy();
+      }
+    });
+    stream.pipe(response);
   }
 }

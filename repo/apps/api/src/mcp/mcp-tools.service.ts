@@ -764,11 +764,21 @@ export class McpToolsService {
           `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
         );
       }
-      const format = McpMarkdownOfficeService.resolveFormat({
+      const intentFormat = this.inferFormatFromIntent(
+        (input as { outputFormat?: string }).outputFormat,
+        fileName,
+        input.title,
+        input.description,
+        content,
+      );
+      let format = McpMarkdownOfficeService.resolveFormat({
         fileName: fileName || this.inferFileNameHint(fileName, input.title, input.description, content),
         mimeType: this.effectiveMimeForFormat(mimeType),
-        outputFormat: (input as { outputFormat?: string }).outputFormat,
+        outputFormat: (input as { outputFormat?: string }).outputFormat || intentFormat,
       });
+      if (format === 'pdf' && intentFormat) {
+        format = intentFormat;
+      }
       const author = input.approvedBy || 'Physical Risk Repository';
       try {
         if (format === 'docx') {
@@ -1257,13 +1267,23 @@ export class McpToolsService {
       || title;
     // ChatGPT often sends mimeType=application/pdf even for Excel — ignore that weak default.
     const hintedName = this.inferFileNameHint(input.fileName, title, description, documentContent);
-    const format = hasMarkdown
+    const intentFormat = this.inferFormatFromIntent(
+      (input as { outputFormat?: string }).outputFormat,
+      hintedName || input.fileName,
+      title,
+      description,
+      documentContent,
+    );
+    let format = hasMarkdown
       ? McpMarkdownOfficeService.resolveFormat({
         fileName: hintedName || input.fileName,
         mimeType: this.effectiveMimeForFormat(input.mimeType),
-        outputFormat: (input as { outputFormat?: string }).outputFormat,
+        outputFormat: (input as { outputFormat?: string }).outputFormat || intentFormat,
       })
       : 'pdf';
+    if (hasMarkdown && format === 'pdf' && intentFormat) {
+      format = intentFormat;
+    }
     return {
       ...input,
       title,
@@ -1303,9 +1323,46 @@ export class McpToolsService {
     documentContent?: string,
   ): string | undefined {
     if (fileName?.trim()) return fileName.trim();
-    const blob = [title, description, documentContent?.slice(0, 500)].filter(Boolean).join('\n');
-    const match = blob.match(/([\w .-]+?\.(xlsx|xls|docx|doc|pptx|ppt|txt))\b/i);
+    const blob = [title, description, documentContent?.slice(0, 2000)].filter(Boolean).join('\n');
+    const match = blob.match(/([\w .,-]+?\.(xlsx|xls|docx|doc|pptx|ppt|txt))\b/i);
     return match?.[1]?.trim();
+  }
+
+  /**
+   * Detect Office/TXT intent from ChatGPT wording even when it forgets outputFormat.
+   * Example: description says "Excel-based … workbook: Plan.xlsx" but payload omits format → still xlsx.
+   */
+  private inferFormatFromIntent(
+    outputFormat?: string,
+    fileName?: string,
+    title?: string,
+    description?: string,
+    documentContent?: string,
+  ): 'docx' | 'xlsx' | 'pptx' | 'txt' | undefined {
+    const explicit = McpMarkdownOfficeService.resolveFormat({
+      fileName,
+      outputFormat,
+    });
+    if (explicit !== 'pdf') return explicit;
+
+    const blob = [title, description, documentContent?.slice(0, 4000), fileName]
+      .filter(Boolean)
+      .join('\n')
+      .toLowerCase();
+
+    if (/\.xlsx?\b/.test(blob) || /\b(excel[- ]based|spreadsheet|workbook)\b/.test(blob)) {
+      return 'xlsx';
+    }
+    if (/\.docx?\b/.test(blob) || /\b(word document|ms word|\bdocx\b)/.test(blob)) {
+      return 'docx';
+    }
+    if (/\.pptx?\b/.test(blob) || /\b(powerpoint|presentation|slides?\b)/.test(blob)) {
+      return 'pptx';
+    }
+    if (/\.txt\b/.test(blob) || /\b(plain text|plaintext)\b/.test(blob)) {
+      return 'txt';
+    }
+    return undefined;
   }
 
   /** Prefer the repo user who owns the MCP API key; ChatGPT does not send end-user identity. */

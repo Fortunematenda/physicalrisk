@@ -27,10 +27,13 @@ describe('DocumentsController file routes', () => {
     await controller.view('version-1', result);
 
     expect(result.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
-    expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'inline; filename="approved.pdf"');
+    expect(result.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'inline; filename="approved.pdf"; filename*=UTF-8\'\'approved.pdf',
+    );
   });
 
-  it('uses inline disposition for DOCX files', async () => {
+  it('uses attachment disposition for DOCX files (not browser-previewable)', async () => {
     versionFile.mockResolvedValue({
       version: { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', originalFileName: 'report.docx' },
       absolutePath: 'C:/storage/report.docx',
@@ -41,7 +44,7 @@ describe('DocumentsController file routes', () => {
 
     expect(result.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
-      'inline; filename="report.docx"',
+      'attachment; filename="report.docx"; filename*=UTF-8\'\'report.docx',
     );
   });
 
@@ -54,7 +57,10 @@ describe('DocumentsController file routes', () => {
 
     await controller.view('version-3', result);
 
-    expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="bundle.zip"');
+    expect(result.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="bundle.zip"; filename*=UTF-8\'\'bundle.zip',
+    );
   });
 
   it('always uses attachment disposition for secure downloads', async () => {
@@ -66,6 +72,28 @@ describe('DocumentsController file routes', () => {
 
     await controller.download('version-1', result);
 
-    expect(result.setHeader).toHaveBeenCalledWith('Content-Disposition', 'attachment; filename="approved.pdf"');
+    expect(result.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="approved.pdf"; filename*=UTF-8\'\'approved.pdf',
+    );
+  });
+
+  it('ASCII-fallbacks en-dash filenames so Node does not reject Content-Disposition', async () => {
+    versionFile.mockResolvedValue({
+      version: {
+        mimeType: 'application/pdf',
+        originalFileName: 'Borehole Shop Business Plan – Zimbabwe.pdf',
+      },
+      absolutePath: 'C:/storage/plan.pdf',
+    });
+    const result = response();
+
+    await controller.download('version-en-dash', result);
+
+    const disposition = (result.setHeader as jest.Mock).mock.calls
+      .find((call) => call[0] === 'Content-Disposition')?.[1] as string;
+    expect(disposition).toContain('filename="Borehole Shop Business Plan - Zimbabwe.pdf"');
+    expect(disposition).toContain("filename*=UTF-8''");
+    expect(disposition.match(/filename="([^"]*)"/)?.[1]).not.toMatch(/–/);
   });
 });

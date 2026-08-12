@@ -151,9 +151,9 @@ export class McpController {
 <main>
   <h1>Upload Approved Document</h1>
   <p class="meta"><strong>${title}</strong><br/>Project: ${project}<br/>Type: ${pending.documentType}</p>
-  <p>Select the PDF and upload. This queues it into the Repository Import Queue for human review.</p>
+  <p>Select the approved file (PDF, Word, Excel, PowerPoint, or text) and upload. This queues it into the Repository Import Queue.</p>
   <form id="f" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept="application/pdf,.pdf" required />
+    <input type="file" name="file" accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain" required />
     <button type="submit">Upload to Import Queue</button>
   </form>
   <p id="msg"></p>
@@ -193,7 +193,7 @@ export class McpController {
     @Req() request: Request,
   ) {
     if (!file?.buffer?.length) {
-      throw new BadRequestException('Choose a PDF file to upload');
+      throw new BadRequestException('Choose a file to upload (PDF, Word, Excel, PowerPoint, or text)');
     }
     const result = await this.tools.completeBrowserUpload(token, file, request.ip);
     return {
