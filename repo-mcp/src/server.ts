@@ -201,17 +201,27 @@ function createMcpServer(authHeader?: string) {
       'NEW_VERSION = same document, next Rev (1.1). NEW = brand-new document code. Omit to auto NEW_VERSION on same title.',
     ),
     versionNo: z.string().optional().describe('Optional; server suggests next Rev if omitted'),
+    fileName: z.string().optional().describe(
+      'Output file name. Use .docx for Word, .xlsx for Excel, .pptx for PowerPoint, .txt for plain text, .pdf for PDF (default).',
+    ),
+    mimeType: z.string().optional(),
+    outputFormat: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt']).optional().describe(
+      'Same-chat conversion format. Default pdf. Use docx/xlsx/pptx/txt — never force those to PDF.',
+    ),
     workspaceCode: z.string().optional().describe(
       'WS-YYYY-##### — REQUIRED when adding a document into a workspace so it attaches (not only Master Index)',
     ),
     owner: z.string().optional(),
     description: z.string().optional(),
-    payload: z.string().optional().describe('JSON string alternative: projectCode, module, documentType, title, documentContent, workspaceCode'),
+    payload: z.string().optional().describe(
+      'JSON string alternative: projectCode, module, documentType, title, documentContent, fileName, outputFormat, workspaceCode',
+    ),
   };
 
   server.tool(
     'submit_approved_document',
-    'IMPORT/SUBMIT an approved document (Markdown → PDF). '
+    'IMPORT/SUBMIT an approved document (Markdown → PDF by default, or DOCX/XLSX/PPTX/TXT when fileName/outputFormat says so). '
+      + 'If the user asked for Word/Excel/PowerPoint/plain text, set outputFormat=docx|xlsx|pptx|txt (or matching fileName) — do NOT convert those to PDF. '
       + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode (adds Rev 1.1, not a new PA-00x). '
       + 'When working in a workspace, ALWAYS pass workspaceCode. '
       + 'Only use mode=NEW when the user explicitly wants a brand-new document ID.',
@@ -228,6 +238,9 @@ function createMcpServer(authHeader?: string) {
             documentCode: args.documentCode,
             mode: args.mode,
             versionNo: args.versionNo,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            outputFormat: args.outputFormat,
             workspaceCode: args.workspaceCode,
             owner: args.owner,
             description: args.description,
@@ -252,6 +265,9 @@ function createMcpServer(authHeader?: string) {
             documentCode: args.documentCode,
             mode: args.mode,
             versionNo: args.versionNo,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            outputFormat: args.outputFormat,
             workspaceCode: args.workspaceCode,
             owner: args.owner,
             description: args.description,

@@ -1,5 +1,6 @@
 .explorer {
-  height: calc(100vh - 64px);
+  height: calc(100vh - var(--top-nav-height, 64px) - 56px);
+  max-height: calc(100vh - var(--top-nav-height, 64px) - 56px);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -7,6 +8,7 @@
   padding: 16px 20px 16px;
   overflow: hidden;
   background: #f1f5f9;
+  box-sizing: border-box;
 }
 
 .header, .toolbar, .notice {
@@ -134,11 +136,10 @@
 /* Three-panel workspace */
 .workspace3 {
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
   display: grid;
   gap: 0;
-  min-height: 620px;
-  height: calc(100vh - 220px);
+  height: auto;
   overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -196,7 +197,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 1 1 auto;
   height: 100%;
+  max-height: 100%;
+  overflow: hidden;
 }
 .panelHeader,
 .inspectorHeader {
@@ -220,9 +224,12 @@
 .panelHeader small { color: #64748b; font-size: 11px; }
 .tree {
   min-height: 0;
-  flex: 1;
-  overflow: auto;
-  padding: 6px 8px 12px;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px 20px;
+  -webkit-overflow-scrolling: touch;
 }
 .treeRoot { padding: 7px 8px; color: #001b36; font-size: 13px; font-weight: 750; }
 .treeRowWrap {
@@ -687,6 +694,10 @@
 }
 .sheetLeft { margin-right: auto; }
 .sheetRight { margin-left: auto; width: min(340px, 94vw); }
+.sheet .treePanelInner {
+  height: 100%;
+  max-height: 100%;
+}
 
 .content {
   min-height: 0;
@@ -930,7 +941,8 @@
 @media (max-width: 680px) {
   .explorer {
     height: auto;
-    min-height: calc(100vh - 64px);
+    min-height: calc(100vh - var(--top-nav-height, 64px) - 24px);
+    max-height: none;
     overflow: visible;
     padding: 10px;
   }

@@ -278,6 +278,15 @@ export class SubmitApprovedDocumentDto {
   @IsString()
   mimeType?: string;
 
+  /**
+   * Same-chat output format when using documentContent.
+   * pdf (default) | docx | xlsx | pptx | txt. Legacy doc/xls/ppt map to modern OOXML.
+   */
+  @IsOptional()
+  @Transform(trimString)
+  @IsIn(['pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'txt', 'text', 'plain', 'plaintext', 'word', 'excel', 'powerpoint', 'presentation', 'slides'])
+  outputFormat?: string;
+
   /** When set, successful import is attached to this workspace (WS-YYYY-#####). */
   @IsOptional()
   @Transform(trimString)
@@ -413,6 +422,11 @@ export class PrepareApprovedDocumentDto {
   @Transform(trimString)
   @IsString()
   mimeType?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsIn(['pdf', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'txt', 'text', 'plain', 'plaintext', 'word', 'excel', 'powerpoint', 'presentation', 'slides'])
+  outputFormat?: string;
 
   /** When set, import is also attached to this Repository Workspace (WS-YYYY-#####). */
   @IsOptional()

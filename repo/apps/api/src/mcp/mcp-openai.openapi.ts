@@ -84,7 +84,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         type: 'string',
         description:
           'JSON with projectCode (exact code from list_repository_projects, e.g. MCRD — not the module name), '
-          + 'module, documentType, title, documentContent; optional owner, description, approvedBy. '
+          + 'module, documentType, title, documentContent; optional owner, description, approvedBy, '
+          + 'fileName (use .docx / .xlsx / .pptx / .txt; default PDF), outputFormat (pdf|docx|xlsx|pptx|txt). '
           + 'For revisions add mode=NEW_VERSION and existingDocumentId or documentCode. '
           + 'Server defaults date, MIME, filename, Rev.',
       },
@@ -116,10 +117,11 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Supports NEW documents and NEW_VERSION revisions of existing documents '
         + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
         + 'search_documents lists the Master Document Index. '
-        + 'Repo converts Markdown to PDF, writes Document Information, applies routing, '
+        + 'Repo converts Markdown to PDF (default), Word (.docx), Excel (.xlsx), PowerPoint (.pptx), or plain text (.txt) from fileName/outputFormat, '
+        + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.16.0',
+      version: '1.17.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -447,8 +449,13 @@ Rules for menus:
 
 STEP C — Auto fields (NEVER ask the user)
 - approvalDate = today (server default if omitted)
-- mimeType = application/pdf (server converts Markdown → PDF)
-- fileName = from title.pdf (server default)
+- Output format:
+  - Default: mimeType = application/pdf, fileName = title.pdf (Markdown → PDF)
+  - If the user asked for Word / .doc / .docx: fileName = title.docx, outputFormat = docx (Markdown → Word)
+  - If the user asked for Excel / .xls / .xlsx: fileName = title.xlsx, outputFormat = xlsx (Markdown → Excel)
+  - If the user asked for PowerPoint / slides / .ppt / .pptx: fileName = title.pptx, outputFormat = pptx (Markdown → PowerPoint)
+  - If the user asked for plain text / .txt: fileName = title.txt, outputFormat = txt (store as text/plain — not PDF)
+  - Never convert Word/Excel/PowerPoint/TXT requests to PDF
 - versionNo = Rev 1.0 for NEW (or server bump for NEW_VERSION)
 - approvalStatus = APPROVED
 - approvedBy = the ChatGPT user's real name if they told you it in this chat; otherwise OMIT approvedBy (the server fills it from the MCP key owner's repo profile)
@@ -480,6 +487,18 @@ NEW VERSION
 
 Example payload after user picks Project=MOSS, Type=Article, Module=Articles (omit approvedBy so the server uses the MCP key owner):
 {"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Goat","description":"Overview of goats as domestic animals.","documentContent":"# The Goat\\n\\n...full markdown..."}
+
+Word example (when the user asked for a Word document):
+{"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Goat","fileName":"The Goat.docx","outputFormat":"docx","documentContent":"# The Goat\\n\\n..."}
+
+Excel example:
+{"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"Budget","fileName":"Budget.xlsx","outputFormat":"xlsx","documentContent":"| Item | Amount |\\n| --- | --- |\\n| A | 10 |"}
+
+PowerPoint example:
+{"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"Q3 Briefing","fileName":"Q3 Briefing.pptx","outputFormat":"pptx","documentContent":"# Q3 Briefing\\n\\n## Highlights\\n- Revenue up\\n- New clients"}
+
+Plain text example:
+{"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"Notes","fileName":"Notes.txt","outputFormat":"txt","documentContent":"# Notes\\n\\nPlain text body..."}
 
 WORKSPACES (resume across chats)
 - Repository is the source of truth — never rely on ChatGPT chat history alone.

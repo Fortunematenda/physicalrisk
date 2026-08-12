@@ -23,6 +23,7 @@ import {
 import { McpForbiddenException } from './mcp.exceptions';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
 import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
+import { McpMarkdownOfficeService } from './mcp-markdown-office.service';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 import { McpUploadSessionService } from './mcp-upload-session.service';
 import { DocumentsService } from '../documents/documents.service';
@@ -42,6 +43,7 @@ export class McpToolsService {
     private readonly browserUploads: McpBrowserUploadService,
     private readonly remoteFiles: McpRemoteFileService,
     private readonly markdownPdf: McpMarkdownPdfService,
+    private readonly markdownOffice: McpMarkdownOfficeService,
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
     private readonly documents: DocumentsService,
@@ -113,6 +115,8 @@ export class McpToolsService {
             mode: prepared.mode,
             existingDocumentId: prepared.existingDocumentId,
             fileName: prepared.fileName!,
+            mimeType: prepared.mimeType,
+            outputFormat: prepared.outputFormat,
             fileUrl: parsed.fileUrl,
             documentContent: parsed.documentContent,
           }, ipAddress);
@@ -156,6 +160,8 @@ export class McpToolsService {
           mode: prepared.mode,
           existingDocumentId: prepared.existingDocumentId,
           fileName: prepared.fileName!,
+          mimeType: prepared.mimeType,
+          outputFormat: prepared.outputFormat,
           uploadId: parsed.uploadId,
           fileContentBase64: parsed.fileContentBase64,
           fileUrl: parsed.fileUrl,
@@ -757,22 +763,50 @@ export class McpToolsService {
           `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
         );
       }
+      const format = McpMarkdownOfficeService.resolveFormat({
+        fileName,
+        mimeType,
+        outputFormat: (input as { outputFormat?: string }).outputFormat,
+      });
+      const author = input.approvedBy || 'Physical Risk Repository';
       try {
-        const pdfBuffer = await this.markdownPdf.render(content, {
-          title: input.title,
-          author: input.approvedBy || 'Physical Risk Repository',
-        });
-        fileContentBase64 = pdfBuffer.toString('base64');
-        fileName = this.defaultPdfFileName(fileName || input.title);
-        mimeType = 'application/pdf';
+        if (format === 'docx') {
+          const buffer = await this.markdownOffice.renderDocx(content, { title: input.title, author });
+          fileContentBase64 = buffer.toString('base64');
+          fileName = McpMarkdownOfficeService.fileNameFor(fileName || input.title, 'docx');
+          mimeType = McpMarkdownOfficeService.mimeFor('docx');
+        } else if (format === 'xlsx') {
+          const buffer = await this.markdownOffice.renderXlsx(content, { title: input.title, author });
+          fileContentBase64 = buffer.toString('base64');
+          fileName = McpMarkdownOfficeService.fileNameFor(fileName || input.title, 'xlsx');
+          mimeType = McpMarkdownOfficeService.mimeFor('xlsx');
+        } else if (format === 'pptx') {
+          const buffer = await this.markdownOffice.renderPptx(content, { title: input.title, author });
+          fileContentBase64 = buffer.toString('base64');
+          fileName = McpMarkdownOfficeService.fileNameFor(fileName || input.title, 'pptx');
+          mimeType = McpMarkdownOfficeService.mimeFor('pptx');
+        } else if (format === 'txt') {
+          const buffer = await this.markdownOffice.renderTxt(content, { title: input.title, author });
+          fileContentBase64 = buffer.toString('base64');
+          fileName = McpMarkdownOfficeService.fileNameFor(fileName || input.title, 'txt');
+          mimeType = McpMarkdownOfficeService.mimeFor('txt');
+        } else {
+          const pdfBuffer = await this.markdownPdf.render(content, {
+            title: input.title,
+            author,
+          });
+          fileContentBase64 = pdfBuffer.toString('base64');
+          fileName = McpMarkdownOfficeService.fileNameFor(fileName || input.title, 'pdf');
+          mimeType = 'application/pdf';
+        }
       } catch (error) {
-        // Keep same-chat submit working if PDF rendering fails in the container.
+        // Keep same-chat submit working if Office/PDF rendering fails in the container.
         const message = error instanceof Error ? error.message : String(error);
         await this.audit.record({
           action: 'MCP_PDF_FALLBACK',
           entityType: 'McpIntegration',
           entityId: integration.id,
-          message: `PDF render failed; queuing Markdown instead (${message})`,
+          message: `${format.toUpperCase()} render failed; queuing Markdown instead (${message})`,
           ipAddress,
         });
         fileContentBase64 = Buffer.from(content, 'utf8').toString('base64');
@@ -1172,6 +1206,7 @@ export class McpToolsService {
       sectionKey: str('sectionKey'),
       fileName: str('fileName') || str('originalFilename') || str('original_filename'),
       mimeType: str('mimeType'),
+      outputFormat: str('outputFormat') || str('output_format') || str('format'),
       metadataJson: str('metadataJson'),
       relationshipsJson: str('relationshipsJson'),
       mode,
@@ -1199,6 +1234,13 @@ export class McpToolsService {
     const description = input.description?.trim()
       || this.deriveDescription(documentContent, title)
       || title;
+    const format = hasMarkdown
+      ? McpMarkdownOfficeService.resolveFormat({
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        outputFormat: (input as { outputFormat?: string }).outputFormat,
+      })
+      : 'pdf';
     return {
       ...input,
       title,
@@ -1211,8 +1253,10 @@ export class McpToolsService {
       approvalDate: input.approvalDate?.trim() || today,
       fileName:
         input.fileName?.trim()
-        || (hasMarkdown ? this.defaultPdfFileName(title) : undefined),
-      mimeType: input.mimeType?.trim() || (hasMarkdown ? 'application/pdf' : undefined),
+        || (hasMarkdown ? McpMarkdownOfficeService.fileNameFor(title, format) : undefined),
+      mimeType:
+        input.mimeType?.trim()
+        || (hasMarkdown ? McpMarkdownOfficeService.mimeFor(format) : undefined),
     };
   }
 
@@ -1400,7 +1444,8 @@ export class McpToolsService {
       check_document_exists:
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
-        'Submit APPROVED document via documentContent (Markdown→PDF), fileUrl, uploadId, or base64. '
+        'Submit APPROVED document via documentContent (Markdown→PDF/DOCX/XLSX), fileUrl, uploadId, or base64. '
+        + 'Default is PDF. For Word set fileName to *.docx (or outputFormat=docx); for Excel use *.xlsx / outputFormat=xlsx; for PowerPoint use *.pptx / outputFormat=pptx; for plain text use *.txt / outputFormat=txt. '
         + 'If the same title already exists, submits as NEW_VERSION (e.g. Rev 1.1) unless mode=NEW. '
         + 'For an intentional new document code, set mode=NEW. '
         + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace. '
@@ -1535,7 +1580,7 @@ export class McpToolsService {
           relationshipsJson: { type: 'string' },
           mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
           existingDocumentId: { type: 'string', format: 'uuid' },
-          fileName: { type: 'string' },
+          fileName: { type: 'string', description: 'e.g. report.docx, sheet.xlsx, deck.pptx, notes.txt (default .pdf)' },
           fileUrl: {
             type: 'string',
             format: 'uri',
@@ -1544,11 +1589,16 @@ export class McpToolsService {
           documentContent: {
             type: 'string',
             description:
-              'Full Markdown body from chat. Repo converts it to PDF and queues the PDF. Max ~500KB.',
+              'Full Markdown body from chat. Repo converts to PDF (default), DOCX, XLSX, PPTX, or TXT based on fileName/outputFormat. Max ~500KB.',
           },
           uploadId: { type: 'string', format: 'uuid', description: 'From begin_document_upload' },
           fileContentBase64: { type: 'string', description: 'Optional if documentContent, fileUrl, or uploadId provided' },
           mimeType: { type: 'string' },
+          outputFormat: {
+            type: 'string',
+            enum: ['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
+            description: 'Same-chat conversion format. Default pdf. Use docx/xlsx/pptx/txt for other formats.',
+          },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
           workspaceCode: {
             type: 'string',
