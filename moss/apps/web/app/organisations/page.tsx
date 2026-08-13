@@ -20,6 +20,7 @@ import {
   IconSearch,
 } from '../../components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
+import { IndustrySelect } from '@/components/organisations/IndustrySelect';
 import { apiFetch } from '../../lib/api';
 import { getStoredUser, resolveMvpNavRole } from '../../lib/auth-user';
 
@@ -109,6 +110,7 @@ export default function OrganisationsPage() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [catalogueIndustries, setCatalogueIndustries] = useState<string[]>([]);
   const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
 
   const load = () =>
@@ -119,11 +121,17 @@ export default function OrganisationsPage() {
 
   useEffect(() => {
     void load();
+    apiFetch<{ industries: string[] }>('/organisations/industries')
+      .then((res) => setCatalogueIndustries(res.industries || []))
+      .catch(() => undefined);
   }, []);
 
   const industries = useMemo(() => {
-    return [...new Set(items.map((x) => x.industry).filter(Boolean) as string[])].sort();
-  }, [items]);
+    const fromOrgs = items.map((x) => x.industry).filter(Boolean) as string[];
+    return [...new Set([...catalogueIndustries, ...fromOrgs])].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    );
+  }, [items, catalogueIndustries]);
 
   const filtered = useMemo(() => {
     const q = (query || headerSearch).trim().toLowerCase();
@@ -314,7 +322,7 @@ export default function OrganisationsPage() {
       <Shell
         title="Organisations"
         hideEyebrow
-        subtitle="Manage all client organisations and their assessment activity."
+        subtitle="Shared client organisations used by Cost Leakage, MOSS, and other diagnostics."
         searchPlaceholder="Search organisations…"
         searchValue={headerSearch}
         onSearch={setHeaderSearch}
@@ -389,11 +397,14 @@ export default function OrganisationsPage() {
                 <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="field">
-                <label>Industry</label>
-                <input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} list="org-industries" />
-                <datalist id="org-industries">
-                  {industries.map((industry) => <option key={industry} value={industry} />)}
-                </datalist>
+                <label htmlFor="org-industry">Industry</label>
+                <IndustrySelect
+                  id="org-industry"
+                  value={form.industry}
+                  onChange={(industry) => setForm({ ...form, industry })}
+                  onCatalogueChange={setCatalogueIndustries}
+                  disabled={saving}
+                />
               </div>
               <div className="field">
                 <label>Registration no.</label>
@@ -444,22 +455,22 @@ export default function OrganisationsPage() {
               />
             </label>
             <select value={industryFilter} onChange={(e) => setIndustryFilter(e.target.value)} aria-label="Industry">
-              <option value="">Industry</option>
+              <option value="">All industries</option>
               {industries.map((industry) => <option key={industry} value={industry}>{industry}</option>)}
             </select>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
-              <option value="">Status</option>
+              <option value="">All statuses</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
             <select value={assessmentFilter} onChange={(e) => setAssessmentFilter(e.target.value)} aria-label="Assessment status">
-              <option value="">Assessment Status</option>
+              <option value="">All assessment statuses</option>
               <option value="in_progress">In Progress</option>
               <option value="completed">Completed</option>
               <option value="none">No assessments</option>
             </select>
             <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} aria-label="Risk rating">
-              <option value="">Risk Rating</option>
+              <option value="">All risk ratings</option>
               {['Critical', 'High', 'Moderate', 'Low'].map((band) => <option key={band} value={band}>{band}</option>)}
             </select>
             <button type="button" className="dash2-filter-btn" onClick={clearFilters}>

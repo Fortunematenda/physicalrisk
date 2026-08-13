@@ -146,7 +146,13 @@ export async function ssoLogout() {
   signInInFlight = null;
   window.localStorage.removeItem('moss_token');
   window.localStorage.removeItem('moss_user');
-
+  try {
+    // Avoid circular import at module load — clear AuthGate SPA cache on logout.
+    const { clearAuthSessionCache } = await import('@/components/AuthGate');
+    clearAuthSessionCache();
+  } catch {
+    // ignore
+  }
   if (await isSsoEnabled()) {
     await signOut({ redirect: false });
     clearLogoutGuard();
@@ -166,7 +172,12 @@ export async function idleLogout() {
   signInInFlight = null;
   window.localStorage.removeItem('moss_token');
   window.localStorage.removeItem('moss_user');
-
+  try {
+    const { clearAuthSessionCache } = await import('@/components/AuthGate');
+    clearAuthSessionCache();
+  } catch {
+    // ignore
+  }
   if (await isSsoEnabled()) {
     await signOut({ redirect: false });
     clearLogoutGuard();

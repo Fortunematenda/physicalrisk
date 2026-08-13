@@ -172,6 +172,9 @@
       MINIO_ROOT_PASSWORD: change_me_storage
     volumes:
       - moss_minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     networks: [physicalrisk-network]
 
   moss-api:
@@ -190,7 +193,8 @@
       CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-https://moss.physicalrisk.com,https://apps.physicalrisk.com}
       PORT: 4000
       S3_ENDPOINT: http://moss-minio:9000
-      S3_PUBLIC_ENDPOINT: https://storage.physicalrisk.com
+      # Browser-facing MinIO for presigned URLs. Local default is localhost:9000; override for prod.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:9000}
       S3_REGION: us-east-1
       S3_ACCESS_KEY: moss-storage
       S3_SECRET_KEY: change_me_storage

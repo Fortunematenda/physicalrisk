@@ -410,7 +410,7 @@ export default function AssessmentsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `moss-assessments-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `scl-assessments-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -418,10 +418,10 @@ export default function AssessmentsPage() {
   return (
     <AuthGate>
       <Shell
-        title="Assessments"
+        title="SCL Assessments"
         hideEyebrow
-        subtitle="View and manage all assessments across your organisations."
-        searchPlaceholder="Search assessments…"
+        subtitle="View and manage Cost Leakage / SCL assessments across your organisations."
+        searchPlaceholder="Search SCL assessments…"
         searchValue={headerSearch}
         onSearch={setHeaderSearch}
       >

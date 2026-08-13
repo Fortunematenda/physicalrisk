@@ -70,9 +70,12 @@ export class EspoCrmService {
   private async checkAssessmentAccess(assessmentId: string, user: AuthUser) {
     const assessment = await this.prisma.assessmentSession.findUnique({
       where: { id: assessmentId },
-      select: { organisationId: true },
+      select: { organisationId: true, productCode: true },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
+    if (assessment.productCode !== 'SCLI_COST_LEAKAGE') {
+      throw new NotFoundException('Assessment not found.');
+    }
     if (INTERNAL_ROLES.has(user.role)) return;
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } },

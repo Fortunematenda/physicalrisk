@@ -258,7 +258,7 @@ export default function AssessmentDetailPage() {
 
         <section className="assess-hero">
           <div>
-            <p className="eyebrow">{data.reference}</p>
+            <p className="eyebrow">SCL Assessment · {data.reference}</p>
             <h2>{data.organisation.name}</h2>
             <p className="muted">{data.questionnaireVersion.questionnaire.name} · Version {data.questionnaireVersion.version}</p>
           </div>
@@ -362,7 +362,7 @@ export default function AssessmentDetailPage() {
           <section className="assess-stage">
             {qIntro ? (
               <div className="assess-intro">
-                <p className="eyebrow">Executive SCLI questionnaire</p>
+                <p className="eyebrow">Executive SCL questionnaire</p>
                 <h2>Answer one focused question at a time</h2>
                 <p className="muted">
                   {questions.length} controlled questions across {categories.length} dimensions. Each option carries a governed risk score — pick the best fit, not the longest answer.

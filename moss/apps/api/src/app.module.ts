@@ -17,6 +17,7 @@ import { UsersModule } from './users/users.module';
 import { SsoUserSyncModule } from './users/sso-user-sync.module';
 import { ActionsModule } from './actions/actions.module';
 import { SettingsModule } from './settings/settings.module';
+import { MossModule } from './moss/moss.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { SettingsModule } from './settings/settings.module';
     UsersModule,
     ActionsModule,
     SettingsModule,
+    MossModule,
   ],
 })
 export class AppModule {}

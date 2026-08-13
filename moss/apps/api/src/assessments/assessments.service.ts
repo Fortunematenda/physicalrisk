@@ -14,6 +14,7 @@ import type { AuthUser } from '../common/current-user.decorator';
 import { workflowTimeline } from '../common/workflow';
 import { INTERNAL_ROLES as INTERNAL_ROLE_SET } from '../common/roles';
 import { EspoCrmService } from '../crm/espocrm.service';
+import { generateAssessmentReference } from '../common/assessment-reference';
 
 const INTERNAL_ROLES = INTERNAL_ROLE_SET;
 const asNumber = (value: unknown): number => Number(value ?? 0) || 0;
@@ -28,15 +29,25 @@ export class AssessmentsService {
   ) {}
 
   async checkAccess(assessmentId: string, user: AuthUser) {
-    const assessment = await this.prisma.assessmentSession.findUnique({ where: { id: assessmentId }, select: { organisationId: true } });
-    if (!assessment) throw new NotFoundException('Assessment not found.');
+    // M3 product isolation: legacy Cost Leakage endpoints never expose MOSS sessions.
+    const assessment = await this.prisma.assessmentSession.findUnique({
+      where: { id: assessmentId },
+      select: { organisationId: true, productCode: true },
+    });
+    if (!assessment || assessment.productCode !== 'SCLI_COST_LEAKAGE') {
+      throw new NotFoundException('Assessment not found.');
+    }
     if (INTERNAL_ROLES.has(user.role)) return;
     const membership = await this.prisma.membership.findUnique({ where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } } });
     if (!membership) throw new ForbiddenException('You do not have access to this assessment.');
   }
 
   async list(user: AuthUser) {
-    const where = INTERNAL_ROLES.has(user.role) ? {} : { organisation: { memberships: { some: { userId: user.id } } } };
+    // M3: legacy Cost Leakage list must never return MOSS sessions.
+    const where = {
+      productCode: 'SCLI_COST_LEAKAGE' as const,
+      ...(INTERNAL_ROLES.has(user.role) ? {} : { organisation: { memberships: { some: { userId: user.id } } } }),
+    };
     const items = await this.prisma.assessmentSession.findMany({
       where,
       orderBy: { updatedAt: 'desc' },
@@ -146,18 +157,27 @@ export class AssessmentsService {
       const membership = await this.prisma.membership.findUnique({ where: { userId_organisationId: { userId: user.id, organisationId: input.organisationId } } });
       if (!membership) throw new ForbiddenException('You cannot create an assessment for this organisation.');
     }
-    const reference = `MOSS-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const assessment = await this.prisma.assessmentSession.create({
-      data: {
-        reference,
-        organisationId: organisation.id,
-        questionnaireVersionId: questionnaire.versions[0].id,
-        createdById: user.id,
-        title: input.title || `${organisation.name} ${questionnaire.code} Assessment`,
-        status: AssessmentStatus.IN_PROGRESS,
-      },
+    const assessment = await this.prisma.$transaction(async (tx) => {
+      const reference = await generateAssessmentReference(tx, 'SCLI_COST_LEAKAGE');
+      return tx.assessmentSession.create({
+        data: {
+          reference,
+          organisationId: organisation.id,
+          questionnaireVersionId: questionnaire.versions[0].id,
+          productCode: 'SCLI_COST_LEAKAGE',
+          createdById: user.id,
+          title: input.title || `${organisation.name} SCL Assessment`,
+          status: AssessmentStatus.IN_PROGRESS,
+        },
+      });
     });
-    await this.audit.record({ userId: user.id, action: 'CREATE', entityType: 'AssessmentSession', entityId: assessment.id, metadata: { reference } });
+    await this.audit.record({
+      userId: user.id,
+      action: 'CREATE',
+      entityType: 'AssessmentSession',
+      entityId: assessment.id,
+      metadata: { reference: assessment.reference, productCode: 'SCLI_COST_LEAKAGE' },
+    });
     return assessment;
   }
 

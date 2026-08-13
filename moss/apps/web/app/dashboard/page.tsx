@@ -491,7 +491,7 @@ export default function DashboardPage() {
     <AuthGate>
       <AppShell
         title="Dashboard"
-        subtitle={`Welcome back, ${userName}. Here's what's happening with your assessments.`}
+        subtitle={`Welcome back, ${userName}. Here's what's happening with your SCL assessments.`}
         searchPlaceholder="Search assessments…"
         searchValue={search}
         onSearch={setSearch}

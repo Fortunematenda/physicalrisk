@@ -135,6 +135,29 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   if (disposition) outHeaders.set('content-disposition', disposition);
   const setCookie = upstream.headers.get('set-cookie');
   if (setCookie) outHeaders.set('set-cookie', setCookie);
+  const cacheControl = upstream.headers.get('cache-control');
+  if (cacheControl) outHeaders.set('cache-control', cacheControl);
+
+  // Buffer binary downloads (PDF reports/evidence). Streaming `upstream.body`
+  // can arrive empty in some Next.js/fetch runtimes and shows as a blank file.
+  const isBinary =
+    Boolean(upstreamType?.includes('pdf')) ||
+    Boolean(upstreamType?.includes('octet-stream')) ||
+    Boolean(disposition?.includes('attachment')) ||
+    /\/file(?:\?|$)/.test(subPath) ||
+    /\/download(?:\?|$)/.test(subPath);
+
+  if (isBinary) {
+    const buf = await upstream.arrayBuffer();
+    outHeaders.set('content-length', String(buf.byteLength));
+    return new NextResponse(buf, {
+      status: upstream.status,
+      headers: outHeaders,
+    });
+  }
+
+  const contentLength = upstream.headers.get('content-length');
+  if (contentLength) outHeaders.set('content-length', contentLength);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

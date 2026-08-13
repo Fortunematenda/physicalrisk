@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, Nunito_Sans } from 'next/font/google';
+import { PortalFrame } from '@/components/PortalFrame';
 import './globals.css';
 
 const inter = Inter({
@@ -22,7 +23,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${nunitoSans.variable} font-sans`}>{children}</body>
+      <body className={`${inter.variable} ${nunitoSans.variable} font-sans`}>
+        <PortalFrame>{children}</PortalFrame>
+      </body>
     </html>
   );
 }

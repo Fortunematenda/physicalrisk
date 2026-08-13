@@ -10,8 +10,14 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma db push --accept-data-loss",
-    "prisma:seed": "prisma db seed"
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:status": "prisma migrate status",
+    "prisma:db-push": "prisma db push",
+    "prisma:seed": "prisma db seed",
+    "prisma:m1-preflight": "tsx prisma/m1-preflight.ts",
+    "prisma:import-moss-catalogue": "tsx prisma/import-moss-catalogue.ts",
+    "prisma:m3-smoke": "node prisma/m3-smoke.js"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

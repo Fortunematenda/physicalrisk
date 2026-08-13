@@ -183,6 +183,49 @@ enum AssumptionRecordStatus {
   SUPERSEDED
 }
 
+/// Product discriminator for AssessmentSession. SOMOD is intentionally omitted — do not attach SOMOD behaviour here.
+enum ProductCode {
+  SCLI_COST_LEAKAGE
+  MOSS
+}
+
+enum SiteStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MossCatalogueStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum MossControlAssessmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SCORED
+  NEEDS_EVIDENCE
+  COMPLETE
+}
+
+enum MossScoringConfigStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum MossAggregationMode {
+  MEAN
+  WEIGHTED_MEAN
+  MIN
+  UNCONFIGURED
+}
+
+enum MossRecommendationSource {
+  MANUAL
+  CATALOGUE_TEMPLATE
+  RULE_ENGINE
+}
+
 model User {
   id           String       @id @default(cuid())
   email        String       @unique
@@ -211,6 +254,8 @@ model User {
   actionItemsOwned ActionItem[] @relation("ActionOwner")
   actionItemsVerified ActionItem[] @relation("ActionVerifier")
   assumptionsApproved CalibrationAssumption[] @relation("AssumptionApprover")
+  mossControlAssessments MossControlAssessment[] @relation("MossControlAssessor")
+  mossRecommendations Recommendation[] @relation("MossRecommendationAuthor")
   auditEvents  AuditEvent[]
 }
 
@@ -226,9 +271,28 @@ model Organisation {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
   memberships      Membership[]
+  sites            Site[]
   assessments      AssessmentSession[]
   crmSyncRecords   CrmSyncRecord[]
   actionItems      ActionItem[]
+}
+
+/// Shared site master data in the diagnostic platform DB (not Repository).
+model Site {
+  id             String     @id @default(cuid())
+  organisationId String
+  name           String
+  siteCode       String
+  address        String?
+  region         String?
+  description    String?
+  status         SiteStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  assessments    AssessmentSession[]
+  @@unique([organisationId, siteCode])
+  @@index([organisationId, status])
 }
 
 model Membership {
@@ -351,6 +415,12 @@ model AssessmentSession {
   reference              String           @unique
   organisationId         String
   questionnaireVersionId String
+  /// Product discriminator. Existing/historical rows backfilled to SCLI_COST_LEAKAGE.
+  /// REQUIREMENT (M3/M8): legacy SCLI list/get APIs must filter productCode = SCLI_COST_LEAKAGE
+  /// so future MOSS sessions are never exposed on Cost Leakage endpoints.
+  productCode            ProductCode      @default(SCLI_COST_LEAKAGE)
+  siteId                 String?
+  mossCatalogueVersionId String?
   createdById            String
   title                  String
   status                 AssessmentStatus @default(DRAFT)
@@ -374,6 +444,8 @@ model AssessmentSession {
   updatedAt              DateTime         @updatedAt
   organisation           Organisation     @relation(fields: [organisationId], references: [id])
   questionnaireVersion   QuestionnaireVersion @relation(fields: [questionnaireVersionId], references: [id])
+  site                   Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  mossCatalogueVersion   MossCatalogueVersion? @relation(fields: [mossCatalogueVersionId], references: [id], onDelete: SetNull)
   createdBy              User             @relation("AssessmentCreator", fields: [createdById], references: [id])
   reviewedBy             User?            @relation("AssessmentReviewer", fields: [reviewedById], references: [id])
   approvedBy             User?            @relation("AssessmentApprover", fields: [approvedById], references: [id])
@@ -383,6 +455,8 @@ model AssessmentSession {
   inputValues            AssessmentInputValue[]
   responses              AssessmentResponse[]
   scoreSnapshots         ScoreSnapshot[]
+  mossControlAssessments MossControlAssessment[]
+  mossScoreSnapshots     MossScoreSnapshot[]
   evidence               EvidenceDocument[]
   findings               Finding[]
   recommendations        Recommendation[]
@@ -396,6 +470,10 @@ model AssessmentSession {
   @@index([organisationId])
   @@index([organisationId, status])
   @@index([reference])
+  @@index([productCode])
+  @@index([productCode, organisationId])
+  @@index([siteId])
+  @@index([mossCatalogueVersionId])
 }
 
 model AssessmentAssignment {
@@ -442,6 +520,158 @@ model AssessmentResponse {
   @@unique([assessmentId, questionId])
 }
 
+/// Immutable published catalogue versions intended; do not seed v3.0 in M1 (that is M2).
+model MossCatalogueVersion {
+  id          String              @id @default(cuid())
+  version     String
+  status      MossCatalogueStatus @default(DRAFT)
+  title       String
+  description String?
+  notes       String?
+  publishedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  domains     MossDomain[]
+  controls    MossControl[]
+  assessments AssessmentSession[]
+  scoreSnapshots MossScoreSnapshot[]
+  scoringConfigurations MossScoringConfiguration[]
+  @@unique([version])
+  @@index([status])
+}
+
+/// Versioned MOSS aggregation configuration.
+/// Live methodology: MEAN v1.0.0 (unweighted) after client confirmation 2026-08-13.
+model MossScoringConfiguration {
+  id                     String                 @id @default(cuid())
+  version                String
+  status                 MossScoringConfigStatus @default(DRAFT)
+  domainAggregation      MossAggregationMode    @default(UNCONFIGURED)
+  overallAggregation     MossAggregationMode    @default(UNCONFIGURED)
+  domainWeights          Json?
+  criticalControlPolicy  Json?
+  severityMapping        Json?
+  recommendationPolicy   Json?
+  notes                  String?
+  /// Optional link to catalogue this config applies to.
+  catalogueVersionId     String?
+  publishedAt            DateTime?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  catalogueVersion       MossCatalogueVersion?  @relation(fields: [catalogueVersionId], references: [id], onDelete: SetNull)
+  scoreSnapshots         MossScoreSnapshot[]
+  @@unique([version])
+  @@index([status])
+  @@index([catalogueVersionId])
+}
+
+model MossDomain {
+  id                 String              @id @default(cuid())
+  catalogueVersionId String
+  domainCode         String
+  name               String
+  sortOrder          Int
+  description        String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  catalogueVersion   MossCatalogueVersion @relation(fields: [catalogueVersionId], references: [id], onDelete: Cascade)
+  controls           MossControl[]
+  @@unique([catalogueVersionId, domainCode])
+  /// Enables composite FK so MossControl.domain belongs to the same catalogue version.
+  @@unique([catalogueVersionId, id])
+  @@index([catalogueVersionId, sortOrder])
+}
+
+model MossControl {
+  id                 String              @id @default(cuid())
+  catalogueVersionId String
+  domainId           String
+  controlCode        String
+  name               String
+  controlFunction    String?
+  owner              String?
+  frequency          String?
+  metric             String?
+  /// Maps catalogue `threshold` (text). Structured future form uses thresholdJson.
+  thresholdText      String?
+  thresholdJson      Json?
+  sortOrder          Int                 @default(0)
+  /// Methodology metadata (JSON arrays/objects preserved as-is from catalogue).
+  evidenceStandards       Json?
+  inspectionMethodology   Json?
+  failureConditions       Json?
+  fraudIndicators         Json?
+  mossScoringRules        Json?
+  /// Financial / optimisation metadata — store only; no MOSS calculation engine in M1.
+  financialRelevance            String?
+  eventUnit                     String?
+  costCategory                  String?
+  leakageQuantification         Json?
+  /// Nullable for future use. Authoritative catalogue has no top-level formula_reference;
+  /// M2 must map formula from leakage_quantification.formula — do not invent references.
+  formulaReference              String?
+  slaPenaltyLogic               Json?
+  incidentToCostConversion      Json?
+  technologySubstitutionLogic   String?
+  manpowerOptimisationLogic     String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  catalogueVersion   MossCatalogueVersion @relation(fields: [catalogueVersionId], references: [id], onDelete: Cascade)
+  domain             MossDomain           @relation(fields: [catalogueVersionId, domainId], references: [catalogueVersionId, id], onDelete: Cascade)
+  controlAssessments MossControlAssessment[]
+  @@unique([catalogueVersionId, controlCode])
+  @@index([domainId, sortOrder])
+  @@index([catalogueVersionId, sortOrder])
+}
+
+model MossControlAssessment {
+  id               String                     @id @default(cuid())
+  assessmentId     String
+  mossControlId    String
+  controlCode      String
+  score            Int?
+  assessorScore    Int?
+  scoreRationale   String?
+  comment          String?
+  findingText      String?
+  status           MossControlAssessmentStatus @default(NOT_STARTED)
+  assessedById     String?
+  assessedAt       DateTime?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  /// Deferred to later milestone (M0 T6): suggestedScore, finalScore, scoreTrace
+  assessment       AssessmentSession          @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  mossControl      MossControl                @relation(fields: [mossControlId], references: [id], onDelete: Restrict)
+  assessedBy       User?                      @relation("MossControlAssessor", fields: [assessedById], references: [id], onDelete: SetNull)
+  evidence         EvidenceDocument[]
+  findings         Finding[]
+  @@unique([assessmentId, mossControlId])
+  @@index([assessmentId, status])
+  @@index([mossControlId])
+}
+
+/// MOSS-only score snapshot. Do not reuse SCLI ScoreSnapshot.
+model MossScoreSnapshot {
+  id                   String              @id @default(cuid())
+  assessmentId         String
+  catalogueVersionId   String
+  configurationId      String?
+  configurationVersion String?
+  overallScore         Decimal?            @db.Decimal(8, 2)
+  domainScores         Json
+  controlScores        Json
+  completenessPercent  Decimal             @db.Decimal(8, 4) @default(0)
+  calculationTrace     Json?
+  calculatedAt         DateTime            @default(now())
+  createdAt            DateTime            @default(now())
+  assessment           AssessmentSession   @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  catalogueVersion     MossCatalogueVersion @relation(fields: [catalogueVersionId], references: [id], onDelete: Restrict)
+  configuration        MossScoringConfiguration? @relation(fields: [configurationId], references: [id], onDelete: SetNull)
+  @@index([assessmentId, calculatedAt])
+  @@index([catalogueVersionId])
+  @@index([configurationId])
+}
+
 model ScoreSnapshot {
   id                 String   @id @default(cuid())
   assessmentId       String
@@ -486,6 +716,8 @@ model EvidenceDocument {
   questionCode       String?
   inputDefinitionId  String?
   findingId          String?
+  /// Additive MOSS link; existing SCLI rows remain null.
+  mossControlAssessmentId String?
   title              String
   documentType       String?
   description        String?
@@ -505,8 +737,10 @@ model EvidenceDocument {
   question           Question? @relation(fields: [questionId], references: [id])
   inputDefinition    AssessmentInputDefinition? @relation(fields: [inputDefinitionId], references: [id])
   finding            Finding? @relation(fields: [findingId], references: [id])
+  mossControlAssessment MossControlAssessment? @relation(fields: [mossControlAssessmentId], references: [id], onDelete: SetNull)
   reviewer           User? @relation("EvidenceReviewer", fields: [reviewerId], references: [id])
   @@index([assessmentId, status])
+  @@index([mossControlAssessmentId])
 }
 
 model Finding {
@@ -523,7 +757,8 @@ model Finding {
   governanceImplication String?
   financialImplication String?
   estimatedExposure    Decimal?        @db.Decimal(18, 2)
-  severity             FindingSeverity
+  /// Nullable for MOSS until client severity mapping is approved. SCLI continues to set a value.
+  severity             FindingSeverity?
   likelihood           String?
   impact               String?
   priority             FindingSeverity?
@@ -534,15 +769,22 @@ model Finding {
   status               FindingStatus   @default(DRAFT)
   targetResolutionDate DateTime?
   financialImpact      Decimal?        @db.Decimal(18, 2)
+  /// Additive product scope; existing SCLI findings remain null (treated as SCLI).
+  productCode          ProductCode?
+  /// Additive MOSS link; existing SCLI rows remain null.
+  mossControlAssessmentId String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
   assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   analyst              User? @relation("FindingAnalyst", fields: [analystId], references: [id])
   reviewer             User? @relation("FindingReviewer", fields: [reviewerId], references: [id])
+  mossControlAssessment MossControlAssessment? @relation(fields: [mossControlAssessmentId], references: [id], onDelete: SetNull)
   evidence             EvidenceDocument[]
   actionItems          ActionItem[]
   @@unique([assessmentId, reference])
   @@index([assessmentId, status])
+  @@index([productCode])
+  @@index([mossControlAssessmentId])
 }
 
 model RecommendationRule {
@@ -568,7 +810,8 @@ model Recommendation {
   recommendationRuleId String?
   title                String
   category             String
-  priority             FindingSeverity
+  /// Nullable for MOSS manual recommendations until priority methodology is approved.
+  priority             FindingSeverity?
   summary              String
   originalSummary      String?
   suggestedNextStep    String?
@@ -583,11 +826,21 @@ model Recommendation {
   status               RecommendationStatus @default(GENERATED)
   targetDate           DateTime?
   ownerName            String?
+  /// Additive product scope; existing SCLI recommendations remain null (treated as SCLI).
+  productCode          ProductCode?
+  controlCode          String?
+  domainCode           String?
+  source               MossRecommendationSource?
+  createdById          String?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   recommendationRule   RecommendationRule? @relation(fields: [recommendationRuleId], references: [id])
+  createdBy            User? @relation("MossRecommendationAuthor", fields: [createdById], references: [id], onDelete: SetNull)
   actionItems          ActionItem[]
+  @@index([assessmentId, status])
+  @@index([productCode])
+  @@index([controlCode])
 }
 
 model QaChecklistItem {

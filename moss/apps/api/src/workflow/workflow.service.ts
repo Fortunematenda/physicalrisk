@@ -64,6 +64,8 @@ export class WorkflowService {
     requireRole(user, ANALYST_ROLES);
     const submitted = await this.prisma.assessmentSession.findMany({
       where: {
+        // Cost Leakage review queue must never include MOSS sessions.
+        productCode: 'SCLI_COST_LEAKAGE',
         status: {
           in: [
             AssessmentStatus.SUBMITTED,
@@ -647,10 +649,11 @@ export class WorkflowService {
     const assessment = await this.prisma.assessmentSession.findUnique({ where: { id: assessmentId } });
     if (!assessment) throw new NotFoundException('Assessment not found.');
     const count = await this.prisma.finding.count({ where: { assessmentId } });
-    const reference = `MOSS-${assessment.reference}-F${String(count + 1).padStart(3, '0')}`;
+    const reference = `SCLI-${assessment.reference}-F${String(count + 1).padStart(3, '0')}`;
     return this.prisma.finding.create({
       data: {
         assessmentId,
+        productCode: 'SCLI_COST_LEAKAGE',
         reference,
         title: input.title,
         category: input.category,

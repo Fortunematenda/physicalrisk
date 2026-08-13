@@ -118,8 +118,9 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const payload = decoded.payload;
-    if (issuer && payload.iss !== issuer) {
-      throw new Error(`Issuer mismatch: ${payload.iss} !== ${issuer}`);
+    const allowedIssuers = resolveAllowedIssuers(issuer);
+    if (allowedIssuers.length && !allowedIssuers.includes(payload.iss)) {
+      throw new Error(`Issuer mismatch: ${payload.iss} !== ${allowedIssuers.join(' | ')}`);
     }
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       throw new Error('Token expired');
@@ -141,6 +142,37 @@ export class JwtAuthGuard implements CanActivate {
     this.jwksCache = { pem, expiresAt: Date.now() + 300_000 };
     return pem;
   }
+}
+
+/**
+ * Local SSO often flips between auth.localhost and localhost:PORT while
+ * Keycloak hostname is being corrected. Accept both for the same realm so a
+ * stale API env does not 401 every request and blink the browser in a login loop.
+ */
+function resolveAllowedIssuers(primary?: string): string[] {
+  const issuers = new Set<string>();
+  if (primary) issuers.add(primary);
+  if (!primary) return [...issuers];
+
+  try {
+    const url = new URL(primary);
+    const realmMatch = url.pathname.match(/\/realms\/[^/]+/);
+    if (!realmMatch) return [...issuers];
+    const realmPath = realmMatch[0];
+    const isLocal =
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.endsWith('.localhost');
+    if (isLocal) {
+      issuers.add(`http://auth.localhost${realmPath}`);
+      issuers.add(`http://localhost:8086${realmPath}`);
+      issuers.add(`http://localhost:8080${realmPath}`);
+      issuers.add(`http://127.0.0.1:8086${realmPath}`);
+    }
+  } catch {
+    // keep primary only
+  }
+  return [...issuers];
 }
 
 function mapKeycloakRoleToMoss(realmRoles: string[]): string {

@@ -85,7 +85,10 @@ export function StatCard({
           ? 'down'
           : 'neutral';
   const colorKey = trendTone || arrowDir;
-  const compactValue = typeof value === 'string' && value.length > 12;
+  // Keep large type for short numeric KPIs; shrink labels like "Pending" / "v3.0".
+  const compactValue =
+    typeof value === 'string' &&
+    !/^\d[\d,]*(?:\.\d+)?%?$/.test(value.trim());
 
   return (
     <Card className={cn('h-full min-h-[108px] min-w-0 rounded-xl border-slate-200 bg-white shadow-sm', className)}>
@@ -110,7 +113,7 @@ export function StatCard({
               className={cn(
                 'mt-0.5 font-bold tracking-tight text-slate-900',
                 compactValue
-                  ? 'text-base leading-snug'
+                  ? 'text-sm leading-snug sm:text-base'
                   : 'truncate text-[1.75rem] leading-none',
               )}
             >

@@ -2,6 +2,7 @@ import { PrismaClient, QuestionnaireStatus, SystemRole, ValueType, FindingSeveri
 import * as argon2 from 'argon2';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { importMossCatalogue } from './import-moss-catalogue.js';
 
 const prisma = new PrismaClient();
 
@@ -194,6 +195,42 @@ async function seedAdmin() {
 async function main() {
   await seedMethodology();
   await seedAdmin();
+  // M2: idempotent — skips if published 3.0 with 14×100 already present.
+  const mossCatalogue = await importMossCatalogue({ publish: true });
+  console.log('MOSS catalogue import:', mossCatalogue.action, {
+    version: mossCatalogue.version,
+    domains: mossCatalogue.domains,
+    controls: mossCatalogue.controls,
+  });
+
+  // M4: publish MEAN v1.0.0 after client acceptance of recommended defaults.
+  const catalogueRow = await prisma.mossCatalogueVersion.findFirst({
+    where: { version: '3.0', status: 'PUBLISHED' },
+    select: { id: true },
+  });
+  await prisma.mossScoringConfiguration.upsert({
+    where: { version: '1.0.0' },
+    update: {
+      status: 'PUBLISHED' as const,
+      domainAggregation: 'MEAN' as const,
+      overallAggregation: 'MEAN' as const,
+      publishedAt: new Date(),
+      catalogueVersionId: catalogueRow?.id ?? null,
+      notes:
+        'Client-accepted recommended defaults (2026-08-13): unweighted MEAN domain + overall.',
+    },
+    create: {
+      version: '1.0.0',
+      status: 'PUBLISHED',
+      domainAggregation: 'MEAN',
+      overallAggregation: 'MEAN',
+      publishedAt: new Date(),
+      catalogueVersionId: catalogueRow?.id ?? null,
+      notes:
+        'Client-accepted recommended defaults (2026-08-13): unweighted MEAN domain + overall.',
+    },
+  });
+  console.log('MOSS scoring config: published MEAN v1.0.0');
   console.log('MOSS seed completed.');
 }
 

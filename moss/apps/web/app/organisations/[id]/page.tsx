@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
+import { IndustrySelect } from '@/components/organisations/IndustrySelect';
 import { apiFetch, money } from '../../../lib/api';
 
 type Tab = 'overview' | 'assessments' | 'edit';
@@ -309,8 +310,13 @@ export default function OrganisationDetailPage() {
                 <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="field">
-                <label>Industry</label>
-                <input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} />
+                <label htmlFor="org-detail-industry">Industry</label>
+                <IndustrySelect
+                  id="org-detail-industry"
+                  value={form.industry}
+                  onChange={(industry) => setForm({ ...form, industry })}
+                  disabled={saving}
+                />
               </div>
               <div className="field">
                 <label>Registration no.</label>

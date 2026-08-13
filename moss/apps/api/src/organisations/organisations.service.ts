@@ -1,9 +1,82 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Default industry catalogue (aligned with SCLI C2 calibration options). */
+const DEFAULT_INDUSTRIES = [
+  'Telecommunications',
+  'Mining',
+  'Energy / Utilities',
+  'Ports and Logistics',
+  'Manufacturing',
+  'Retail',
+  'Financial Services',
+  'Data Centres',
+  'Government / Public Infrastructure',
+  'Healthcare',
+  'Other',
+] as const;
+
+const INDUSTRIES_SETTING_KEY = 'organisation.industries';
 
 @Injectable()
 export class OrganisationsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private normalizeIndustryName(name: string) {
+    return name.trim().replace(/\s+/g, ' ');
+  }
+
+  private asIndustryList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => (typeof item === 'string' ? this.normalizeIndustryName(item) : ''))
+      .filter(Boolean);
+  }
+
+  async listIndustries() {
+    const [setting, orgRows] = await Promise.all([
+      this.prisma.systemSetting.findUnique({ where: { key: INDUSTRIES_SETTING_KEY } }),
+      this.prisma.organisation.findMany({
+        where: { industry: { not: null } },
+        select: { industry: true },
+        distinct: ['industry'],
+      }),
+    ]);
+    const stored = this.asIndustryList(setting?.value);
+    const fromOrgs = orgRows
+      .map((row) => (row.industry ? this.normalizeIndustryName(row.industry) : ''))
+      .filter(Boolean);
+    const industries = [...new Set([...DEFAULT_INDUSTRIES, ...stored, ...fromOrgs])].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    );
+    return { industries };
+  }
+
+  async addIndustry(name: string) {
+    const cleaned = this.normalizeIndustryName(name || '');
+    if (cleaned.length < 2) {
+      throw new BadRequestException('Industry name must be at least 2 characters.');
+    }
+
+    const current = await this.listIndustries();
+    const existing = current.industries.find((item) => item.toLowerCase() === cleaned.toLowerCase());
+    if (existing) {
+      return { industry: existing, industries: current.industries, created: false };
+    }
+
+    const setting = await this.prisma.systemSetting.findUnique({ where: { key: INDUSTRIES_SETTING_KEY } });
+    const stored = this.asIndustryList(setting?.value);
+    const nextValue = [...stored, cleaned];
+    await this.prisma.systemSetting.upsert({
+      where: { key: INDUSTRIES_SETTING_KEY },
+      create: { key: INDUSTRIES_SETTING_KEY, value: nextValue },
+      update: { value: nextValue },
+    });
+
+    const refreshed = await this.listIndustries();
+    return { industry: cleaned, industries: refreshed.industries, created: true };
+  }
 
   async list() {
     const organisations = await this.prisma.organisation.findMany({
@@ -11,6 +84,7 @@ export class OrganisationsService {
       include: {
         _count: { select: { assessments: true, memberships: true } },
         assessments: {
+          where: { productCode: 'SCLI_COST_LEAKAGE' },
           orderBy: { updatedAt: 'desc' },
           select: {
             id: true,
@@ -101,6 +175,7 @@ export class OrganisationsService {
       include: {
         _count: { select: { assessments: true, memberships: true } },
         assessments: {
+          where: { productCode: 'SCLI_COST_LEAKAGE' },
           orderBy: { updatedAt: 'desc' },
           include: {
             questionnaireVersion: {
@@ -237,5 +312,42 @@ export class OrganisationsService {
       assessmentsRemoved: organisation._count.assessments,
       message: 'Organisation and related assessments deleted.',
     };
+  }
+
+  async listSites(organisationId: string) {
+    const org = await this.prisma.organisation.findUnique({ where: { id: organisationId }, select: { id: true } });
+    if (!org) throw new NotFoundException('Organisation not found.');
+    return this.prisma.site.findMany({
+      where: { organisationId },
+      orderBy: [{ status: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async createSite(
+    organisationId: string,
+    data: { name: string; siteCode: string; address?: string; region?: string; description?: string },
+  ) {
+    const org = await this.prisma.organisation.findUnique({ where: { id: organisationId }, select: { id: true } });
+    if (!org) throw new NotFoundException('Organisation not found.');
+    const siteCode = data.siteCode.trim().toUpperCase();
+    if (!siteCode) throw new BadRequestException('siteCode is required.');
+    if (!data.name?.trim()) throw new BadRequestException('name is required.');
+    try {
+      return await this.prisma.site.create({
+        data: {
+          organisationId,
+          name: data.name.trim(),
+          siteCode,
+          address: data.address?.trim() || null,
+          region: data.region?.trim() || null,
+          description: data.description?.trim() || null,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new BadRequestException('A site with this siteCode already exists for the organisation.');
+      }
+      throw error;
+    }
   }
 }

@@ -15,6 +15,7 @@ import {
   PanelLeft,
   ScrollText,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
@@ -41,11 +42,30 @@ import {
   filterNavSections,
   isNavItemActive,
   NAV_SECTIONS,
+  sectionHasActiveItem,
   type NavSectionConfig,
 } from '@/lib/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 
 export const NAV_ICON_MAP: Record<string, LucideIcon> = {
+  'scl-dashboard': LayoutDashboard,
+  'scl-assessments': ClipboardList,
+  'scl-review-queue': ListChecks,
+  'scl-reports': FileText,
+  'scl-methodology': SlidersHorizontal,
+  'scl-assumptions': Calculator,
+  'moss-home': ShieldCheck,
+  'moss-assessments': ClipboardList,
+  'moss-actions': ListChecks,
+  'moss-catalogue': SlidersHorizontal,
+  'moss-scoring': Calculator,
+  // legacy ids (safety)
+  'scli-dashboard': LayoutDashboard,
+  'scli-organisations': Building2,
+  'scli-assessments': ClipboardList,
+  'scli-review-queue': ListChecks,
+  'scli-reports': FileText,
   dashboard: LayoutDashboard,
   organisations: Building2,
   assessments: ClipboardList,
@@ -141,11 +161,11 @@ export function userInitials(name: string): string {
 export function useFilteredNavSections(): NavSectionConfig[] {
   const user = useSidebarUser();
   const mvpRole = resolveMvpNavRole(user?.role || 'CLIENT_EXECUTIVE');
-  return filterNavSections(NAV_SECTIONS, mvpRole);
+  return useMemo(() => filterNavSections(NAV_SECTIONS, mvpRole), [mvpRole]);
 }
 
 function renderNavBadge(itemId: string, badges: NavBadges) {
-  if (itemId === 'review-queue' && badges.reviewQueue > 0) {
+  if ((itemId === 'review-queue' || itemId === 'scl-review-queue' || itemId === 'scli-review-queue') && badges.reviewQueue > 0) {
     return (
       <Badge variant="danger" className="ml-auto shrink-0">
         {badges.reviewQueue}
@@ -168,25 +188,106 @@ type SidebarNavListProps = {
   className?: string;
 };
 
+/** Cost Leakage + MOSS are mutually exclusive accordion groups. */
+const PRODUCT_SECTION_IDS = new Set(['scl', 'moss']);
+
 export function SidebarNavList({
   collapsed = false,
   onNavigate,
   className,
 }: SidebarNavListProps) {
-  const pathname = usePathname();
+  const pathname = usePathname() || '';
   const sections = useFilteredNavSections();
   const badges = useNavBadges();
+  const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const activeProductId =
+      sections.find(
+        (section) =>
+          PRODUCT_SECTION_IDS.has(section.id) && sectionHasActiveItem(pathname, section),
+      )?.id ?? null;
+
+    if (!activeProductId) return;
+
+    setManualOpen((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const id of PRODUCT_SECTION_IDS) {
+        const shouldOpen = id === activeProductId;
+        if (next[id] !== shouldOpen) {
+          next[id] = shouldOpen;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pathname, sections]);
+
+  function isSectionOpen(section: NavSectionConfig): boolean {
+    if (!section.collapsible || collapsed) return true;
+    if (manualOpen[section.id] !== undefined) return manualOpen[section.id];
+    // Default: only the product that matches the current route is expanded.
+    return sectionHasActiveItem(pathname, section);
+  }
+
+  function toggleSection(section: NavSectionConfig) {
+    const willOpen = !isSectionOpen(section);
+    setManualOpen((prev) => {
+      const next = { ...prev, [section.id]: willOpen };
+      // Opening Cost Leakage or MOSS closes the other product group.
+      if (willOpen && PRODUCT_SECTION_IDS.has(section.id)) {
+        for (const id of PRODUCT_SECTION_IDS) {
+          if (id !== section.id) next[id] = false;
+        }
+      }
+      return next;
+    });
+  }
 
   return (
     <TooltipProvider delayDuration={0}>
       <nav className={cn('flex-1 overflow-y-auto', className)} aria-label="Portal sections">
-        {sections.map((section) => (
-          <div key={section.id} className="mb-4">
-            {!collapsed && (
-              <p className="mb-2 px-3 text-[11px] font-semibold tracking-wider text-white/40">
-                {section.label}
-              </p>
+        {sections.map((section) => {
+          const open = isSectionOpen(section);
+          const isProduct = section.id === 'scl' || section.id === 'moss';
+          return (
+          <div
+            key={section.id}
+            className={cn(
+              'mb-3',
+              isProduct && 'rounded-lg border border-white/10 bg-white/[0.02] p-2',
             )}
+          >
+            {!collapsed && section.collapsible ? (
+              <button
+                type="button"
+                className={cn(
+                  'mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] font-bold tracking-wide text-white transition-colors hover:bg-white/10',
+                  open && 'bg-white/5',
+                )}
+                aria-expanded={open}
+                onClick={() => toggleSection(section)}
+              >
+                <span className="min-w-0 flex-1 truncate uppercase tracking-[0.1em]">
+                  {section.label}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    'size-4 shrink-0 text-white/70 transition-transform duration-200',
+                    open ? 'rotate-0' : '-rotate-90',
+                  )}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : (
+              !collapsed && !!section.label && (
+                <p className="mb-2 px-3 text-[11px] font-semibold tracking-wider text-white/40">
+                  {section.label}
+                </p>
+              )
+            )}
+            {open && (
             <ul className="space-y-0.5">
               {section.items.map((item) => {
                 const active = isNavItemActive(pathname, item.href);
@@ -194,6 +295,7 @@ export function SidebarNavList({
                 const link = (
                   <Link
                     href={item.href}
+                    scroll={false}
                     aria-current={active ? 'page' : undefined}
                     onClick={onNavigate}
                     className={cn(
@@ -218,7 +320,7 @@ export function SidebarNavList({
                       <Tooltip>
                         <TooltipTrigger asChild>{link}</TooltipTrigger>
                         <TooltipContent side="right" className="bg-[#111318] text-white">
-                          {item.label}
+                          {section.label ? `${section.label}: ${item.label}` : item.label}
                         </TooltipContent>
                       </Tooltip>
                     </li>
@@ -228,8 +330,10 @@ export function SidebarNavList({
                 return <li key={item.id}>{link}</li>;
               })}
             </ul>
+            )}
           </div>
-        ))}
+          );
+        })}
       </nav>
     </TooltipProvider>
   );
@@ -243,21 +347,16 @@ export function SidebarBrand({ collapsed = false }: SidebarBrandProps) {
   return (
     <div
       className={cn(
-        'flex min-w-0 flex-col items-start gap-1',
+        'flex min-w-0 flex-col items-start',
         collapsed && 'items-center',
       )}
-      title="MOSS Physical Risk"
+      title="Physical Risk"
     >
       <img
         src="/physical_risk_logo_main.png"
         alt="Physical Risk"
         className={cn('brand-logo', collapsed && 'brand-logo-collapsed')}
       />
-      {!collapsed && (
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/55">
-          MOSS
-        </p>
-      )}
     </div>
   );
 }

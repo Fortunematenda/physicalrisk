@@ -1,17 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 
 import { AppHeader } from '@/components/layout/app-header';
 import { AppSidebar, useNavBadges } from '@/components/layout/app-sidebar';
 import { MobileSidebar } from '@/components/layout/mobile-sidebar';
 import { PageContainer } from '@/components/layout/page-container';
+import { useShellChrome } from '@/components/shell-chrome';
 import { idleLogout, ssoLogout } from '@/lib/sso';
 import { IdleSessionGuard } from '@/components/IdleSessionGuard';
 
 const SIDEBAR_COLLAPSED_KEY = 'moss_sidebar_collapsed';
 
-type AppShellProps = {
+export type AppShellProps = {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
@@ -25,7 +26,17 @@ type AppShellProps = {
   mailCount?: number;
 };
 
-export function AppShell({
+function readCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** Persistent shell chrome — used by PortalFrame. */
+export function AppShellFrame({
   title,
   subtitle,
   children,
@@ -38,19 +49,21 @@ export function AppShell({
   mailCount,
 }: AppShellProps) {
   const badges = useNavBadges();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-    if (stored === 'true') setCollapsed(true);
   }, []);
 
   useEffect(() => {
     if (!mounted) return;
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      /* ignore */
+    }
   }, [collapsed, mounted]);
 
   const logout = useCallback(() => {
@@ -61,15 +74,14 @@ export function AppShell({
     setCollapsed((value) => !value);
   }, []);
 
-  const resolvedNotifications =
-    notificationCount ?? badges.reviewQueue;
+  const resolvedNotifications = notificationCount ?? badges.reviewQueue;
   const resolvedMail = mailCount ?? badges.failedEmails;
 
   return (
     <div className="flex min-h-screen bg-moss-page">
       <IdleSessionGuard enabled={mounted} onTimeout={() => { void idleLogout(); }} />
       <AppSidebar
-        collapsed={mounted && collapsed}
+        collapsed={collapsed}
         onToggleCollapse={toggleCollapse}
         onLogout={logout}
       />
@@ -99,5 +111,71 @@ export function AppShell({
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * Page-level shell. Inside PortalFrame this only updates header chrome and
+ * renders children — AppShellFrame stays mounted (no sidebar blink).
+ */
+export function AppShell({
+  title,
+  subtitle,
+  children,
+  actions,
+  searchPlaceholder = 'Search…',
+  hideSearch = false,
+  onSearch,
+  searchValue,
+  notificationCount,
+  mailCount,
+}: AppShellProps) {
+  const ctx = useShellChrome();
+  const setChrome = ctx?.setChrome;
+
+  useLayoutEffect(() => {
+    if (!setChrome) return;
+    setChrome({
+      title,
+      subtitle,
+      actions,
+      searchPlaceholder,
+      hideSearch,
+      onSearch,
+      searchValue,
+      notificationCount,
+      mailCount,
+    });
+  }, [
+    setChrome,
+    title,
+    subtitle,
+    actions,
+    searchPlaceholder,
+    hideSearch,
+    onSearch,
+    searchValue,
+    notificationCount,
+    mailCount,
+  ]);
+
+  if (ctx) {
+    return <>{children}</>;
+  }
+
+  return (
+    <AppShellFrame
+      title={title}
+      subtitle={subtitle}
+      actions={actions}
+      searchPlaceholder={searchPlaceholder}
+      hideSearch={hideSearch}
+      onSearch={onSearch}
+      searchValue={searchValue}
+      notificationCount={notificationCount}
+      mailCount={mailCount}
+    >
+      {children}
+    </AppShellFrame>
   );
 }

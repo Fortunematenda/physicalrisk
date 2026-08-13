@@ -29,7 +29,7 @@ export class ReportsService {
 
   private createPdf(assessment: any, reportType: ReportType): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 48, info: { Title: assessment.title, Author: 'Physical Risk · MOSS' } });
+      const doc = new PDFDocument({ size: 'A4', margin: 48, info: { Title: assessment.title, Author: 'Physical Risk · SCLI' } });
       const chunks: Buffer[] = [];
       doc.on('data', chunk => chunks.push(Buffer.from(chunk)));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -45,8 +45,8 @@ export class ReportsService {
       // 1. Cover
       doc.rect(0, 0, doc.page.width, 120).fill(BRAND);
       doc.fillColor('#ffffff').fontSize(11).text('PHYSICAL RISK', 48, 36);
-      doc.fontSize(22).text('MOSS', 48, 54);
-      doc.fontSize(10).text('Management Operating Security System', 48, 82);
+      doc.fontSize(22).text('SCLI', 48, 54);
+      doc.fontSize(10).text('Security Cost Leakage Index', 48, 82);
       doc.fillColor('#111111').fontSize(20).text(reportLabel, 48, 160);
       doc.moveDown(0.5).fontSize(12).fillColor('#555555')
         .text('Security Cost Leakage Index (SCLI) – Executive Assurance Gap Decision Report');
@@ -165,6 +165,9 @@ export class ReportsService {
       },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
+    if (assessment.productCode !== 'SCLI_COST_LEAKAGE') {
+      throw new BadRequestException('SCLI reports cannot be generated for MOSS assessments.');
+    }
     if (!assessment.scoreSnapshots[0]) throw new BadRequestException('Evaluate the assessment before generating a report.');
 
     const approvedStatuses = new Set(['APPROVED', 'REPORT_GENERATED', 'REPORT_ISSUED']);
@@ -273,9 +276,15 @@ export class ReportsService {
   }
 
   async listAll(user: AuthUser) {
-    const where = INTERNAL_ROLES.has(user.role)
-      ? {}
-      : { assessment: { organisation: { memberships: { some: { userId: user.id } } } } };
+    const where = {
+      // Cost Leakage Reports page must never list MOSS PDFs.
+      assessment: {
+        productCode: 'SCLI_COST_LEAKAGE' as const,
+        ...(INTERNAL_ROLES.has(user.role)
+          ? {}
+          : { organisation: { memberships: { some: { userId: user.id } } } }),
+      },
+    };
 
     const reports = await this.prisma.report.findMany({
       where,
