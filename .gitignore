@@ -4,6 +4,7 @@
 **/.env
 **/.env.*
 !.env.example.disabled
+!.env.moss-staging.example
 *.pem
 *.key
 *.p12
@@ -39,6 +40,8 @@ backups/
 logs/
 **/logs/
 *.sql
+# Keep Prisma Migrate SQL in version control (required for deploy)
+!**/prisma/migrations/**/*.sql
 *.sqlite
 *.sqlite3
 *.db

@@ -16,7 +16,7 @@ ENV NODE_ENV=production
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/packages/shared ./packages/shared
 COPY --from=base /app/apps/api ./apps/api
-COPY --from=base /app/package.json /app/pnpm-workspace.yaml ./
+COPY --from=base /app/package.json /app/pnpm-workspace.yaml /app/tsconfig.base.json ./
 WORKDIR /app/apps/api
 EXPOSE 4000
-CMD ["sh", "-c", "pnpm prisma:migrate && pnpm prisma:seed && node dist/main.js"]
+CMD ["sh", "-c", "pnpm prisma:migrate || (echo 'migrate deploy failed — attempting non-destructive db push bootstrap for empty/legacy DBs'; pnpm prisma:db-push && pnpm exec prisma migrate resolve --applied 20260720_espocrm_integration && pnpm exec prisma migrate resolve --applied 20260720_smtp_system_settings && pnpm exec prisma migrate resolve --applied 20260809180000_moss_m1_data_foundation && pnpm exec prisma migrate resolve --applied 20260809193000_moss_remaining_framework); pnpm prisma:seed && node dist/main.js"]
