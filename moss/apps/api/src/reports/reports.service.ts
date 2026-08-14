@@ -283,7 +283,7 @@ export class ReportsService {
     try {
       await this.email.enqueue({
         recipient,
-        subject: `${report.assessment.organisation.name} – MOSS Executive Report`,
+        subject: `${report.assessment.organisation.name} – Cost Leakage Executive Report`,
         template: 'report_issued',
         relatedType: 'Report',
         relatedId: id,
@@ -293,7 +293,7 @@ export class ReportsService {
           reference: report.assessment.reference,
           organisationName: report.assessment.organisation.name,
           attachmentStorageKey: report.storageKey,
-          attachmentFileName: report.fileName || `${report.assessment.reference}-report.pdf`,
+          attachmentFileName: report.fileName || `${report.assessment.reference}-Cost-Leakage-report.pdf`,
           attachmentContentType: 'application/pdf',
         },
       });

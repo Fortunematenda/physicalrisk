@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ReportType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssessmentsService } from '../assessments/assessments.service';
 import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
 import { EspoCrmService } from '../crm/espocrm.service';
+import { ReportsService } from '../reports/reports.service';
 
 type LeadContact = {
   organisationName: string;
@@ -25,6 +27,7 @@ export class PublicService {
     private readonly config: ConfigService,
     private readonly email: EmailService,
     private readonly crm: EspoCrmService,
+    private readonly reports: ReportsService,
   ) {}
 
   async getPublishedQuestionnaire(code = 'SCLI') {
@@ -304,7 +307,11 @@ export class PublicService {
       throw error;
     }
 
-    const thankYouSent = await this.sendThankYouEmail(lead);
+    const reportAttachment = await this.generatePreliminaryReportAttachment(
+      lead.assessmentId,
+      authUser,
+    );
+    const thankYouSent = await this.sendThankYouEmail(lead, reportAttachment);
 
     try {
       await this.crm.queueAssessmentSync(lead.assessmentId);
@@ -344,6 +351,7 @@ export class PublicService {
         assessmentId: lead.assessmentId,
         evaluated,
         thankYouSent,
+        reportAttached: Boolean(reportAttachment?.attachmentStorageKey),
         inputCount: (input.inputs || []).length,
         responseCount: (input.responses || []).length,
       },
@@ -368,7 +376,48 @@ export class PublicService {
     return user;
   }
 
-  private async sendThankYouEmail(lead: { email: string; firstName: string; organisationName: string; assessmentId?: string | null }) {
+  private async generatePreliminaryReportAttachment(
+    assessmentId: string,
+    authUser: { id: string; email: string; role: string },
+  ): Promise<{
+    attachmentStorageKey?: string;
+    attachmentFileName?: string;
+    attachmentContentType?: string;
+    url?: string;
+    reference?: string;
+  } | null> {
+    try {
+      const report = await this.reports.generate(assessmentId, authUser, {
+        reportType: ReportType.PRELIMINARY_EXECUTIVE,
+      });
+      if (!report?.storageKey) return null;
+      const assessment = await this.prisma.assessmentSession.findUnique({
+        where: { id: assessmentId },
+        select: { reference: true },
+      });
+      return {
+        attachmentStorageKey: report.storageKey,
+        attachmentFileName: report.fileName || `${assessment?.reference || 'assessment'}-Cost-Leakage.pdf`,
+        attachmentContentType: 'application/pdf',
+        url: report.downloadUrl,
+        reference: assessment?.reference,
+      };
+    } catch {
+      // Submission must succeed even if PDF generation fails; email still goes out.
+      return null;
+    }
+  }
+
+  private async sendThankYouEmail(
+    lead: { email: string; firstName: string; organisationName: string; assessmentId?: string | null },
+    reportAttachment?: {
+      attachmentStorageKey?: string;
+      attachmentFileName?: string;
+      attachmentContentType?: string;
+      url?: string;
+      reference?: string;
+    } | null,
+  ) {
     try {
       await this.email.enqueue({
         recipient: lead.email,
@@ -379,19 +428,24 @@ export class PublicService {
         payload: {
           firstName: lead.firstName,
           organisationName: lead.organisationName,
+          reference: reportAttachment?.reference,
+          url: reportAttachment?.url,
+          attachmentStorageKey: reportAttachment?.attachmentStorageKey,
+          attachmentFileName: reportAttachment?.attachmentFileName,
+          attachmentContentType: reportAttachment?.attachmentContentType || 'application/pdf',
         },
       });
       const notify = this.config.get<string>('LEAD_NOTIFY_EMAIL') || this.config.get<string>('SEED_ADMIN_EMAIL');
       if (notify) {
         await this.email.enqueue({
           recipient: notify,
-          subject: `New MOSS assessment submitted: ${lead.organisationName}`,
+          subject: `New Cost Leakage assessment submitted: ${lead.organisationName}`,
           template: 'internal_submission',
           relatedType: 'AssessmentSession',
           relatedId: lead.assessmentId || undefined,
           payload: {
             organisationName: lead.organisationName,
-            reference: lead.assessmentId || '',
+            reference: reportAttachment?.reference || lead.assessmentId || '',
           },
         });
       }

@@ -366,7 +366,19 @@ export class EmailService {
       case 'submission_confirmation':
         lines.push(`<p>Dear ${payload.firstName || 'Colleague'},</p>`);
         lines.push(`<p>Thank you. Your Security Cost Leakage assessment for <strong>${payload.organisationName || 'your organisation'}</strong> was received.</p>`);
-        lines.push(`<p>Our analysts will review your responses and be in contact shortly.</p>`);
+        if (payload.attachmentStorageKey) {
+          lines.push(
+            `<p>Please find your preliminary Cost Leakage PDF report attached to this email${
+              payload.reference ? ` (${payload.reference})` : ''
+            }.</p>`,
+          );
+          if (payload.url) {
+            lines.push(`<p>You can also <a href="${payload.url}">open the secure report link</a>.</p>`);
+          }
+          lines.push(`<p>Our analysts will review your responses and may follow up with a verified executive report.</p>`);
+        } else {
+          lines.push(`<p>Our analysts will review your responses and be in contact shortly.</p>`);
+        }
         break;
       case 'missing_information':
         lines.push(`<p>Dear ${payload.firstName || 'Colleague'},</p>`);
@@ -380,7 +392,7 @@ export class EmailService {
       case 'report_available':
         lines.push(`<p>Dear Colleague,</p>`);
         lines.push(
-          `<p>Please find the executive report for <strong>${payload.organisationName || 'your organisation'}</strong>${
+          `<p>Please find the Cost Leakage executive report for <strong>${payload.organisationName || 'your organisation'}</strong>${
             payload.reference ? ` (${payload.reference})` : ''
           } attached to this email as a PDF.</p>`,
         );
@@ -481,22 +493,16 @@ export class EmailService {
 
     const filename =
       (typeof payload.attachmentFileName === 'string' && payload.attachmentFileName.trim())
-      || 'report.pdf';
+      || 'Cost-Leakage-report.pdf';
     const contentType =
       (typeof payload.attachmentContentType === 'string' && payload.attachmentContentType.trim())
       || 'application/pdf';
 
-    try {
-      const content = await this.storage.getBuffer(storageKey);
-      if (!content.length) {
-        this.logger.warn(`Email attachment empty for key ${storageKey}`);
-        return undefined;
-      }
-      return [{ filename, content, contentType }];
-    } catch (error: any) {
-      this.logger.warn(`Unable to load email attachment ${storageKey}: ${error?.message || error}`);
-      return undefined;
+    const content = await this.storage.getBuffer(storageKey);
+    if (!content.length) {
+      throw new Error(`Email attachment empty for key ${storageKey}`);
     }
+    return [{ filename, content, contentType }];
   }
 
   async retry(id: string) {
