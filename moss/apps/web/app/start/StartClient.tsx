@@ -433,18 +433,26 @@ export default function StartAssessmentClient() {
         .filter(([, optionId]) => !!optionId)
         .map(([questionCode, responseOptionId]) => ({ questionCode, responseOptionId }));
 
-      const response = await fetch(`${API_BASE}/public/complete-assessment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          ...details,
-          leadId,
-          website,
-          inputs: inputPayload,
-          responses: responsePayload,
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 60000);
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE}/public/complete-assessment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            ...details,
+            leadId,
+            website,
+            inputs: inputPayload,
+            responses: responsePayload,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/json') ? await response.json() : null;
       if (!response.ok) {
@@ -456,7 +464,11 @@ export default function StartAssessmentClient() {
       setSavedSession(null);
       setPhase('thanks');
     } catch (e: any) {
-      setError(e.message);
+      setError(
+        e?.name === 'AbortError'
+          ? 'Submission timed out. Please try again — if it keeps failing, contact support.'
+          : e.message,
+      );
     } finally {
       setLoading(false);
     }

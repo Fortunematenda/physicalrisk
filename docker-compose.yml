@@ -190,7 +190,7 @@
       REDIS_URL: redis://moss-redis:6379
       JWT_SECRET: sso-managed-jwt-secret-for-moss-local
       JWT_EXPIRES_IN: 8h
-      CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-https://moss.physicalrisk.com,https://apps.physicalrisk.com}
+      CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-https://moss.physicalrisk.com,https://apps.physicalrisk.com,https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com}
       PORT: 4000
       S3_ENDPOINT: http://moss-minio:9000
       # Browser-facing MinIO for presigned URLs. Local default is localhost:9000; override for prod.
@@ -207,8 +207,8 @@
       CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-info@physicalrisk.com}
       CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
       CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}
-      CONTACT_ALLOWED_ORIGINS: ${CONTACT_ALLOWED_ORIGINS:-https://test.physicalrisk.com}
-      CONTACT_ALLOWED_HOSTS: ${CONTACT_ALLOWED_HOSTS:-test.physicalrisk.com}
+      CONTACT_ALLOWED_ORIGINS: ${CONTACT_ALLOWED_ORIGINS:-https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com}
+      CONTACT_ALLOWED_HOSTS: ${CONTACT_ALLOWED_HOSTS:-test.physicalrisk.com,physicalrisk.com,www.physicalrisk.com}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       ESPO_LEAD_PROGRAMME_FIELD: ${ESPO_LEAD_PROGRAMME_FIELD:-}
       ESPO_LEAD_SOURCE_FIELD: ${ESPO_LEAD_SOURCE_FIELD:-source}

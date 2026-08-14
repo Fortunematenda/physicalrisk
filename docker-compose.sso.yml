@@ -32,11 +32,15 @@
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wpuser}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      MOSS_CONTACT_API_URL: ${MOSS_CONTACT_API_URL:-https://moss.physicalrisk.com/api/public/contact}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_HOME', 'https://test.physicalrisk.com');
         define('WP_SITEURL', 'https://test.physicalrisk.com');
         define('FORCE_SSL_ADMIN', true);
         define('FS_METHOD', 'direct');
+        if (getenv('TURNSTILE_SITE_KEY')) { define('TURNSTILE_SITE_KEY', getenv('TURNSTILE_SITE_KEY')); }
+        if (getenv('MOSS_CONTACT_API_URL')) { define('MOSS_CONTACT_API_URL', getenv('MOSS_CONTACT_API_URL')); }
         if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
           $$_SERVER['HTTPS'] = 'on';
         }
@@ -176,7 +180,13 @@
       REDIS_URL: redis://moss-redis:6379
       JWT_SECRET: sso-managed-jwt-secret-for-moss-local
       JWT_EXPIRES_IN: 8h
-      CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-http://moss.localhost,http://localhost:3001,http://apps.localhost}
+      CORS_ORIGINS: ${MOSS_CORS_ORIGINS:-http://moss.localhost,http://localhost:3001,http://apps.localhost,https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com}
+      CONTACT_ALLOWED_ORIGINS: ${CONTACT_ALLOWED_ORIGINS:-https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com}
+      CONTACT_ALLOWED_HOSTS: ${CONTACT_ALLOWED_HOSTS:-test.physicalrisk.com,physicalrisk.com,www.physicalrisk.com}
+      CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-info@physicalrisk.com}
+      CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
+      CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       PORT: 4000
       # Browser-facing URLs for report links / CRM deep-links (must be public HTTPS in production)
       PUBLIC_URL: ${MOSS_WEB_URL:-http://moss.localhost}

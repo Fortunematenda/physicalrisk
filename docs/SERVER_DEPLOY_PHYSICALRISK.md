@@ -87,6 +87,30 @@ Realm import runs on **first** Keycloak DB only. If Keycloak already has data:
 
 Point the WordPress CTA to the questionnaire URL above.
 
+## WordPress “Book MOSS Assessment” form
+
+The MetForm on `test.physicalrisk.com` posts to `https://moss.physicalrisk.com/api/public/contact`.
+
+Required on the VPS (`.env.sso` + recreate `moss-api` / `wordpress`):
+
+```bash
+# In .env.sso — append WordPress origins if missing
+MOSS_CORS_ORIGINS=https://moss.physicalrisk.com,https://apps.physicalrisk.com,https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com
+CONTACT_ALLOWED_ORIGINS=https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com
+CONTACT_ALLOWED_HOSTS=test.physicalrisk.com,physicalrisk.com,www.physicalrisk.com
+TURNSTILE_SITE_KEY=...your Cloudflare Turnstile site key...
+TURNSTILE_SECRET_KEY=...your Cloudflare Turnstile secret...
+```
+
+`deploy-sso-rsync.sh` **does not** sync `wordpress/` (by design). Copy the contact MU-plugin manually when it changes:
+
+```bash
+# From a fresh GitHub pull on the VPS:
+cp /tmp/physicalrisk-pull/wordpress/wp-content/mu-plugins/moss-contact-api.php \
+  /opt/physicalrisk/wordpress/wp-content/mu-plugins/moss-contact-api.php
+docker compose -f docker-compose.sso.yml --env-file .env.sso up -d --force-recreate moss-api wordpress
+```
+
 ## After deploy checklist
 
 1. Portal login works

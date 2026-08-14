@@ -41,7 +41,10 @@ export class ContactService {
         body: new URLSearchParams({ secret, response: token, remoteip: ip }),
       });
       const result = await response.json() as { success?: boolean; hostname?: string };
-      const hosts = (this.config.get<string>('CONTACT_ALLOWED_HOSTS') || 'test.physicalrisk.com')
+      const hosts = (
+        this.config.get<string>('CONTACT_ALLOWED_HOSTS')
+        || 'test.physicalrisk.com,physicalrisk.com,www.physicalrisk.com'
+      )
         .split(',').map((v) => v.trim().toLowerCase()).filter(Boolean);
       if (!result.success || !result.hostname || !hosts.includes(result.hostname.toLowerCase())) {
         throw new Error('CAPTCHA_REJECTED');

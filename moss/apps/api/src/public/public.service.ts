@@ -307,11 +307,18 @@ export class PublicService {
       throw error;
     }
 
-    const reportAttachment = await this.generatePreliminaryReportAttachment(
-      lead.assessmentId,
-      authUser,
-    );
-    const thankYouSent = await this.sendThankYouEmail(lead, reportAttachment);
+    // PDF + thank-you email run after submit so the browser is never stuck spinning.
+    void this.generatePreliminaryReportAttachment(lead.assessmentId, authUser)
+      .then(async (reportAttachment) => {
+        const sent = await this.sendThankYouEmail(lead, reportAttachment);
+        if (sent) {
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { thankYouSentAt: new Date() },
+          }).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
 
     try {
       await this.crm.queueAssessmentSync(lead.assessmentId);
@@ -324,7 +331,6 @@ export class PublicService {
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
-        thankYouSentAt: thankYouSent ? new Date() : null,
         firstName: input.firstName.trim(),
         lastName: input.lastName.trim(),
         phone: input.phone?.trim() || lead.phone,
@@ -350,8 +356,7 @@ export class PublicService {
       metadata: {
         assessmentId: lead.assessmentId,
         evaluated,
-        thankYouSent,
-        reportAttached: Boolean(reportAttachment?.attachmentStorageKey),
+        thankYouQueued: true,
         inputCount: (input.inputs || []).length,
         responseCount: (input.responses || []).length,
       },
@@ -362,7 +367,7 @@ export class PublicService {
       assessmentId: lead.assessmentId,
       status: updated.status,
       evaluated,
-      thankYouSent,
+      thankYouSent: true,
       message: 'Thank you for finishing. Our experts will be in contact with you.',
     };
   }

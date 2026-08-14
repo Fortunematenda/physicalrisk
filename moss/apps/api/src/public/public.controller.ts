@@ -180,7 +180,10 @@ export class PublicController {
 
   private assertContactOrigin(req: Request) {
     const origin = String(req.headers.origin || '').replace(/\/$/, '');
-    const allowed = (this.config.get<string>('CONTACT_ALLOWED_ORIGINS') || 'https://test.physicalrisk.com')
+    const allowed = (
+      this.config.get<string>('CONTACT_ALLOWED_ORIGINS')
+      || 'https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com'
+    )
       .split(',').map((v) => v.trim().replace(/\/$/, '')).filter(Boolean);
     if (!origin || !allowed.includes(origin)) {
       throw new HttpException({ success: false, message: 'Request origin is not allowed.' }, HttpStatus.FORBIDDEN);
