@@ -8,6 +8,7 @@ import {
   Cable,
   ClipboardList,
   FileText,
+  Layers,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -60,6 +61,8 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
   'moss-actions': ListChecks,
   'moss-catalogue': SlidersHorizontal,
   'moss-scoring': Calculator,
+  'somod-home': Layers,
+  'somod-assessments': ClipboardList,
   // legacy ids (safety)
   'scli-dashboard': LayoutDashboard,
   'scli-organisations': Building2,
@@ -188,8 +191,8 @@ type SidebarNavListProps = {
   className?: string;
 };
 
-/** Cost Leakage + MOSS are mutually exclusive accordion groups. */
-const PRODUCT_SECTION_IDS = new Set(['scl', 'moss']);
+/** Cost Leakage, MOSS, and SOMOD are mutually exclusive accordion product groups. */
+const PRODUCT_SECTION_IDS = new Set(['scl', 'moss', 'somod']);
 
 export function SidebarNavList({
   collapsed = false,
@@ -235,7 +238,7 @@ export function SidebarNavList({
     const willOpen = !isSectionOpen(section);
     setManualOpen((prev) => {
       const next = { ...prev, [section.id]: willOpen };
-      // Opening Cost Leakage or MOSS closes the other product group.
+      // Opening one product group closes the others.
       if (willOpen && PRODUCT_SECTION_IDS.has(section.id)) {
         for (const id of PRODUCT_SECTION_IDS) {
           if (id !== section.id) next[id] = false;
@@ -250,7 +253,7 @@ export function SidebarNavList({
       <nav className={cn('flex-1 overflow-y-auto', className)} aria-label="Portal sections">
         {sections.map((section) => {
           const open = isSectionOpen(section);
-          const isProduct = section.id === 'scl' || section.id === 'moss';
+          const isProduct = PRODUCT_SECTION_IDS.has(section.id);
           return (
           <div
             key={section.id}

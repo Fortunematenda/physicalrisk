@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import { StatCard } from '@/components/dashboard/stat-card';
+import { useConfirm } from '@/components/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { MossControlCodeSelect } from '@/components/moss/ControlCodeSelect';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
@@ -55,6 +56,7 @@ const severitySelectClass =
 
 export default function MossFindingsPage() {
   const id = String(useParams()?.id || '');
+  const confirm = useConfirm();
   const [items, setItems] = useState<FindingRow[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -193,7 +195,12 @@ export default function MossFindingsPage() {
   }
 
   async function deleteFinding(row: FindingRow) {
-    const ok = window.confirm(`Delete finding “${row.title}”? This cannot be undone.`);
+    const ok = await confirm({
+      title: 'Delete finding',
+      description: `Delete finding “${row.title}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(row.id);
@@ -217,8 +224,8 @@ export default function MossFindingsPage() {
         <div className="min-w-0">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">Findings</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Record structured findings for this MOSS assessment. Set severity manually; automatic
-            score→severity mapping remains pending client methodology.
+            Record structured findings for this MOSS assessment. Set severity manually for each
+            finding.
           </p>
         </div>
         <Badge variant="secondary" className="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold">

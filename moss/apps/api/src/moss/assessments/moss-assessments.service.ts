@@ -77,7 +77,7 @@ export class MossAssessmentsService {
   }
 
   /** Shell questionnaire satisfies required AssessmentSession.questionnaireVersionId FK without using SCLI content. */
-  private async ensureMossQuestionnaireVersionId(): Promise<string> {
+  private async ensureMossQuestionnaireVersionId(catalogueVersion: string): Promise<string> {
     const questionnaire = await this.prisma.questionnaire.upsert({
       where: { code: 'MOSS' },
       update: {
@@ -91,15 +91,20 @@ export class MossAssessmentsService {
       },
     });
     let version = await this.prisma.questionnaireVersion.findUnique({
-      where: { questionnaireId_version: { questionnaireId: questionnaire.id, version: '3.0' } },
+      where: {
+        questionnaireId_version: {
+          questionnaireId: questionnaire.id,
+          version: catalogueVersion,
+        },
+      },
     });
     if (!version) {
       version = await this.prisma.questionnaireVersion.create({
         data: {
           questionnaireId: questionnaire.id,
-          version: '3.0',
+          version: catalogueVersion,
           status: QuestionnaireStatus.PUBLISHED,
-          methodologyNote: 'Empty shell — MOSS controls are stored in MossControl.',
+          methodologyNote: 'MOSS controls are stored in the Master Catalogue.',
           publishedAt: new Date(),
         },
       });
@@ -155,7 +160,7 @@ export class MossAssessmentsService {
   }
 
   async create(input: { organisationId: string; siteId?: string; title?: string }, user: AuthUser) {
-    const published = await this.catalogue.requirePublished('3.0');
+    const published = await this.catalogue.requirePublished();
     const organisation = await this.prisma.organisation.findUnique({ where: { id: input.organisationId } });
     if (!organisation) throw new BadRequestException('Organisation not found.');
 
@@ -173,7 +178,7 @@ export class MossAssessmentsService {
       }
     }
 
-    const questionnaireVersionId = await this.ensureMossQuestionnaireVersionId();
+    const questionnaireVersionId = await this.ensureMossQuestionnaireVersionId(published.version);
     const title = input.title?.trim() || `${organisation.name} MOSS Assessment`;
 
     const assessment = await this.prisma.$transaction(async (tx) => {
@@ -204,7 +209,7 @@ export class MossAssessmentsService {
       entityType: 'AssessmentSession',
       entityId: assessment.id,
       organisationId: organisation.id,
-      metadata: { reference: assessment.reference, catalogueVersion: '3.0' },
+      metadata: { reference: assessment.reference, catalogueVersion: published.version },
     });
 
     const progress = await this.progress.forAssessment(assessment.id, published.id);
@@ -349,7 +354,7 @@ export class MossAssessmentsService {
     ).length;
 
     // Ensure MEAN v1 is published; portfolio overall is assessment-scoped.
-    const published = await this.catalogue.requirePublished('3.0');
+    const published = await this.catalogue.requirePublished();
     await this.scoring.ensurePublishedMeanV1(published.id);
 
     return {

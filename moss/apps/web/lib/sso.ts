@@ -16,6 +16,31 @@ export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || 'https://apps.ph
 const LOGOUT_FLAG = 'moss_sso_logging_out';
 let signInInFlight: Promise<void> | null = null;
 
+/** Safe in-app return path after SSO (never auth/login intermediates). */
+export function sanitizeReturnPath(raw?: string | null): string {
+  if (!raw) return '/dashboard';
+  let path = raw;
+  if (path.startsWith('http')) {
+    try {
+      path = new URL(path).pathname || '/dashboard';
+    } catch {
+      return '/dashboard';
+    }
+  }
+  if (!path.startsWith('/') || path.startsWith('//')) return '/dashboard';
+  const lower = path.toLowerCase();
+  if (
+    lower === '/login' ||
+    lower.startsWith('/login?') ||
+    lower === '/auth/complete' ||
+    lower.startsWith('/auth/complete?') ||
+    lower.startsWith('/api/auth')
+  ) {
+    return '/dashboard';
+  }
+  return path;
+}
+
 export function isLoggingOut(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -106,7 +131,7 @@ export async function startKeycloakSignIn(callbackUrl: string) {
 
   signInInFlight = (async () => {
     window.localStorage.removeItem('moss_token');
-    const next = callbackUrl.startsWith('/') && !callbackUrl.startsWith('//') ? callbackUrl : '/dashboard';
+    const next = sanitizeReturnPath(callbackUrl);
     const result = await signIn('keycloak', {
       callbackUrl: `/auth/complete?next=${encodeURIComponent(next)}`,
       redirect: false,
@@ -122,7 +147,7 @@ export async function startKeycloakSignIn(callbackUrl: string) {
 }
 
 export async function redirectToLogin(returnPath?: string, force = false) {
-  const next = returnPath || window.location.pathname || '/dashboard';
+  const next = sanitizeReturnPath(returnPath || window.location.pathname || '/dashboard');
   if (isLoggingOut()) return;
   if (!force && (await hasSsoSession())) return;
   if (await isSsoEnabled()) {

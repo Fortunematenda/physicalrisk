@@ -173,7 +173,13 @@ export class OrganisationsService {
     const organisation = await this.prisma.organisation.findUnique({
       where: { id },
       include: {
-        _count: { select: { assessments: true, memberships: true } },
+        _count: {
+          select: {
+            assessments: true,
+            memberships: true,
+            somodAssessments: true,
+          },
+        },
         assessments: {
           where: { productCode: 'SCLI_COST_LEAKAGE' },
           orderBy: { updatedAt: 'desc' },
@@ -185,76 +191,129 @@ export class OrganisationsService {
               },
             },
             scoreSnapshots: { orderBy: { createdAt: 'desc' }, take: 1 },
-            _count: { select: { evidence: true, recommendations: true, reports: true, responses: true, inputValues: true } },
+            _count: {
+              select: {
+                evidence: true,
+                recommendations: true,
+                reports: true,
+                responses: true,
+                inputValues: true,
+              },
+            },
           },
         },
         memberships: {
           include: {
-            user: { select: { id: true, email: true, firstName: true, lastName: true, systemRole: true } },
+            user: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+                systemRole: true,
+              },
+            },
           },
         },
       },
     });
     if (!organisation) throw new NotFoundException('Organisation not found.');
 
-    const leads = await this.prisma.publicLead.findMany({
-      where: { organisationId: id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [leads, mossAssessments, somodAssessments] = await Promise.all([
+      this.prisma.publicLead.findMany({
+        where: { organisationId: id },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.assessmentSession.findMany({
+        where: { organisationId: id, productCode: 'MOSS' },
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          mossCatalogueVersion: { select: { id: true, version: true, title: true, status: true } },
+          site: { select: { id: true, name: true, siteCode: true } },
+          _count: { select: { mossControlAssessments: true } },
+        },
+      }),
+      this.prisma.somodAssessment.findMany({
+        where: { organisationId: id },
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          site: { select: { id: true, name: true, siteCode: true } },
+          mossAssessment: { select: { id: true, reference: true, title: true } },
+        },
+      }),
+    ]);
 
-    const leadByAssessment = new Map(leads.filter((l) => l.assessmentId).map((l) => [l.assessmentId as string, l]));
+    const leadByAssessment = new Map(
+      leads.filter((l) => l.assessmentId).map((l) => [l.assessmentId as string, l]),
+    );
+
+    const costLeakageAssessments = organisation.assessments.map((assessment) => {
+      const lead = leadByAssessment.get(assessment.id);
+      const inputsTotal = assessment.questionnaireVersion?._count?.inputDefinitions || 0;
+      const questionsTotal = assessment.questionnaireVersion?._count?.questions || 0;
+      const inputsAnswered = assessment._count.inputValues;
+      const questionsAnswered = assessment._count.responses;
+      const computedPercent =
+        inputsTotal + questionsTotal
+          ? Math.round(((inputsAnswered + questionsAnswered) / (inputsTotal + questionsTotal)) * 100)
+          : 0;
+      const isComplete =
+        lead?.status === 'COMPLETED' ||
+        ['SUBMITTED', 'AUTOMATED_EVALUATION_COMPLETE', 'APPROVED'].includes(assessment.status);
+      const progressPercent = isComplete ? 100 : (lead?.progressPercent ?? computedPercent);
+      const progressLabel = isComplete
+        ? 'Submitted'
+        : lead?.progressLabel ||
+          (questionsAnswered
+            ? `Questions answered ${questionsAnswered}/${questionsTotal}`
+            : inputsAnswered
+              ? `Calibration ${inputsAnswered}/${inputsTotal}`
+              : 'Details captured');
+      return {
+        ...assessment,
+        source: lead ? 'PUBLIC' : 'INTERNAL',
+        publicLead: lead
+          ? {
+              id: lead.id,
+              firstName: lead.firstName,
+              lastName: lead.lastName,
+              email: lead.email,
+              status: lead.status,
+              source: lead.source,
+              completedAt: lead.completedAt,
+              progressLabel: lead.progressLabel,
+              progressPercent: lead.progressPercent,
+              lastProgressAt: lead.lastProgressAt,
+            }
+          : null,
+        progress: {
+          percent: progressPercent,
+          label: progressLabel,
+          phase: isComplete
+            ? 'completed'
+            : lead?.progressPhase || (questionsAnswered ? 'questions' : 'calibration'),
+          inputsAnswered,
+          inputsTotal,
+          questionsAnswered,
+          questionsTotal,
+          lastProgressAt: lead?.lastProgressAt || assessment.updatedAt,
+        },
+      };
+    });
 
     return {
       ...organisation,
       publicLeads: leads,
-      assessments: organisation.assessments.map((assessment) => {
-        const lead = leadByAssessment.get(assessment.id);
-        const inputsTotal = assessment.questionnaireVersion?._count?.inputDefinitions || 0;
-        const questionsTotal = assessment.questionnaireVersion?._count?.questions || 0;
-        const inputsAnswered = assessment._count.inputValues;
-        const questionsAnswered = assessment._count.responses;
-        const computedPercent = inputsTotal + questionsTotal
-          ? Math.round(((inputsAnswered + questionsAnswered) / (inputsTotal + questionsTotal)) * 100)
-          : 0;
-        const isComplete = lead?.status === 'COMPLETED' || ['SUBMITTED', 'AUTOMATED_EVALUATION_COMPLETE', 'APPROVED'].includes(assessment.status);
-        const progressPercent = isComplete ? 100 : (lead?.progressPercent ?? computedPercent);
-        const progressLabel = isComplete
-          ? 'Submitted'
-          : lead?.progressLabel
-            || (questionsAnswered
-              ? `Questions answered ${questionsAnswered}/${questionsTotal}`
-              : inputsAnswered
-                ? `Calibration ${inputsAnswered}/${inputsTotal}`
-                : 'Details captured');
-        return {
-          ...assessment,
-          source: lead ? 'PUBLIC' : 'INTERNAL',
-          publicLead: lead
-            ? {
-                id: lead.id,
-                firstName: lead.firstName,
-                lastName: lead.lastName,
-                email: lead.email,
-                status: lead.status,
-                source: lead.source,
-                completedAt: lead.completedAt,
-                progressLabel: lead.progressLabel,
-                progressPercent: lead.progressPercent,
-                lastProgressAt: lead.lastProgressAt,
-              }
-            : null,
-          progress: {
-            percent: progressPercent,
-            label: progressLabel,
-            phase: isComplete ? 'completed' : (lead?.progressPhase || (questionsAnswered ? 'questions' : 'calibration')),
-            inputsAnswered,
-            inputsTotal,
-            questionsAnswered,
-            questionsTotal,
-            lastProgressAt: lead?.lastProgressAt || assessment.updatedAt,
-          },
-        };
-      }),
+      /** @deprecated Prefer costLeakageAssessments — kept for older clients. */
+      assessments: costLeakageAssessments,
+      costLeakageAssessments,
+      mossAssessments,
+      somodAssessments,
+      productCounts: {
+        costLeakage: costLeakageAssessments.length,
+        moss: mossAssessments.length,
+        somod: somodAssessments.length,
+      },
     };
   }
 
@@ -299,7 +358,11 @@ export class OrganisationsService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.publicLead.deleteMany({ where: { organisationId: id } });
-      const assessments = await tx.assessmentSession.findMany({ where: { organisationId: id }, select: { id: true } });
+      await tx.somodAssessment.deleteMany({ where: { organisationId: id } });
+      const assessments = await tx.assessmentSession.findMany({
+        where: { organisationId: id },
+        select: { id: true },
+      });
       for (const assessment of assessments) {
         await tx.assessmentSession.delete({ where: { id: assessment.id } });
       }

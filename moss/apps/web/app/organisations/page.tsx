@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { AuthGate } from '../../components/AuthGate';
 import { Shell } from '../../components/Shell';
+import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '../../components/RowActionsMenu';
 import {
   IconDownload,
@@ -93,6 +94,7 @@ function riskTone(band?: string) {
 }
 
 export default function OrganisationsPage() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<Organisation[]>([]);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -254,11 +256,15 @@ export default function OrganisationsPage() {
 
   async function deleteOrganisation(org: Organisation) {
     const count = org._count?.assessments ?? 0;
-    const ok = window.confirm(
-      count > 0
-        ? `Delete “${org.name}” and its ${count} related assessment(s)? This cannot be undone.`
-        : `Delete “${org.name}”? This cannot be undone.`,
-    );
+    const ok = await confirm({
+      title: 'Delete organisation',
+      description:
+        count > 0
+          ? `Delete “${org.name}” and its ${count} related assessment(s)? This cannot be undone.`
+          : `Delete “${org.name}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(org.id);

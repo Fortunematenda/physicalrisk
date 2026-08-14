@@ -32,7 +32,7 @@ describe('MOSS catalogue contracts', () => {
 
 describe.runIf(hasDb)('MOSS M3 services', () => {
   const prisma = new PrismaClient() as unknown as PrismaService;
-  const catalogue = new MossCatalogueService(prisma);
+  const catalogue = new MossCatalogueService(prisma, noopAudit);
   const progress = new MossProgressService(prisma);
   const assessments = new MossAssessmentsService(prisma, catalogue, progress, noopAudit);
   const suffix = `m3-${Date.now()}`;

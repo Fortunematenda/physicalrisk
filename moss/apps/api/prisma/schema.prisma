@@ -220,6 +220,41 @@ enum MossAggregationMode {
   UNCONFIGURED
 }
 
+/// SOMOD uses a dedicated aggregate — not AssessmentSession / ProductCode.
+enum SomodAssessmentStatus {
+  DRAFT
+  IN_PROGRESS
+  SUBMITTED
+  REVIEWED
+  RETURNED_FOR_CORRECTION
+  APPROVED
+  SUPERSEDED
+  ARCHIVED
+}
+
+enum SomodScenarioType {
+  CURRENT
+  RISK_ALIGNED
+  COST_EFFICIENT
+  RECOMMENDED_OPTIMAL
+}
+
+enum SomodScenarioStatus {
+  DRAFT
+  READY
+  SELECTED
+}
+
+/// Financial layer approval (handoff §10) — separate from assessment workflow status.
+enum SomodFinancialLayerStatus {
+  DRAFT
+  CALCULATED
+  IN_REVIEW
+  RETURNED
+  APPROVED
+  LOCKED
+}
+
 enum MossRecommendationSource {
   MANUAL
   CATALOGUE_TEMPLATE
@@ -256,6 +291,8 @@ model User {
   assumptionsApproved CalibrationAssumption[] @relation("AssumptionApprover")
   mossControlAssessments MossControlAssessment[] @relation("MossControlAssessor")
   mossRecommendations Recommendation[] @relation("MossRecommendationAuthor")
+  somodAssessmentsCreated SomodAssessment[] @relation("SomodAssessmentCreator")
+  somodFinancialApprovals SomodAssessment[] @relation("SomodFinancialApprover")
   auditEvents  AuditEvent[]
 }
 
@@ -273,6 +310,7 @@ model Organisation {
   memberships      Membership[]
   sites            Site[]
   assessments      AssessmentSession[]
+  somodAssessments SomodAssessment[]
   crmSyncRecords   CrmSyncRecord[]
   actionItems      ActionItem[]
 }
@@ -291,6 +329,7 @@ model Site {
   updatedAt      DateTime   @updatedAt
   organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   assessments    AssessmentSession[]
+  somodAssessments SomodAssessment[]
   @@unique([organisationId, siteCode])
   @@index([organisationId, status])
 }
@@ -466,6 +505,7 @@ model AssessmentSession {
   scoreOverrides         ScoreOverride[]
   qaChecklist            QaChecklistItem[]
   actionItems            ActionItem[]
+  somodLinkedAssessments SomodAssessment[] @relation("SomodMossLink")
   @@index([status])
   @@index([organisationId])
   @@index([organisationId, status])
@@ -1042,4 +1082,192 @@ model ContactSubmission {
   updatedAt       DateTime @updatedAt
   @@index([email])
   @@index([crmStatus, nextAttemptAt])
+}
+
+/// Security Operating Model Optimisation Diagnostic — separate product aggregate.
+/// Five engines + financial layer (handoff pack v1.0).
+model SomodAssessment {
+  id               String                @id @default(cuid())
+  reference        String                @unique
+  organisationId   String
+  siteId           String?
+  /// Optional read-only link to a MOSS AssessmentSession (productCode = MOSS).
+  mossAssessmentId String?
+  createdById      String
+  title            String
+  status           SomodAssessmentStatus @default(DRAFT)
+  notes            String?
+  /// Diagnostic version (handoff root data model).
+  version          Int                   @default(1)
+  /// Financial layer lifecycle (handoff §10).
+  financialLayerStatus SomodFinancialLayerStatus @default(DRAFT)
+  /// True when inputs changed after last successful calculate-financials.
+  financialStale       Boolean               @default(true)
+  financialCalculatedAt DateTime?
+  financialApprovedAt   DateTime?
+  financialApprovedById String?
+  financialLockReason   String?
+  /// Five engines — JSON inputs feeding operational + financial calculation.
+  riskRequirementJson       Json?
+  deploymentCapabilityJson  Json?
+  technologyJson            Json?
+  costEfficiencyJson        Json?
+  optimisationTradeoffJson  Json?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  organisation     Organisation          @relation(fields: [organisationId], references: [id])
+  site             Site?                 @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  mossAssessment   AssessmentSession?    @relation("SomodMossLink", fields: [mossAssessmentId], references: [id], onDelete: SetNull)
+  createdBy        User                  @relation("SomodAssessmentCreator", fields: [createdById], references: [id])
+  financialApprovedBy User?              @relation("SomodFinancialApprover", fields: [financialApprovedById], references: [id], onDelete: SetNull)
+  scenarios        SomodScenario[]
+  financialModel   SomodFinancialModel?
+  penalties        SomodPenaltyLibrary[]
+  controlFinancialMappings SomodControlFinancialMapping[]
+  scenarioFinancialOutputs SomodScenarioFinancialOutput[]
+  cfoDashboardSnapshots    SomodCfoDashboardSnapshot[]
+  @@index([organisationId, status])
+  @@index([siteId])
+  @@index([mossAssessmentId])
+  @@index([status])
+  @@index([createdById])
+  @@index([financialLayerStatus])
+}
+
+/// Optimisation scenario under a SOMOD assessment (Current / Risk-Aligned / Cost-Efficient / Recommended Optimal).
+model SomodScenario {
+  id                 String              @id @default(cuid())
+  somodAssessmentId  String
+  scenarioType       SomodScenarioType
+  label              String
+  status             SomodScenarioStatus @default(DRAFT)
+  sortOrder          Int                 @default(0)
+  summary            String?
+  /// Assessor assumptions specific to this scenario.
+  inputsJson         Json?
+  /// Operational Method V1 / engine evaluation output.
+  resultsJson        Json?
+  evaluatedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  assessment         SomodAssessment     @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+  @@unique([somodAssessmentId, scenarioType])
+  @@index([somodAssessmentId, sortOrder])
+  @@index([status])
+}
+
+/// Handoff §6 — editable cost/contract variables; derived values computed in service layer.
+model SomodFinancialModel {
+  id                               String   @id @default(cuid())
+  somodAssessmentId                String   @unique
+  currency                         String   @default("ZAR") @db.VarChar(10)
+  monthlyGuardCost                 Decimal  @db.Decimal(18, 2)
+  monthlySupervisorCost            Decimal  @db.Decimal(18, 2)
+  daysPerMonth                     Int
+  shiftHours                       Decimal  @db.Decimal(6, 2)
+  responseDelayCostRate            Decimal  @db.Decimal(18, 2)
+  defaultIncidentSeverityMultiplier Decimal @db.Decimal(6, 2)
+  monthlyContractValue             Decimal  @db.Decimal(18, 2)
+  patrolValuePerMiss               Decimal  @default(0) @db.Decimal(18, 2)
+  technologyCapexTotal             Decimal  @default(0) @db.Decimal(18, 2)
+  technologyMonthlyOpex            Decimal  @default(0) @db.Decimal(18, 2)
+  technologyLifespanMonths         Int?
+  createdAt                        DateTime @default(now())
+  updatedAt                        DateTime @updatedAt
+  assessment                       SomodAssessment @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+}
+
+/// Handoff §5.2 / §6 — governed penalty rules (formula expressions not consultant-editable).
+model SomodPenaltyLibrary {
+  id                 String   @id @default(cuid())
+  somodAssessmentId  String?
+  penaltyKey         String   @db.VarChar(100)
+  penaltyName        String   @db.VarChar(255)
+  metricName         String   @db.VarChar(255)
+  thresholdType      String   @db.VarChar(50)
+  thresholdValue     Decimal? @db.Decimal(18, 6)
+  unit               String   @db.VarChar(50)
+  /// Governed expression — service-layer only; never exposed as editable in consultant UI.
+  formulaExpression  String   @db.Text
+  appliesToControlId String?  @db.VarChar(50)
+  isActive           Boolean  @default(true)
+  isGoverned         Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  assessment         SomodAssessment? @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+  controlMappings    SomodControlFinancialMapping[]
+  @@index([somodAssessmentId, isActive])
+  @@unique([somodAssessmentId, penaltyKey])
+}
+
+/// Handoff §5.3 / §6 — bridge between controls and money.
+model SomodControlFinancialMapping {
+  id                   String   @id @default(cuid())
+  somodAssessmentId    String
+  controlId            String   @db.VarChar(50)
+  financialRelevance   Boolean  @default(false)
+  costCategory         String?  @db.VarChar(100)
+  eventUnit            String?  @db.VarChar(100)
+  exposureFormula      String?  @db.Text
+  penaltyId            String?
+  recoverableFormula   String?  @db.Text
+  cfoOutputCategory    String?  @db.VarChar(100)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  assessment           SomodAssessment @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+  penalty              SomodPenaltyLibrary? @relation(fields: [penaltyId], references: [id], onDelete: SetNull)
+  @@index([somodAssessmentId])
+  @@unique([somodAssessmentId, controlId])
+}
+
+/// Handoff §6 — scenario-level financial outputs for the four scenarios.
+model SomodScenarioFinancialOutput {
+  id                        String            @id @default(cuid())
+  somodAssessmentId         String
+  scenarioType              SomodScenarioType
+  /// CALCULATED | METHODOLOGY_REQUIRED | INCOMPLETE | STALE | LEGACY_PLACEHOLDER
+  calculationStatus         String            @default("CALCULATED") @db.VarChar(40)
+  methodologyMissing        Json?
+  monthlyManpowerCost       Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyTechnologyCost     Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyPenaltyExposure    Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyOperationalLeakage Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyRecoverableValue   Decimal           @default(0) @db.Decimal(18, 2)
+  monthlyTotalSecurityCost  Decimal           @default(0) @db.Decimal(18, 2)
+  annualTotalSecurityCost   Decimal           @default(0) @db.Decimal(18, 2)
+  requiredCapitalInvestment Decimal           @default(0) @db.Decimal(18, 2)
+  paybackMonths             Decimal?          @db.Decimal(10, 2)
+  effectivenessScore        Decimal?          @db.Decimal(6, 2)
+  riskPosition              String?           @db.VarChar(50)
+  detailJson                Json?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  assessment                SomodAssessment   @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+  @@unique([somodAssessmentId, scenarioType])
+  @@index([somodAssessmentId])
+}
+
+/// Handoff §6 — locked CFO dashboard summaries (immutable once approved).
+model SomodCfoDashboardSnapshot {
+  id                        String   @id @default(cuid())
+  somodAssessmentId         String
+  currency                  String   @db.VarChar(10)
+  currentMonthlySpend       Decimal  @db.Decimal(18, 2)
+  optimalMonthlySpend       Decimal  @db.Decimal(18, 2)
+  monthlySavings            Decimal  @db.Decimal(18, 2)
+  annualSavings             Decimal  @db.Decimal(18, 2)
+  currentMonthlyLeakage     Decimal  @db.Decimal(18, 2)
+  optimalMonthlyLeakage     Decimal  @db.Decimal(18, 2)
+  monthlyRecoverableValue   Decimal  @db.Decimal(18, 2)
+  requiredCapitalInvestment Decimal  @db.Decimal(18, 2)
+  paybackMonths             Decimal? @db.Decimal(10, 2)
+  currentEffectiveness      Decimal? @db.Decimal(6, 2)
+  optimalEffectiveness      Decimal? @db.Decimal(6, 2)
+  currentRiskPosition       String?  @db.VarChar(50)
+  optimalRiskPosition       String?  @db.VarChar(50)
+  isLocked                  Boolean  @default(false)
+  snapshotJson              Json?
+  createdAt                 DateTime @default(now())
+  assessment                SomodAssessment @relation(fields: [somodAssessmentId], references: [id], onDelete: Cascade)
+  @@index([somodAssessmentId, createdAt])
 }

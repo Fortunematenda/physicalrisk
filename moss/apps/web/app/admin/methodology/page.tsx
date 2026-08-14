@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
+import { useConfirm } from '@/components/confirm-dialog';
 import {
   IconBookOpen,
   IconDownload,
@@ -127,6 +128,7 @@ function suggestNextCode(rows: Array<{ code: string }>, prefix: string) {
 }
 
 export default function MethodologyPage() {
+  const confirm = useConfirm();
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -398,7 +400,13 @@ export default function MethodologyPage() {
   }
 
   async function deleteQuestion(row: Question) {
-    if (!window.confirm(`Delete question ${row.code}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete question',
+      description: `Delete question ${row.code}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     try {
@@ -412,7 +420,13 @@ export default function MethodologyPage() {
   }
 
   async function deleteInput(row: InputDef) {
-    if (!window.confirm(`Delete calibration input ${row.code}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete calibration input',
+      description: `Delete calibration input ${row.code}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     setError('');
     setNotice('');
     try {

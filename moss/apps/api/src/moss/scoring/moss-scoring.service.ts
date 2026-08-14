@@ -270,7 +270,7 @@ export class MossScoringService {
       readOnly: true,
       immutable: true,
       note:
-        'Published MEAN v1.0.0 is read-only in this release. Weighting, critical overrides, auto severity, and auto recommendations are not enabled.',
+        'Published MEAN scoring is active. Advanced weighting, critical-control overrides, and automatic findings or recommendations are not enabled in this release.',
       configurationStatus: configured ? 'CONFIGURED' : 'PENDING_METHODOLOGY',
       catalogue: catalogue
         ? {

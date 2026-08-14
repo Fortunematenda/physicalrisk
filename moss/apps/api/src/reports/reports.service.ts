@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { ConfigService } from '@nestjs/config';
-import { ReportType } from '@prisma/client';
+import { ReportStatus, ReportType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../evidence/storage.service';
 import { AuditService } from '../audit/audit.service';
@@ -189,30 +189,67 @@ export class ReportsService {
       }
     }
 
-    const prior = await this.prisma.report.count({
-      where: { assessmentId, reportType },
+    const existing = await this.prisma.report.findFirst({
+      where: {
+        assessmentId,
+        reportType,
+        status: { not: ReportStatus.SUPERSEDED },
+      },
+      orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
     });
-    const version = prior + 1;
+
+    // Keep a single active report per assessment + type: replace in place.
+    const version = existing?.version ?? 1;
     const buffer = await this.createPdf(assessment, reportType);
     const label = reportType === ReportType.PRELIMINARY_EXECUTIVE ? 'Preliminary' : 'Approved-Executive';
-    const fileName = `${assessment.reference}-${label}-v${version}.pdf`;
-    const storageKey = `assessments/${assessment.id}/reports/${Date.now()}-${fileName}`;
+    const fileName = `${assessment.reference}-${label}.pdf`;
+    const storageKey = existing?.storageKey
+      ? existing.storageKey
+      : `assessments/${assessment.id}/reports/${assessment.reference}-${label}.pdf`;
     await this.storage.put(storageKey, buffer, 'application/pdf');
 
-    const report = await this.prisma.report.create({
-      data: {
+    // Any other active rows of this type become historical only.
+    await this.prisma.report.updateMany({
+      where: {
         assessmentId,
-        title: `${assessment.title} ${label} Report`,
-        status: 'GENERATED',
         reportType,
-        version,
-        storageKey,
-        fileName,
-        generatedById: user.id,
-        generatedAt: new Date(),
-        approvedAt: reportType === ReportType.VERIFIED_EXECUTIVE ? new Date() : null,
+        status: { not: ReportStatus.SUPERSEDED },
+        ...(existing ? { id: { not: existing.id } } : {}),
       },
+      data: { status: ReportStatus.SUPERSEDED },
     });
+
+    const report = existing
+      ? await this.prisma.report.update({
+          where: { id: existing.id },
+          data: {
+            title: `${assessment.title} ${label} Report`,
+            status: 'GENERATED',
+            storageKey,
+            fileName,
+            generatedById: user.id,
+            generatedAt: new Date(),
+            approvedAt:
+              reportType === ReportType.VERIFIED_EXECUTIVE
+                ? new Date()
+                : existing.approvedAt,
+            issuedAt: null,
+          },
+        })
+      : await this.prisma.report.create({
+          data: {
+            assessmentId,
+            title: `${assessment.title} ${label} Report`,
+            status: 'GENERATED',
+            reportType,
+            version,
+            storageKey,
+            fileName,
+            generatedById: user.id,
+            generatedAt: new Date(),
+            approvedAt: reportType === ReportType.VERIFIED_EXECUTIVE ? new Date() : null,
+          },
+        });
 
     if (reportType === ReportType.VERIFIED_EXECUTIVE) {
       await this.prisma.assessmentSession.update({
@@ -223,10 +260,10 @@ export class ReportsService {
 
     await this.audit.record({
       userId: user.id,
-      action: 'GENERATE_REPORT',
+      action: existing ? 'REPLACE_REPORT' : 'GENERATE_REPORT',
       entityType: 'Report',
       entityId: report.id,
-      metadata: { assessmentId, reportType, version },
+      metadata: { assessmentId, reportType, version, replaced: Boolean(existing) },
     });
     try {
       await this.crm?.queueOpportunitySync(assessmentId);
@@ -275,6 +312,37 @@ export class ReportsService {
     return updated;
   }
 
+  async remove(id: string, user: AuthUser) {
+    requireRole(user, ANALYST_ROLES, 'Analyst permission required to delete reports.');
+    const report = await this.prisma.report.findUnique({
+      where: { id },
+      include: { assessment: { select: { id: true, productCode: true } } },
+    });
+    if (!report) throw new NotFoundException('Report not found.');
+    if (report.assessment.productCode !== 'SCLI_COST_LEAKAGE') {
+      throw new BadRequestException('This endpoint deletes Cost Leakage reports only.');
+    }
+    await this.assessments.checkAccess(report.assessmentId, user);
+
+    if (report.storageKey) {
+      await this.storage.delete(report.storageKey);
+    }
+
+    await this.prisma.report.delete({ where: { id } });
+    await this.audit.record({
+      userId: user.id,
+      action: 'DELETE_REPORT',
+      entityType: 'Report',
+      entityId: id,
+      metadata: {
+        assessmentId: report.assessmentId,
+        reportType: report.reportType,
+        fileName: report.fileName,
+      },
+    });
+    return { ok: true, id };
+  }
+
   async listAll(user: AuthUser) {
     const where = {
       // Cost Leakage Reports page must never list MOSS PDFs.
@@ -287,7 +355,10 @@ export class ReportsService {
     };
 
     const reports = await this.prisma.report.findMany({
-      where,
+      where: {
+        ...where,
+        status: { not: 'SUPERSEDED' },
+      },
       orderBy: [{ createdAt: 'desc' }],
       take: 500,
       include: {
@@ -402,7 +473,7 @@ export class ReportsService {
   async listForAssessment(assessmentId: string, user: AuthUser) {
     await this.assessments.checkAccess(assessmentId, user);
     return this.prisma.report.findMany({
-      where: { assessmentId },
+      where: { assessmentId, status: { not: 'SUPERSEDED' } },
       orderBy: [{ reportType: 'asc' }, { version: 'desc' }],
     });
   }

@@ -23,7 +23,7 @@ export class UsersService {
   private assertLocalUserAdminAllowed() {
     if (this.config.get<string>('KEYCLOAK_ENABLED') === 'true') {
       throw new ForbiddenException(
-        'Users are managed in Keycloak SSO. Create or update accounts in auth.localhost, not here.',
+        'Users are managed in Keycloak SSO. Create or update accounts in the identity provider, not here.',
       );
     }
   }

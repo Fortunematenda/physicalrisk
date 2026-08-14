@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, Nunito_Sans } from 'next/font/google';
+import { ConfirmProvider } from '@/components/confirm-dialog';
 import { PortalFrame } from '@/components/PortalFrame';
 import './globals.css';
 
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={`${inter.variable} ${nunitoSans.variable} font-sans`}>
-        <PortalFrame>{children}</PortalFrame>
+        <ConfirmProvider>
+          <PortalFrame>{children}</PortalFrame>
+        </ConfirmProvider>
       </body>
     </html>
   );

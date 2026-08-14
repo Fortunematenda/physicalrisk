@@ -3,10 +3,11 @@
 import { useSession, signIn } from 'next-auth/react';
 import { Suspense, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Shield, LogOut, ArrowUpRight, Database } from 'lucide-react';
+import { Shield, LogOut, ArrowUpRight, Database, Scale } from 'lucide-react';
 
 const MOSS_URL = process.env.NEXT_PUBLIC_MOSS_URL || 'https://moss.physicalrisk.com';
 const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL || 'https://repo.physicalrisk.com';
+const SOMOD_URL = `${MOSS_URL.replace(/\/$/, '')}/somod`;
 
 function HomeInner() {
   const { data: session, status } = useSession();
@@ -92,7 +93,8 @@ function HomeInner() {
               Physical Risk Platform
             </h1>
             <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/60">
-              Your SSO session has ended. Sign in again to open MOSS or the enterprise repository.
+              Your SSO session has ended. Sign in again to open MOSS, SOMOD, or the enterprise
+              repository.
             </p>
             <button
               type="button"
@@ -103,7 +105,7 @@ function HomeInner() {
             </button>
           </section>
 
-          <div className="grid gap-5 opacity-50 sm:grid-cols-2">
+          <div className="grid gap-5 opacity-50 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-[#c41230] text-white">
                 <Shield className="h-6 w-6" />
@@ -115,6 +117,19 @@ function HomeInner() {
               <p className="text-sm leading-relaxed text-white/55">
                 Management Operating Security System — assessments, evidence, risk scoring, and
                 executive reporting.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7">
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-[#0f766e] text-white">
+                <Scale className="h-6 w-6" />
+              </div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/45">
+                Optimisation diagnostic
+              </p>
+              <h2 className="mb-3 text-2xl font-semibold tracking-tight text-white">SOMOD</h2>
+              <p className="text-sm leading-relaxed text-white/55">
+                Security Operating Model Optimisation — Current, Risk-Aligned, and Cost-Efficient
+                scenarios.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-7">
@@ -156,6 +171,18 @@ function HomeInner() {
       accent: 'from-[#c41230]/25 via-transparent to-transparent',
       iconClass: 'bg-[#c41230] text-white shadow-[#c41230]/40',
       cta: 'Open MOSS',
+    },
+    canMoss && {
+      key: 'somod',
+      href: SOMOD_URL,
+      title: 'SOMOD',
+      eyebrow: 'Optimisation diagnostic',
+      description:
+        'Security Operating Model Optimisation — Current, Risk-Aligned, and Cost-Efficient scenario engines.',
+      icon: Scale,
+      accent: 'from-teal-500/20 via-transparent to-transparent',
+      iconClass: 'bg-[#0f766e] text-white shadow-teal-900/40',
+      cta: 'Open SOMOD',
     },
     canRepo && {
       key: 'repo',
@@ -233,21 +260,21 @@ function HomeInner() {
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/60">
             Choose an application to continue. Your SSO session is active across the portal, MOSS,
-            and the enterprise repository.
+            SOMOD, and the enterprise repository.
           </p>
         </section>
 
         {apps.length > 0 ? (
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {apps.map((app, index) => {
               const Icon = app.icon;
+              const delayClass =
+                index === 0 ? 'pr-rise-delay-2' : index === 1 ? 'pr-rise-delay-3' : 'pr-rise-delay-3';
               return (
                 <a
                   key={app.key}
                   href={app.href}
-                  className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-7 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm transition duration-300 hover:-translate-y-1 hover:border-[#c41230]/45 hover:bg-white/[0.07] pr-rise ${
-                    index === 0 ? 'pr-rise-delay-2' : 'pr-rise-delay-3'
-                  }`}
+                  className={`group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-7 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm transition duration-300 hover:-translate-y-1 hover:border-[#c41230]/45 hover:bg-white/[0.07] pr-rise ${delayClass}`}
                 >
                   <div
                     className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${app.accent} opacity-80 transition group-hover:opacity-100`}

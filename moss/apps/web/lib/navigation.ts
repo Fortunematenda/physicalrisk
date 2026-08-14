@@ -6,6 +6,7 @@ import {
   IconClipboardList,
   IconFileText,
   IconHistory,
+  IconLayers,
   IconLayoutDashboard,
   IconListChecks,
   IconMail,
@@ -135,7 +136,28 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     ],
   },
   {
-    // Shared across Cost Leakage, MOSS, and future SOMOD — standalone, above SYSTEM.
+    id: 'somod',
+    label: 'SOMOD',
+    collapsible: true,
+    items: [
+      {
+        id: 'somod-home',
+        label: 'Dashboard',
+        href: '/somod',
+        icon: IconLayers,
+        roles: ['ADMIN', 'ANALYST', 'CLIENT'],
+      },
+      {
+        id: 'somod-assessments',
+        label: 'Assessments',
+        href: '/somod/assessments',
+        icon: IconClipboardList,
+        roles: ['ADMIN', 'ANALYST', 'CLIENT'],
+      },
+    ],
+  },
+  {
+    // Shared across Cost Leakage, MOSS, and SOMOD — standalone, above SYSTEM.
     id: 'organisations',
     label: '',
     items: [
@@ -185,8 +207,9 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
 ];
 
 /** Active product for brand subtitle / context. */
-export function activeDiagnosticProduct(pathname: string): 'SCL' | 'MOSS' | 'PLATFORM' {
+export function activeDiagnosticProduct(pathname: string): 'SCL' | 'MOSS' | 'SOMOD' | 'PLATFORM' {
   if (pathname === '/moss' || pathname.startsWith('/moss/')) return 'MOSS';
+  if (pathname === '/somod' || pathname.startsWith('/somod/')) return 'SOMOD';
   if (
     pathname === '/dashboard'
     || pathname === '/start'
@@ -233,6 +256,23 @@ export function isNavItemActive(pathname: string, href: string): boolean {
 
   if (href === '/moss/admin/scoring') {
     return pathname === '/moss/admin/scoring' || pathname.startsWith('/moss/admin/scoring/');
+  }
+
+  if (href === '/somod') {
+    return pathname === '/somod';
+  }
+
+  if (href === '/somod/assessments/new') {
+    return pathname === '/somod/assessments/new';
+  }
+
+  if (href === '/somod/assessments') {
+    return (
+      pathname === '/somod/assessments'
+      || (pathname.startsWith('/somod/assessments/')
+        && pathname !== '/somod/assessments/new'
+        && !pathname.startsWith('/somod/assessments/new/'))
+    );
   }
 
   if (href === '/assessments/assigned') {

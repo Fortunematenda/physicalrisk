@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import { StatCard } from '@/components/dashboard/stat-card';
+import { useConfirm } from '@/components/confirm-dialog';
 import { EmptyState } from '@/components/common/empty-state';
 import { MossControlCodeSelect } from '@/components/moss/ControlCodeSelect';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
@@ -45,6 +46,7 @@ type RecommendationRow = {
 
 export default function MossRecommendationsPage() {
   const id = String(useParams()?.id || '');
+  const confirm = useConfirm();
   const [items, setItems] = useState<RecommendationRow[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -163,7 +165,12 @@ export default function MossRecommendationsPage() {
   }
 
   async function deleteRecommendation(row: RecommendationRow) {
-    const ok = window.confirm(`Delete recommendation “${row.title}”? This cannot be undone.`);
+    const ok = await confirm({
+      title: 'Delete recommendation',
+      description: `Delete recommendation “${row.title}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(row.id);
@@ -187,12 +194,12 @@ export default function MossRecommendationsPage() {
         <div className="min-w-0">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">Recommendations</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            Capture manual improvement actions for this MOSS assessment. Automatic recommendation
-            rules remain pending methodology configuration.
+            Capture improvement actions for this MOSS assessment. Recommendations are created
+            manually by the assessor.
           </p>
         </div>
         <Badge variant="secondary" className="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold">
-          Auto rules · Pending
+          Manual
         </Badge>
       </div>
 

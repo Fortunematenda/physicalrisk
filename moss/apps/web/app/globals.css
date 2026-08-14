@@ -194,6 +194,13 @@ button { cursor: pointer; }
   padding-right: 2px;
 }
 .sidebar-section { margin-bottom: 18px; }
+.sidebar-section-product {
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
 .sidebar-section-label {
   margin: 0 0 8px;
   padding: 0 10px;

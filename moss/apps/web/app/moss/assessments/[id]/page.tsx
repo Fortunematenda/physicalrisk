@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { StatCard } from '@/components/dashboard/stat-card';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -149,6 +150,7 @@ function MethodologyBlock({ title, value, defaultOpen = false }: { title: string
 
 export default function MossWorkspacePage() {
   const params = useParams<{ id: string }>();
+  const confirm = useConfirm();
   const assessmentId = params.id;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [domainCode, setDomainCode] = useState('');
@@ -369,9 +371,12 @@ export default function MossWorkspacePage() {
     } catch (err: unknown) {
       const details = err && typeof err === 'object' && 'details' in err ? (err as any).details : null;
       if (details?.code === 'MOSS_INCOMPLETE_SUBMIT_CONFIRMATION_REQUIRED') {
-        const ok = window.confirm(
-          `Submit assessment with incomplete controls?\n\nScored ${details.controlsScored}/${details.controlsTotal} (${details.completenessPercent}%).`,
-        );
+        const ok = await confirm({
+          title: 'Submit incomplete assessment',
+          description: `Submit assessment with incomplete controls?\n\nScored ${details.controlsScored}/${details.controlsTotal} (${details.completenessPercent}%).`,
+          confirmLabel: 'Submit anyway',
+          variant: 'default',
+        });
         if (ok) {
           setSubmitting(false);
           await submitAssessment(true);
@@ -894,7 +899,8 @@ export default function MossWorkspacePage() {
                         {financialOpen ? (
                           <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
                             <p className="m-0 text-slate-500">
-                              Methodology metadata only — financial calculation is not enabled in this MOSS version.
+                              Financial mapping reference from the catalogue. Calculation engines
+                              for these formulas are not enabled in this release.
                             </p>
                             {financial?.eventUnit != null ? (
                               <p className="m-0"><strong>Event Unit</strong><br />{String(financial.eventUnit)}</p>

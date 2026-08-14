@@ -18,6 +18,7 @@ import { SsoUserSyncModule } from './users/sso-user-sync.module';
 import { ActionsModule } from './actions/actions.module';
 import { SettingsModule } from './settings/settings.module';
 import { MossModule } from './moss/moss.module';
+import { SomodModule } from './somod/somod.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { MossModule } from './moss/moss.module';
     ActionsModule,
     SettingsModule,
     MossModule,
+    SomodModule,
   ],
 })
 export class AppModule {}

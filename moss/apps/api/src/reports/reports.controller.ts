@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { IsEmail, IsEnum, IsOptional } from 'class-validator';
 import { ReportType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -37,6 +37,11 @@ export class ReportsController {
   @Post(':id/issue')
   issue(@Param('id') id: string, @Body() body: IssueReportDto, @CurrentUser() user: AuthUser) {
     return this.service.issue(id, body.email, user);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 
   @Get(':id')

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
   UploadedFile,
   UseGuards,
@@ -13,7 +14,15 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { Roles } from '../../common/roles';
@@ -41,6 +50,27 @@ export class MossReturnDto {
   @IsString() @MinLength(3) comment!: string;
 }
 
+export class CloneMossCatalogueDto {
+  @IsString() @MinLength(1) version!: string;
+  @IsOptional() @IsString() title?: string;
+}
+
+export class UpdateMossCatalogueDomainDto {
+  @IsOptional() @IsString() @MinLength(2) name?: string;
+  @IsOptional() @IsString() description?: string | null;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) sortOrder?: number;
+}
+
+export class UpdateMossCatalogueControlDto {
+  @IsOptional() @IsString() @MinLength(2) name?: string;
+  @IsOptional() @IsString() controlFunction?: string | null;
+  @IsOptional() @IsString() owner?: string | null;
+  @IsOptional() @IsString() frequency?: string | null;
+  @IsOptional() @IsString() metric?: string | null;
+  @IsOptional() @IsString() thresholdText?: string | null;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) sortOrder?: number;
+}
+
 @Controller('moss')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MossAssessmentsController {
@@ -62,16 +92,73 @@ export class MossAssessmentsController {
 
   @Get('admin/catalogue')
   @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
-  async adminCatalogue() {
-    const summary = await this.catalogue.summary();
-    const domains = await this.catalogue.listDomains();
-    return {
-      ...summary,
-      domains,
-      immutable: true,
-      readOnly: true,
-      note: 'Published catalogue v3.0 is read-only. Uncontrolled draft clone/edit/publish is not enabled.',
-    };
+  async adminCatalogue(@Query('versionId') versionId?: string) {
+    const { versions } = await this.catalogue.listVersions();
+    const selectedId =
+      versionId ||
+      versions.find((v) => v.status === 'PUBLISHED')?.id ||
+      versions.find((v) => v.status === 'DRAFT')?.id ||
+      versions[0]?.id;
+    if (!selectedId) {
+      return {
+        versions,
+        domains: [],
+        controlRows: [],
+        readOnly: true,
+        editable: false,
+        note: 'No catalogue versions found. Import the Master Catalogue first.',
+      };
+    }
+    const workspace = await this.catalogue.getVersionWorkspace(selectedId);
+    return { ...workspace, versions };
+  }
+
+  @Get('admin/catalogue/versions')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  adminCatalogueVersions() {
+    return this.catalogue.listVersions();
+  }
+
+  @Get('admin/catalogue/versions/:id')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  adminCatalogueVersion(@Param('id') id: string) {
+    return this.catalogue.getVersionWorkspace(id);
+  }
+
+  @Post('admin/catalogue/versions/:id/clone')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  cloneCatalogue(
+    @Param('id') id: string,
+    @Body() body: CloneMossCatalogueDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.catalogue.cloneVersion(id, body, user);
+  }
+
+  @Post('admin/catalogue/versions/:id/publish')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  publishCatalogue(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.catalogue.publishVersion(id, user);
+  }
+
+  @Patch('admin/catalogue/domains/:domainId')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  updateCatalogueDomain(
+    @Param('domainId') domainId: string,
+    @Body() body: UpdateMossCatalogueDomainDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.catalogue.updateDomain(domainId, body, user);
+  }
+
+  @Patch('admin/catalogue/controls/:controlId')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  updateCatalogueControl(
+    @Param('controlId') controlId: string,
+    @Body() body: UpdateMossCatalogueControlDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.catalogue.updateControl(controlId, body, user);
   }
 
   @Get('admin/scoring')

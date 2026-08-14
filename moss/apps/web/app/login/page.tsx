@@ -17,23 +17,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { API_BASE } from '@/lib/api';
-import { clearLogoutGuard, hasSsoSession, isSsoEnabled, startKeycloakSignIn } from '@/lib/sso';
+import {
+  clearLogoutGuard,
+  hasSsoSession,
+  isSsoEnabled,
+  sanitizeReturnPath,
+  startKeycloakSignIn,
+} from '@/lib/sso';
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const rawNext = params.get('next') || params.get('callbackUrl') || '/dashboard';
-  const next = rawNext.startsWith('http')
-    ? (() => {
-        try {
-          return new URL(rawNext).pathname || '/dashboard';
-        } catch {
-          return '/dashboard';
-        }
-      })()
-    : rawNext.startsWith('/')
-      ? rawNext
-      : '/dashboard';
+  const next = sanitizeReturnPath(params.get('next') || params.get('callbackUrl') || '/dashboard');
   const oauthError = params.get('error');
   const stale = params.get('stale') === '1';
   const legacyLoginEnabled =
@@ -176,7 +171,10 @@ function LoginForm() {
                 <Button
                   type="button"
                   className="w-full bg-[#c41230] hover:bg-[#a10f28]"
-                  onClick={() => startKeycloakSignIn(next)}
+                  onClick={() => {
+                    // Hard navigation clears stale query + NextAuth leftover state cookies.
+                    window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+                  }}
                 >
                   Retry SSO
                 </Button>

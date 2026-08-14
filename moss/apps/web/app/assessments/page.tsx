@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AuthGate } from '../../components/AuthGate';
 import { Shell } from '../../components/Shell';
+import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '../../components/RowActionsMenu';
 import {
   IconCalendar,
@@ -197,6 +198,7 @@ function shortOrgId(id?: string) {
 }
 
 export default function AssessmentsPage() {
+  const confirm = useConfirm();
   const [items, setItems] = useState<Assessment[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -260,7 +262,12 @@ export default function AssessmentsPage() {
 
   async function deleteAssessment(a: Assessment) {
     const label = a.reference || a.title;
-    const ok = window.confirm(`Delete assessment “${label}”? This cannot be undone.`);
+    const ok = await confirm({
+      title: 'Delete assessment',
+      description: `Delete assessment “${label}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(a.id);

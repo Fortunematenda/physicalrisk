@@ -21,7 +21,7 @@ export function normalizeRole(role: string): string {
 }
 
 export const ADMIN_ROLES = new Set(['SUPER_ADMIN']);
-/** Approvers: admins and authorised analysts (Lean MVP). */
+/** Approvers for general MOSS lean MVP (legacy). Prefer SOMOD-specific sets below for SOMOD. */
 export const APPROVER_ROLES = new Set(['SUPER_ADMIN', 'ANALYST', 'REVIEWER']);
 export const INTERNAL_ROLES = new Set([
   'SUPER_ADMIN',
@@ -33,6 +33,16 @@ export const INTERNAL_ROLES = new Set([
 ]);
 export const REVIEWER_ROLES = new Set(['SUPER_ADMIN', 'REVIEWER', 'ANALYST']);
 export const ANALYST_ROLES = new Set(['SUPER_ADMIN', 'ANALYST', 'REVIEWER']);
+/** SOMOD: consultants/analysts must NOT approve — reviewers and admins only. */
+export const SOMOD_APPROVER_ROLES = new Set(['SUPER_ADMIN', 'REVIEWER']);
+/** SOMOD: analysts/consultants may edit drafts and run calc, not approve. */
+export const SOMOD_CONSULTANT_ROLES = new Set([
+  'SUPER_ADMIN',
+  'METHODOLOGY_ADMIN',
+  'ANALYST',
+  'REVIEWER',
+  'SALES',
+]);
 export const METHODOLOGY_ROLES = new Set(['SUPER_ADMIN', 'METHODOLOGY_ADMIN']);
 export const WRITE_INTERNAL_ROLES = new Set(['SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ANALYST', 'REVIEWER', 'SALES']);
 export const CLIENT_ROLES = new Set(['CLIENT_EXECUTIVE', 'CLIENT_CONTRIBUTOR']);

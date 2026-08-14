@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AuthGate } from '../../components/AuthGate';
 import { Shell } from '../../components/Shell';
+import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '../../components/RowActionsMenu';
 import {
   IconAlertTriangle,
@@ -167,6 +168,7 @@ function statusLabel(status: string) {
 }
 
 export default function ReportsIndexPage() {
+  const confirm = useConfirm();
   const [data, setData] = useState<ReportsResponse>({ items: [] });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -185,6 +187,7 @@ export default function ReportsIndexPage() {
   const [assessments, setAssessments] = useState<Array<{ id: string; reference: string; title: string; organisation?: { name: string } }>>([]);
   const [generateId, setGenerateId] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = () =>
     apiFetch<ReportsResponse>('/reports')
@@ -354,6 +357,31 @@ export default function ReportsIndexPage() {
       setError(e instanceof Error ? e.message : 'Unable to generate report.');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function deleteReport(row: ReportRow) {
+    const label = row.reference || row.title || row.id;
+    const ok = await confirm({
+      title: 'Delete report',
+      description: `Delete report “${label}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    setMenuOpenId(null);
+    setDeletingId(row.id);
+    setError('');
+    try {
+      await apiFetch(`/reports/${row.id}`, { method: 'DELETE' });
+      setData((prev) => ({
+        ...prev,
+        items: (prev.items || []).filter((item) => item.id !== row.id),
+      }));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Unable to delete report.');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -586,6 +614,14 @@ export default function ReportsIndexPage() {
                               {r.assessment?.organisation?.id && (
                                 <Link href={`/organisations/${r.assessment.organisation.id}`} onClick={() => setMenuOpenId(null)}>View organisation</Link>
                               )}
+                              <button
+                                type="button"
+                                className="danger"
+                                disabled={deletingId === r.id}
+                                onClick={() => void deleteReport(r)}
+                              >
+                                {deletingId === r.id ? 'Deleting…' : 'Delete report'}
+                              </button>
                             </RowActionsMenu>
                           </div>
                         </td>

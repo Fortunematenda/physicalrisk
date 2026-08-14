@@ -171,9 +171,9 @@ export class MossReportsService {
 
       doc.moveDown(1.2).fillColor('#111111').fontSize(12).text('Disclaimer');
       doc.moveDown(0.3).fontSize(9).fillColor('#555555').text(
-        'This MOSS report is a decision-support maturity assessment based on assessor scores and catalogue methodology. ' +
-          'It is not an audit finding and does not include Cost Leakage / SCLI financial estimates. ' +
-          'Automatic severity mapping and recommendation rules remain subject to client methodology confirmation. ' +
+        'This MOSS report is a decision-support maturity assessment based on assessor scores and the published catalogue. ' +
+          'It is not an audit finding and does not include Cost Leakage financial estimates. ' +
+          'Findings severity and recommendations are recorded by the assessor. ' +
           'Physical Risk accepts no liability for commercial decisions taken solely on the basis of this report without further assurance work.',
       );
 

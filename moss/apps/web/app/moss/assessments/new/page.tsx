@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   BookOpen,
   Building2,
@@ -44,8 +44,9 @@ type Catalogue = {
 
 const ADD_NEW_SITE = '__add_new_site__';
 
-export default function NewMossAssessmentPage() {
+function NewMossAssessmentForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [catalogue, setCatalogue] = useState<Catalogue | null>(null);
@@ -67,6 +68,7 @@ export default function NewMossAssessmentPage() {
   const [siteError, setSiteError] = useState('');
 
   useEffect(() => {
+    const prefOrg = searchParams.get('org') || '';
     setLoading(true);
     Promise.all([
       apiFetch<OrgOption[]>('/organisations'),
@@ -75,10 +77,11 @@ export default function NewMossAssessmentPage() {
       .then(([orgList, cat]) => {
         setOrgs(orgList.map((o) => ({ id: o.id, name: o.name })));
         setCatalogue(cat);
+        if (prefOrg && orgList.some((o) => o.id === prefOrg)) setOrganisationId(prefOrg);
       })
       .catch((e: unknown) => setError(mossApiErrorMessage(e, 'Unable to load form data.')))
       .finally(() => setLoading(false));
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     if (!organisationId) {
@@ -425,5 +428,21 @@ export default function NewMossAssessmentPage() {
         </Dialog>
       </Shell>
     </AuthGate>
+  );
+}
+
+export default function NewMossAssessmentPage() {
+  return (
+    <Suspense
+      fallback={
+        <AuthGate>
+          <Shell title="New MOSS Assessment">
+            <p className="text-sm text-slate-500">Loading…</p>
+          </Shell>
+        </AuthGate>
+      }
+    >
+      <NewMossAssessmentForm />
+    </Suspense>
   );
 }

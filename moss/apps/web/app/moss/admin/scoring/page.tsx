@@ -298,8 +298,10 @@ export default function MossScoringAdminPage() {
 
               <Card className="rounded-xl border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-lg">Not enabled in v1</CardTitle>
-                  <CardDescription>Deferred until client methodology approval</CardDescription>
+                  <CardTitle className="text-lg">Not enabled in this release</CardTitle>
+                  <CardDescription>
+                    Available when advanced scoring configuration is approved
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ul className="m-0 list-none space-y-2 p-0">
@@ -319,7 +321,7 @@ export default function MossScoringAdminPage() {
               <Card className="rounded-xl border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Policy fields</CardTitle>
-                  <CardDescription>Stored on config; unused by MEAN v1 engine</CardDescription>
+                  <CardDescription>Stored on configuration; unused by active MEAN scoring</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <Row

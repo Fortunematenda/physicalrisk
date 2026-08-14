@@ -3,10 +3,11 @@
 import { Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+import { sanitizeReturnPath } from '@/lib/sso';
+
 function CompleteSignIn() {
   const params = useSearchParams();
-  const rawNext = params.get('next') || '/dashboard';
-  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/dashboard';
+  const next = sanitizeReturnPath(params.get('next') || '/dashboard');
 
   useEffect(() => {
     window.location.replace(next);

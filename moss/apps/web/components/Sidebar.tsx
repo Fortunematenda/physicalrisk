@@ -86,7 +86,7 @@ export function Sidebar({
   const roleLabel = user ? roleDisplayLabel(user.role) : 'User';
 
   useEffect(() => {
-    const productIds = new Set(['scl', 'moss']);
+    const productIds = new Set(['scl', 'moss', 'somod']);
     const activeProductId =
       sections.find(
         (section) => productIds.has(section.id) && sectionHasActiveItem(pathname, section),
@@ -118,8 +118,11 @@ export function Sidebar({
     const willOpen = !isSectionOpen(section);
     setManualOpen((prev) => {
       const next = { ...prev, [section.id]: willOpen };
-      if (willOpen && (section.id === 'scl' || section.id === 'moss')) {
-        next[section.id === 'scl' ? 'moss' : 'scl'] = false;
+      const productIds = ['scl', 'moss', 'somod'] as const;
+      if (willOpen && productIds.includes(section.id as (typeof productIds)[number])) {
+        for (const id of productIds) {
+          if (id !== section.id) next[id] = false;
+        }
       }
       return next;
     });
@@ -164,8 +167,13 @@ export function Sidebar({
           const prevGroup = index > 0 ? sections[index - 1]?.group : undefined;
           const showGroup = Boolean(section.group && section.group !== prevGroup);
           const open = isSectionOpen(section);
+          const isProduct =
+            section.id === 'scl' || section.id === 'moss' || section.id === 'somod';
           return (
-            <div className="sidebar-section" key={section.id}>
+            <div
+              className={`sidebar-section${isProduct ? ' sidebar-section-product' : ''}`}
+              key={section.id}
+            >
               {!collapsed && showGroup && section.group && (
                 <p className="sidebar-section-label sidebar-group-label">{section.group}</p>
               )}

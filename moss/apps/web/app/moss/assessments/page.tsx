@@ -15,6 +15,7 @@ import {
 
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
+import { useConfirm } from '@/components/confirm-dialog';
 import { EmptyState } from '../../../components/common/empty-state';
 import { RowActionsMenu } from '../../../components/RowActionsMenu';
 import { IconMoreVertical } from '../../../components/NavIcons';
@@ -57,6 +58,7 @@ type Row = {
 
 export default function MossAssessmentsPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -164,7 +166,12 @@ export default function MossAssessmentsPage() {
 
   async function deleteAssessment(row: Row) {
     const label = row.reference || row.title;
-    const ok = window.confirm(`Delete MOSS assessment “${label}”? This cannot be undone.`);
+    const ok = await confirm({
+      title: 'Delete assessment',
+      description: `Delete MOSS assessment “${label}”? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(row.id);

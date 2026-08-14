@@ -20,7 +20,7 @@ export class MossRecommendationsService {
       orderBy: { createdAt: 'desc' },
     });
     return {
-      automaticRecommendationRules: 'PENDING CLIENT METHODOLOGY',
+      automaticRecommendationRules: 'MANUAL',
       ruleEngineEnabled: false,
       items,
     };
@@ -71,7 +71,9 @@ export class MossRecommendationsService {
     if (!summary) throw new BadRequestException('recommendation text is required.');
     // RULE_ENGINE intentionally disabled
     if (body.source === ('RULE_ENGINE' as string)) {
-      throw new BadRequestException('Automatic recommendation rules: PENDING CLIENT METHODOLOGY');
+      throw new BadRequestException(
+        'Automatic recommendation generation is not enabled. Add recommendations manually.',
+      );
     }
 
     const rec = await this.prisma.recommendation.create({
@@ -102,7 +104,7 @@ export class MossRecommendationsService {
 
     return {
       ...rec,
-      automaticRecommendationRules: 'PENDING CLIENT METHODOLOGY',
+      automaticRecommendationRules: 'MANUAL',
     };
   }
 

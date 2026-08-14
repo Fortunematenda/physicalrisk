@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CreateBucketCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 @Injectable()
@@ -37,6 +37,14 @@ export class StorageService implements OnModuleInit {
   async put(key: string, body: Buffer, contentType: string) {
     await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
     return key;
+  }
+
+  async delete(key: string) {
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch {
+      // Best-effort: missing objects must not block report deletion.
+    }
   }
 
   get(key: string) {
