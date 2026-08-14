@@ -24,12 +24,17 @@ If WordPress/Apache already owns port 80 on the same server, do **not** bind com
 
 ## Deploy steps
 
+**Do not delete anything on the VPS.** Prefer `scripts/deploy-sso-rsync.sh` (additive rsync — no `--delete`). It never removes server-only files, never touches `wordpress/`, and restores `.env.sso`.
+
 ```bash
 # On the server
-cd /path/to/physicalrisk
-# Prefer pulling latest main (MCP + connectors are on main)
+cd /opt/physicalrisk
 
-cp .env.sso.production.example .env.sso   # first time only
+# Additive sync from GitHub main (safe — no deletes)
+bash scripts/deploy-sso-rsync.sh /opt/physicalrisk
+
+# First time only: copy and edit env
+# cp .env.sso.production.example .env.sso
 # Edit .env.sso — replace every REPLACE_WITH_* value
 # Also set connector vars for Repo external imports:
 #   CONNECTOR_ENCRYPTION_KEY=   # 64-char hex (32 bytes)
