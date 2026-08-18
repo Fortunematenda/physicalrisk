@@ -65,18 +65,34 @@ export class McpMarkdownOfficeService {
     }
   }
 
+  /**
+   * Parse ChatGPT's messy outputFormat strings ("xlsx, not PDF", "Excel (.xlsx)").
+   * Office tokens win over a trailing "pdf".
+   */
+  static formatFromPhrase(raw?: string): OfficeFormat | undefined {
+    const blob = String(raw || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!blob) return undefined;
+    if (['docx', 'doc', 'word'].includes(blob)) return 'docx';
+    if (['xlsx', 'xls', 'excel', 'spreadsheet'].includes(blob)) return 'xlsx';
+    if (['pptx', 'ppt', 'powerpoint', 'presentation', 'slides'].includes(blob)) return 'pptx';
+    if (['txt', 'text', 'plain', 'plaintext'].includes(blob)) return 'txt';
+    if (blob === 'pdf') return 'pdf';
+    if (/\b(xlsx|xls|excel|spreadsheet)\b/.test(blob)) return 'xlsx';
+    if (/\b(docx|doc|word)\b/.test(blob)) return 'docx';
+    if (/\b(pptx|ppt|powerpoint|presentation|slides)\b/.test(blob)) return 'pptx';
+    if (/\b(txt|plaintext)\b/.test(blob) || /\bplain text\b/.test(String(raw || '').toLowerCase())) return 'txt';
+    if (/\bpdf\b/.test(blob)) return 'pdf';
+    return undefined;
+  }
+
   /** Resolve desired output format from filename / mime / optional outputFormat. Default: pdf. */
   static resolveFormat(input: {
     fileName?: string;
     mimeType?: string;
     outputFormat?: string;
   }): OfficeFormat {
-    const explicit = String(input.outputFormat || '').trim().toLowerCase();
-    if (['docx', 'doc', 'word'].includes(explicit)) return 'docx';
-    if (['xlsx', 'xls', 'excel', 'spreadsheet'].includes(explicit)) return 'xlsx';
-    if (['pptx', 'ppt', 'powerpoint', 'presentation', 'slides'].includes(explicit)) return 'pptx';
-    if (['txt', 'text', 'plain', 'plaintext'].includes(explicit)) return 'txt';
-    if (['pdf'].includes(explicit)) return 'pdf';
+    const fromPhrase = McpMarkdownOfficeService.formatFromPhrase(input.outputFormat);
+    if (fromPhrase) return fromPhrase;
 
     const name = String(input.fileName || '').trim().toLowerCase();
     if (/\.(docx?)$/i.test(name)) return 'docx';

@@ -1367,13 +1367,18 @@ export class McpToolsService {
       .join('\n')
       .toLowerCase();
 
-    if (/\.xlsx?\b/.test(blob) || /\b(excel[- ]based|spreadsheet|workbook)\b/.test(blob)) {
+    const fromPhrase = McpMarkdownOfficeService.formatFromPhrase(
+      [title, description, fileName].filter(Boolean).join(' '),
+    );
+    if (fromPhrase && fromPhrase !== 'pdf') return fromPhrase;
+
+    if (/\.xlsx?\b/.test(blob) || /\b(xlsx|xls|excel|spreadsheet|workbook)\b/.test(blob)) {
       return 'xlsx';
     }
-    if (/\.docx?\b/.test(blob) || /\b(word document|ms word|\bdocx\b)/.test(blob)) {
+    if (/\.docx?\b/.test(blob) || /\b(docx|ms[- ]word|word document)\b/.test(blob)) {
       return 'docx';
     }
-    if (/\.pptx?\b/.test(blob) || /\b(powerpoint|presentation|slides?\b)/.test(blob)) {
+    if (/\.pptx?\b/.test(blob) || /\b(pptx|ppt|powerpoint)\b/.test(blob)) {
       return 'pptx';
     }
     if (/\.txt\b/.test(blob) || /\b(plain text|plaintext)\b/.test(blob)) {
@@ -1566,8 +1571,9 @@ export class McpToolsService {
       check_document_exists:
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
-        'Submit APPROVED document via documentContent (Markdown→PDF/DOCX/XLSX), fileUrl, uploadId, or base64. '
-        + 'Default is PDF. For Word set fileName to *.docx (or outputFormat=docx); for Excel use *.xlsx / outputFormat=xlsx; for PowerPoint use *.pptx / outputFormat=pptx; for plain text use *.txt / outputFormat=txt. '
+        'Submit APPROVED document via documentContent (Markdown→PDF/DOCX/XLSX/PPTX/TXT), fileUrl, uploadId, or base64. '
+        + 'If the user asked for Excel/spreadsheet/.xlsx, set outputFormat=xlsx and fileName=*.xlsx — never PDF. '
+        + 'Word→docx, PowerPoint→pptx, text→txt. PDF only when the user asked for PDF or did not name a format. '
         + 'If the same title already exists, submits as NEW_VERSION (e.g. Rev 1.1) unless mode=NEW. '
         + 'For an intentional new document code, set mode=NEW. '
         + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace. '
@@ -1702,16 +1708,16 @@ export class McpToolsService {
           relationshipsJson: { type: 'string' },
           mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
           existingDocumentId: { type: 'string', format: 'uuid' },
-          fileName: { type: 'string', description: 'e.g. report.docx, sheet.xlsx, deck.pptx, notes.txt (default .pdf)' },
+          fileName: { type: 'string', description: 'e.g. report.docx, sheet.xlsx, deck.pptx, notes.txt (PDF only if user asked for PDF)' },
           fileUrl: {
             type: 'string',
             format: 'uri',
-            description: 'Public http(s) URL to a PDF. Repo downloads it.',
+            description: 'Public http(s) URL to PDF/Word/Excel/PowerPoint/text. Repo downloads it.',
           },
           documentContent: {
             type: 'string',
             description:
-              'Full Markdown body from chat. Repo converts to PDF (default), DOCX, XLSX, PPTX, or TXT based on fileName/outputFormat. Max ~500KB.',
+              'Full Markdown body from chat. Converts to XLSX/DOCX/PPTX/TXT/PDF from fileName/outputFormat (Excel request must be xlsx, never PDF). Max ~500KB.',
           },
           uploadId: { type: 'string', format: 'uuid', description: 'From begin_document_upload' },
           fileContentBase64: { type: 'string', description: 'Optional if documentContent, fileUrl, or uploadId provided' },
@@ -1719,7 +1725,7 @@ export class McpToolsService {
           outputFormat: {
             type: 'string',
             enum: ['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
-            description: 'Same-chat conversion format. Default pdf. Use docx/xlsx/pptx/txt for other formats.',
+            description: 'Required when not PDF. Use xlsx if the user asked for Excel/spreadsheet.',
           },
           module: { type: 'string', description: 'Module name (e.g. Enterprise Architecture) — resolved to sectionKey' },
           workspaceCode: {

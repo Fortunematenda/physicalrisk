@@ -22,6 +22,11 @@ describe('McpMarkdownOfficeService', () => {
       outputFormat: 'xlsx',
       mimeType: 'application/pdf',
     })).toBe('xlsx');
+    expect(McpMarkdownOfficeService.resolveFormat({ outputFormat: 'xlsx, not PDF' })).toBe('xlsx');
+    expect(McpMarkdownOfficeService.resolveFormat({ outputFormat: 'Excel (.xlsx)' })).toBe('xlsx');
+    expect(McpMarkdownOfficeService.resolveFormat({ outputFormat: 'Import as Excel, not PDF' })).toBe('xlsx');
+    expect(McpMarkdownOfficeService.formatFromPhrase('Excel-based borehole shop workbook')).toBe('xlsx');
+    expect(McpMarkdownOfficeService.formatFromPhrase('plain article about goats')).toBeUndefined();
     expect(McpMarkdownOfficeService.resolveFormat({})).toBe('pdf');
   });
 

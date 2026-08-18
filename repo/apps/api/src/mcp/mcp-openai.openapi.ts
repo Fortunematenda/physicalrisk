@@ -126,11 +126,11 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Supports NEW documents and NEW_VERSION revisions of existing documents '
         + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
         + 'search_documents lists the Master Document Index. '
-        + 'Repo converts Markdown to PDF (default), Word (.docx), Excel (.xlsx), PowerPoint (.pptx), or plain text (.txt) from fileName/outputFormat, '
+        + 'Repo converts Markdown from fileName/outputFormat: Excel→xlsx, Word→docx, PowerPoint→pptx, text→txt, otherwise PDF. '
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.20.0',
+      version: '1.21.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
