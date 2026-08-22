@@ -241,7 +241,7 @@ export class McpController {
         message:
           (result as { uploadUrl?: string; importJobId?: string })?.importJobId
             ? 'Document queued in Import Queue'
-            : 'No file attached. Open result.uploadUrl in a browser and upload the PDF, or resubmit with fileUrl.',
+            : 'No file attached. Open result.uploadUrl in a browser and upload the original file (.xlsx/.docx/.pdf/.pptx), or resubmit with fileUrl / fileContentBase64.',
       };
     }
 

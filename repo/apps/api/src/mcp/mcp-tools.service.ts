@@ -172,9 +172,34 @@ export class McpToolsService {
         }, ipAddress);
       }
       case 'submit_approved_file': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          parsed.dto,
+          undefined,
+          this.defaultApproverName(integration),
+        );
+        const source = this.unwrapPayloadObject(args);
         return this.submitApprovedFile(
           integration,
-          args as unknown as SubmitApprovedFileDto,
+          {
+            ...prepared,
+            fileName: prepared.fileName || parsed.dto.fileName || 'document.xlsx',
+            fileContentBase64: parsed.fileContentBase64,
+            uploadId: parsed.uploadId,
+            fileUrl: parsed.fileUrl,
+            mimeType: prepared.mimeType || (typeof source.mimeType === 'string' ? source.mimeType : undefined),
+            workspaceCode:
+              typeof source.workspaceCode === 'string' ? source.workspaceCode.trim() : undefined,
+            sourceSha256:
+              typeof source.sourceSha256 === 'string' ? source.sourceSha256.trim() : undefined,
+            idempotencyKey:
+              typeof source.idempotencyKey === 'string' ? source.idempotencyKey.trim() : undefined,
+            mode: prepared.mode,
+            existingDocumentId: prepared.existingDocumentId,
+            documentCode: prepared.documentCode,
+            description: prepared.description,
+            owner: prepared.owner,
+          } as SubmitApprovedFileDto,
           ipAddress,
         );
       }
@@ -760,6 +785,7 @@ export class McpToolsService {
         fileContentBase64: file.buffer.toString('base64'),
       },
       ipAddress,
+      { forceFilePreserve: true },
     );
     return result;
   }
@@ -976,6 +1002,7 @@ export class McpToolsService {
             fileName,
             fileContentBase64,
             mimeType,
+            sourceSha256: (input as { sourceSha256?: string }).sourceSha256,
             mcpIntegrationId: integration.id,
             processAsync: true,
             importMode,
@@ -1116,6 +1143,7 @@ export class McpToolsService {
         fileUrl: input.fileUrl,
         mimeType: input.mimeType,
         workspaceCode: input.workspaceCode,
+        sourceSha256: input.sourceSha256,
         documentContent: undefined,
         outputFormat: undefined,
         idempotencyKey: input.idempotencyKey,

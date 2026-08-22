@@ -146,6 +146,40 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     expect(markdownOffice.renderDocx).not.toHaveBeenCalled();
   });
 
+  it('TEST A2 — submit_approved_file preserves XLSX bytes from Actions payload string', async () => {
+    const bytes = Buffer.from('PK\x03\x04xl/workbook.xml-fake-xlsx');
+    const result = await service.dispatchTool(
+      integration,
+      'submit_approved_file',
+      {
+        payload: JSON.stringify({
+          projectCode: 'MOSS',
+          documentType: 'Article',
+          title: 'Budget Workbook',
+          fileName: 'Budget.xlsx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          fileContentBase64: bytes.toString('base64'),
+        }),
+        fileName: 'Budget.xlsx',
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'QUEUED',
+      importMode: 'FILE_PRESERVE',
+      conversionPerformed: false,
+    });
+    expect(orchestrator.queueMcpApprovedDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importMode: 'FILE_PRESERVE',
+        conversionPerformed: false,
+        fileName: expect.stringMatching(/\.xlsx$/i),
+        fileContentBase64: bytes.toString('base64'),
+      }),
+    );
+    expect(markdownOffice.renderXlsx).not.toHaveBeenCalled();
+  });
+
   it('TEST F — submit_approved_content marks CONTENT_CREATE and may convert', async () => {
     const result = await service.dispatchTool(
       integration,

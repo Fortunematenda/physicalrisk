@@ -295,6 +295,12 @@ export class SubmitApprovedDocumentDto {
   @IsString()
   workspaceCode?: string;
 
+  /** Optional client SHA-256 hex of the original file bytes (FILE_PRESERVE integrity). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  sourceSha256?: string;
+
   /** Client-supplied idempotency key (also accepted via Idempotency-Key header). */
   @IsOptional()
   @Transform(trimString)
