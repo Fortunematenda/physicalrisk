@@ -1,11 +1,25 @@
 'use client';
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import {
+  filterSclActiveTriageQuestions,
+  isMoneyRangeValue,
+  isPercentRangeValue,
+  isSclMoneyLossCode,
+  type MoneyRangeValue,
+  type PercentRangeValue,
+} from '@moss/shared';
 import { AuthGate } from '../../../components/AuthGate';
+import { IndustryWithOtherField } from '../../../components/IndustryWithOtherField';
+import { MoneyRangeSelector } from '../../../components/MoneyRangeSelector';
+import { PercentRangeSelector } from '../../../components/PercentRangeSelector';
 import { Shell } from '../../../components/Shell';
 import { MetricCard, StatusBadge } from '../../../components/Ui';
 import { ApiError, apiFetch, money, pct } from '../../../lib/api';
+import { isIndustryValueComplete } from '../../../lib/scl-industry-other';
+import { resolveNextQuestion } from '../../../lib/scl-question-nav';
+import { splitOptionPresentation } from '../../../lib/scl-option-label';
 
 type MissingFields = { missingInputs: string[]; missingQuestions: string[] };
 
@@ -17,13 +31,8 @@ const CALIBRATION_GROUPS = [
 ];
 
 function isFilled(value: unknown) {
+  if (isPercentRangeValue(value) || isMoneyRangeValue(value)) return true;
   return value !== undefined && value !== null && value !== '';
-}
-
-function riskTone(score: number) {
-  if (score <= 25) return 'low';
-  if (score <= 55) return 'mid';
-  return 'high';
 }
 
 export default function AssessmentDetailPage() {
@@ -38,13 +47,27 @@ export default function AssessmentDetailPage() {
   const [qIndex, setQIndex] = useState(0);
   const [qIntro, setQIntro] = useState(true);
   const [savingOption, setSavingOption] = useState('');
+  const [questionError, setQuestionError] = useState('');
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => apiFetch(`/assessments/${id}`).then(setData).catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
 
+  function clearAdvanceTimer() {
+    if (advanceTimerRef.current != null) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => () => clearAdvanceTimer(), []);
+
   const inputMap = useMemo(() => Object.fromEntries((data?.inputValues || []).map((x: any) => [x.inputDefinitionId, x.value])), [data]);
   const responseMap = useMemo(() => Object.fromEntries((data?.responses || []).map((x: any) => [x.questionId, x])), [data]);
-  const questions = data?.questionnaireVersion?.questions || [];
+  const questions = useMemo(
+    () => filterSclActiveTriageQuestions((data?.questionnaireVersion?.questions || []) as any[]),
+    [data],
+  );
   const inputs = data?.questionnaireVersion?.inputDefinitions || [];
 
   const progress = useMemo(() => {
@@ -97,7 +120,14 @@ export default function AssessmentDetailPage() {
   function collectMissing(): MissingFields {
     if (!data) return { missingInputs: [], missingQuestions: [] };
     return {
-      missingInputs: inputs.filter((def: any) => def.required && !isFilled(inputMap[def.id])).map((def: any) => def.code),
+      missingInputs: inputs
+        .filter((def: any) => {
+          if (!def.required) return false;
+          const stored = inputMap[def.id];
+          if (def.code === 'C2') return !isIndustryValueComplete(stored);
+          return !isFilled(stored);
+        })
+        .map((def: any) => def.code),
       missingQuestions: questions.filter((q: any) => q.required && !responseMap[q.id]?.responseOptionId).map((q: any) => q.code),
     };
   }
@@ -123,8 +153,21 @@ export default function AssessmentDetailPage() {
   async function saveInput(def: any, raw: any) {
     setError('');
     let value = raw;
-    if (def.valueType === 'PERCENT') value = Number(raw) / 100;
-    if (def.valueType === 'NUMBER' || def.valueType === 'CURRENCY') value = Number(raw);
+    if (def.valueType === 'PERCENT') {
+      if (isPercentRangeValue(raw)) {
+        value = raw;
+      } else {
+        const n = Number(String(raw).replace(/[,\s]/g, ''));
+        value = Number.isFinite(n) ? (n > 1 ? n / 100 : n) : 0;
+      }
+    }
+    if (def.valueType === 'CURRENCY' && isSclMoneyLossCode(def.code) && isMoneyRangeValue(raw)) {
+      value = raw;
+    } else if (def.valueType === 'NUMBER' || def.valueType === 'CURRENCY') {
+      const cleaned = String(raw ?? '').replace(/[Rr$€£]/g, '').replace(/[\s\u00A0,]/g, '').trim();
+      const n = Number(cleaned);
+      value = Number.isFinite(n) ? n : 0;
+    }
     try {
       await apiFetch(`/assessments/${id}/inputs/${def.code}`, { method: 'PATCH', body: JSON.stringify({ value }) });
       setData((old: any) => ({
@@ -137,27 +180,60 @@ export default function AssessmentDetailPage() {
     }
   }
 
-  async function saveResponse(q: any, responseOptionId: string, advance = false) {
+  async function saveResponse(q: any, responseOptionId: string) {
     setSavingOption(responseOptionId);
     setError('');
+    setQuestionError('');
+    // Optimistic select so Next validation sees the answer immediately (no silent disable/race).
+    setData((old: any) => ({
+      ...old,
+      responses: [
+        ...old.responses.filter((x: any) => x.questionId !== q.id),
+        { questionId: q.id, responseOptionId, responseOption: q.options.find((o: any) => o.id === responseOptionId), question: q },
+      ],
+    }));
+    clearMissingCode(q.code);
     try {
       await apiFetch(`/assessments/${id}/responses/${q.code}`, { method: 'PATCH', body: JSON.stringify({ responseOptionId }) });
-      setData((old: any) => ({
-        ...old,
-        responses: [
-          ...old.responses.filter((x: any) => x.questionId !== q.id),
-          { questionId: q.id, responseOptionId, responseOption: q.options.find((o: any) => o.id === responseOptionId), question: q },
-        ],
-      }));
-      clearMissingCode(q.code);
-      if (advance && qIndex < questions.length - 1) {
-        window.setTimeout(() => setQIndex((i) => Math.min(i + 1, questions.length - 1)), 220);
-      }
+      // Do not auto-advance — user clicks Next.
     } catch (e: any) {
       setError(e.message);
+      // Roll back optimistic select on failure.
+      setData((old: any) => ({
+        ...old,
+        responses: old.responses.filter((x: any) => !(x.questionId === q.id && x.responseOptionId === responseOptionId)),
+      }));
     } finally {
       setSavingOption('');
     }
+  }
+
+  function goNextQuestion() {
+    if (!currentQuestion) return;
+    const selected = responseMap[currentQuestion.id]?.responseOptionId;
+    const result = resolveNextQuestion({
+      qIndex,
+      questionCount: questions.length,
+      hasAnswer: !!selected,
+    });
+    if (!result.ok) {
+      setQuestionError(result.error);
+      return;
+    }
+    setQuestionError('');
+    clearAdvanceTimer();
+    if (result.nextIndex !== qIndex) setQIndex(result.nextIndex);
+  }
+
+  function goBackQuestion() {
+    setQuestionError('');
+    clearAdvanceTimer();
+    if (qIndex <= 0) {
+      setTab('profile');
+      setCalStep(Math.max(0, CALIBRATION_GROUPS.length - 1));
+      return;
+    }
+    setQIndex((i) => Math.max(0, i - 1));
   }
 
   async function action(path: string, message: string, requireComplete = false) {
@@ -299,6 +375,10 @@ export default function AssessmentDetailPage() {
               </div>
             </div>
 
+            {groupInputs.some(
+              (d: any) =>
+                d.valueType === 'PERCENT' || (d.valueType === 'CURRENCY' && isSclMoneyLossCode(d.code)),
+            ) && <p className="assess-cal-hint">Select an estimated range for each item below.</p>}
             <div className="form-grid assess-cal-grid">
               {groupInputs.map((def: any) => {
                 const stored = inputMap[def.id];
@@ -312,7 +392,14 @@ export default function AssessmentDetailPage() {
                       {def.required && <span className="req">*</span>}
                       {isMissing && <span className="missing-tag">Required</span>}
                     </label>
-                    {def.valueType === 'SELECT' ? (
+                    {def.valueType === 'SELECT' && def.code === 'C2' ? (
+                      <IndustryWithOtherField
+                        variant="pills"
+                        options={def.options || []}
+                        value={value}
+                        onChange={(next) => void saveInput(def, next)}
+                      />
+                    ) : def.valueType === 'SELECT' ? (
                       <div className="choice-grid">
                         {(def.options || []).map((o: string) => (
                           <button
@@ -331,17 +418,27 @@ export default function AssessmentDetailPage() {
                           <button key={o} type="button" className={`choice-pill${String(value ?? '').toUpperCase() === o ? ' selected' : ''}`} onClick={() => saveInput(def, o)}>{o}</button>
                         ))}
                       </div>
+                    ) : def.valueType === 'PERCENT' ? (
+                      <PercentRangeSelector
+                        value={stored}
+                        onChange={(next: PercentRangeValue) => void saveInput(def, next)}
+                      />
+                    ) : def.valueType === 'CURRENCY' && isSclMoneyLossCode(def.code) ? (
+                      <MoneyRangeSelector
+                        value={stored}
+                        onChange={(next: MoneyRangeValue) => void saveInput(def, next)}
+                      />
                     ) : (
                       <input
                         key={`${def.id}-${stored === undefined ? 'empty' : 'set'}`}
                         type={def.valueType === 'TEXT' ? 'text' : 'number'}
-                        step={def.valueType === 'PERCENT' ? '0.1' : '1'}
-                        defaultValue={stored === undefined ? '' : (def.valueType === 'PERCENT' ? Number(stored || 0) * 100 : stored ?? '')}
+                        step="1"
+                        defaultValue={stored === undefined ? '' : (stored ?? '')}
                         onBlur={(e) => saveInput(def, e.target.value)}
                         id={def.id}
                       />
                     )}
-                    <small>{def.guidance}{def.valueType === 'PERCENT' ? ' Enter as 0–100%.' : ''}</small>
+                    {def.guidance ? <small>{def.guidance}</small> : null}
                   </div>
                 );
               })}
@@ -350,9 +447,9 @@ export default function AssessmentDetailPage() {
             <div className="assess-nav">
               <button className="btn secondary" disabled={calStep === 0} onClick={() => setCalStep((s) => Math.max(0, s - 1))}>Back</button>
               {calStep < CALIBRATION_GROUPS.length - 1 ? (
-                <button className="btn" onClick={() => setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1))}>Continue</button>
+                <button type="button" className="btn" onClick={() => setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1))}>Next</button>
               ) : (
-                <button className="btn" onClick={() => { setTab('questionnaire'); setQIntro(true); }}>Start questionnaire</button>
+                <button type="button" className="btn" onClick={() => { setTab('questionnaire'); setQIntro(false); setQIndex(0); }}>Next</button>
               )}
             </div>
           </section>
@@ -389,77 +486,93 @@ export default function AssessmentDetailPage() {
                 </button>
               </div>
             ) : currentQuestion && (
-              <>
-                <div className="assess-stage-head">
-                  <div>
-                    <p className="eyebrow">{currentQuestion.category}</p>
-                    <p className="q-counter">Question {qIndex + 1} of {questions.length}</p>
+              <div className="scl-triage">
+                <header className="scl-triage-progress">
+                  <div className="scl-triage-progress-top">
+                    <div>
+                      <p className="scl-triage-series">Security Cost Leakage</p>
+                      <p className="scl-triage-counter">
+                        Question {qIndex + 1} of {questions.length}
+                      </p>
+                    </div>
+                    <p className="scl-triage-pct">{qProgress}% complete</p>
                   </div>
-                  <div className="q-progress-wrap">
-                    <span>{qProgress}% complete</span>
-                    <div className="progress"><span style={{ width: `${qProgress}%` }} /></div>
+                  <div
+                    className="scl-triage-bar"
+                    role="progressbar"
+                    aria-valuenow={qProgress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span style={{ width: `${qProgress}%` }} />
                   </div>
-                </div>
+                </header>
 
-                <div className={`question-focus${missingSet.has(currentQuestion.code) ? ' missing' : ''}`} data-field-code={currentQuestion.code}>
-                  <div className="question-focus-meta">
-                    <span className="question-code">{currentQuestion.code}</span>
-                    <span className="question-weight">Weight {Number(currentQuestion.weight)}</span>
-                    {missingSet.has(currentQuestion.code) && <span className="missing-tag">Required</span>}
-                  </div>
-                  <h2 className="question-focus-title">{currentQuestion.text}</h2>
-                  <p className="evidence-hint"><strong>Suggested evidence:</strong> {currentQuestion.evidenceHint}</p>
-
-                  <div className="option-list">
+                <section className={`scl-triage-card${missingSet.has(currentQuestion.code) ? ' missing-border' : ''}`}>
+                  <p className="scl-triage-category">{currentQuestion.category}</p>
+                  <h2 className="scl-triage-question">{currentQuestion.text}</h2>
+                  <p className="scl-triage-prompt">Select the response that best reflects the current position.</p>
+                  {currentQuestion.evidenceHint ? (
+                    <p className="evidence-hint" style={{ marginTop: -8, marginBottom: 18 }}>
+                      <strong>Suggested evidence:</strong> {currentQuestion.evidenceHint}
+                    </p>
+                  ) : null}
+                  <div className="scl-triage-options" role="radiogroup" aria-label="Response options">
                     {[...currentQuestion.options].sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((o: any) => {
                       const selected = selectedId === o.id;
-                      const tone = riskTone(Number(o.riskScore));
+                      const { title, description } = splitOptionPresentation(o.label);
                       return (
                         <button
                           key={o.id}
                           type="button"
-                          className={`option-card tone-${tone}${selected ? ' selected' : ''}`}
+                          role="radio"
+                          aria-checked={selected}
+                          className={`scl-triage-option${selected ? ' selected' : ''}`}
                           disabled={!!savingOption}
-                          onClick={() => saveResponse(currentQuestion, o.id, true)}
+                          onClick={() => saveResponse(currentQuestion, o.id)}
                         >
-                          <span className="option-check">{selected ? '✓' : ''}</span>
-                          <span className="option-label">{o.label}</span>
-                          <span className="option-score">Risk {Number(o.riskScore).toFixed(0)}</span>
+                          <span className="scl-triage-radio" aria-hidden="true" />
+                          <span className="scl-triage-option-copy">
+                            <strong>{title}</strong>
+                            {description ? <span>{description}</span> : null}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
-                </div>
+                  {questionError && (
+                    <p className="field-error" role="alert" style={{ marginTop: 16, color: '#b91c1c', fontWeight: 650 }}>
+                      {questionError}
+                    </p>
+                  )}
+                </section>
 
-                <div className="assess-nav">
-                  <button className="btn secondary" disabled={qIndex === 0} onClick={() => setQIndex((i) => Math.max(0, i - 1))}>Back</button>
-                  <div className="assess-nav-right">
-                    {qIndex < questions.length - 1 ? (
-                      <button className="btn" disabled={!selectedId} onClick={() => setQIndex((i) => Math.min(questions.length - 1, i + 1))}>Next</button>
-                    ) : (
-                      <>
-                        <button className="btn secondary" disabled={busy} onClick={() => action(`/assessments/${id}/evaluate`, 'Scores recalculated.', true)}>Recalculate</button>
-                        <button className="btn" disabled={busy || !selectedId} onClick={() => action(`/assessments/${id}/submit`, 'Assessment evaluated successfully.', true)}>Submit and evaluate</button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="q-jump">
-                  {questions.map((q: any, i: number) => {
-                    const done = !!responseMap[q.id]?.responseOptionId;
-                    return (
+                <footer className="scl-triage-nav">
+                  <button type="button" className="btn secondary scl-triage-prev" onClick={goBackQuestion}>Previous</button>
+                  {qIndex < questions.length - 1 ? (
+                    <button type="button" className="btn scl-triage-next" onClick={goNextQuestion}>Next question</button>
+                  ) : (
+                    <div className="assess-nav-right" style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <button type="button" className="btn secondary" disabled={busy} onClick={() => action(`/assessments/${id}/evaluate`, 'Scores recalculated.', true)}>Recalculate</button>
                       <button
-                        key={q.id}
                         type="button"
-                        className={`q-jump-dot${i === qIndex ? ' active' : ''}${done ? ' done' : ''}${missingSet.has(q.code) ? ' alert' : ''}`}
-                        onClick={() => setQIndex(i)}
-                        title={q.code}
-                      />
-                    );
-                  })}
-                </div>
-              </>
+                        className="btn scl-triage-next"
+                        disabled={busy}
+                        onClick={() => {
+                          if (!selectedId) {
+                            setQuestionError('Please select an answer before submitting.');
+                            return;
+                          }
+                          setQuestionError('');
+                          action(`/assessments/${id}/submit`, 'Assessment evaluated successfully.', true);
+                        }}
+                      >
+                        Submit and evaluate
+                      </button>
+                    </div>
+                  )}
+                </footer>
+              </div>
             )}
           </section>
         )}

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FilePlus2, Lightbulb, Plus } from 'lucide-react';
+import { isSclActiveTriageQuestionCode } from '@moss/shared';
 
 import { AuthGate } from '../../../../components/AuthGate';
 import { EmptyState } from '../../../../components/common/empty-state';
@@ -28,6 +29,7 @@ import {
 } from '../../../../components/ui/select';
 import { Switch } from '../../../../components/ui/switch';
 import { Textarea } from '../../../../components/ui/textarea';
+import { stripUnintendedLeadingDash } from '../../../../lib/scl-option-label';
 import { StatusBadge as LegacyStatusBadge } from '../../../../components/Ui';
 import { apiFetch, money } from '../../../../lib/api';
 import { cn } from '../../../../lib/utils';
@@ -65,18 +67,22 @@ function riskAccent(band?: string) {
 }
 
 function CategoryBars({ items }: { items: Array<{ category: string; score: number }> }) {
-  const max = Math.max(...items.map((i) => Number(i.score)), 1);
+  // SCL category scores are on a 0–100 risk scale; fill against 100 so bars reflect absolute risk.
   return (
     <div className="dash-bars">
-      {items.map((item) => (
-        <div className="dash-bar-row" key={item.category}>
-          <span>{item.category}</span>
-          <div className="dash-bar-track">
-            <div className="dash-bar-fill" style={{ width: `${(Number(item.score) / max) * 100}%` }} />
+      {items.map((item) => {
+        const score = Number(item.score);
+        const widthPct = Math.max(0, Math.min(100, Number.isFinite(score) ? score : 0));
+        return (
+          <div className="dash-bar-row" key={item.category}>
+            <span>{item.category}</span>
+            <div className="dash-bar-track">
+              <div className="dash-bar-fill" style={{ width: `${widthPct}%` }} />
+            </div>
+            <strong>{Number.isFinite(score) ? score.toFixed(1) : '—'}</strong>
           </div>
-          <strong>{Number(item.score).toFixed(1)}</strong>
-        </div>
-      ))}
+        );
+      })}
       {!items.length && <p className="muted small">No category scores available.</p>}
     </div>
   );
@@ -143,7 +149,9 @@ export default function AssessmentReviewPage() {
   }, [evidence]);
 
   const filteredResponses = useMemo(() => {
-    const rows = assessment?.responses || [];
+    const rows = (assessment?.responses || []).filter((row: any) =>
+      isSclActiveTriageQuestionCode(row.question?.code),
+    );
     const q = responseQuery.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((row: any) =>
@@ -340,7 +348,7 @@ export default function AssessmentReviewPage() {
                   <div className="rev-card-head">
                     <div>
                       <h3>Questionnaire responses</h3>
-                      <p className="muted small">All captured answers for analyst verification</p>
+                      <p className="muted small">Active triage answers (15 questions — same set as the public website)</p>
                     </div>
                     <input
                       className="rev-search"
@@ -363,7 +371,7 @@ export default function AssessmentReviewPage() {
                           <tr key={row.id}>
                             <td><code>{row.question?.code}</code></td>
                             <td>{row.question?.text}</td>
-                            <td><strong>{row.responseOption?.label || '—'}</strong></td>
+                            <td><strong>{stripUnintendedLeadingDash(row.responseOption?.label || '') || '—'}</strong></td>
                           </tr>
                         ))}
                         {!filteredResponses.length && (

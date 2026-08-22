@@ -33,6 +33,7 @@
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wpuser}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
       MOSS_CONTACT_API_URL: ${MOSS_CONTACT_API_URL:-https://moss.physicalrisk.com/api/public/contact}
+      MOSS_ASSESSMENT_URL: ${MOSS_ASSESSMENT_URL:-http://moss.localhost/start?source=wordpress}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_HOME', 'https://test.physicalrisk.com');
@@ -165,6 +166,10 @@
     environment:
       MINIO_ROOT_USER: moss-storage
       MINIO_ROOT_PASSWORD: change_me_storage
+    ports:
+      # Browser PDF downloads use S3_PUBLIC_ENDPOINT=http://localhost:9000
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - moss_minio:/data
     networks: [physicalrisk-network]
@@ -187,6 +192,25 @@
       CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
       CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      ESPO_LEAD_PROGRAMME_FIELD: ${ESPO_LEAD_PROGRAMME_FIELD:-}
+      ESPO_LEAD_SOURCE_FIELD: ${ESPO_LEAD_SOURCE_FIELD:-source}
+      # Outbound mail (thank-you + report PDF). Must match docker-compose.yml wiring.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Physical Risk}
+      SCL_REPORT_EMAIL: ${SCL_REPORT_EMAIL:-sales@physicalrisk.com}
+      LEAD_NOTIFY_EMAIL: ${LEAD_NOTIFY_EMAIL:-}
+      ESPOCRM_ENABLED: ${ESPOCRM_ENABLED:-false}
+      ESPOCRM_BASE_URL: ${ESPOCRM_BASE_URL:-}
+      ESPOCRM_API_KEY: ${ESPOCRM_API_KEY:-}
+      ESPOCRM_TIMEOUT: ${ESPOCRM_TIMEOUT:-15000}
+      ESPOCRM_VERIFY_SSL: ${ESPOCRM_VERIFY_SSL:-true}
+      ESPOCRM_AUTO_SYNC: ${ESPOCRM_AUTO_SYNC:-true}
+      ESPOCRM_FOLLOW_UP_DAYS: ${ESPOCRM_FOLLOW_UP_DAYS:-2}
       PORT: 4000
       # Browser-facing URLs for report links / CRM deep-links (must be public HTTPS in production)
       PUBLIC_URL: ${MOSS_WEB_URL:-http://moss.localhost}

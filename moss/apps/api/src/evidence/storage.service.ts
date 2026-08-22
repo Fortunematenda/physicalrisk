@@ -70,7 +70,20 @@ export class StorageService implements OnModuleInit {
     return Buffer.concat(chunks);
   }
 
-  signedDownloadUrl(key: string, expiresIn = 900) {
-    return getSignedUrl(this.signingClient, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn });
+  signedDownloadUrl(key: string, expiresIn = 900, downloadFileName?: string) {
+    const safeName = String(downloadFileName || '')
+      .replace(/[\r\n"]/g, '')
+      .trim();
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ...(safeName
+        ? {
+            ResponseContentDisposition: `attachment; filename="${safeName}"`,
+            ResponseContentType: 'application/pdf',
+          }
+        : {}),
+    });
+    return getSignedUrl(this.signingClient, command, { expiresIn });
   }
 }

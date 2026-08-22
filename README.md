@@ -56,12 +56,16 @@ physicalrisk/
 
 ## Documentation
 
-- [Local SSO Setup](docs/LOCAL_SSO_SETUP.md) — Getting started guide
-- [Server deploy (physicalrisk.com)](docs/SERVER_DEPLOY_PHYSICALRISK.md) — Client-test / VPS checklist
+Index: [docs/README.md](docs/README.md)
+
+- [Local SSO Setup](docs/LOCAL_SSO_SETUP.md) — Getting started (`moss.localhost`)
+- [Server deploy (physicalrisk.com)](docs/SERVER_DEPLOY_PHYSICALRISK.md) — Production / VPS checklist
 - [Architecture](docs/LOCAL_SSO_ARCHITECTURE.md) — System design and flows
 - [Keycloak Setup](docs/KEYCLOAK_LOCAL_SETUP.md) — IdP configuration
 - [Role Mapping](docs/LOCAL_ROLE_MAPPING.md) — How Keycloak roles map to app roles
 - [Troubleshooting](docs/LOCAL_SSO_TROUBLESHOOTING.md) — Common issues and fixes
+- [SCL commercial funnel](docs/SCL_COMMERCIAL_FUNNEL_ARCHITECTURE.md) — Public assessment funnel
+- [SCL E2E UAT](docs/SCL_END_TO_END_UAT_CHECKLIST.md) — End-to-end checklist
 
 ## Local Hostnames
 

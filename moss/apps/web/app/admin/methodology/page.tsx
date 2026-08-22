@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from 'lucide-react';
+import { filterSclActiveTriageQuestions } from '@moss/shared';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
@@ -157,7 +158,10 @@ export default function MethodologyPage() {
     void load();
   }, [load]);
 
-  const questions: Question[] = version?.questions || [];
+  const questions: Question[] = useMemo(
+    () => filterSclActiveTriageQuestions(version?.questions || []),
+    [version?.questions],
+  );
   const inputs: InputDef[] = version?.inputDefinitions || [];
   const assumptions = version?.assumptions || [];
 
@@ -474,7 +478,7 @@ export default function MethodologyPage() {
       <Shell
         title="Questionnaire & Calibration"
         eyebrow="Methodology"
-        subtitle="Manage the SCLI questionnaire, calibration inputs and scoring model."
+        subtitle="Manage the SCLI questionnaire (15 active triage questions — same set as the public website), calibration inputs and scoring model."
         searchPlaceholder="Search methodology…"
         searchValue={query}
         onSearch={setQuery}

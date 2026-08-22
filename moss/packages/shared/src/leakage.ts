@@ -1,7 +1,8 @@
 import type { LeakageResult, ScliAssumptions, ScliCalibrationInput } from './types';
+import { asFiniteNumber } from './money';
 
-const clamp01 = (value: number) => Math.min(1, Math.max(0, Number(value) || 0));
-const safe = (value: number) => Math.max(0, Number(value) || 0);
+const clamp01 = (value: number) => Math.min(1, Math.max(0, asFiniteNumber(value)));
+const safe = (value: number) => Math.max(0, asFiniteNumber(value));
 const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
 
 export function calculateLeakage(
@@ -106,5 +107,7 @@ export function calculateLeakage(
     recoverableHigh: likelyLeakageValue * assumptions.recoverableHighFactor,
     likelyLeakagePerPremise: likelyLeakageValue / Math.max(1, premises),
     contractValuePerPremise: annualValue / Math.max(1, premises),
+    estimatedLossesLow: safe(input.estimatedLossesLow),
+    estimatedLossesHigh: safe(input.estimatedLossesHigh),
   };
 }

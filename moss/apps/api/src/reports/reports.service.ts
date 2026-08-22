@@ -1,5 +1,4 @@
 import { BadRequestException, Inject, Injectable, NotFoundException, Optional, forwardRef } from '@nestjs/common';
-import PDFDocument from 'pdfkit';
 import { ConfigService } from '@nestjs/config';
 import { ReportStatus, ReportType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,10 +9,13 @@ import { EmailService } from '../email/email.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { ADMIN_ROLES, ANALYST_ROLES, APPROVER_ROLES, INTERNAL_ROLES, requireRole } from '../common/roles';
 import { EspoCrmService } from '../crm/espocrm.service';
-
-const money = (value: number) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 2 }).format(value || 0);
-const percent = (value: number) => `${((value || 0) * 100).toFixed(1)}%`;
-const BRAND = '#c41230';
+import {
+  buildSclReportDocumentMeta,
+  buildSclReportFileName,
+  resolveSclReportBrandConfig,
+  resolveSclReportLogoPath,
+} from './scl-report-branding';
+import { buildScoringMatrixPanels, renderSclExecutivePdf } from './scl-report-pdf';
 
 @Injectable()
 export class ReportsService {
@@ -27,130 +29,90 @@ export class ReportsService {
     @Optional() @Inject(forwardRef(() => EspoCrmService)) private readonly crm?: EspoCrmService,
   ) {}
 
-  private createPdf(assessment: any, reportType: ReportType): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 48, info: { Title: assessment.title, Author: 'Physical Risk · SCLI' } });
-      const chunks: Buffer[] = [];
-      doc.on('data', chunk => chunks.push(Buffer.from(chunk)));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      doc.on('error', reject);
+  private async createPdf(assessment: any, reportType: ReportType): Promise<Buffer> {
+    const brand = resolveSclReportBrandConfig(this.config);
+    const logoPath = resolveSclReportLogoPath(brand);
+    const snapshot = assessment.scoreSnapshots[0];
+    const leakage = snapshot.leakageResult as any;
+    const categories = (snapshot.categoryScores as any[]) || [];
+    const recommendations = (assessment.recommendations || []).filter(
+      (r: any) => r.includeInReport !== false,
+    );
+    const isPreliminary = reportType === ReportType.PRELIMINARY_EXECUTIVE;
+    const reportLabel = isPreliminary ? 'Preliminary Executive Report' : 'Approved Executive Report';
+    const meta = buildSclReportDocumentMeta({
+      organisationName: assessment.organisation?.name,
+      reference: assessment.reference,
+      assessmentDate: assessment.submittedAt || assessment.createdAt,
+      reportTypeLabel: reportLabel,
+      methodologyVersion: snapshot.modelVersion,
+      isPreliminary,
+    });
+    const questions = assessment.questionnaireVersion?.questions || [];
+    const responseByQuestionId = new Map<string, string>(
+      (assessment.responses || [])
+        .filter((r: any) => r.questionId && r.responseOptionId)
+        .map((r: any) => [String(r.questionId), String(r.responseOptionId)]),
+    );
+    const scoringMatrix = buildScoringMatrixPanels(
+      questions.map((q: any) => ({
+        id: q.id,
+        text: q.text,
+        code: q.code,
+        selectedOptionId: responseByQuestionId.get(String(q.id)) || null,
+        options: (q.options || []).map((o: any) => ({
+          id: o.id,
+          label: o.label,
+          riskScore: Number(o.riskScore),
+        })),
+      })),
+      { answeredOnly: true },
+    );
+    const lead = await this.prisma.publicLead.findFirst({
+      where: { assessmentId: assessment.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const prospectName = lead
+      ? [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim()
+      : '';
 
-      const snapshot = assessment.scoreSnapshots[0];
-      const leakage = snapshot.leakageResult as any;
-      const categories = (snapshot.categoryScores as any[]) || [];
-      const recommendations = (assessment.recommendations || []).filter((r: any) => r.includeInReport !== false);
-      const isPreliminary = reportType === ReportType.PRELIMINARY_EXECUTIVE;
-      const reportLabel = isPreliminary ? 'Preliminary Executive Report' : 'Approved Executive Report';
-
-      // 1. Cover
-      doc.rect(0, 0, doc.page.width, 120).fill(BRAND);
-      doc.fillColor('#ffffff').fontSize(11).text('PHYSICAL RISK', 48, 36);
-      doc.fontSize(22).text('SCLI', 48, 54);
-      doc.fontSize(10).text('Security Cost Leakage Index', 48, 82);
-      doc.fillColor('#111111').fontSize(20).text(reportLabel, 48, 160);
-      doc.moveDown(0.5).fontSize(12).fillColor('#555555')
-        .text('Security Cost Leakage Index (SCLI) – Executive Assurance Gap Decision Report');
-      doc.moveDown(2).fillColor('#111111').fontSize(11);
-      doc.text(`Organisation: ${assessment.organisation.name}`);
-      doc.text(`Assessment reference: ${assessment.reference}`);
-      doc.text(`Assessment date: ${new Date(assessment.submittedAt || assessment.createdAt).toLocaleDateString('en-ZA')}`);
-      doc.text(`Methodology: ${snapshot.modelVersion}`);
-      doc.text(`Generated: ${new Date().toLocaleDateString('en-ZA')}`);
-      if (isPreliminary) {
-        doc.moveDown().fillColor(BRAND).fontSize(10)
-          .text('PRELIMINARY – Subject to analyst review and approval.');
-      }
-
-      // 2–4. Org + executive summary
-      doc.addPage().fillColor('#111111').fontSize(16).text('Executive Summary');
-      doc.moveDown().fontSize(10).fillColor('#333333');
-      doc.text(
-        `This ${isPreliminary ? 'preliminary' : 'approved'} report summarises the Security Cost Leakage Index assessment for ${assessment.organisation.name}. ` +
-        `Scores and financial estimates are decision-support outputs based on calibration inputs and questionnaire responses. ` +
-        `They do not constitute an audit opinion or proof of actual loss.`,
-      );
-      doc.moveDown().fillColor('#111111').fontSize(11);
-      doc.text(`Overall SCLI Risk Score: ${Number(snapshot.overallRiskScore).toFixed(1)} / 100`);
-      doc.text(`Risk rating: ${snapshot.riskBand}`);
-      doc.text(`Governance maturity score: ${Number(snapshot.maturityScore).toFixed(1)} / 100`);
-      doc.text(`Confidence rating (methodology): ${percent(Number(snapshot.methodologyConfidence))}`);
-      doc.text(`Evidence confidence: ${percent(Number(snapshot.evidenceConfidence))}`);
-      doc.text(`Opportunity score: ${Number(snapshot.opportunityScore).toFixed(1)} / 100`);
-
-      doc.moveDown(1.2).fontSize(14).text('Leakage estimates');
-      doc.moveDown(0.4).fontSize(10);
-      doc.text(`Minimum leakage estimate: ${money(leakage.minimumLeakageValue)} (${percent(leakage.minimumLeakageRate)})`);
-      doc.text(`Likely leakage estimate: ${money(leakage.likelyLeakageValue)} (${percent(leakage.likelyLeakageRate)})`);
-      doc.text(`Maximum exposure estimate: ${money(leakage.maximumExposureValue)} (${percent(leakage.maximumExposureRate)})`);
-      doc.text(`Recoverable-value range: ${money(leakage.recoverableLow)} – ${money(leakage.recoverableHigh)}`);
-
-      // Category scores
-      doc.moveDown(1.2).fontSize(14).fillColor('#111111').text('Category scores');
-      doc.moveDown(0.4).fontSize(10);
-      const sortedCats = [...categories].sort((a, b) => Number(b.score) - Number(a.score));
-      sortedCats.forEach((category: any) => {
-        doc.text(`${category.category}: ${Number(category.score).toFixed(1)} / 100`);
-      });
-
-      // Top risk drivers
-      doc.moveDown(1.2).fontSize(14).text('Top risk drivers');
-      doc.moveDown(0.4).fontSize(10);
-      const drivers = sortedCats.slice(0, 5);
-      if (!drivers.length) doc.text('No category scores available.');
-      drivers.forEach((category: any, i: number) => {
-        doc.text(`${i + 1}. ${category.category} (${Number(category.score).toFixed(1)} / 100)`);
-      });
-
-      // Recommendations + next steps
-      doc.addPage().fontSize(16).fillColor('#111111').text('Recommendations');
-      doc.moveDown().fontSize(10);
-      if (!recommendations.length) doc.text('No recommendations were selected for this report.');
-      recommendations.forEach((recommendation: any, index: number) => {
-        doc.fontSize(12).fillColor('#111111').text(`${index + 1}. ${recommendation.title} — ${recommendation.priority}`);
-        doc.fontSize(10).fillColor('#333333').text(recommendation.summary);
-        if (recommendation.serviceOffering) {
-          doc.fillColor('#555555').text(`Mapped service offering: ${recommendation.serviceOffering}`);
-        }
-        if (recommendation.suggestedNextStep) {
-          doc.fillColor('#555555').text(`Suggested next step: ${recommendation.suggestedNextStep}`);
-        }
-        doc.fillColor('#111111').moveDown();
-      });
-
-      doc.moveDown(0.5).fontSize(14).text('Proposed next steps');
-      doc.moveDown(0.4).fontSize(10).fillColor('#333333');
-      const nextSteps = recommendations
-        .map((r: any) => r.suggestedNextStep)
-        .filter(Boolean);
-      if (nextSteps.length) {
-        nextSteps.forEach((step: string, i: number) => doc.text(`${i + 1}. ${step}`));
-      } else {
-        doc.text('1. Complete analyst review of evidence and calibration where required.');
-        doc.text('2. Agree a scoped Physical Risk assurance engagement against the highest-risk categories.');
-        doc.text('3. Validate recoverable-value estimates through targeted evidence sampling.');
-      }
-
-      // Methodology / assumptions / disclaimer
-      doc.addPage().fillColor('#111111').fontSize(16).text('Methodology, assumptions and limitations');
-      doc.moveDown().fontSize(10).fillColor('#333333');
-      doc.text(`Methodology version: ${snapshot.modelVersion}`);
-      doc.moveDown().text(
-        'The SCLI model combines weighted executive responses with calibration variables including security spend, estate scale, ' +
-        'guard-force scale, technology coverage, manual-record reliance, proof gaps, internal capacity and allowance complexity. ' +
-        'Financial estimates use the seeded leakage assumptions retained against this questionnaire version.',
-      );
-      doc.moveDown().text(
-        'Assumptions and limitations: rates and multipliers are indicative industry-informed defaults used for decision support. ' +
-        'Results may change when calibration inputs, evidence confidence or questionnaire responses change. ' +
-        'Existing submitted assessments retain the questionnaire version used at submission.',
-      );
-      doc.moveDown().fillColor('#111111').fontSize(12).text('Disclaimer');
-      doc.moveDown(0.3).fontSize(9).fillColor('#555555').text(
-        'This report is a preliminary or approved executive decision-support assessment, not an audit finding. ' +
-        'Financial estimates require validation through independent evidence review. ' +
-        'Physical Risk and MOSS accept no liability for commercial decisions taken solely on the basis of this report without further assurance work.',
-      );
-      doc.end();
+    return renderSclExecutivePdf({
+      brand,
+      logoPath,
+      companyName: meta.companyName,
+      reference: meta.reference,
+      assessmentDateLabel: meta.assessmentDateLabel,
+      reportTitle: meta.reportTitle,
+      isPreliminary,
+      modelVersion: snapshot.modelVersion,
+      overallRiskScore: Number(snapshot.overallRiskScore),
+      maturityScore: Number(snapshot.maturityScore),
+      riskBand: snapshot.riskBand,
+      methodologyConfidence: Number(snapshot.methodologyConfidence),
+      evidenceConfidence: Number(snapshot.evidenceConfidence),
+      opportunityScore: Number(snapshot.opportunityScore),
+      prospectName: prospectName || null,
+      selectedServices: brand.productLine,
+      leakage: {
+        estimatedLossesLow: leakage?.estimatedLossesLow,
+        estimatedLossesHigh: leakage?.estimatedLossesHigh,
+        estimatedLossesLowBand: leakage?.estimatedLossesLowBand,
+        estimatedLossesHighBand: leakage?.estimatedLossesHighBand,
+        minimumLeakageValue: Number(leakage?.minimumLeakageValue || 0),
+        minimumLeakageRate: Number(leakage?.minimumLeakageRate || 0),
+        likelyLeakageValue: Number(leakage?.likelyLeakageValue || 0),
+        likelyLeakageRate: Number(leakage?.likelyLeakageRate || 0),
+        maximumExposureValue: Number(leakage?.maximumExposureValue || 0),
+        maximumExposureRate: Number(leakage?.maximumExposureRate || 0),
+        recoverableLow: Number(leakage?.recoverableLow || 0),
+        recoverableHigh: Number(leakage?.recoverableHigh || 0),
+      },
+      categoryScores: categories.map((c: any) => ({
+        category: String(c.category),
+        score: Number(c.score),
+      })),
+      recommendations,
+      scoringMatrix,
     });
   }
 
@@ -162,6 +124,17 @@ export class ReportsService {
         organisation: true,
         scoreSnapshots: { orderBy: { createdAt: 'desc' }, take: 1 },
         recommendations: { orderBy: { priority: 'desc' } },
+        questionnaireVersion: {
+          include: {
+            questions: {
+              orderBy: { sortOrder: 'asc' },
+              include: { options: { orderBy: { sortOrder: 'asc' } } },
+            },
+          },
+        },
+        responses: {
+          select: { questionId: true, responseOptionId: true },
+        },
       },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
@@ -202,7 +175,15 @@ export class ReportsService {
     const version = existing?.version ?? 1;
     const buffer = await this.createPdf(assessment, reportType);
     const label = reportType === ReportType.PRELIMINARY_EXECUTIVE ? 'Preliminary' : 'Approved-Executive';
-    const fileName = `${assessment.reference}-${label}.pdf`;
+    const brand = resolveSclReportBrandConfig(this.config);
+    const assessmentDate = assessment.submittedAt || assessment.createdAt;
+    const fileName = buildSclReportFileName({
+      companyName: assessment.organisation.name,
+      assessmentDate,
+      reference: assessment.reference,
+      brand,
+    });
+    // Stable storage object key (not the download filename) so replace-in-place and history stay intact.
     const storageKey = existing?.storageKey
       ? existing.storageKey
       : `assessments/${assessment.id}/reports/${assessment.reference}-${label}.pdf`;
@@ -270,7 +251,7 @@ export class ReportsService {
     } catch {
       // CRM downtime must not block report generation
     }
-    return { ...report, downloadUrl: await this.storage.signedDownloadUrl(storageKey) };
+    return { ...report, downloadUrl: await this.storage.signedDownloadUrl(storageKey, 900, fileName) };
   }
 
   async issue(id: string, recipient: string, user: AuthUser) {
@@ -278,7 +259,15 @@ export class ReportsService {
     const report = await this.prisma.report.findUnique({ where: { id }, include: { assessment: { include: { organisation: true } } } });
     if (!report || !report.storageKey) throw new NotFoundException('Generated report not found.');
     await this.assessments.checkAccess(report.assessmentId, user);
-    const url = await this.storage.signedDownloadUrl(report.storageKey, 60 * 60 * 24 * 7);
+    const attachmentName =
+      report.fileName ||
+      buildSclReportFileName({
+        companyName: report.assessment.organisation.name,
+        assessmentDate: report.assessment.submittedAt || report.assessment.createdAt,
+        reference: report.assessment.reference,
+        brand: resolveSclReportBrandConfig(this.config),
+      });
+    const url = await this.storage.signedDownloadUrl(report.storageKey, 60 * 60 * 24 * 7, attachmentName);
 
     try {
       await this.email.enqueue({
@@ -293,7 +282,7 @@ export class ReportsService {
           reference: report.assessment.reference,
           organisationName: report.assessment.organisation.name,
           attachmentStorageKey: report.storageKey,
-          attachmentFileName: report.fileName || `${report.assessment.reference}-Cost-Leakage-report.pdf`,
+          attachmentFileName: attachmentName,
           attachmentContentType: 'application/pdf',
         },
       });
@@ -499,7 +488,9 @@ export class ReportsService {
 
     return {
       ...report,
-      downloadUrl: report.storageKey ? await this.storage.signedDownloadUrl(report.storageKey) : null,
+      downloadUrl: report.storageKey
+        ? await this.storage.signedDownloadUrl(report.storageKey, 900, report.fileName || undefined)
+        : null,
       suggestedRecipientEmail: recipientEmail,
       contact: lead
         ? { email: lead.email, name: `${lead.firstName} ${lead.lastName}`.trim() }

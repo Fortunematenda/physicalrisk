@@ -2,7 +2,6 @@
 
 **Status:** Decision / confirmation pack only — **no implementation**.  
 **Architecture baseline:** `docs/MOSS_100_CONTROL_IMPLEMENTATION_PLAN.md` (approved, with contract-wording correction).  
-**Platform baseline:** `docs/PHYSICAL_RISK_CURRENT_STATE_AUDIT.md`.  
 **Date:** 2026-08-09
 
 ---

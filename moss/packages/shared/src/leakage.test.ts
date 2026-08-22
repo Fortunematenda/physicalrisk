@@ -40,6 +40,8 @@ const assumptions: ScliAssumptions = {
 
 const calibration: ScliCalibrationInput = {
   annualSecurityContractValue: 10_000_000,
+  estimatedLossesLow: 1_400_000,
+  estimatedLossesHigh: 2_800_000,
   protectedPremises: 40,
   guardForce: 120,
   internalSecurityTeamSize: 2,
@@ -69,5 +71,15 @@ describe('SCLI leakage calculations', () => {
     const low = calculateLeakage({ ...calibration, annualSecurityContractValue: 1_000_000 }, assumptions, 62);
     const high = calculateLeakage({ ...calibration, annualSecurityContractValue: 20_000_000 }, assumptions, 62);
     expect(high.likelyLeakageValue).toBeGreaterThan(low.likelyLeakageValue);
+  });
+
+  it('echoes questionnaire estimated losses (C6/C7) into leakage result', () => {
+    const result = calculateLeakage(
+      { ...calibration, estimatedLossesLow: 250_000, estimatedLossesHigh: 1_200_000 },
+      assumptions,
+      62,
+    );
+    expect(result.estimatedLossesLow).toBe(250_000);
+    expect(result.estimatedLossesHigh).toBe(1_200_000);
   });
 });

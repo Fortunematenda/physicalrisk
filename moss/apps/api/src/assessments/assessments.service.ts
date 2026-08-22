@@ -5,6 +5,15 @@ import {
   calculateEvidenceConfidence,
   calculateLeakage,
   calculateOpportunityScore,
+  asFiniteNumber,
+  DEFAULT_PERCENT_RANGE_MAPPING,
+  isMoneyRangeValue,
+  isPercentRangeValue,
+  isSclActiveTriageQuestionCode,
+  isSclMoneyLossCode,
+  resolveMoneyForScoring,
+  resolvePercentForScoring,
+  type MoneyRangeValue,
   type ScliAssumptions,
   type ScliCalibrationInput,
 } from '@moss/shared';
@@ -17,8 +26,36 @@ import { EspoCrmService } from '../crm/espocrm.service';
 import { generateAssessmentReference } from '../common/assessment-reference';
 
 const INTERNAL_ROLES = INTERNAL_ROLE_SET;
-const asNumber = (value: unknown): number => Number(value ?? 0) || 0;
+const asNumber = (value: unknown): number => asFiniteNumber(value, 0);
 const asBoolean = (value: unknown): boolean => value === true || String(value).toUpperCase() === 'YES' || String(value).toLowerCase() === 'true';
+
+function asCalibrationPercent(code: string, value: unknown): number {
+  const resolved = resolvePercentForScoring(value, DEFAULT_PERCENT_RANGE_MAPPING);
+  if (resolved.ok) return resolved.fraction;
+  if (resolved.reason === 'pending-mapping') {
+    throw new BadRequestException(
+      `Percentage band on ${code} cannot be scored until Physical Risk confirms the band→fraction mapping ` +
+        `(range ${resolved.rangeCode || 'unknown'}). Structured range data is stored; scoring conversion is pending client confirmation.`,
+    );
+  }
+  if (resolved.reason === 'unknown-range') {
+    throw new BadRequestException(`Unknown percentage range on ${code}: ${resolved.rangeCode}.`);
+  }
+  return 0;
+}
+
+/**
+ * C6/C7 are echoed into leakageResult for reports; they do not drive leakage rates.
+ * Ranges persist for display; numeric echo uses configured mapping only (never invent mid/min/max).
+ */
+function resolveMoneyLossEcho(value: unknown): { amount: number; band: MoneyRangeValue | null } {
+  if (isMoneyRangeValue(value)) {
+    const resolved = resolveMoneyForScoring(value);
+    if (resolved.ok) return { amount: resolved.amount, band: value };
+    return { amount: 0, band: value };
+  }
+  return { amount: asNumber(value), band: null };
+}
 
 @Injectable()
 export class AssessmentsService {
@@ -225,10 +262,42 @@ export class AssessmentsService {
     if (!assessment || assessment.lockedAt) throw new BadRequestException('Assessment is locked or unavailable.');
     const definition = await this.prisma.assessmentInputDefinition.findUnique({ where: { questionnaireVersionId_code: { questionnaireVersionId: assessment.questionnaireVersionId, code } } });
     if (!definition) throw new BadRequestException('Input definition not found.');
+
+    let persisted: unknown = value;
+    if (definition.valueType === 'CURRENCY' && isSclMoneyLossCode(code) && isMoneyRangeValue(value)) {
+      // Monetary-loss bands (C6/C7): store structured ZAR range — never invent a midpoint amount.
+      persisted = {
+        code: value.code,
+        min: value.min,
+        max: value.max,
+        label: value.label,
+        unit: 'ZAR' as const,
+      };
+    } else if (definition.valueType === 'CURRENCY' || definition.valueType === 'NUMBER') {
+      // Persist numeric JSON — never store "R1,200,000" in currency fields.
+      const n = asFiniteNumber(value, Number.NaN);
+      if (!Number.isFinite(n) && value !== null && value !== undefined && value !== '') {
+        throw new BadRequestException(`Invalid numeric value for ${code}.`);
+      }
+      persisted = Number.isFinite(n) ? n : value;
+    } else if (definition.valueType === 'PERCENT') {
+      if (isPercentRangeValue(value)) {
+        persisted = {
+          rangeCode: value.rangeCode,
+          min: value.min,
+          max: value.max,
+          unit: 'percent',
+        };
+      } else {
+        const n = asFiniteNumber(value, Number.NaN);
+        if (Number.isFinite(n)) persisted = n > 1 ? n / 100 : n;
+      }
+    }
+
     const record = await this.prisma.assessmentInputValue.upsert({
       where: { assessmentId_inputDefinitionId: { assessmentId: id, inputDefinitionId: definition.id } },
-      update: { value: value as Prisma.InputJsonValue },
-      create: { assessmentId: id, inputDefinitionId: definition.id, value: value as Prisma.InputJsonValue },
+      update: { value: persisted as Prisma.InputJsonValue },
+      create: { assessmentId: id, inputDefinitionId: definition.id, value: persisted as Prisma.InputJsonValue },
     });
     await this.audit.record({ userId: user.id, action: 'SAVE_INPUT', entityType: 'AssessmentSession', entityId: id, metadata: { code } });
     return record;
@@ -291,7 +360,7 @@ export class AssessmentsService {
     };
   }
 
-  async evaluate(id: string, user: AuthUser) {
+  async evaluate(id: string, user: AuthUser, opts?: { allowIncompleteQuestions?: boolean }) {
     await this.checkAccess(id, user);
     const assessment = await this.prisma.assessmentSession.findUnique({
       where: { id },
@@ -305,8 +374,16 @@ export class AssessmentsService {
     if (!assessment) throw new NotFoundException('Assessment not found.');
 
     const missingInputs = assessment.questionnaireVersion.inputDefinitions.filter(def => def.required && !assessment.inputValues.some(value => value.inputDefinitionId === def.id));
-    const missingQuestions = assessment.questionnaireVersion.questions.filter(question => question.required && !assessment.responses.some(response => response.questionId === question.id && response.responseOptionId));
-    if (missingInputs.length || missingQuestions.length) {
+    const isScli = assessment.productCode === 'SCLI_COST_LEAKAGE';
+    const missingQuestions = assessment.questionnaireVersion.questions.filter((question) => {
+      if (!question.required) return false;
+      // Active triage set only (Q7/Q14/Q16/Q18/Q19 retired) — match public website.
+      if (isScli && !isSclActiveTriageQuestionCode(question.code)) return false;
+      return !assessment.responses.some(
+        (response) => response.questionId === question.id && response.responseOptionId,
+      );
+    });
+    if (missingInputs.length || (!opts?.allowIncompleteQuestions && missingQuestions.length)) {
       throw new BadRequestException({
         message: 'Complete all required fields before evaluation.',
         missingInputs: missingInputs.map(item => item.code),
@@ -314,7 +391,12 @@ export class AssessmentsService {
       });
     }
 
-    const scoredItems = assessment.responses.map(response => ({
+    const scoredItems = assessment.responses
+      .filter((response) => {
+        if (!isScli) return true;
+        return isSclActiveTriageQuestionCode(response.question.code);
+      })
+      .map((response) => ({
       code: response.question.code,
       category: response.question.category,
       weight: Number(response.question.weight),
@@ -323,23 +405,31 @@ export class AssessmentsService {
     }));
     const score = calculateAssessmentScore(scoredItems);
     const values = Object.fromEntries(assessment.inputValues.map(item => [item.inputDefinition.code, item.value]));
+    const lossesLow = resolveMoneyLossEcho(values.C6);
+    const lossesHigh = resolveMoneyLossEcho(values.C7);
     const calibration: ScliCalibrationInput = {
       protectedPremises: asNumber(values.C3),
       guardForce: asNumber(values.C4),
       annualSecurityContractValue: asNumber(values.C5),
+      estimatedLossesLow: lossesLow.amount,
+      estimatedLossesHigh: lossesHigh.amount,
       internalSecurityTeamSize: asNumber(values.C8),
-      integratedTechnologyCoverage: asNumber(values.C10),
-      technologySlaVerification: asNumber(values.C11),
-      manualRecordReliance: asNumber(values.C12),
-      surveillanceCoverage: asNumber(values.C13),
-      accessControlCoverage: asNumber(values.C14),
-      realtimePatrolCoverage: asNumber(values.C15),
-      delayedPatrolReporting: asNumber(values.C16),
-      supervisoryProof: asNumber(values.C17),
-      attendanceProof: asNumber(values.C18),
+      integratedTechnologyCoverage: asCalibrationPercent('C10', values.C10),
+      technologySlaVerification: asCalibrationPercent('C11', values.C11),
+      manualRecordReliance: asCalibrationPercent('C12', values.C12),
+      surveillanceCoverage: asCalibrationPercent('C13', values.C13),
+      accessControlCoverage: asCalibrationPercent('C14', values.C14),
+      realtimePatrolCoverage: asCalibrationPercent('C15', values.C15),
+      delayedPatrolReporting: asCalibrationPercent('C16', values.C16),
+      supervisoryProof: asCalibrationPercent('C17', values.C17),
+      attendanceProof: asCalibrationPercent('C18', values.C18),
       allowanceFlags: [values.C19, values.C20, values.C21, values.C22, values.C23].map(asBoolean),
     };
-    const leakage = calculateLeakage(calibration, this.mapAssumptions(assessment.questionnaireVersion.assumptions), score.overallRiskScore);
+    const leakage = {
+      ...calculateLeakage(calibration, this.mapAssumptions(assessment.questionnaireVersion.assumptions), score.overallRiskScore),
+      estimatedLossesLowBand: lossesLow.band,
+      estimatedLossesHighBand: lossesHigh.band,
+    };
     const unknownAnswers = assessment.responses.filter(response => response.responseOption?.label.toLowerCase().includes('unknown')).length;
     const verifiedEvidence = assessment.evidence.filter(item => item.status === 'VERIFIED' || item.status === 'ACCEPTED').length;
     const evidenceConfidence = calculateEvidenceConfidence({
@@ -405,9 +495,9 @@ export class AssessmentsService {
     return this.get(id, user);
   }
 
-  async submit(id: string, user: AuthUser) {
+  async submit(id: string, user: AuthUser, opts?: { allowIncompleteQuestions?: boolean }) {
     await this.checkAccess(id, user);
-    await this.evaluate(id, user);
+    await this.evaluate(id, user, opts);
     await this.prisma.assessmentSession.update({ where: { id }, data: { status: AssessmentStatus.SUBMITTED, submittedAt: new Date() } });
     try {
       await this.crm?.queueOpportunitySync(id);

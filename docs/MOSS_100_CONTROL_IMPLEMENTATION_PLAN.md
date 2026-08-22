@@ -1,7 +1,6 @@
 # MOSS 100-Control Implementation Plan
 
-**Status:** Architecture / planning only — **DO NOT IMPLEMENT** until this revised plan is approved.  
-**Baseline:** `docs/PHYSICAL_RISK_CURRENT_STATE_AUDIT.md` (approved).  
+**Status:** Architecture / planning — living plan for MOSS 100-control track.  
 **Date:** 2026-08-09 (revised same day — architecture corrections)
 
 ---

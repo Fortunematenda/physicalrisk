@@ -38,7 +38,13 @@ describe.runIf(hasDb)('SCL / MOSS create + list isolation', () => {
   const scl = new AssessmentsService(prisma, noopAudit);
   const catalogue = new MossCatalogueService(prisma, noopAudit);
   const progress = new MossProgressService(prisma);
-  const moss = new MossAssessmentsService(prisma, catalogue, progress, noopAudit);
+  const moss = new MossAssessmentsService(
+    prisma,
+    catalogue,
+    progress,
+    noopAudit,
+    { scoreAssessment: async () => null } as any,
+  );
   const suffix = `scl-moss-${Date.now()}`;
   let userId = '';
   let organisationId = '';

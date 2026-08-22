@@ -530,17 +530,38 @@ export class EspoCrmService {
    * Contact-form path: create/update EspoCRM Lead immediately when enabled.
    * Does not require AUTO_SYNC. On failure, queues a retry so submission stays non-blocking.
    */
-  async syncLeadFromContactForm(leadId: string) {
+  async syncLeadFromContactForm(
+    leadId: string,
+    overrides?: { jobTitle?: string; attribution?: Record<string, unknown> },
+  ) {
     await this.refreshConfig();
     if (!this.cfg.enabled) {
+      this.logger.warn(`EspoCRM lead sync skipped for ${leadId}: integration disabled`);
       return { synced: false, reason: 'disabled' as const };
     }
     if (!this.cfg.baseUrl || !this.cfg.apiKey) {
+      this.logger.error(
+        `EspoCRM lead sync skipped for ${leadId}: base URL or API key not configured (set ESPOCRM_API_KEY)`,
+      );
+      // Persist a visible failure so Settings / CRM sync list shows the gap.
+      await this.prisma.crmSyncRecord.create({
+        data: {
+          entityType: 'Lead',
+          localEntityId: leadId,
+          jobType: 'ESPO_SYNC_LEAD',
+          action: 'skip',
+          payload: { reason: 'not_configured', queuedAt: new Date().toISOString() },
+          status: 'FAILED',
+          errorCode: 'NOT_CONFIGURED',
+          errorMessage: 'EspoCRM base URL and API key must be configured.',
+          lastAttemptAt: new Date(),
+        },
+      }).catch(() => undefined);
       return { synced: false, reason: 'not_configured' as const };
     }
 
     try {
-      const result = await this.syncLead(leadId);
+      const result = await this.syncLead(leadId, overrides);
       return { synced: true, leadId: result.leadId };
     } catch (error: unknown) {
       this.logger.warn(
@@ -796,12 +817,24 @@ export class EspoCrmService {
     return { leadId, action: found?.id ? 'update' : 'create' };
   }
 
-  async syncLead(leadId: string, user?: AuthUser) {
+  async syncLead(
+    leadId: string,
+    userOrOverrides?: AuthUser | { jobTitle?: string; attribution?: Record<string, unknown> },
+  ) {
     await this.refreshConfig();
     assertEspoConfigured(this.cfg);
     const client = await this.client();
     const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
     if (!lead) throw new NotFoundException('Lead not found.');
+
+    const overrides =
+      userOrOverrides && !('email' in userOrOverrides)
+        ? (userOrOverrides as { jobTitle?: string; attribution?: Record<string, unknown> })
+        : undefined;
+    const user =
+      userOrOverrides && 'email' in userOrOverrides ? (userOrOverrides as AuthUser) : undefined;
+    const jobTitle = overrides?.jobTitle?.trim() || null;
+    const attribution = overrides?.attribution || null;
 
     const assessment = lead.assessmentId
       ? await this.prisma.assessmentSession.findUnique({
@@ -826,19 +859,47 @@ export class EspoCrmService {
     const espStatus = 'New';
 
     const espPhone = normalizeEspoPhone(lead.phone);
+    const attr = (attribution || {}) as Record<string, unknown>;
+    const country = typeof attr.country === 'string' ? attr.country.trim() : '';
+    const primaryConcern = typeof attr.primaryConcern === 'string' ? attr.primaryConcern.trim() : '';
+    const totalSites = typeof attr.totalSites === 'string' ? attr.totalSites.trim() : '';
+    const securityExpenditure =
+      typeof attr.securityExpenditure === 'string' ? attr.securityExpenditure.trim() : '';
+    const orgFromAttr =
+      typeof attr.organisationName === 'string' ? attr.organisationName.trim() : '';
+    const industryFromAttr = typeof attr.industry === 'string' ? attr.industry.trim() : '';
+
     const payload: Record<string, unknown> = {
       firstName: lead.firstName,
       lastName: lead.lastName,
       name: `${lead.firstName} ${lead.lastName}`.trim(),
       emailAddress: lead.email,
-      accountName: lead.organisationName,
+      accountName: lead.organisationName || orgFromAttr || undefined,
       status: espStatus,
       source: espSource,
       description: [
         `MOSS lead ID: ${lead.id}`,
         assessment?.reference ? `Assessment reference: ${assessment.reference}` : null,
-        lead.industry ? `Industry: ${lead.industry}` : null,
+        (lead.industry || industryFromAttr) ? `Industry: ${lead.industry || industryFromAttr}` : null,
+        jobTitle ? `Role: ${jobTitle}` : null,
+        country ? `Country: ${country}` : null,
+        totalSites ? `Operational sites: ${totalSites}` : null,
+        securityExpenditure ? `Security expenditure: ${securityExpenditure}` : null,
+        primaryConcern ? `Primary concern: ${primaryConcern}` : null,
         lead.source ? `MOSS source: ${lead.source}` : null,
+        attribution
+          ? `Attribution: ${JSON.stringify({
+              source: attr.source,
+              medium: attr.medium,
+              campaign: attr.campaign,
+              content: attr.content,
+              term: attr.term,
+              series: attr.series,
+              article: attr.article,
+              cta: attr.cta,
+              insightsOptIn: attr.insightsOptIn,
+            })}`
+          : null,
         lead.phone && !espPhone ? `Phone (raw): ${lead.phone}` : null,
       ]
         .filter(Boolean)
@@ -846,6 +907,9 @@ export class EspoCrmService {
     };
     if (espPhone) {
       payload.phoneNumber = espPhone;
+    }
+    if (jobTitle) {
+      payload.title = jobTitle;
     }
     if (this.cfg.assignedUserId) {
       payload.assignedUserId = this.cfg.assignedUserId;

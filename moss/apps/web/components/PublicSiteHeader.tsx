@@ -8,7 +8,7 @@ export type PublicNavItem = {
   children?: PublicNavItem[];
 };
 
-const QUESTIONNAIRE_URL = 'https://moss.physicalrisk.com/start?source=wordpress';
+const QUESTIONNAIRE_URL = `${(process.env.NEXT_PUBLIC_MOSS_URL || 'http://moss.localhost').replace(/\/$/, '')}/start?source=wordpress`;
 
 export function PublicSiteHeader({
   wordpressUrl,

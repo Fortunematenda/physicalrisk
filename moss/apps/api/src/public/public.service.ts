@@ -7,6 +7,28 @@ import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { ReportsService } from '../reports/reports.service';
+import {
+  buildPriorityActionText,
+  resolveSclClassificationVisual,
+} from '../reports/scl-report-visual';
+
+type LeadAttribution = {
+  source?: string;
+  medium?: string;
+  campaign?: string;
+  content?: string;
+  term?: string;
+  series?: string;
+  article?: string;
+  cta?: string;
+  referrer?: string;
+  landingPage?: string;
+  country?: string;
+  primaryConcern?: string;
+  insightsOptIn?: boolean;
+  totalSites?: string;
+  securityExpenditure?: string;
+};
 
 type LeadContact = {
   organisationName: string;
@@ -15,7 +37,9 @@ type LeadContact = {
   lastName: string;
   email: string;
   phone?: string;
+  jobTitle?: string;
   website?: string;
+  attribution?: LeadAttribution;
 };
 
 @Injectable()
@@ -64,6 +88,7 @@ export class PublicService {
         required: def.required,
         sortOrder: def.sortOrder,
         options: def.options,
+        defaultValue: def.defaultValue ?? undefined,
       })),
       questions: version.questions.map((q) => ({
         code: q.code,
@@ -74,7 +99,7 @@ export class PublicService {
         sortOrder: q.sortOrder,
         options: q.options.map((o) => ({
           id: o.id,
-          label: o.label,
+          label: String(o.label || '').replace(/^[\s\u00A0\u200B\uFEFF]*[-–—•·]\s+/, ''),
           sortOrder: o.sortOrder,
         })),
       })),
@@ -135,12 +160,17 @@ export class PublicService {
         organisationId: organisation.id,
         assessmentId: assessment.id,
         crmReady: true,
+        jobTitle: input.jobTitle || null,
+        attribution: input.attribution || null,
       },
     });
 
     try {
       // Create EspoCRM Lead immediately when the contact form is completed
-      await this.crm.syncLeadFromContactForm(lead.id);
+      await this.crm.syncLeadFromContactForm(lead.id, {
+        jobTitle: input.jobTitle,
+        attribution: input.attribution,
+      });
       await this.crm.queueAccountSync(organisation.id);
     } catch {
       // CRM downtime must not block public lead capture
@@ -174,6 +204,8 @@ export class PublicService {
     const inputs: Record<string, unknown> = {};
     for (const row of assessment.inputValues) {
       let value = row.value as unknown;
+      // Legacy PERCENT was stored as 0–1 fraction — expose 0–100 for display.
+      // Structured range objects are returned as-is for the range selector.
       if (row.inputDefinition.valueType === 'PERCENT' && typeof value === 'number') {
         value = Number((value * 100).toFixed(4));
       }
@@ -211,7 +243,6 @@ export class PublicService {
       },
       inputs,
       responses,
-      message: 'Welcome back. You can continue where you left off.',
     };
   }
 
@@ -291,13 +322,16 @@ export class PublicService {
 
     const claimed = await this.prisma.publicLead.updateMany({
       where: { id: lead.id, status: 'IN_PROGRESS' },
-      data: { status: 'SUBMITTING', lastProgressAt: new Date() },
+      data: {
+        status: 'SUBMITTING',
+        lastProgressAt: new Date(),
+      },
     });
     if (claimed.count !== 1) throw new BadRequestException('This assessment has already been submitted.');
 
     let evaluated = false;
     try {
-      await this.assessments.submit(lead.assessmentId, authUser);
+      await this.assessments.submit(lead.assessmentId, authUser, { allowIncompleteQuestions: true });
       evaluated = true;
     } catch (error) {
       await this.prisma.publicLead.updateMany({
@@ -307,10 +341,14 @@ export class PublicService {
       throw error;
     }
 
-    // PDF + thank-you email run after submit so the browser is never stuck spinning.
-    void this.generatePreliminaryReportAttachment(lead.assessmentId, authUser)
-      .then(async (reportAttachment) => {
-        const sent = await this.sendThankYouEmail(lead, reportAttachment);
+    // Generate PDF before responding so the results page can offer Download.
+    // Failure still allows completion; email path retries via existing queue.
+    const reportAttachment = await this.generatePreliminaryReportAttachment(lead.assessmentId, authUser);
+    void this.sendThankYouEmail(
+      { ...lead, firstName: input.firstName.trim(), organisationName: input.organisationName.trim() || lead.organisationName },
+      reportAttachment,
+    )
+      .then(async (sent) => {
         if (sent) {
           await this.prisma.publicLead.update({
             where: { id: lead.id },
@@ -320,19 +358,15 @@ export class PublicService {
       })
       .catch(() => undefined);
 
-    try {
-      await this.crm.queueAssessmentSync(lead.assessmentId);
-    } catch {
-      // CRM unavailable must not block public submission
-    }
-
     const updated = await this.prisma.publicLead.update({
       where: { id: lead.id },
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
+        organisationName: input.organisationName.trim() || lead.organisationName,
         firstName: input.firstName.trim(),
         lastName: input.lastName.trim(),
+        email: input.email.trim().toLowerCase() || lead.email,
         phone: input.phone?.trim() || lead.phone,
         industry: input.industry?.trim() || lead.industry,
         progressPhase: 'completed',
@@ -342,11 +376,61 @@ export class PublicService {
       },
     });
 
-    try {
-      await this.crm.syncLeadFromContactForm(lead.id);
-    } catch {
-      // Existing CRM retry handling keeps submission non-blocking.
+    if (updated.organisationId) {
+      await this.prisma.organisation
+        .update({
+          where: { id: updated.organisationId },
+          data: {
+            name: updated.organisationName,
+            industry: updated.industry,
+            primaryEmail: updated.email,
+            primaryPhone: updated.phone,
+          },
+        })
+        .catch(() => undefined);
     }
+
+    let crmLeadSync: { synced: boolean; reason?: string; leadId?: string } = {
+      synced: false,
+      reason: 'not_attempted',
+    };
+    try {
+      crmLeadSync = await this.syncPublicSubmissionToCrm(updated, input, lead.assessmentId);
+    } catch (error) {
+      // CRM unavailable must not block public submission
+      crmLeadSync = {
+        synced: false,
+        reason: error instanceof Error ? error.message : 'crm_sync_failed',
+      };
+    }
+
+    const assessment = await this.prisma.assessmentSession.findUnique({
+      where: { id: lead.assessmentId },
+      include: {
+        scoreSnapshots: { orderBy: { createdAt: 'desc' }, take: 1 },
+        recommendations: { orderBy: { createdAt: 'asc' }, take: 5 },
+      },
+    });
+    const snapshot = assessment?.scoreSnapshots?.[0];
+    const visual = snapshot
+      ? resolveSclClassificationVisual(Number(snapshot.overallRiskScore))
+      : null;
+    const diagnosis =
+      visual?.band === 'Controlled'
+        ? 'Controlled cost leakage profile indicated'
+        : visual?.band === 'Moderate'
+          ? 'Moderate cost leakage exposure indicated'
+          : visual?.band === 'High'
+            ? 'Significant cost leakage exposure indicated'
+            : visual?.band === 'Critical'
+              ? 'Critical cost leakage exposure indicated'
+              : 'Preliminary indication complete';
+    const recommendedAction = buildPriorityActionText({
+      recommendations: assessment?.recommendations || [],
+      shortName: 'Physical Risk',
+    });
+    const attr = (input.attribution || {}) as LeadAttribution;
+    const campaignSummary = [attr.source, attr.campaign, attr.medium].filter(Boolean).join(' / ') || updated.source || 'Direct';
 
     await this.audit.record({
       userId: systemUser.id,
@@ -359,6 +443,12 @@ export class PublicService {
         thankYouQueued: true,
         inputCount: (input.inputs || []).length,
         responseCount: (input.responses || []).length,
+        hasReport: Boolean(reportAttachment?.url),
+        jobTitle: input.jobTitle || null,
+        attribution: input.attribution || null,
+        crmLeadSynced: crmLeadSync.synced,
+        crmLeadSyncReason: crmLeadSync.reason || null,
+        espocrmLeadId: crmLeadSync.leadId || null,
       },
     });
 
@@ -368,8 +458,73 @@ export class PublicService {
       status: updated.status,
       evaluated,
       thankYouSent: true,
+      crmLeadSynced: crmLeadSync.synced,
+      crmLeadSyncReason: crmLeadSync.reason || null,
       message: 'Thank you for finishing. Our experts will be in contact with you.',
+      downloadUrl: reportAttachment?.url || null,
+      fileName: reportAttachment?.attachmentFileName || null,
+      reference: assessment?.reference || reportAttachment?.reference || lead.assessmentId,
+      result: {
+        assessmentId: lead.assessmentId,
+        reference: assessment?.reference || lead.assessmentId,
+        organisationName: updated.organisationName,
+        prospectName: `${updated.firstName} ${updated.lastName}`.trim(),
+        assessmentDateLabel: new Date(updated.completedAt || Date.now()).toLocaleString('en-ZA', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
+        riskBand: visual?.band || snapshot?.riskBand || '—',
+        accessibleLabel: visual?.accessibleLabel || String(snapshot?.riskBand || 'Result recorded'),
+        colourName: visual?.colourName || '',
+        bandIndex: visual?.bandIndex ?? 2,
+        overallRiskScore: snapshot ? Number(snapshot.overallRiskScore) : null,
+        categoryScores: ((snapshot?.categoryScores as Array<{ category?: string; score?: number }>) || []).map(
+          (c) => ({
+            category: String(c.category || ''),
+            score: Number(c.score || 0),
+          }),
+        ),
+        diagnosis,
+        recommendedAction,
+        campaignSummary,
+        downloadUrl: reportAttachment?.url || null,
+        fileName: reportAttachment?.attachmentFileName || null,
+        reportId: null,
+      },
     };
+  }
+
+  private async syncPublicSubmissionToCrm(
+    lead: {
+      id: string;
+      organisationId: string | null;
+      assessmentId: string | null;
+      organisationName: string;
+      industry: string | null;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string | null;
+    },
+    input: { jobTitle?: string; attribution?: LeadAttribution },
+    assessmentId: string,
+  ): Promise<{ synced: boolean; reason?: string; leadId?: string }> {
+    if (lead.organisationId) {
+      await this.crm.queueAccountSync(lead.organisationId);
+    }
+    const leadSync = await this.crm.syncLeadFromContactForm(lead.id, {
+      jobTitle: input.jobTitle,
+      attribution: {
+        ...(input.attribution || {}),
+        // Ensure company contact fields travel with the EspoCRM Lead payload.
+        organisationName: lead.organisationName,
+        industry: lead.industry || undefined,
+        phone: lead.phone || undefined,
+      },
+    });
+    await this.crm.queueAssessmentSync(assessmentId);
+    await this.crm.queueReportUpdate(assessmentId);
+    return leadSync;
   }
 
   private async getSystemUser() {
@@ -402,7 +557,7 @@ export class PublicService {
       });
       return {
         attachmentStorageKey: report.storageKey,
-        attachmentFileName: report.fileName || `${assessment?.reference || 'assessment'}-Cost-Leakage.pdf`,
+        attachmentFileName: report.fileName || undefined,
         attachmentContentType: 'application/pdf',
         url: report.downloadUrl,
         reference: assessment?.reference,

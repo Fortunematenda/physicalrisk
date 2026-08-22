@@ -1,20 +1,18 @@
 import { Loader2 } from 'lucide-react';
 import { Suspense } from 'react';
 
-import { Card, CardContent } from '@/components/ui/card';
+import { SclAssessmentShell } from '@/components/scl/SclAssessmentShell';
 
 import StartAssessmentClient from './StartClient';
 
 function StartLoadingFallback() {
   return (
-    <div className="flex min-h-[320px] items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <CardContent className="flex items-center justify-center gap-3 py-10 text-sm text-moss-muted">
-          <Loader2 className="size-5 animate-spin text-moss-red" aria-hidden="true" />
-          Loading intake…
-        </CardContent>
-      </Card>
-    </div>
+    <SclAssessmentShell>
+      <div className="scl-exec-shell" style={{ padding: '80px 0', textAlign: 'center' }}>
+        <Loader2 className="inline size-6 animate-spin" aria-hidden="true" />
+        <p style={{ marginTop: 16, color: '#666', fontSize: 14 }}>Loading assessment…</p>
+      </div>
+    </SclAssessmentShell>
   );
 }
 

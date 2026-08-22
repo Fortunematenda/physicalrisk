@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { OrganisationSelect, type OrgOption } from '@/components/organisations/OrganisationSelect';
+import { filterSclActiveTriageQuestions } from '@moss/shared';
 import { apiFetch } from '../../../lib/api';
 
 type QuestionnairePayload = {
@@ -83,7 +84,9 @@ function NewAssessmentForm() {
   }
 
   const version = questionnaire?.versions?.[0];
-  const questionCount = version?.questions?.length ?? 0;
+  const questionCount = filterSclActiveTriageQuestions(
+    ((version?.questions || []) as Array<{ code: string }>),
+  ).length;
   const inputCount = version?.inputDefinitions?.length ?? 0;
   const selectedOrg = orgs.find((o) => o.id === organisationId);
 
@@ -114,7 +117,7 @@ function NewAssessmentForm() {
           icon={ClipboardList}
           title="Questions"
           value={questionCount || '—'}
-          description="Executive questionnaire"
+          description="Active triage (matches website)"
           tone="blue"
           loading={loading}
         />

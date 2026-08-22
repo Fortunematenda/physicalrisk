@@ -26,6 +26,10 @@ export interface AssessmentScore {
 
 export interface ScliCalibrationInput {
   annualSecurityContractValue: number;
+  /** Questionnaire C6 — estimated annual security losses (low). */
+  estimatedLossesLow: number;
+  /** Questionnaire C7 — estimated annual security losses (high). */
+  estimatedLossesHigh: number;
   protectedPremises: number;
   guardForce: number;
   internalSecurityTeamSize: number;
@@ -103,4 +107,24 @@ export interface LeakageResult {
   recoverableHigh: number;
   likelyLeakagePerPremise: number;
   contractValuePerPremise: number;
+  /** Echo of questionnaire C6 (numeric). */
+  estimatedLossesLow: number;
+  /** Echo of questionnaire C7 (numeric). */
+  estimatedLossesHigh: number;
+  /** Structured C6 band when captured as a range (report display; scoring map may be pending). */
+  estimatedLossesLowBand?: {
+    code: string;
+    min: number;
+    max: number | null;
+    label: string;
+    unit: 'ZAR';
+  } | null;
+  /** Structured C7 band when captured as a range. */
+  estimatedLossesHighBand?: {
+    code: string;
+    min: number;
+    max: number | null;
+    label: string;
+    unit: 'ZAR';
+  } | null;
 }

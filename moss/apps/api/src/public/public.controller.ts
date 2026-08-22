@@ -26,6 +26,8 @@ class LeadDto {
   @IsString() @MaxLength(100) lastName!: string;
   @IsEmail() email!: string;
   @IsOptional() @IsString() @MaxLength(50) phone?: string;
+  @IsOptional() @IsString() @MaxLength(80) jobTitle?: string;
+  @IsOptional() attribution?: Record<string, unknown>;
   // Honeypot: legitimate clients leave this blank.
   @IsOptional() @IsString() @MaxLength(0) website?: string;
 }

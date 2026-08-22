@@ -353,8 +353,16 @@ export class EmailService {
   }
 
   private renderBody(template: string, payload: Record<string, unknown> = {}) {
+    const customerFacing = new Set([
+      'submission_confirmation',
+      'missing_information',
+      'report_issued',
+      'report_available',
+    ]);
     const brand = 'Physical Risk · MOSS';
-    const lines: string[] = [`<p style="font-family:Segoe UI,Arial,sans-serif">${brand}</p>`];
+    const lines: string[] = customerFacing.has(template)
+      ? []
+      : [`<p style="font-family:Segoe UI,Arial,sans-serif">${brand}</p>`];
     switch (template) {
       case 'assessment_assigned':
         lines.push(`<p>You have been assigned as <strong>${payload.role || 'analyst'}</strong> on a MOSS assessment.</p>`);
@@ -493,7 +501,7 @@ export class EmailService {
 
     const filename =
       (typeof payload.attachmentFileName === 'string' && payload.attachmentFileName.trim())
-      || 'Cost-Leakage-report.pdf';
+      || 'Physical-Risk-Security-Cost-Leakage-Assessment.pdf';
     const contentType =
       (typeof payload.attachmentContentType === 'string' && payload.attachmentContentType.trim())
       || 'application/pdf';
