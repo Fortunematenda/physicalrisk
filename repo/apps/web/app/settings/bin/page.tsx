@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
+import { useConfirm } from '@/components/confirm-dialog';
 import { api, formatDate } from '@/lib/api';
 import { canCreateConfiguration, getCurrentUser, isAdmin } from '@/lib/permissions';
 import { SettingsTabs } from '../settings-tabs';
@@ -24,6 +25,7 @@ type BinRow = {
 };
 
 export default function SettingsBinPage() {
+  const confirm = useConfirm();
   const user = getCurrentUser();
   const canManage = canCreateConfiguration(user);
   const admin = isAdmin(user);
@@ -68,7 +70,11 @@ export default function SettingsBinPage() {
 
   const restore = async (item: BinRow) => {
     if (!admin) return;
-    const ok = window.confirm(`Restore ${item.code} — ${item.title}?`);
+    const ok = await confirm({
+      title: 'Restore document',
+      message: `Restore ${item.code} — ${item.title} to the repository?`,
+      confirmLabel: 'Restore',
+    });
     if (!ok) return;
     setBusyId(item.id);
     setError('');
@@ -86,9 +92,12 @@ export default function SettingsBinPage() {
 
   const permanentDelete = async (item: BinRow) => {
     if (!admin) return;
-    const ok = window.confirm(
-      `Permanently delete ${item.code} — ${item.title}?\n\nThis cannot be undone. Files and versions will be removed from storage.`,
-    );
+    const ok = await confirm({
+      title: 'Delete forever',
+      message: `Permanently delete ${item.code} — ${item.title}?\n\nThis cannot be undone. Files and versions will be removed from storage.`,
+      confirmLabel: 'Delete forever',
+      tone: 'danger',
+    });
     if (!ok) return;
     setBusyId(item.id);
     setError('');
@@ -119,7 +128,7 @@ export default function SettingsBinPage() {
           {error ? <div className="notice error">{error}</div> : null}
           {notice ? <div className="notice success">{notice}</div> : null}
 
-          <div className="panel" style={{ marginBottom: 16 }}>
+          <div className="panel" style={{ marginBottom: 16, padding: 16 }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <input
                 type="search"
