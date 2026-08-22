@@ -47,6 +47,14 @@ export interface McpApprovedDocumentRequest {
    * Repository placement runs in a background worker so nginx/ChatGPT timeouts cannot kill the job.
    */
   processAsync?: boolean;
+  /** FILE_PRESERVE = original bytes; CONTENT_CREATE = Markdown/text regenerated document. */
+  importMode?: 'FILE_PRESERVE' | 'CONTENT_CREATE';
+  /** True when Markdown/text was converted into a generated file before staging. */
+  conversionPerformed?: boolean;
+  /** Original client-reported filename (before sanitize). */
+  originalFilename?: string;
+  /** Client-supplied SHA-256 (hex) of source bytes, if known. */
+  sourceSha256?: string;
 }
 
 export interface McpExternalImportResult {
@@ -61,4 +69,13 @@ export interface McpExternalImportResult {
   sectionName?: string;
   message?: string;
   needsReview?: boolean;
+  importMode?: 'FILE_PRESERVE' | 'CONTENT_CREATE';
+  conversionPerformed?: boolean;
+  originalFilename?: string;
+  mimeType?: string;
+  sourceSizeBytes?: number;
+  storedSizeBytes?: number;
+  sourceSha256?: string;
+  storedSha256?: string;
+  checksumVerified?: boolean;
 }

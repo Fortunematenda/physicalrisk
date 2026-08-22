@@ -41,13 +41,15 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.17.0',
+    version: '1.18.0',
     description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
       + 'Use find_repository_documents / search_documents to list Master Document Index. '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
-      + 'For imports: list projects/modules/types, then submit_approved_document with projectCode + full documentContent. '
-      + 'submit_approved_document returns QUEUED immediately — poll get_import_status; workspace creation is not import completion.',
+      + 'FILE IMPORTS: when an original DOCX/XLSX/PDF/PPTX (or other approved artifact) exists, use submit_approved_file '
+      + 'with fileContentBase64/fileUrl/uploadId — never convert that file to Markdown first. '
+      + 'Use submit_approved_content only for intentional Markdown/text → generated document. '
+      + 'Imports return QUEUED — poll get_import_status; workspace creation is not import completion.',
   });
 
   const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
@@ -195,18 +197,30 @@ function createMcpServer(authHeader?: string) {
     module: z.string().optional().describe('Module/section name e.g. Research Library'),
     documentType: z.string().optional().describe('e.g. Research Note, Article'),
     title: z.string().optional(),
-    documentContent: z.string().optional().describe('Full Markdown body of the document'),
+    documentContent: z.string().optional().describe(
+      'Markdown/text only — use submit_approved_content for intentional text imports. '
+        + 'Do NOT put DOCX/XLSX/PDF content here when an original file exists.',
+    ),
     documentCode: z.string().optional().describe('Existing code e.g. PROR-PA-003 for NEW_VERSION'),
     mode: z.enum(['NEW', 'NEW_VERSION']).optional().describe(
       'NEW_VERSION = same document, next Rev (1.1). NEW = brand-new document code. Omit to auto NEW_VERSION on same title.',
     ),
     versionNo: z.string().optional().describe('Optional; server suggests next Rev if omitted'),
     fileName: z.string().optional().describe(
-      'Output file name. Use .docx for Word, .xlsx for Excel, .pptx for PowerPoint, .txt for plain text, .pdf for PDF (default).',
+      'Original or output file name including extension (.docx, .xlsx, .pdf, …).',
     ),
     mimeType: z.string().optional(),
     outputFormat: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt']).optional().describe(
-      'Same-chat conversion format. Default pdf. Use docx/xlsx/pptx/txt — never force those to PDF.',
+      'CONTENT_CREATE only. Default pdf. Never use this to "convert" an original binary file.',
+    ),
+    fileContentBase64: z.string().optional().describe(
+      'Base64 of the ORIGINAL file bytes (FILE_PRESERVE). Prefer submit_approved_file when available.',
+    ),
+    fileUrl: z.string().url().optional().describe(
+      'HTTPS URL the repository can fetch for the ORIGINAL artifact (FILE_PRESERVE).',
+    ),
+    uploadId: z.string().uuid().optional().describe(
+      'Chunked upload session id from begin_document_upload (FILE_PRESERVE).',
     ),
     workspaceCode: z.string().optional().describe(
       'WS-YYYY-##### — REQUIRED when adding a document into a workspace so it attaches (not only Master Index)',
@@ -214,18 +228,87 @@ function createMcpServer(authHeader?: string) {
     owner: z.string().optional(),
     description: z.string().optional(),
     payload: z.string().optional().describe(
-      'JSON string alternative: projectCode, module, documentType, title, documentContent, fileName, outputFormat, workspaceCode',
+      'JSON string alternative: projectCode, module, documentType, title, documentContent / file fields, workspaceCode',
     ),
   };
 
+  const submitFileSchema = {
+    projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
+    module: z.string().optional().describe('Module/section name'),
+    documentType: z.string().optional().describe('e.g. Research Note, Article'),
+    title: z.string().optional(),
+    documentCode: z.string().optional(),
+    mode: z.enum(['NEW', 'NEW_VERSION']).optional(),
+    versionNo: z.string().optional(),
+    fileName: z.string().optional().describe('Original filename with extension (.docx, .xlsx, .pdf, …)'),
+    mimeType: z.string().optional(),
+    fileContentBase64: z.string().optional().describe('Base64 of the exact original file bytes'),
+    fileUrl: z.string().url().optional().describe('HTTPS URL to the original artifact'),
+    uploadId: z.string().uuid().optional().describe('From begin_document_upload + chunks'),
+    sourceSha256: z.string().optional().describe('Optional SHA-256 hex of source bytes'),
+    workspaceCode: z.string().optional().describe('WS-YYYY-#####'),
+    owner: z.string().optional(),
+    description: z.string().optional(),
+    payload: z.string().optional(),
+  };
+
+  const submitContentSchema = {
+    projectCode: z.string().optional(),
+    module: z.string().optional(),
+    documentType: z.string().optional(),
+    title: z.string().optional(),
+    documentContent: z.string().optional().describe('Full Markdown/text body to generate a Repository document from'),
+    documentCode: z.string().optional(),
+    mode: z.enum(['NEW', 'NEW_VERSION']).optional(),
+    versionNo: z.string().optional(),
+    fileName: z.string().optional(),
+    mimeType: z.string().optional(),
+    outputFormat: z.enum(['pdf', 'docx', 'xlsx', 'pptx', 'txt']).optional(),
+    workspaceCode: z.string().optional(),
+    owner: z.string().optional(),
+    description: z.string().optional(),
+    payload: z.string().optional(),
+  };
+
   server.tool(
-    'submit_approved_document',
-    'IMPORT/SUBMIT an approved document (Markdown → PDF by default, or DOCX/XLSX/PPTX/TXT when fileName/outputFormat says so). '
-      + 'If the user asked for Word/Excel/PowerPoint/plain text, set outputFormat=docx|xlsx|pptx|txt (or matching fileName) — do NOT convert those to PDF. '
-      + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode (adds Rev 1.1, not a new PA-00x). '
-      + 'When working in a workspace, ALWAYS pass workspaceCode. '
-      + 'Only use mode=NEW when the user explicitly wants a brand-new document ID.',
-    submitDocSchema,
+    'submit_approved_file',
+    'Import the exact original approved file into the Physical Risk Repository without converting or reconstructing it. '
+      + 'Prefer this whenever a real generated/uploaded DOCX, XLSX, PDF, PPTX, ZIP or other approved source artifact is available. '
+      + 'Do not convert the source to Markdown or recreate it. '
+      + 'Provide fileContentBase64, fileUrl, or uploadId. '
+      + 'If the original artifact cannot be supplied, returns ORIGINAL_FILE_UNAVAILABLE (no Markdown fallback).',
+    submitFileSchema,
+    async (args) => {
+      const body = args.payload
+        ? { payload: args.payload }
+        : {
+            projectCode: args.projectCode,
+            module: args.module,
+            documentType: args.documentType,
+            title: args.title,
+            documentCode: args.documentCode,
+            mode: args.mode,
+            versionNo: args.versionNo,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            fileContentBase64: args.fileContentBase64,
+            fileUrl: args.fileUrl,
+            uploadId: args.uploadId,
+            sourceSha256: args.sourceSha256,
+            workspaceCode: args.workspaceCode,
+            owner: args.owner,
+            description: args.description,
+          };
+      return toolResult(await mcpTool('submit_approved_file', body));
+    },
+  );
+
+  server.tool(
+    'submit_approved_content',
+    'Create a Repository document from supplied text/Markdown. '
+      + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use submit_approved_file instead. '
+      + 'Converts Markdown to PDF/DOCX/XLSX/PPTX/TXT from fileName/outputFormat.',
+    submitContentSchema,
     async (args) => {
       const body = args.payload
         ? { payload: args.payload }
@@ -245,13 +328,15 @@ function createMcpServer(authHeader?: string) {
             owner: args.owner,
             description: args.description,
           };
-      return toolResult(await mcpTool('submit_approved_document', body));
+      return toolResult(await mcpTool('submit_approved_content', body));
     },
   );
 
   server.tool(
-    'prepare_approved_document',
-    'Prepare or submit (alias of submit_approved_document) — same fields as submit.',
+    'submit_approved_document',
+    'Legacy combined submit. Prefer submit_approved_file for original artifacts, or submit_approved_content for Markdown. '
+      + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode. '
+      + 'When working in a workspace, ALWAYS pass workspaceCode.',
     submitDocSchema,
     async (args) => {
       const body = args.payload
@@ -268,6 +353,40 @@ function createMcpServer(authHeader?: string) {
             fileName: args.fileName,
             mimeType: args.mimeType,
             outputFormat: args.outputFormat,
+            fileContentBase64: args.fileContentBase64,
+            fileUrl: args.fileUrl,
+            uploadId: args.uploadId,
+            workspaceCode: args.workspaceCode,
+            owner: args.owner,
+            description: args.description,
+          };
+      return toolResult(await mcpTool('submit_approved_document', body));
+    },
+  );
+
+  server.tool(
+    'prepare_approved_document',
+    'Prepare or submit (alias of submit_approved_document) — same fields as submit. '
+      + 'Without file bytes/content, returns a browser upload URL for FILE_PRESERVE.',
+    submitDocSchema,
+    async (args) => {
+      const body = args.payload
+        ? { payload: args.payload }
+        : {
+            projectCode: args.projectCode,
+            module: args.module,
+            documentType: args.documentType,
+            title: args.title,
+            documentContent: args.documentContent,
+            documentCode: args.documentCode,
+            mode: args.mode,
+            versionNo: args.versionNo,
+            fileName: args.fileName,
+            mimeType: args.mimeType,
+            outputFormat: args.outputFormat,
+            fileContentBase64: args.fileContentBase64,
+            fileUrl: args.fileUrl,
+            uploadId: args.uploadId,
             workspaceCode: args.workspaceCode,
             owner: args.owner,
             description: args.description,

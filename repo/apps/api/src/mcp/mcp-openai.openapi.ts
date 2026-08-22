@@ -122,11 +122,13 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Same-chat: research → generate → approve → submit with documentContent. '
+        'Same-chat: prefer submit_approved_file when an original DOCX/XLSX/PDF exists; '
+        + 'use submit_approved_content for intentional Markdown imports. '
+        + 'Legacy submit_approved_document still accepted. '
         + 'Supports NEW documents and NEW_VERSION revisions of existing documents '
         + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
         + 'search_documents lists the Master Document Index. '
-        + 'Repo converts Markdown from fileName/outputFormat: Excel→xlsx, Word→docx, PowerPoint→pptx, text→txt, otherwise PDF. '
+        + 'Repo converts Markdown from fileName/outputFormat: Excel to xlsx, Word to docx, PowerPoint to pptx, text to txt, otherwise PDF. '
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
@@ -388,7 +390,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         McpBearer: {
           type: 'http',
           scheme: 'bearer',
-          description: 'Full mcp_… API key as Bearer token',
+          description: 'Full mcp_ API key as Bearer token',
         },
       },
     },

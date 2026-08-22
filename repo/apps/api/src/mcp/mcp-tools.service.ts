@@ -19,6 +19,7 @@ import {
   PrepareApprovedDocumentDto,
   ResolveImportTargetsDto,
   SubmitApprovedDocumentDto,
+  SubmitApprovedFileDto,
   UploadDocumentChunkDto,
   mcpAllowsAllProjects,
 } from './mcp.dto';
@@ -169,6 +170,51 @@ export class McpToolsService {
           fileUrl: parsed.fileUrl,
           documentContent: parsed.documentContent,
         }, ipAddress);
+      }
+      case 'submit_approved_file': {
+        return this.submitApprovedFile(
+          integration,
+          args as unknown as SubmitApprovedFileDto,
+          ipAddress,
+        );
+      }
+      case 'submit_approved_content': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          parsed.dto,
+          parsed.documentContent,
+          this.defaultApproverName(integration),
+        );
+        if (!parsed.documentContent?.trim()) {
+          return {
+            status: 'CONTENT_REQUIRED',
+            message:
+              'submit_approved_content requires documentContent (Markdown/text). '
+              + 'To preserve an original DOCX/XLSX/PDF, use submit_approved_file instead.',
+          };
+        }
+        if (parsed.fileContentBase64 || parsed.uploadId || parsed.fileUrl) {
+          return {
+            status: 'USE_SUBMIT_APPROVED_FILE',
+            message:
+              'Binary file fields were supplied. Use submit_approved_file to preserve the original artifact '
+              + 'without Markdown conversion.',
+          };
+        }
+        return this.submitApprovedDocument(integration, {
+          ...prepared,
+          documentCode: prepared.documentCode,
+          description: prepared.description,
+          owner: prepared.owner,
+          metadataJson: prepared.metadataJson,
+          relationshipsJson: prepared.relationshipsJson,
+          mode: prepared.mode,
+          existingDocumentId: prepared.existingDocumentId,
+          fileName: prepared.fileName!,
+          mimeType: prepared.mimeType,
+          outputFormat: prepared.outputFormat,
+          documentContent: parsed.documentContent,
+        }, ipAddress, { forceContentCreate: true });
       }
       case 'get_import_status':
         return this.getImportStatus(integration, args as unknown as GetImportStatusDto);
@@ -720,6 +766,7 @@ export class McpToolsService {
     integration: McpIntegration,
     input: SubmitApprovedDocumentDto,
     ipAddress?: string,
+    options?: { forceContentCreate?: boolean; forceFilePreserve?: boolean },
   ) {
     // Always normalise — browser upload / multipart callers skip dispatchTool defaults.
     const normalised = await this.normaliseSubmitInput(input, integration);
@@ -745,6 +792,9 @@ export class McpToolsService {
     let fileContentBase64 = input.fileContentBase64?.trim();
     let fileName = input.fileName?.trim();
     let mimeType = input.mimeType?.trim();
+    let conversionPerformed = false;
+    let importMode: 'FILE_PRESERVE' | 'CONTENT_CREATE' = 'FILE_PRESERVE';
+    const originalFilenameHint = fileName;
     if (input.uploadId?.trim()) {
       const staged = this.uploads.takeBase64(input.uploadId.trim());
       fileContentBase64 = staged.fileContentBase64;
@@ -758,6 +808,17 @@ export class McpToolsService {
       mimeType = mimeType || remote.mimeType;
     }
     if (!fileContentBase64 && input.documentContent != null) {
+      if (options?.forceFilePreserve) {
+        return {
+          status: 'ORIGINAL_FILE_UNAVAILABLE',
+          message:
+            'The Repository connector did not receive the original source artifact. '
+            + 'The file has NOT been reconstructed from text. '
+            + 'Please reattach the original file or use a supported file transfer path.',
+          conversionPerformed: false,
+          importMode: 'FILE_PRESERVE',
+        };
+      }
       const content = String(input.documentContent);
       if (!content.trim()) {
         throw new BadRequestException('documentContent must not be empty');
@@ -769,6 +830,8 @@ export class McpToolsService {
           `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
         );
       }
+      conversionPerformed = true;
+      importMode = 'CONTENT_CREATE';
       const intentFormat = this.inferFormatFromIntent(
         (input as { outputFormat?: string }).outputFormat,
         fileName,
@@ -830,7 +893,22 @@ export class McpToolsService {
         mimeType = 'text/markdown';
       }
     }
+    if (options?.forceContentCreate) {
+      importMode = 'CONTENT_CREATE';
+      conversionPerformed = true;
+    }
     if (!fileContentBase64) {
+      if (options?.forceFilePreserve) {
+        return {
+          status: 'ORIGINAL_FILE_UNAVAILABLE',
+          message:
+            'The Repository connector did not receive the original source artifact. '
+            + 'The file has NOT been reconstructed from text. '
+            + 'Please reattach the original file or use a supported file transfer path.',
+          conversionPerformed: false,
+          importMode: 'FILE_PRESERVE',
+        };
+      }
       throw new BadRequestException(
         'Provide documentContent (same-chat), fileUrl, uploadId, or fileContentBase64',
       );
@@ -864,7 +942,7 @@ export class McpToolsService {
 
       const { result, replayed } = await this.idempotency.beginOrReplay({
         idempotencyKey,
-        operation: 'submit_approved_document',
+        operation: options?.forceFilePreserve ? 'submit_approved_file' : 'submit_approved_document',
         userId: integration.createdBy?.id,
         requestPayload: {
           projectId,
@@ -872,6 +950,7 @@ export class McpToolsService {
           documentCode: versioned.documentCode,
           versionNo: versioned.versionNo,
           fileName,
+          importMode,
           checksumHint: fileContentBase64.slice(0, 64),
         },
         execute: async () => {
@@ -897,6 +976,9 @@ export class McpToolsService {
             mimeType,
             mcpIntegrationId: integration.id,
             processAsync: true,
+            importMode,
+            conversionPerformed,
+            originalFilename: originalFilenameHint || fileName,
           });
 
           const workspaceCode = input.workspaceCode?.trim() || null;
@@ -911,26 +993,42 @@ export class McpToolsService {
             action: 'MCP_SUBMISSION_ACCEPTED',
             entityType: 'ImportJob',
             entityId: queued.importJobId,
-            message: `MCP submission accepted for ${input.fileName} (async queue)`,
-            after: { integrationId: integration.id, checksum: queued.checksum, async: true },
+            message: `MCP ${importMode} submission accepted for ${fileName} (async queue)`,
+            after: {
+              integrationId: integration.id,
+              checksum: queued.checksum,
+              async: true,
+              importMode,
+              conversionPerformed,
+              checksumVerified: queued.checksumVerified === true,
+              tool: options?.forceFilePreserve ? 'submit_approved_file' : 'submit_approved_document',
+            },
             ipAddress,
           });
 
           return {
             accepted: true,
+            status: queued.imported ? 'IMPORTED' : 'QUEUED',
             importJobId: queued.importJobId,
-            status: 'QUEUED',
             importStatus: queued.status,
             externalImportStatus: queued.externalImportStatus,
             checksum: queued.checksum,
             fileName: queued.fileName,
+            originalFilename: queued.originalFilename || originalFilenameHint || fileName,
             outputFormat: (extname(queued.fileName).replace('.', '') || 'bin').toLowerCase(),
-            mimeType,
+            mimeType: queued.mimeType || mimeType,
             imported: false,
             needsReview: queued.needsReview === true,
             documentCode: queued.documentCode ?? null,
             sectionName: queued.sectionName ?? null,
             workspaceCode,
+            importMode: queued.importMode || importMode,
+            conversionPerformed: queued.conversionPerformed === true,
+            sourceSizeBytes: queued.sourceSizeBytes,
+            storedSizeBytes: queued.storedSizeBytes,
+            sourceSha256: queued.sourceSha256 || queued.checksum,
+            storedSha256: queued.storedSha256 || queued.checksum,
+            checksumVerified: queued.checksumVerified === true,
             message: queued.message
               ?? `Import accepted as ${queued.fileName}. Poll get_import_status; workspace creation is not import completion.`,
             projectId,
@@ -951,11 +1049,78 @@ export class McpToolsService {
         entityType: 'McpIntegration',
         entityId: integration.id,
         message,
-        after: { projectId, fileName: input.fileName },
+        after: { projectId, fileName: input.fileName, importMode },
         ipAddress,
       });
       throw error;
     }
+  }
+
+  /**
+   * FILE_PRESERVE: import exact original bytes. Never converts Markdown to Office/PDF.
+   */
+  async submitApprovedFile(
+    integration: McpIntegration,
+    input: SubmitApprovedFileDto,
+    ipAddress?: string,
+  ) {
+    const hasBinary = Boolean(
+      input.fileContentBase64?.trim() || input.uploadId?.trim() || input.fileUrl?.trim(),
+    );
+    if (!hasBinary) {
+      await this.audit.record({
+        action: 'MCP_ORIGINAL_FILE_UNAVAILABLE',
+        entityType: 'McpIntegration',
+        entityId: integration.id,
+        message: 'submit_approved_file called without usable file bytes/reference',
+        after: {
+          tool: 'submit_approved_file',
+          fileName: input.fileName,
+          workspaceCode: input.workspaceCode,
+        },
+        ipAddress,
+      });
+      return {
+        status: 'ORIGINAL_FILE_UNAVAILABLE',
+        message:
+          'The Repository connector did not receive the original source artifact. '
+          + 'The file has NOT been reconstructed from text. '
+          + 'Please reattach the original file (fileContentBase64, fileUrl, or uploadId) '
+          + 'or use submit_approved_content only when intentionally creating from Markdown.',
+        conversionPerformed: false,
+        importMode: 'FILE_PRESERVE',
+      };
+    }
+
+    const defaults = this.applySubmitDefaults(
+      {
+        ...input,
+        versionNo: input.versionNo || '1.0',
+        approvalStatus: input.approvalStatus || 'APPROVED',
+        approvalDate: input.approvalDate || new Date().toISOString().slice(0, 10),
+        fileName: input.fileName,
+      } as SubmitApprovedDocumentDto,
+      undefined,
+      this.defaultApproverName(integration),
+    );
+
+    return this.submitApprovedDocument(
+      integration,
+      {
+        ...defaults,
+        fileName: input.fileName,
+        fileContentBase64: input.fileContentBase64,
+        uploadId: input.uploadId,
+        fileUrl: input.fileUrl,
+        mimeType: input.mimeType,
+        workspaceCode: input.workspaceCode,
+        documentContent: undefined,
+        outputFormat: undefined,
+        idempotencyKey: input.idempotencyKey,
+      },
+      ipAddress,
+      { forceFilePreserve: true },
+    );
   }
 
   async getImportStatus(integration: McpIntegration, input: GetImportStatusDto) {
@@ -974,6 +1139,14 @@ export class McpToolsService {
       fileName: job.fileName,
       checksum: job.checksum,
       errorMessage: job.errorMessage,
+      importMode: (job.metadata as Record<string, unknown> | null)?.importMode ?? null,
+      conversionPerformed: (job.metadata as Record<string, unknown> | null)?.conversionPerformed ?? null,
+      checksumVerified: (job.metadata as Record<string, unknown> | null)?.checksumVerified ?? null,
+      originalFilename: (job.metadata as Record<string, unknown> | null)?.originalFilename ?? job.fileName,
+      sourceSizeBytes: (job.metadata as Record<string, unknown> | null)?.sourceSizeBytes ?? job.fileSize,
+      storedSizeBytes: (job.metadata as Record<string, unknown> | null)?.storedSizeBytes ?? job.fileSize,
+      sourceSha256: (job.metadata as Record<string, unknown> | null)?.sourceSha256 ?? job.checksum,
+      storedSha256: (job.metadata as Record<string, unknown> | null)?.storedSha256 ?? job.checksum,
       project: { id: job.project.id, code: job.project.code, name: job.project.name },
       sourceSystem: { id: job.sourceSystem.id, code: job.sourceSystem.code, name: job.sourceSystem.name },
       resolvedSection: job.resolvedSection
@@ -1571,13 +1744,19 @@ export class McpToolsService {
       check_document_exists:
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
-        'Submit APPROVED document via documentContent (Markdown→PDF/DOCX/XLSX/PPTX/TXT), fileUrl, uploadId, or base64. '
-        + 'If the user asked for Excel/spreadsheet/.xlsx, set outputFormat=xlsx and fileName=*.xlsx — never PDF. '
-        + 'Word→docx, PowerPoint→pptx, text→txt. PDF only when the user asked for PDF or did not name a format. '
-        + 'If the same title already exists, submits as NEW_VERSION (e.g. Rev 1.1) unless mode=NEW. '
-        + 'For an intentional new document code, set mode=NEW. '
-        + 'Pass workspaceCode (WS-YYYY-#####) to also attach the import to that workspace. '
-        + 'Prefer check_document_exists first, then pass documentCode + mode=NEW_VERSION.',
+        'Legacy combined submit. Prefer submit_approved_file when an original DOCX/XLSX/PDF/PPTX exists, '
+        + 'or submit_approved_content for intentional Markdown→document creation. '
+        + 'If the same title already exists, submits as NEW_VERSION unless mode=NEW. '
+        + 'Pass workspaceCode (WS-YYYY-#####) to attach after import.',
+      submit_approved_file:
+        'Import the exact original approved file into the Physical Risk Repository without converting or reconstructing it. '
+        + 'Use whenever a real generated/uploaded DOCX, XLSX, PDF, PPTX, ZIP or other approved artifact is available. '
+        + 'Pass fileContentBase64, fileUrl, or uploadId — do NOT convert the source to Markdown first. '
+        + 'If the original artifact cannot be supplied, returns ORIGINAL_FILE_UNAVAILABLE (no text reconstruction).',
+      submit_approved_content:
+        'Create a Repository document from supplied text/Markdown. '
+        + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use submit_approved_file instead. '
+        + 'Converts Markdown to PDF/DOCX/XLSX/PPTX/TXT from fileName/outputFormat.',
       get_import_status: 'Get the processing status of an import job by id',
       create_workspace: 'Create a Repository Workspace (returns WS-YYYY-#####)',
       get_workspace: 'Get a workspace by workspaceCode',
@@ -1732,6 +1911,68 @@ export class McpToolsService {
             type: 'string',
             description: 'Optional WS-YYYY-##### — attach this import to the workspace after submit',
           },
+        },
+      },
+      submit_approved_file: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        description:
+          'Import the exact original approved artifact without conversion. '
+          + 'Requires fileContentBase64, fileUrl, or uploadId.',
+        properties: {
+          projectCode: { type: 'string' },
+          projectId: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          documentType: { type: 'string' },
+          documentCode: { type: 'string' },
+          module: { type: 'string' },
+          fileName: { type: 'string', description: 'Original filename including extension (.docx, .xlsx, .pdf, …)' },
+          mimeType: { type: 'string' },
+          fileContentBase64: {
+            type: 'string',
+            description: 'Base64 of the original file bytes (preferred when ChatGPT can supply them)',
+          },
+          fileUrl: {
+            type: 'string',
+            format: 'uri',
+            description: 'HTTPS URL the repository can fetch for the original artifact',
+          },
+          uploadId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'From begin_document_upload + upload_document_chunk',
+          },
+          sourceSha256: { type: 'string', description: 'Optional client SHA-256 hex of source bytes' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          versionNo: { type: 'string' },
+          workspaceCode: { type: 'string' },
+          description: { type: 'string' },
+          owner: { type: 'string' },
+        },
+      },
+      submit_approved_content: {
+        type: 'object',
+        required: ['title', 'documentType', 'documentContent'],
+        description:
+          'Create a Repository document from Markdown/text. Not for preserving original binary files.',
+        properties: {
+          projectCode: { type: 'string' },
+          projectId: { type: 'string', format: 'uuid' },
+          title: { type: 'string' },
+          documentType: { type: 'string' },
+          documentCode: { type: 'string' },
+          module: { type: 'string' },
+          documentContent: { type: 'string', description: 'Full Markdown/text body' },
+          fileName: { type: 'string' },
+          outputFormat: {
+            type: 'string',
+            enum: ['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
+          },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          versionNo: { type: 'string' },
+          workspaceCode: { type: 'string' },
+          description: { type: 'string' },
+          owner: { type: 'string' },
         },
       },
       get_import_status: {

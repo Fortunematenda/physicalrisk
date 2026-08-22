@@ -216,7 +216,30 @@ export class ExternalImportOrchestratorService {
     assertMimeTypeAllowed(mimeType, fileType, fileName);
 
     const checksum = createHash('sha256').update(fileBuffer).digest('hex');
+    const sourceSha256 = (request.sourceSha256?.trim().toLowerCase() || checksum).toLowerCase();
+    if (request.sourceSha256?.trim() && sourceSha256 !== checksum) {
+      throw new BadRequestException({
+        status: 'FILE_INTEGRITY_MISMATCH',
+        message: 'Client-reported source SHA-256 does not match received file bytes.',
+        sourceSha256,
+        receivedSha256: checksum,
+      });
+    }
     const staged = await this.storage.stageIncoming(fileName, fileBuffer);
+    const storedBuffer = await this.storage.readIncoming(staged.relativePath);
+    const storedSha256 = createHash('sha256').update(storedBuffer).digest('hex');
+    const checksumVerified = storedSha256 === checksum && storedBuffer.length === fileBuffer.length;
+    if (!checksumVerified) {
+      await this.storage.remove(staged.relativePath).catch(() => undefined);
+      throw new BadRequestException({
+        status: 'FILE_INTEGRITY_MISMATCH',
+        message: 'Stored file SHA-256 does not match source bytes. Import aborted.',
+        sourceSha256: checksum,
+        storedSha256,
+        sourceSizeBytes: fileBuffer.length,
+        storedSizeBytes: storedBuffer.length,
+      });
+    }
     const approvalDate = new Date(String(request.approvalDate).trim());
     if (Number.isNaN(approvalDate.getTime())) {
       throw new BadRequestException('Approval date is invalid');
@@ -235,6 +258,11 @@ export class ExternalImportOrchestratorService {
     } catch {
       relationships = [];
     }
+
+    const importMode: 'FILE_PRESERVE' | 'CONTENT_CREATE' =
+      request.importMode === 'FILE_PRESERVE' ? 'FILE_PRESERVE' : 'CONTENT_CREATE';
+    const conversionPerformed = request.conversionPerformed === true;
+    const originalFilename = (request.originalFilename || fileName).trim();
 
     const matchingVersion = await this.db.documentVersions.findOne({
       where: { checksum },
@@ -282,6 +310,15 @@ export class ExternalImportOrchestratorService {
       customMetadata,
       relationships,
       dedupReason: dedup.reason,
+      importMode,
+      conversionPerformed,
+      originalFilename,
+      originalMimeType: mimeType,
+      sourceSizeBytes: fileBuffer.length,
+      sourceSha256: checksum,
+      storedSizeBytes: storedBuffer.length,
+      storedSha256,
+      checksumVerified,
     };
 
     const job = this.db.importJobs.create({
@@ -322,8 +359,24 @@ export class ExternalImportOrchestratorService {
         status: saved.status,
         externalImportStatus: saved.externalImportStatus,
         mcpIntegrationId: request.mcpIntegrationId,
+        importMode,
+        conversionPerformed,
+        checksumVerified,
+        originalFilename,
       },
     });
+
+    const integrityFields = {
+      importMode,
+      conversionPerformed,
+      originalFilename,
+      mimeType,
+      sourceSizeBytes: fileBuffer.length,
+      storedSizeBytes: storedBuffer.length,
+      sourceSha256: checksum,
+      storedSha256,
+      checksumVerified,
+    };
 
     // Duplicates / version conflicts stay in Import Queue for a human.
     if (saved.status !== ImportStatus.READY_FOR_REVIEW) {
@@ -338,6 +391,7 @@ export class ExternalImportOrchestratorService {
         message:
           'Document needs Import Queue review (duplicate or version conflict). '
           + 'Routing rules were not auto-applied.',
+        ...integrityFields,
       };
     }
 
@@ -354,6 +408,7 @@ export class ExternalImportOrchestratorService {
         message:
           'Import accepted and queued for background processing. '
           + 'Poll get_import_status with this importJobId; do not treat workspace creation as import completion.',
+        ...integrityFields,
       };
     }
 
@@ -374,6 +429,7 @@ export class ExternalImportOrchestratorService {
             ? `Imported into ${completed.resolvedSection?.name || 'repository'}; Master Document Index updated.`
             : 'Import did not complete; check Import Queue.',
         needsReview: completed.status !== ImportStatus.IMPORTED,
+        ...integrityFields,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Auto-import failed';
@@ -401,6 +457,7 @@ export class ExternalImportOrchestratorService {
         message:
           `Could not auto-import (${message}). Confirm routing in Import Queue. `
           + 'Once routing rules cover this type/module, future ChatGPT approvals import automatically.',
+        ...integrityFields,
       };
     }
   }

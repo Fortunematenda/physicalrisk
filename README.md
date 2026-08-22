@@ -66,6 +66,7 @@ Index: [docs/README.md](docs/README.md)
 - [Troubleshooting](docs/LOCAL_SSO_TROUBLESHOOTING.md) — Common issues and fixes
 - [SCL commercial funnel](docs/SCL_COMMERCIAL_FUNNEL_ARCHITECTURE.md) — Public assessment funnel
 - [SCL E2E UAT](docs/SCL_END_TO_END_UAT_CHECKLIST.md) — End-to-end checklist
+- [Repo MCP file preserve](docs/REPO_MCP_FILE_PRESERVE.md) — Original DOCX/XLSX/PDF import (no Markdown rebuild)
 
 ## Local Hostnames
 

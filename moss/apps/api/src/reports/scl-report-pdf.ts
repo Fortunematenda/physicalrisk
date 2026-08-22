@@ -332,14 +332,19 @@ function drawPageOneBody(
   });
   y += lampH + 28;
 
-  // Dimension indications
+  // Dimension indications — single-row layout: label | gap | bar | value
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
     .text('Dimension indications', x, y);
   y = doc.y + 14;
 
-  const labelW = 140;
-  const valueW = 32;
-  const barW = contentW - labelW - valueW - 12;
+  const labelW = 172;
+  const labelGap = 16;
+  const valueW = 28;
+  const valueGap = 10;
+  const barW = Math.max(80, contentW - labelW - labelGap - valueW - valueGap);
+  const rowH = 22;
+  const barH = 10;
+  const fontSize = 10;
   const rows = (input.categoryScores || []).length
     ? input.categoryScores
     : [{ category: 'Overall', score: Number(input.overallRiskScore) || 0 }];
@@ -348,19 +353,28 @@ function drawPageOneBody(
     const score = Math.max(0, Math.min(100, Math.round(Number(row.score) || 0)));
     const fillW = (barW * score) / 100;
     const barColour = resolveSclClassificationVisual(score).colourHex;
-    doc.fillColor(INK).font('Helvetica').fontSize(10)
-      .text(row.category, x, y - 1, { width: labelW, lineBreak: false });
-    doc.rect(x + labelW, y + 3, barW, 9).fill('#ececec');
+    const barX = x + labelW + labelGap;
+    const barY = y + (rowH - barH) / 2;
+    // PDFKit y is text baseline — nudge so label/value sit on the same visual row as the bar.
+    const textY = y + (rowH - fontSize) / 2 + 1;
+
+    doc.fillColor(INK).font('Helvetica').fontSize(fontSize)
+      .text(String(row.category || ''), x, textY, {
+        width: labelW,
+        lineBreak: false,
+        ellipsis: true,
+      });
+    doc.rect(barX, barY, barW, barH).fill('#ececec');
     if (fillW > 0) {
-      doc.rect(x + labelW, y + 3, Math.max(fillW, 3), 9).fill(barColour);
+      doc.rect(barX, barY, Math.max(fillW, 3), barH).fill(barColour);
     }
-    doc.fillColor(INK).font('Helvetica-Bold').fontSize(10)
-      .text(String(score), x + labelW + barW + 6, y - 1, {
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(fontSize)
+      .text(String(score), barX + barW + valueGap, textY, {
         width: valueW,
         align: 'right',
         lineBreak: false,
       });
-    y += 26;
+    y += rowH + 8;
   });
   y += 18;
 

@@ -199,8 +199,11 @@ export class McpController {
     return {
       accepted: true,
       result,
-      importJobId: result.importJobId,
-      message: 'Document queued in Import Queue',
+      importJobId: 'importJobId' in result ? result.importJobId : undefined,
+      message:
+        'importJobId' in result && result.importJobId
+          ? 'Document queued in Import Queue'
+          : ('message' in result && result.message) || 'Upload processed',
     };
   }
 

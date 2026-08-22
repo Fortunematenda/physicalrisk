@@ -48,5 +48,6 @@ App-level MOSS docs: `moss/docs/` (API, EspoCRM, methodology, WordPress entry, d
 | [chatgpt-integration-options.md](chatgpt-integration-options.md) | Integration modes |
 | [chatgpt-repo-connector-notion-style.md](chatgpt-repo-connector-notion-style.md) | Mode B connector guide |
 | [chatgpt-import-versioning.md](chatgpt-import-versioning.md) | Import versioning rules |
+| [REPO_MCP_FILE_PRESERVE.md](REPO_MCP_FILE_PRESERVE.md) | Original file import (FILE_PRESERVE vs CONTENT_CREATE) |
 | [repo-gpt-actions-workspaces.md](repo-gpt-actions-workspaces.md) | GPT Actions / workspaces |
 | [workspace-testing-checklist.md](workspace-testing-checklist.md) | Workspace UAT checklist |

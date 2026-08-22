@@ -171,6 +171,15 @@ export class VpsStorageService implements OnApplicationBootstrap {
     return { relativePath, absolutePath };
   }
 
+  /** Re-read a staged incoming file for integrity verification. */
+  async readIncoming(relativePath: string): Promise<Buffer> {
+    const normalized = relativePath.replace(/\\/g, '/');
+    if (!normalized.startsWith('incoming/')) {
+      throw new BadRequestException('readIncoming is limited to incoming staging paths');
+    }
+    return readFile(this.resolveStoragePath(normalized));
+  }
+
   async stageExternalImport(originalFileName: string, data: Buffer) {
     const safeName = this.safeSegment(originalFileName);
     const relativePath = join('staging', 'external-imports', `${Date.now()}-${safeName}`).replace(/\\/g, '/');

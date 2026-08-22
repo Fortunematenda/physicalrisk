@@ -28,6 +28,8 @@ export const MCP_TOOL_NAMES = [
   'begin_document_upload',
   'upload_document_chunk',
   'submit_approved_document',
+  'submit_approved_file',
+  'submit_approved_content',
   'get_import_status',
   'create_workspace',
   'get_workspace',
@@ -294,6 +296,132 @@ export class SubmitApprovedDocumentDto {
   workspaceCode?: string;
 
   /** Client-supplied idempotency key (also accepted via Idempotency-Key header). */
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  idempotencyKey?: string;
+}
+
+/**
+ * FILE_PRESERVE import — original artifact bytes only.
+ * Do not send documentContent; that belongs on submit_approved_content.
+ */
+export class SubmitApprovedFileDto {
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  projectId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  projectCode?: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  documentCode?: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  documentType!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  owner?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  versionNo?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  approvalStatus?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  approvedBy?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  approvalDate?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  sectionKey?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  module?: string;
+
+  @IsOptional()
+  metadataJson?: string;
+
+  @IsOptional()
+  relationshipsJson?: string;
+
+  @IsOptional()
+  @IsIn(['NEW', 'NEW_VERSION'])
+  mode?: 'NEW' | 'NEW_VERSION';
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  existingDocumentId?: string;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  fileName!: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUUID('4')
+  uploadId?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  fileContentBase64?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsUrl({ require_protocol: true, protocols: ['http', 'https'] })
+  fileUrl?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  mimeType?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  workspaceCode?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  sourceSha256?: string;
+
   @IsOptional()
   @Transform(trimString)
   @IsString()
