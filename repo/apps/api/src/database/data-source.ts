@@ -7,6 +7,7 @@ import { AddConnectorInfrastructure1721600000000 } from './migrations/1721600000
 import { AddFolderMappingReviewFields1721600000001 } from './migrations/1721600000001-AddFolderMappingReviewFields';
 import { AddRepositoryWorkspaces1721700000000 } from './migrations/1721700000000-AddRepositoryWorkspaces';
 import { AddConnectorSessionsAndImportJobs1721800000000 } from './migrations/1721800000000-AddConnectorSessionsAndImportJobs';
+import { AddDocumentRecycleBin1721900000000 } from './migrations/1721900000000-AddDocumentRecycleBin';
 
 export default new DataSource({
   type: 'postgres',
@@ -20,6 +21,7 @@ export default new DataSource({
     AddFolderMappingReviewFields1721600000001,
     AddRepositoryWorkspaces1721700000000,
     AddConnectorSessionsAndImportJobs1721800000000,
+    AddDocumentRecycleBin1721900000000,
   ],
   migrationsRun: false,
   synchronize: false,

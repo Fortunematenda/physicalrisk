@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { extname } from 'path';
-import { In } from 'typeorm';
+import { In, IsNull } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { alignStoredFileIdentity } from '../common/document-format.util';
 import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
@@ -335,6 +335,7 @@ export class McpToolsService {
       .leftJoinAndSelect('document.project', 'project')
       .leftJoinAndSelect('document.section', 'section')
       .leftJoinAndSelect('document.versions', 'versions')
+      .where('document.deletedAt IS NULL')
       .orderBy('document.updatedAt', 'DESC')
       .take(limit);
 
@@ -399,11 +400,11 @@ export class McpToolsService {
 
     const document = id
       ? await this.db.documents.findOne({
-        where: { id },
+        where: { id, deletedAt: IsNull() },
         relations: { project: true, section: true, versions: true },
       })
       : await this.db.documents.findOne({
-        where: { code },
+        where: { code, deletedAt: IsNull() },
         relations: { project: true, section: true, versions: true },
       });
 
@@ -593,7 +594,8 @@ export class McpToolsService {
     const qb = this.db.documents.createQueryBuilder('document')
       .leftJoinAndSelect('document.project', 'project')
       .leftJoinAndSelect('document.versions', 'versions')
-      .where('project.id = :projectId', { projectId });
+      .where('project.id = :projectId', { projectId })
+      .andWhere('document.deletedAt IS NULL');
 
     const conditions: string[] = [];
     const params: Record<string, string> = { projectId };
@@ -1224,7 +1226,7 @@ export class McpToolsService {
 
     if (input.existingDocumentId?.trim()) {
       document = await this.db.documents.findOne({
-        where: { id: input.existingDocumentId.trim(), project: { id: projectId } },
+        where: { id: input.existingDocumentId.trim(), project: { id: projectId }, deletedAt: IsNull() },
         relations: { versions: true },
       });
       if (!document) {
@@ -1232,7 +1234,7 @@ export class McpToolsService {
       }
     } else if (input.documentCode?.trim()) {
       document = await this.db.documents.findOne({
-        where: { project: { id: projectId }, code: input.documentCode.trim().toUpperCase() },
+        where: { project: { id: projectId }, code: input.documentCode.trim().toUpperCase(), deletedAt: IsNull() },
         relations: { versions: true },
       });
     } else if (!forceNewDocument && input.title?.trim()) {
@@ -1242,6 +1244,7 @@ export class McpToolsService {
         .leftJoinAndSelect('document.versions', 'versions')
         .innerJoin('document.project', 'project')
         .where('project.id = :projectId', { projectId })
+        .andWhere('document.deletedAt IS NULL')
         .andWhere('LOWER(document.title) = LOWER(:title)', { title: input.title.trim() })
         .orderBy('document.updatedAt', 'DESC')
         .getOne();

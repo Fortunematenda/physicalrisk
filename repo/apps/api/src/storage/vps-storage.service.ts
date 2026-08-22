@@ -5,6 +5,7 @@ import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, statfs, u
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { DatabaseService } from '../database/database.service';
 import { Project, ProjectStatus } from '../database/entities';
+import { IsNull } from 'typeorm';
 
 export type ZipMember = {
   /** Sanitised path relative to the pack root (posix separators). */
@@ -393,12 +394,17 @@ export class VpsStorageService implements OnApplicationBootstrap {
     const project = await this.db.projects.findOne({ where: { id: projectId }, relations: { sections: true } });
     if (!project) throw new NotFoundException('Project not found');
     const [documents, versions] = await Promise.all([
-      this.db.documents.find({ where: { project: { id: projectId } }, relations: { section: true }, order: { code: 'ASC' } }),
+      this.db.documents.find({
+        where: { project: { id: projectId }, deletedAt: IsNull() },
+        relations: { section: true },
+        order: { code: 'ASC' },
+      }),
       this.db.documentVersions.createQueryBuilder('version')
         .leftJoinAndSelect('version.document', 'document')
         .leftJoinAndSelect('document.section', 'section')
         .leftJoin('document.project', 'project')
         .where('project.id = :projectId', { projectId })
+        .andWhere('document.deletedAt IS NULL')
         .orderBy('document.code', 'ASC').addOrderBy('version.createdAt', 'DESC').getMany(),
     ]);
     const masterSection = project.sections?.find((item) => item.sectionKey === 'MASTER_DOCUMENT_INDEX');
@@ -478,6 +484,7 @@ export class VpsStorageService implements OnApplicationBootstrap {
       .leftJoinAndSelect('document.section', 'section')
       .leftJoin('document.project', 'project')
       .where('project.id = :projectId', { projectId })
+      .andWhere('document.deletedAt IS NULL')
       .getMany();
 
     type VersionRow = (typeof versions)[number];

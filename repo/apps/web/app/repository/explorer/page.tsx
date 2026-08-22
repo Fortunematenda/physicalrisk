@@ -391,8 +391,8 @@ export default function RepositoryExplorerPage() {
   const deleteDocument = async (documentId: string, title: string) => {
     const ok = await confirm({
       title: 'Delete file',
-      message: `Delete selected file “${title}” and all of its versions from the repository? This cannot be undone.`,
-      confirmLabel: 'Delete file',
+      message: `Move “${title}” to the recycle bin?\n\nIt will be kept for 30 days and can be restored by an admin from Settings → Bin.`,
+      confirmLabel: 'Move to bin',
       tone: 'danger',
     });
     if (!ok) return;
@@ -425,9 +425,9 @@ export default function RepositoryExplorerPage() {
     const ok = await confirm({
       title: 'Delete folder',
       message: docCount > 0
-        ? `Delete folder “${target.name}” and its ${docCount} document(s)? This permanently removes the folder${isModule ? ' (module)' : ''}, all nested files, and Index records. This cannot be undone.`
-        : `Delete folder “${target.name}”${isModule ? ' (module)' : ''} from the repository? This cannot be undone.`,
-      confirmLabel: 'Delete folder',
+        ? `Move folder “${target.name}” and its ${docCount} document(s) to the recycle bin?\n\nDocuments are kept for 30 days and can be restored by an admin from Settings → Bin.`
+        : `Delete folder “${target.name}”${isModule ? ' (module)' : ''} from the repository?`,
+      confirmLabel: docCount > 0 ? 'Move to bin' : 'Delete folder',
       tone: 'danger',
     });
     if (!ok) return;

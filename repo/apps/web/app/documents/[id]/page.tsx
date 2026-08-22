@@ -479,8 +479,8 @@ export default function DocumentPage() {
     if (!item) return;
     const ok = await confirm({
       title: 'Delete document',
-      message: `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the logical document, all versions, relationships, and VPS files.`,
-      confirmLabel: 'Delete',
+      message: `Move ${item.code} — ${item.title} to the recycle bin?\n\nIt will be kept for 30 days and can be restored by an admin from Settings → Bin.`,
+      confirmLabel: 'Move to bin',
       tone: 'danger',
     });
     if (!ok) return;

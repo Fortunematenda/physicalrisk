@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { lookup as mimeLookup } from 'mime-types';
-import { Brackets, In } from 'typeorm';
+import { Brackets, In, IsNull } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { assertZipBufferIntegrity, assertZipFileIntegrity, isZipLike } from '../common/binary-integrity.util';
 import { DatabaseService } from '../database/database.service';
@@ -1557,7 +1557,7 @@ export class ImportsService {
     let sequence = await this.db.documents.count({ where: { project: { id: projectId } } }) + 1;
     while (true) {
       const code = `${projectCode}-${sectionCode}-${String(sequence).padStart(3, '0')}`;
-      if (!(await this.db.documents.findOne({ where: { project: { id: projectId }, code } }))) return code;
+      if (!(await this.db.documents.findOne({ where: { project: { id: projectId }, code, deletedAt: IsNull() } }))) return code;
       sequence += 1;
     }
   }
@@ -1572,7 +1572,7 @@ export class ImportsService {
 
     if (mode === 'NEW_VERSION' && metadata.existingDocumentId?.trim()) {
       const document = await this.db.documents.findOne({
-        where: { id: metadata.existingDocumentId.trim(), project: { id: projectId } },
+        where: { id: metadata.existingDocumentId.trim(), project: { id: projectId }, deletedAt: IsNull() },
         relations: { project: true, section: true, versions: { createdBy: true } },
       });
       if (!document) throw new BadRequestException('Selected existing document was not found');
@@ -1582,7 +1582,7 @@ export class ImportsService {
 
     if (documentCode) {
       const document = await this.db.documents.findOne({
-        where: { project: { id: projectId }, code: documentCode },
+        where: { project: { id: projectId }, code: documentCode, deletedAt: IsNull() },
         relations: { project: true, section: true, versions: { createdBy: true } },
       });
       if (document) {

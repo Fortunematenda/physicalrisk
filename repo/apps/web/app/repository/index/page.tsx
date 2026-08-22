@@ -95,8 +95,8 @@ function MasterDocumentIndexPageInner() {
     setOpenMenuId(null);
     const ok = await confirm({
       title: 'Delete document',
-      message: `Delete document ${item.code} — ${item.title}?\n\nThis permanently removes the document, all versions, relationships, and VPS files.`,
-      confirmLabel: 'Delete',
+      message: `Move ${item.code} — ${item.title} to the recycle bin?\n\nIt will be kept for 30 days and can be restored by an admin from Settings → Bin.`,
+      confirmLabel: 'Move to bin',
       tone: 'danger',
     });
     if (!ok) return;
@@ -106,7 +106,7 @@ function MasterDocumentIndexPageInner() {
     try {
       await api(`/documents/${item.id}`, { method: 'DELETE' });
       setItems((current) => current.filter((row) => row.id !== item.id));
-      setNotice(`Deleted ${item.code}.`);
+      setNotice(`Moved ${item.code} to the recycle bin.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to delete document');
     } finally {

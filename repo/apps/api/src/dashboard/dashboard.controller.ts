@@ -1,6 +1,6 @@
 import { BadRequestException, Controller, Get, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Between, In, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
+import { Between, In, IsNull, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
 import { Public } from '../common/public.decorator';
 import { DatabaseService } from '../database/database.service';
 import { ImportStatus, ProjectStatus, DocumentStatus, ApprovalStatus } from '../database/entities';
@@ -115,8 +115,8 @@ export class DashboardController {
     // 2. CORE METRICS
     // ──────────────────────────────────────────────────────────────────────────
     const [totalDocuments, currentVersions] = await Promise.all([
-      this.db.documents.count(),
-      this.db.documentVersions.count({ where: { isCurrent: true } }),
+      this.db.documents.count({ where: { deletedAt: IsNull() } }),
+      this.db.documentVersions.count({ where: { isCurrent: true, document: { deletedAt: IsNull() } } }),
     ]);
 
     // Imports in selected period
@@ -165,9 +165,9 @@ export class DashboardController {
     // Document.status SUPERSEDED is rarely set on NEW_VERSION imports (doc stays CURRENT).
     // ──────────────────────────────────────────────────────────────────────────
     const [currentVersionCount, supersededVersionCount, archivedDocumentCount] = await Promise.all([
-      this.db.documentVersions.count({ where: { isCurrent: true } }),
-      this.db.documentVersions.count({ where: { isCurrent: false } }),
-      this.db.documents.count({ where: { status: DocumentStatus.ARCHIVED } }),
+      this.db.documentVersions.count({ where: { isCurrent: true, document: { deletedAt: IsNull() } } }),
+      this.db.documentVersions.count({ where: { isCurrent: false, document: { deletedAt: IsNull() } } }),
+      this.db.documents.count({ where: { status: DocumentStatus.ARCHIVED, deletedAt: IsNull() } }),
     ]);
     const statusTotal = currentVersionCount + supersededVersionCount + archivedDocumentCount;
     const statusDistribution = [
@@ -197,6 +197,7 @@ export class DashboardController {
     const recentDocuments = await this.db.documents.find({
       take: 4,
       order: { updatedAt: 'DESC' },
+      where: { deletedAt: IsNull() },
       relations: { project: true, section: true, versions: true },
     });
 

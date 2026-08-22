@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
+import { IsNull, Not } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { verifyStoredBinaryIntegrity } from '../common/binary-integrity.util';
 import { VpsStorageService } from '../storage/vps-storage.service';
@@ -13,9 +14,21 @@ import {
   RelationshipType,
 } from '../database/entities';
 
+const RECYCLE_BIN_RETENTION_DAYS = 30;
+
 @Injectable()
 export class DocumentsService {
   constructor(private readonly db: DatabaseService, private readonly audit: AuditService, private readonly storage: VpsStorageService) {}
+
+  private recycleBinPurgeAfter(from = new Date()) {
+    return new Date(from.getTime() + RECYCLE_BIN_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  }
+
+  private assertNotInBin(document: Document) {
+    if (document.deletedAt) {
+      throw new NotFoundException('Document not found (it is in the recycle bin)');
+    }
+  }
 
   async list(filters: { projectId?: string; sectionId?: string; search?: string; status?: string }) {
     // Heal Index/Explorer drift: DB rows whose files were wiped by older deletes.
@@ -25,6 +38,7 @@ export class DocumentsService {
       .leftJoinAndSelect('document.project', 'project')
       .leftJoinAndSelect('document.section', 'section')
       .leftJoinAndSelect('document.versions', 'versions')
+      .where('document.deletedAt IS NULL')
       .orderBy('document.updatedAt', 'DESC');
     if (filters.projectId) qb.andWhere('project.id = :projectId', { projectId: filters.projectId });
     if (filters.sectionId) qb.andWhere('section.id = :sectionId', { sectionId: filters.sectionId });
@@ -45,6 +59,54 @@ export class DocumentsService {
     }));
   }
 
+  async listBin(filters: { projectId?: string; search?: string } = {}) {
+    const qb = this.db.documents.createQueryBuilder('document')
+      .leftJoinAndSelect('document.project', 'project')
+      .leftJoinAndSelect('document.section', 'section')
+      .leftJoinAndSelect('document.deletedBy', 'deletedBy')
+      .leftJoinAndSelect('document.versions', 'versions')
+      .where('document.deletedAt IS NOT NULL')
+      .orderBy('document.deletedAt', 'DESC');
+    if (filters.projectId) qb.andWhere('project.id = :projectId', { projectId: filters.projectId });
+    if (filters.search) {
+      qb.andWhere(
+        '(document.title ILIKE :search OR document.code ILIKE :search OR document.binOriginalCode ILIKE :search OR document.documentType ILIKE :search)',
+        { search: `%${filters.search}%` },
+      );
+    }
+    const documents = await qb.getMany();
+    const now = Date.now();
+    return documents.map((document) => {
+      const displayCode = document.binOriginalCode || document.code;
+      const purgeAfter = document.purgeAfter ? new Date(document.purgeAfter) : null;
+      const daysRemaining = purgeAfter
+        ? Math.max(0, Math.ceil((purgeAfter.getTime() - now) / (24 * 60 * 60 * 1000)))
+        : null;
+      return {
+        id: document.id,
+        code: displayCode,
+        binCode: document.code,
+        title: document.title,
+        documentType: document.documentType,
+        status: document.status,
+        currentVersionNo: document.currentVersionNo,
+        deletedAt: document.deletedAt,
+        purgeAfter: document.purgeAfter,
+        daysRemaining,
+        deletedBy: document.deletedBy
+          ? { id: document.deletedBy.id, name: document.deletedBy.name, email: document.deletedBy.email }
+          : null,
+        project: document.project
+          ? { id: document.project.id, code: document.project.code, name: document.project.name }
+          : null,
+        section: document.section
+          ? { id: document.section.id, name: document.section.name }
+          : null,
+        versionCount: document.versions?.length ?? 0,
+      };
+    });
+  }
+
   async get(id: string) {
     const document = await this.db.documents.findOne({
       where: { id },
@@ -61,7 +123,7 @@ export class DocumentsService {
         noteEntries: { createdAt: 'ASC' },
       },
     });
-    if (!document) throw new NotFoundException('Document not found');
+    if (!document || document.deletedAt) throw new NotFoundException('Document not found');
     document.versions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     document.importJobs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     document.noteEntries = [...(document.noteEntries ?? [])].sort(
@@ -111,6 +173,7 @@ export class DocumentsService {
       relations: { project: true, section: true, versions: true, currentVersion: true },
     });
     if (!document) throw new NotFoundException('Document not found');
+    this.assertNotInBin(document);
 
     const before = {
       title: document.title,
@@ -177,7 +240,7 @@ export class DocumentsService {
 
     if (code !== document.code || project.id !== document.project.id) {
       const duplicate = await this.db.documents.findOne({
-        where: { project: { id: project.id }, code },
+        where: { project: { id: project.id }, code, deletedAt: IsNull() },
       });
       if (duplicate && duplicate.id !== document.id) {
         throw new BadRequestException(`Document code ${code} already exists in this project`);
@@ -365,6 +428,7 @@ export class DocumentsService {
 
     const document = await this.db.documents.findOne({ where: { id } });
     if (!document) throw new NotFoundException('Document not found');
+    this.assertNotInBin(document);
 
     const createdBy = userId
       ? await this.db.users.findOne({ where: { id: userId } })
@@ -390,23 +454,139 @@ export class DocumentsService {
   }
 
   /**
-   * Hard-delete a document row and its version files.
-   * ZIP pack members share a pack folder — only that member's files are removed
-   * (never wipe the whole pack/section, which used to orphan siblings still listed in Index).
+   * Move a document to the recycle bin (kept for 30 days). Storage files stay on disk.
+   * Pass { permanent: true } to hard-delete immediately (admin / purge).
    */
-  async remove(id: string, userId?: string, options?: { skipPurge?: boolean }) {
+  async remove(id: string, userId?: string, options?: { skipPurge?: boolean; permanent?: boolean }) {
+    if (options?.permanent) {
+      return this.hardRemove(id, userId, { skipPurge: options.skipPurge });
+    }
+
+    const document = await this.db.documents.findOne({
+      where: { id },
+      relations: { project: true, section: true, versions: true },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+    if (document.deletedAt) {
+      return {
+        deleted: true,
+        softDeleted: true,
+        id,
+        code: document.binOriginalCode || document.code,
+        projectId: document.project.id,
+        purgeAfter: document.purgeAfter,
+      };
+    }
+
+    const deletedAt = new Date();
+    const purgeAfter = this.recycleBinPurgeAfter(deletedAt);
+    const originalCode = document.code;
+    const deletedBy = userId
+      ? await this.db.users.findOne({ where: { id: userId } })
+      : null;
+
+    document.binOriginalCode = originalCode;
+    document.code = `${originalCode}__bin__${document.id.replace(/-/g, '').slice(0, 8)}`;
+    document.deletedAt = deletedAt;
+    document.purgeAfter = purgeAfter;
+    document.deletedBy = deletedBy;
+    await this.db.documents.save(document);
+
+    await this.storage.refreshRegisters(document.project.id).catch(() => undefined);
+
+    await this.audit.record({
+      userId,
+      action: 'DOCUMENT_BIN',
+      entityType: 'Document',
+      entityId: id,
+      message: `Moved document ${originalCode} to recycle bin (purge after ${purgeAfter.toISOString().slice(0, 10)})`,
+      before: {
+        id: document.id,
+        code: originalCode,
+        title: document.title,
+        projectId: document.project.id,
+        versionCount: document.versions?.length ?? 0,
+      },
+      after: { purgeAfter, binCode: document.code },
+    });
+
+    return {
+      deleted: true,
+      softDeleted: true,
+      id,
+      code: originalCode,
+      projectId: document.project.id,
+      purgeAfter,
+      retentionDays: RECYCLE_BIN_RETENTION_DAYS,
+    };
+  }
+
+  async restore(id: string, userId?: string) {
+    const document = await this.db.documents.findOne({
+      where: { id },
+      relations: { project: true, section: true },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+    if (!document.deletedAt) {
+      throw new BadRequestException('Document is not in the recycle bin');
+    }
+
+    const restoreCode = (document.binOriginalCode || document.code.replace(/__bin__[a-f0-9]+$/i, '')).trim().toUpperCase();
+    if (!restoreCode) throw new BadRequestException('Cannot restore: original document code is missing');
+
+    const clash = await this.db.documents.findOne({
+      where: { project: { id: document.project.id }, code: restoreCode, deletedAt: IsNull() },
+    });
+    if (clash && clash.id !== document.id) {
+      throw new BadRequestException(
+        `Cannot restore: document code ${restoreCode} is already used by another document in this project`,
+      );
+    }
+
+    const before = {
+      code: document.binOriginalCode,
+      deletedAt: document.deletedAt,
+      purgeAfter: document.purgeAfter,
+    };
+
+    document.code = restoreCode;
+    document.binOriginalCode = null;
+    document.deletedAt = null;
+    document.purgeAfter = null;
+    document.deletedBy = null;
+    await this.db.documents.save(document);
+
+    await this.storage.refreshRegisters(document.project.id).catch(() => undefined);
+
+    await this.audit.record({
+      userId,
+      action: 'DOCUMENT_RESTORE',
+      entityType: 'Document',
+      entityId: id,
+      message: `Restored document ${restoreCode} from recycle bin`,
+      before,
+      after: { code: restoreCode },
+    });
+
+    return this.get(id);
+  }
+
+  /** Permanently delete DB rows and storage files (admin / expired bin purge). */
+  async hardRemove(id: string, userId?: string, options?: { skipPurge?: boolean }) {
     const document = await this.db.documents.findOne({
       where: { id },
       relations: { project: true, section: true, versions: true },
     });
     if (!document) throw new NotFoundException('Document not found');
 
+    const displayCode = document.binOriginalCode || document.code;
     const before = {
       id: document.id,
-      code: document.code,
+      code: displayCode,
       title: document.title,
       projectId: document.project.id,
       versionCount: document.versions?.length ?? 0,
+      softDeleted: Boolean(document.deletedAt),
     };
 
     const versions = document.versions ?? [];
@@ -416,8 +596,6 @@ export class DocumentsService {
       return meta?.zipPack === true || Boolean(meta?.zipEntry);
     });
 
-    // Normal docs: repository/.../{code}/v{n}/{file} → remove the {code} directory after files.
-    // ZIP packs: only unlink member files (+ history copies); prune empty dirs up to the pack root.
     const documentDirectories = new Set<string>();
     if (!isZipPack) {
       for (const path of storagePaths) {
@@ -465,21 +643,51 @@ export class DocumentsService {
       action: 'DOCUMENT_DELETE',
       entityType: 'Document',
       entityId: id,
-      message: `Deleted document ${before.code}`,
+      message: `Permanently deleted document ${before.code}`,
       before,
     });
 
-    // Clear Index ghosts left by older deletes that wiped disk files but left DB rows.
     if (!options?.skipPurge) {
       await this.purgeMissingStorage(document.project.id, userId).catch(() => undefined);
     }
 
-    return { deleted: true, id, code: before.code, projectId: before.projectId };
+    return { deleted: true, permanent: true, id, code: before.code, projectId: before.projectId };
+  }
+
+  /** Hard-delete recycle-bin items whose retention window has expired. */
+  async purgeExpiredBin(userId?: string) {
+    const now = new Date();
+    const candidates = await this.db.documents.find({
+      where: { deletedAt: Not(IsNull()) },
+      select: { id: true, deletedAt: true, purgeAfter: true, code: true, binOriginalCode: true },
+    });
+
+    const toPurge = candidates.filter((row) => {
+      if (!row.deletedAt) return false;
+      const due = row.purgeAfter ?? this.recycleBinPurgeAfter(row.deletedAt);
+      return due.getTime() <= now.getTime();
+    });
+
+    const purged: Array<{ id: string; code: string }> = [];
+    for (const row of toPurge) {
+      try {
+        const result = await this.hardRemove(row.id, userId, { skipPurge: true });
+        purged.push({ id: result.id, code: result.code });
+      } catch {
+        // continue remaining items
+      }
+    }
+
+    return {
+      purged: purged.length,
+      retentionDays: RECYCLE_BIN_RETENTION_DAYS,
+      documents: purged,
+    };
   }
 
   /**
-   * Delete a repository folder (imported pack folder or configured module) and everything under it:
-   * documents/versions in DB, files on disk, and the ProjectSection row when it is a module.
+   * Soft-delete every active document under a repository folder into the recycle bin.
+   * Files stay on disk until permanent purge so admins can restore.
    */
   async deleteRepositoryFolder(projectId: string, folderPath: string, userId?: string) {
     const project = await this.db.projects.findOne({
@@ -512,7 +720,7 @@ export class DocumentsService {
     }
 
     const documents = await this.db.documents.find({
-      where: { project: { id: projectId } },
+      where: { project: { id: projectId }, deletedAt: IsNull() },
       relations: { versions: true, section: true, project: true },
     });
     const prefix = `${normalised}/`;
@@ -533,45 +741,44 @@ export class DocumentsService {
     });
 
     for (const document of toDelete) {
-      await this.remove(document.id, userId, { skipPurge: true });
-    }
-
-    await this.storage.removeDirectory(normalised);
-
-    if (section) {
-      await this.db.projectSections.remove(section);
+      await this.remove(document.id, userId);
     }
 
     await this.storage.refreshRegisters(projectId).catch(() => undefined);
     await this.audit.record({
       userId,
-      action: 'DOCUMENT_DELETE',
+      action: 'DOCUMENT_BIN',
       entityType: section ? 'ProjectSection' : 'RepositoryFolder',
       entityId: section?.id ?? normalised,
       message: section
-        ? `Deleted module folder ${section.name} and ${toDelete.length} document(s)`
-        : `Deleted folder ${normalised} and ${toDelete.length} document(s)`,
+        ? `Moved module folder ${section.name} contents to recycle bin (${toDelete.length} document(s))`
+        : `Moved folder ${normalised} contents to recycle bin (${toDelete.length} document(s))`,
       before: {
         path: normalised,
         sectionId: section?.id ?? null,
         sectionName: section?.name ?? null,
-        documentsDeleted: toDelete.map((document) => document.code),
+        documentsBinned: toDelete.map((document) => document.code),
+        retentionDays: RECYCLE_BIN_RETENTION_DAYS,
       },
     });
 
     return {
       deleted: true,
+      softDeleted: true,
       path: normalised,
       documentsDeleted: toDelete.length,
-      sectionDeleted: Boolean(section),
+      sectionDeleted: false,
       sectionId: section?.id ?? null,
+      retentionDays: RECYCLE_BIN_RETENTION_DAYS,
     };
   }
 
   /** Remove documents whose version files are no longer on disk (orphans vs Explorer tree). */
   async purgeMissingStorage(projectId?: string, userId?: string) {
     const documents = await this.db.documents.find({
-      where: projectId ? { project: { id: projectId } } : {},
+      where: projectId
+        ? { project: { id: projectId }, deletedAt: IsNull() }
+        : { deletedAt: IsNull() },
       relations: { versions: true, project: true, section: true },
     });
     const purged: Array<{ id: string; code: string }> = [];
@@ -580,7 +787,7 @@ export class DocumentsService {
         .map((version) => version.storagePath)
         .filter(Boolean) as string[];
       if (!paths.length) {
-        await this.remove(document.id, userId, { skipPurge: true });
+        await this.hardRemove(document.id, userId, { skipPurge: true });
         purged.push({ id: document.id, code: document.code });
         continue;
       }
@@ -592,7 +799,7 @@ export class DocumentsService {
         }
       }
       if (!anyExists) {
-        await this.remove(document.id, userId, { skipPurge: true });
+        await this.hardRemove(document.id, userId, { skipPurge: true });
         purged.push({ id: document.id, code: document.code });
       }
     }
@@ -606,6 +813,7 @@ export class DocumentsService {
       .leftJoinAndSelect('document.section', 'section')
       .leftJoinAndSelect('version.createdBy', 'createdBy')
       .where('version.document_id IS NOT NULL')
+      .andWhere('document.deletedAt IS NULL')
       .orderBy('version.createdAt', 'DESC');
     if (projectId) qb.andWhere('project.id = :projectId', { projectId });
     return qb.getMany();
@@ -620,16 +828,17 @@ export class DocumentsService {
       .leftJoinAndSelect('toDocument.project', 'toProject')
       .leftJoinAndSelect('toDocument.section', 'toSection')
       .leftJoinAndSelect('relationship.createdBy', 'createdBy')
+      .where('fromDocument.deletedAt IS NULL AND toDocument.deletedAt IS NULL')
       .orderBy('relationship.createdAt', 'DESC');
-    if (projectId) qb.where('fromProject.id = :projectId OR toProject.id = :projectId', { projectId });
+    if (projectId) qb.andWhere('fromProject.id = :projectId OR toProject.id = :projectId', { projectId });
     return qb.getMany();
   }
 
   async createRelationship(input: { fromDocumentId: string; toDocumentId: string; type?: RelationshipType; description?: string }, userId?: string) {
     if (input.fromDocumentId === input.toDocumentId) throw new BadRequestException('A document cannot be related to itself');
     const [fromDocument, toDocument, createdBy] = await Promise.all([
-      this.db.documents.findOne({ where: { id: input.fromDocumentId } }),
-      this.db.documents.findOne({ where: { id: input.toDocumentId } }),
+      this.db.documents.findOne({ where: { id: input.fromDocumentId, deletedAt: IsNull() } }),
+      this.db.documents.findOne({ where: { id: input.toDocumentId, deletedAt: IsNull() } }),
       userId ? this.db.users.findOne({ where: { id: userId } }) : Promise.resolve(null),
     ]);
     if (!fromDocument || !toDocument) throw new BadRequestException('Both documents must exist');
@@ -677,7 +886,7 @@ export class DocumentsService {
 
   async versionFile(versionId: string) {
     const version = await this.db.documentVersions.findOne({ where: { id: versionId }, relations: { document: true } });
-    if (!version) throw new NotFoundException('Document version not found');
+    if (!version || version.document?.deletedAt) throw new NotFoundException('Document version not found');
     const absolutePath = this.storage.resolveStoragePath(version.storagePath);
     if (!(await this.storage.exists(absolutePath))) {
       throw new NotFoundException('Stored file is missing on the server');

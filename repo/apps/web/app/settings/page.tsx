@@ -40,6 +40,7 @@ export default function SettingsPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <a className="button primary" href="/settings/source-connections">Source Connections</a>
           <a className="button" href="/imports/queue">Import Queue</a>
+          <a className="button" href="/settings/bin">Recycle bin</a>
           <a className="button" href="/settings/audit">System logs</a>
         </div>
       </div>

@@ -21,6 +21,27 @@ export class DocumentsController {
     return this.documents.list({ projectId, sectionId, search, status });
   }
 
+  @Get('documents/bin')
+  @UseGuards(RolesGuard)
+  @Roles(...DOCUMENT_MUTATION_ROLES)
+  listBin(@Query('projectId') projectId?: string, @Query('search') search?: string) {
+    return this.documents.listBin({ projectId, search });
+  }
+
+  @Post('documents/:id/restore')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  restore(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.documents.restore(id, user?.id);
+  }
+
+  @Delete('documents/:id/permanent')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  permanentRemove(@Param('id') id: string, @CurrentUser() user: { id?: string } | null) {
+    return this.documents.remove(id, user?.id, { permanent: true });
+  }
+
   @Get('documents/:id') get(@Param('id') id: string) { return this.documents.get(id); }
 
   @Patch('documents/:id')

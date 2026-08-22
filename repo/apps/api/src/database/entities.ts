@@ -466,6 +466,12 @@ export class Document {
   @OneToMany(() => DocumentRelationship, (rel) => rel.toDocument) incomingRelationships!: DocumentRelationship[];
   @OneToMany(() => ImportJob, (job) => job.document) importJobs!: ImportJob[];
   @OneToMany(() => DocumentNote, (note) => note.document) noteEntries!: DocumentNote[];
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true }) deletedAt!: Date | null;
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'deleted_by_id' }) deletedBy!: User | null;
+  @Column({ name: 'purge_after', type: 'timestamptz', nullable: true }) purgeAfter!: Date | null;
+  /** Original document code while the row is in the recycle bin (code is renamed to free uniqueness). */
+  @Column({ name: 'bin_original_code', type: 'varchar', nullable: true }) binOriginalCode!: string | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 }

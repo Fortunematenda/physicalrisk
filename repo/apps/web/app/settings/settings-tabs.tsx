@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 const TABS = [
   { href: '/settings', label: 'Overview', match: (path: string) => path === '/settings' },
+  { href: '/settings/bin', label: 'Bin', match: (path: string) => path.startsWith('/settings/bin') },
   { href: '/settings/audit', label: 'Logs', match: (path: string) => path.startsWith('/settings/audit') },
 ] as const;
 
