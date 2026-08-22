@@ -29,8 +29,23 @@ export function useVersionPreview(version: VersionItem | null | undefined) {
           headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
           credentials: 'same-origin',
         });
-        if (!response.ok) throw new Error('Preview could not be loaded.');
+        if (!response.ok) {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const body = await response.json().catch(() => null) as { message?: string } | null;
+            throw new Error(body?.message || 'Preview could not be loaded.');
+          }
+          throw new Error('Preview could not be loaded.');
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json') || contentType.includes('text/html')) {
+          throw new Error('Preview returned an error body instead of the file.');
+        }
         const blob = await response.blob();
+        const contentLength = response.headers.get('content-length');
+        if (contentLength && blob.size !== Number(contentLength)) {
+          throw new Error('Preview download was truncated.');
+        }
         objectUrl = URL.createObjectURL(blob);
         if (!cancelled) setPreviewUrl(objectUrl);
       } catch (caught) {

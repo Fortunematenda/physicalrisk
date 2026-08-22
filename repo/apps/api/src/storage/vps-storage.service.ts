@@ -125,7 +125,7 @@ export class VpsStorageService implements OnApplicationBootstrap {
     try {
       zip = new AdmZip(absolute);
     } catch {
-      throw new BadRequestException('Unable to read ZIP archive');
+      throw new BadRequestException('Corrupted zip: can\'t find end of central directory');
     }
 
     const members: ZipMember[] = [];

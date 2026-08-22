@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import { AuditService } from '../common/audit.service';
+import { verifyStoredBinaryIntegrity } from '../common/binary-integrity.util';
 import { VpsStorageService } from '../storage/vps-storage.service';
 import { DatabaseService } from '../database/database.service';
 import {
@@ -682,5 +683,20 @@ export class DocumentsService {
       throw new NotFoundException('Stored file is missing on the server');
     }
     return { version, absolutePath };
+  }
+
+  /**
+   * Resolve a version file and verify binary integrity before any download/stream.
+   * APPROVED/IMPORTED alone is not sufficient — checksum (+ ZIP EOCD) must pass.
+   */
+  async prepareBinaryDownload(versionId: string) {
+    const { version, absolutePath } = await this.versionFile(versionId);
+    const integrity = await verifyStoredBinaryIntegrity({
+      absolutePath,
+      expectedSha256: version.checksum,
+      fileName: version.originalFileName,
+      mimeType: version.mimeType,
+    });
+    return { version, absolutePath, integrity };
   }
 }

@@ -140,7 +140,16 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   if (upstreamType) outHeaders.set('content-type', upstreamType);
   const disposition = upstream.headers.get('content-disposition');
   if (disposition) outHeaders.set('content-disposition', disposition);
+  const contentLength = upstream.headers.get('content-length');
+  if (contentLength) outHeaders.set('content-length', contentLength);
+  const checksum = upstream.headers.get('x-checksum-sha256');
+  if (checksum) outHeaders.set('x-checksum-sha256', checksum);
+  const digest = upstream.headers.get('digest');
+  if (digest) outHeaders.set('digest', digest);
+  const zipEntries = upstream.headers.get('x-zip-entry-count');
+  if (zipEntries) outHeaders.set('x-zip-entry-count', zipEntries);
   outHeaders.set('x-request-id', requestId);
+  outHeaders.set('cache-control', 'no-store');
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

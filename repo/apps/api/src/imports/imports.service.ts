@@ -4,6 +4,7 @@ import { extname } from 'node:path';
 import { lookup as mimeLookup } from 'mime-types';
 import { Brackets, In } from 'typeorm';
 import { AuditService } from '../common/audit.service';
+import { assertZipBufferIntegrity, assertZipFileIntegrity, isZipLike } from '../common/binary-integrity.util';
 import { DatabaseService } from '../database/database.service';
 import {
   ApprovalStatus,
@@ -188,6 +189,10 @@ export class ImportsService {
         await this.storage.remove(draftJob.incomingPath).catch(() => undefined);
       }
       const staged = await this.storage.stageIncoming(file.originalname, file.buffer);
+      if (isZipLike(file.originalname, file.mimetype)) {
+        assertZipBufferIntegrity(file.buffer);
+        await assertZipFileIntegrity(staged.absolutePath);
+      }
       incomingPath = staged.relativePath;
       mimeType = file.mimetype || 'application/octet-stream';
       checksum = createHash('sha256').update(file.buffer).digest('hex');
@@ -358,6 +363,10 @@ export class ImportsService {
         throw new BadRequestException(`File exceeds the ${fileType.maxSizeMb} MB limit`);
       }
       const staged = await this.storage.stageIncoming(file.originalname, file.buffer);
+      if (isZipLike(file.originalname, file.mimetype)) {
+        assertZipBufferIntegrity(file.buffer);
+        await assertZipFileIntegrity(staged.absolutePath);
+      }
       fileName = file.originalname;
       incomingPath = staged.relativePath;
       mimeType = file.mimetype || 'application/octet-stream';
@@ -633,6 +642,7 @@ export class ImportsService {
 
       // ZIP: extract into a pack folder (default / MCP), or store the archive as-is when extractZip=false.
       if (extension === 'zip') {
+        await assertZipFileIntegrity(this.storage.resolveStoragePath(job.incomingPath));
         const shouldExtract = wantsZipExtraction(metadata.extractZip);
         if (shouldExtract !== false) {
           return this.processZipPack(id, job, section, metadata, userId);

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import AdmZip = require('adm-zip');
+import { buildZipArchive } from '../common/zip-archive.util';
 
 export type OfficeFormat = 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'txt';
 
@@ -10,7 +10,7 @@ export type MarkdownOfficeOptions = {
 
 /**
  * Lightweight Markdown → DOCX / XLSX / PPTX / TXT for MCP same-chat submissions.
- * Uses OOXML + adm-zip (already a dependency) — no LibreOffice required.
+ * OOXML packages are built with archiver (finalize + EOCD validation) — never truncated AdmZip buffers.
  * Legacy .doc / .xls / .ppt requests are mapped to modern .docx / .xlsx / .pptx.
  * Plain text (.txt) stores the chat body as UTF-8 without PDF conversion.
  */
@@ -21,7 +21,7 @@ export class McpMarkdownOfficeService {
   async renderDocx(markdown: string, options: MarkdownOfficeOptions = {}): Promise<Buffer> {
     const title = (options.title || 'Approved Document').trim() || 'Approved Document';
     try {
-      return this.buildDocx(markdown, title);
+      return await this.buildDocx(markdown, title);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Markdown→DOCX failed: ${message}`);
@@ -32,7 +32,7 @@ export class McpMarkdownOfficeService {
   async renderXlsx(markdown: string, options: MarkdownOfficeOptions = {}): Promise<Buffer> {
     const title = (options.title || 'Approved Document').trim() || 'Approved Document';
     try {
-      return this.buildXlsx(markdown, title);
+      return await this.buildXlsx(markdown, title);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Markdown→XLSX failed: ${message}`);
@@ -43,7 +43,7 @@ export class McpMarkdownOfficeService {
   async renderPptx(markdown: string, options: MarkdownOfficeOptions = {}): Promise<Buffer> {
     const title = (options.title || 'Approved Document').trim() || 'Approved Document';
     try {
-      return this.buildPptx(markdown, title);
+      return await this.buildPptx(markdown, title);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Markdown→PPTX failed: ${message}`);
@@ -165,7 +165,7 @@ export class McpMarkdownOfficeService {
     return `${base}.pdf`;
   }
 
-  private buildDocx(markdown: string, title: string): Buffer {
+  private async buildDocx(markdown: string, title: string): Promise<Buffer> {
     const body = this.stripDuplicateLeadingTitle(markdown, title);
     const paragraphsXml = this.markdownToDocxParagraphs(body, title);
     const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -191,14 +191,15 @@ export class McpMarkdownOfficeService {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
 
-    const zip = new AdmZip();
-    zip.addFile('[Content_Types].xml', Buffer.from(contentTypes, 'utf8'));
-    zip.addFile('_rels/.rels', Buffer.from(rels, 'utf8'));
-    zip.addFile('word/document.xml', Buffer.from(documentXml, 'utf8'));
-    return zip.toBuffer();
+    const zip = await buildZipArchive([
+      { name: '[Content_Types].xml', data: Buffer.from(contentTypes, 'utf8') },
+      { name: '_rels/.rels', data: Buffer.from(rels, 'utf8') },
+      { name: 'word/document.xml', data: Buffer.from(documentXml, 'utf8') },
+    ]);
+    return zip.buffer;
   }
 
-  private buildXlsx(markdown: string, title: string): Buffer {
+  private async buildXlsx(markdown: string, title: string): Promise<Buffer> {
     const rows = this.markdownToSheetRows(markdown, title);
     const sheetXml = this.sheetXmlFromRows(rows);
     const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -227,18 +228,19 @@ export class McpMarkdownOfficeService {
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 </Types>`;
 
-    const zip = new AdmZip();
-    zip.addFile('[Content_Types].xml', Buffer.from(contentTypes, 'utf8'));
-    zip.addFile('_rels/.rels', Buffer.from(rootRels, 'utf8'));
-    zip.addFile('xl/workbook.xml', Buffer.from(workbookXml, 'utf8'));
-    zip.addFile('xl/_rels/workbook.xml.rels', Buffer.from(workbookRels, 'utf8'));
-    zip.addFile('xl/worksheets/sheet1.xml', Buffer.from(sheetXml, 'utf8'));
-    return zip.toBuffer();
+    const zip = await buildZipArchive([
+      { name: '[Content_Types].xml', data: Buffer.from(contentTypes, 'utf8') },
+      { name: '_rels/.rels', data: Buffer.from(rootRels, 'utf8') },
+      { name: 'xl/workbook.xml', data: Buffer.from(workbookXml, 'utf8') },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(workbookRels, 'utf8') },
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheetXml, 'utf8') },
+    ]);
+    return zip.buffer;
   }
 
-  private buildPptx(markdown: string, title: string): Buffer {
+  private async buildPptx(markdown: string, title: string): Promise<Buffer> {
     const slides = this.markdownToSlides(markdown, title);
-    const zip = new AdmZip();
+    const entries: Array<{ name: string; data: Buffer }> = [];
 
     const slideOverrides = slides
       .map((_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`)
@@ -285,48 +287,68 @@ export class McpMarkdownOfficeService {
   <p:notesSz cx="6858000" cy="9144000"/>
 </p:presentation>`;
 
-    zip.addFile('[Content_Types].xml', Buffer.from(contentTypes, 'utf8'));
-    zip.addFile('_rels/.rels', Buffer.from(rootRels, 'utf8'));
-    zip.addFile('ppt/presentation.xml', Buffer.from(presentationXml, 'utf8'));
-    zip.addFile('ppt/_rels/presentation.xml.rels', Buffer.from(
-      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    entries.push(
+      { name: '[Content_Types].xml', data: Buffer.from(contentTypes, 'utf8') },
+      { name: '_rels/.rels', data: Buffer.from(rootRels, 'utf8') },
+      { name: 'ppt/presentation.xml', data: Buffer.from(presentationXml, 'utf8') },
+      {
+        name: 'ppt/_rels/presentation.xml.rels',
+        data: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   ${presentationRels}
 </Relationships>`,
-      'utf8',
-    ));
+          'utf8',
+        ),
+      },
+    );
 
     slides.forEach((slide, index) => {
       const n = index + 1;
-      zip.addFile(`ppt/slides/slide${n}.xml`, Buffer.from(this.slideXml(slide), 'utf8'));
-      zip.addFile(`ppt/slides/_rels/slide${n}.xml.rels`, Buffer.from(
-        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      entries.push(
+        { name: `ppt/slides/slide${n}.xml`, data: Buffer.from(this.slideXml(slide), 'utf8') },
+        {
+          name: `ppt/slides/_rels/slide${n}.xml.rels`,
+          data: Buffer.from(
+            `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
 </Relationships>`,
-        'utf8',
-      ));
+            'utf8',
+          ),
+        },
+      );
     });
 
-    zip.addFile('ppt/slideLayouts/slideLayout1.xml', Buffer.from(this.slideLayoutXml(), 'utf8'));
-    zip.addFile('ppt/slideLayouts/_rels/slideLayout1.xml.rels', Buffer.from(
-      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    entries.push(
+      { name: 'ppt/slideLayouts/slideLayout1.xml', data: Buffer.from(this.slideLayoutXml(), 'utf8') },
+      {
+        name: 'ppt/slideLayouts/_rels/slideLayout1.xml.rels',
+        data: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
 </Relationships>`,
-      'utf8',
-    ));
-    zip.addFile('ppt/slideMasters/slideMaster1.xml', Buffer.from(this.slideMasterXml(), 'utf8'));
-    zip.addFile('ppt/slideMasters/_rels/slideMaster1.xml.rels', Buffer.from(
-      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          'utf8',
+        ),
+      },
+      { name: 'ppt/slideMasters/slideMaster1.xml', data: Buffer.from(this.slideMasterXml(), 'utf8') },
+      {
+        name: 'ppt/slideMasters/_rels/slideMaster1.xml.rels',
+        data: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
 </Relationships>`,
-      'utf8',
-    ));
-    zip.addFile('ppt/theme/theme1.xml', Buffer.from(this.themeXml(), 'utf8'));
-    return zip.toBuffer();
+          'utf8',
+        ),
+      },
+      { name: 'ppt/theme/theme1.xml', data: Buffer.from(this.themeXml(), 'utf8') },
+    );
+
+    const zip = await buildZipArchive(entries);
+    return zip.buffer;
   }
 
   private markdownToSlides(markdown: string, title: string): Array<{ title: string; bullets: string[] }> {

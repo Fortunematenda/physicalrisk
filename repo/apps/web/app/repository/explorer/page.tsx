@@ -12,6 +12,7 @@ import { useConfirm } from '@/components/confirm-dialog';
 import { StatusBadge } from '@/components/status-badge';
 import { SuccessNotice } from '@/components/success-notice';
 import { API_URL, api, formatDate, getToken } from '@/lib/api';
+import { downloadBinaryFile } from '@/lib/download-binary';
 import { deriveSectionFields } from '@/lib/section-fields';
 import { DocumentDetailsInspector } from './components/DocumentDetailsInspector';
 import { DocumentPreview } from './components/DocumentPreview';
@@ -340,17 +341,12 @@ export default function RepositoryExplorerPage() {
 
   const download = async (version: VersionItem) => {
     try {
-      const response = await fetch(`${API_URL}/versions/${version.id}/download`, {
-        headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
-        credentials: 'same-origin',
+      await downloadBinaryFile({
+        url: `${API_URL}/versions/${version.id}/download`,
+        fileName: version.originalFileName || 'download',
+        token: getToken(),
+        expectedSha256: (version as { checksum?: string }).checksum || null,
       });
-      if (!response.ok) throw new Error('Download failed');
-      const url = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = version.originalFileName;
-      anchor.click();
-      URL.revokeObjectURL(url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Download failed.');
     }
@@ -376,7 +372,16 @@ export default function RepositoryExplorerPage() {
         credentials: 'same-origin',
       });
       if (!response.ok) throw new Error('File view failed');
-      const url = URL.createObjectURL(await response.blob());
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json') || contentType.includes('text/html')) {
+        throw new Error('Server returned an error instead of the file');
+      }
+      const blob = await response.blob();
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && blob.size !== Number(contentLength)) {
+        throw new Error('File download was truncated');
+      }
+      const url = URL.createObjectURL(blob);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'File view failed.');

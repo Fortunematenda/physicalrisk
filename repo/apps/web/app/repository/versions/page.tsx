@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { EmptyState } from '@/components/empty-state';
 import { api, API_URL, formatBytes, formatDate, getToken } from '@/lib/api';
+import { downloadBinaryFile } from '@/lib/download-binary';
 import styles from './VersionRegister.module.css';
 
 type VersionRow = {
@@ -107,18 +108,12 @@ export default function VersionRegisterPage() {
     setDownloadingId(item.id);
     setError('');
     try {
-      const token = getToken();
-      const response = await fetch(`${API_URL}/versions/${item.id}/download`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      await downloadBinaryFile({
+        url: `${API_URL}/versions/${item.id}/download`,
+        fileName: item.originalFileName || 'download',
+        token: getToken(),
+        expectedSize: item.fileSize || null,
       });
-      if (!response.ok) throw new Error('Download failed');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = item.originalFileName;
-      anchor.click();
-      URL.revokeObjectURL(url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Download failed');
     } finally {

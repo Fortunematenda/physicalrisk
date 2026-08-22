@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { Loading } from '@/components/loading';
 import { api, API_URL, formatBytes, formatDate, getToken } from '@/lib/api';
+import { downloadBinaryFile } from '@/lib/download-binary';
 import { useConfirm } from '@/components/confirm-dialog';
 import { SuccessNotice } from '@/components/success-notice';
 import styles from './DocumentDetails.module.css';
@@ -74,6 +75,7 @@ type DocumentRecord = {
     originalFileName: string;
     fileSize: number;
     mimeType?: string;
+    checksum?: string;
     storagePath: string;
     createdAt: string;
     createdBy?: { name?: string } | null;
@@ -305,24 +307,13 @@ export default function DocumentPage() {
   }, [editing, form.projectId, form.sectionId, activeSections]);
 
   const download = (version: DocumentRecord['versions'][number]) => {
-    const token = getToken();
-    fetch(`${API_URL}/versions/${version.id}/download`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'same-origin',
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Download failed');
-        return response.blob();
-      })
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = version.originalFileName;
-        anchor.click();
-        URL.revokeObjectURL(url);
-      })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Download failed'));
+    downloadBinaryFile({
+      url: `${API_URL}/versions/${version.id}/download`,
+      fileName: version.originalFileName || 'download',
+      token: getToken(),
+      expectedSha256: version.checksum || null,
+      expectedSize: version.fileSize || null,
+    }).catch((caught) => setError(caught instanceof Error ? caught.message : 'Download failed'));
   };
 
   const previewPdf = (version: DocumentRecord['versions'][number]) => {
