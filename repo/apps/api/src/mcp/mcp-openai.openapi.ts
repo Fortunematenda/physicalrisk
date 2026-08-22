@@ -101,6 +101,48 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     },
   };
 
+  /** FILE_PRESERVE — original bytes; no Markdown rebuild. */
+  const filePreservePayloadSchema = {
+    type: 'object',
+    required: ['payload'],
+    properties: {
+      payload: {
+        type: 'string',
+        description:
+          'JSON: projectCode, module, documentType, title, fileName; plus one of '
+          + 'fileContentBase64 | fileUrl | uploadId. Optional mimeType, mode=NEW_VERSION, workspaceCode. '
+          + 'Do NOT put documentContent here — that rebuilds the file.',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original name with extension (.docx / .xlsx / .pdf / .pptx)',
+      },
+    },
+  };
+
+  /** CONTENT_CREATE — intentional Markdown → generated document. */
+  const contentCreatePayloadSchema = {
+    type: 'object',
+    required: ['payload'],
+    properties: {
+      payload: {
+        type: 'string',
+        description:
+          'JSON: projectCode, module, documentType, title, documentContent; optional fileName, '
+          + 'outputFormat (pdf|docx|xlsx|pptx|txt), mode=NEW_VERSION, workspaceCode.',
+      },
+      outputFormat: {
+        type: 'string',
+        enum: ['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
+        description: 'Generated format when creating from Markdown (default pdf).',
+      },
+      fileName: {
+        type: 'string',
+        description: 'e.g. Plan.xlsx / Report.docx',
+      },
+    },
+  };
+
   const post = (
     operationId: string,
     summary: string,
@@ -132,7 +174,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.21.0',
+      version: '1.22.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -246,25 +288,45 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         },
         'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
       ),
+      '/api/mcp/tools/submit_approved_file': post(
+        'submit_approved_file',
+        'Preserve original DOCX/XLSX/PDF bytes (no rebuild)',
+        {
+          required: true,
+          content: { 'application/json': { schema: filePreservePayloadSchema } },
+        },
+        'FILE_PRESERVE: import exact original bytes via fileContentBase64, fileUrl, or uploadId. '
+          + 'Never use documentContent. Missing file → ORIGINAL_FILE_UNAVAILABLE.',
+      ),
+      '/api/mcp/tools/submit_approved_content': post(
+        'submit_approved_content',
+        'Create document from Markdown/text',
+        {
+          required: true,
+          content: { 'application/json': { schema: contentCreatePayloadSchema } },
+        },
+        'CONTENT_CREATE: intentional Markdown → generated file. Set outputFormat for Office/TXT. '
+          + 'Do not use when an original DOCX/XLSX/PDF must be preserved.',
+      ),
       '/api/mcp/tools/submit_approved_document': post(
         'submit_approved_document',
-        'Submit approved document (new or next version)',
+        'Legacy submit (prefer file or content tools)',
         {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Pass payload. Set top-level outputFormat when not PDF (xlsx/docx/pptx/txt). '
-          + 'Spreadsheet/.xlsx → outputFormat=xlsx (never PDF). '
-          + 'Put Markdown in documentContent. NEW_VERSION: mode + existingDocumentId/documentCode.',
+        'Legacy. Prefer submit_approved_file for originals, submit_approved_content for Markdown. '
+          + 'outputFormat=xlsx for spreadsheets. NEW_VERSION: mode + existingDocumentId/documentCode.',
       ),
       '/api/mcp/tools/prepare_approved_document': post(
         'prepare_approved_document',
-        'Prepare or submit (alias)',
+        'Prepare browser upload URL for original file',
         {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Same as submit_approved_document. Set outputFormat=xlsx for spreadsheets.',
+        'Returns uploadUrl for browser upload of the original file (FILE_PRESERVE path). '
+          + 'Prefer when ChatGPT cannot send file bytes in the Action call.',
       ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
@@ -459,43 +521,50 @@ Rules for menus:
 - Prefer short messages so ChatGPT can offer suggested-reply chips when available.
 
 ════════════════════════════════════
-OUTPUT FORMAT (critical — read every time)
+IMPORT MODE (critical — choose before submit)
 ════════════════════════════════════
-ChatGPT may show a downloadable .xlsx in the chat UI. That file is NOT sent to Repo automatically.
-You MUST set the format explicitly on submit_approved_document:
+1) ORIGINAL FILE EXISTS (user attached / downloadable DOCX, XLSX, PDF, PPTX in chat, or you have a file URL):
+   - Prefer submit_approved_file with the original bytes (fileContentBase64 / fileUrl / uploadId).
+   - If Actions cannot send bytes: call prepare_approved_document → give the user result.uploadUrl → they upload in browser → then get_import_status.
+   - NEVER put the file body into documentContent and rebuild — that destroys formatting/sheets/formulas.
+   - If submit_approved_file returns ORIGINAL_FILE_UNAVAILABLE, tell the user and use prepare/upload — do not fall back to Markdown rebuild.
+
+2) MARKDOWN / TEXT YOU WROTE IN THIS CHAT (no original Office/PDF artifact):
+   - Use submit_approved_content with documentContent + outputFormat/fileName.
+   - Set outputFormat = xlsx|docx|pptx|txt|pdf (and matching fileName extension).
+   - Spreadsheet/.xlsx → outputFormat=xlsx. NEVER PDF for Excel.
+   - Word → docx; PowerPoint → pptx; plain text → txt; PDF only if asked or no Office/TXT requested.
+
+3) Legacy submit_approved_document still works but prefer (1) or (2).
+
+════════════════════════════════════
+OUTPUT FORMAT (for CONTENT_CREATE / Markdown only)
+════════════════════════════════════
+When using submit_approved_content (or legacy submit with documentContent):
 - Top-level Action field outputFormat = xlsx|docx|pptx|txt|pdf
 - AND inside payload: "outputFormat":"…" and "fileName":"….xlsx" (or .docx/.pptx/.txt/.pdf)
-
-Rules:
-- If you created/showed a Spreadsheet or .xlsx/.xls, or the user asked for Excel: outputFormat=xlsx, fileName=*.xlsx. NEVER PDF.
-- If Word / .docx: outputFormat=docx. NEVER PDF.
-- If PowerPoint / .pptx: outputFormat=pptx. NEVER PDF.
-- If plain text / .txt: outputFormat=txt. NEVER PDF.
-- PDF only when the user asked for PDF or did not ask for Office/TXT.
 - NEVER send mimeType=application/pdf when using xlsx/docx/pptx/txt.
 - On success, tell the user the stored fileName extension (must match the requested format).
 
 STEP C — Auto fields (NEVER ask the user)
 - approvalDate = today (server default if omitted)
-- Output format: follow OUTPUT FORMAT rules above (default PDF only when no Office/TXT was requested)
+- Output format: only for CONTENT_CREATE — follow OUTPUT FORMAT rules above
 - versionNo = Rev 1.0 for NEW (or server bump for NEW_VERSION)
 - approvalStatus = APPROVED
 - approvedBy = the ChatGPT user's real name if they told you it in this chat; otherwise OMIT approvedBy (the server fills it from the MCP key owner's repo profile)
 - owner = same as approvedBy when you set it; otherwise omit
 - description = 1–2 sentence summary YOU write from the document
-- documentContent = the FULL Markdown you already generated in THIS chat (never ask the user to paste it again)
+- For CONTENT_CREATE: documentContent = the FULL Markdown you already generated in THIS chat (never ask the user to paste it again)
+- For FILE_PRESERVE: do NOT send documentContent
 
 STEP D — Import immediately after selections are complete
 As soon as project + documentType + module are known:
 1) Optional: check_document_exists (title or code) — if exists and user wants another version, use matches[0].newVersionSubmitHints (mode=NEW_VERSION).
-2) Call submit_approved_document ONCE with:
-   - top-level outputFormat when not PDF (especially xlsx for spreadsheets)
-   - payload JSON string containing at least:
-     projectCode, module, documentType, title, documentContent, description
-     and when not PDF: fileName + outputFormat (same as top-level)
-   Include owner and approvedBy only when you know the user's real name.
-3) Do NOT ask for date, MIME, filename, version, or content again.
-4) On success report: imported, documentCode, sectionName, importJobId, result.fileName (must show .xlsx/.docx/.pptx/.txt/.pdf), result.message.
+2) Choose mode:
+   - Original file → submit_approved_file (or prepare_approved_document + browser upload)
+   - Markdown you wrote → submit_approved_content with documentContent + outputFormat
+3) Do NOT ask for date, MIME, filename, version, or content again (except browser upload when FILE_PRESERVE needs it).
+4) On success report: imported, documentCode, sectionName, importJobId, result.fileName, result.importMode / conversionPerformed when present, result.message.
 5) Only mention Import Queue if needsReview=true.
 
 FORBIDDEN

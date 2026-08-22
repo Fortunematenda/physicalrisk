@@ -37,4 +37,12 @@ cd repo/apps/api
 npx jest --runInBand --forceExit mcp-file-preserve.spec.ts
 ```
 
-Connector: rebuild `repo-mcp` + `repo-api`, then in ChatGPT prefer `submit_approved_file` when a real file exists.
+Connector: rebuild `repo-api` (+ `repo-mcp` for Mode B). Then refresh ChatGPT:
+
+**Mode A (Custom GPT Actions):** GPT builder → Actions → re-import  
+`https://repo.physicalrisk.com/api/mcp/openai/openapi.json`  
+and paste updated GPT Instructions from Repo → Settings → MCP Integrations (or `/api/mcp/openai/gpt-instructions`).
+
+**Mode B (MCP connector):** reconnect / start a new chat so tool list refreshes (`submit_approved_file`, `submit_approved_content`).
+
+Prefer `submit_approved_file` when a real file exists.
