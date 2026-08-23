@@ -382,12 +382,17 @@ export class McpAuthService {
   }
 
   assertToolAllowed(integration: McpIntegration, toolName: McpToolName): void {
-    // Always available helpers for ChatGPT Actions name→ID mapping and chunked uploads.
+    // Always available: ChatGPT Actions binary-import path + helpers.
+    // Older keys may omit these from allowedTools (UI shipped before FILE_PRESERVE).
     if (
       toolName === 'resolve_import_targets'
       || toolName === 'prepare_approved_document'
       || toolName === 'begin_document_upload'
       || toolName === 'upload_document_chunk'
+      || toolName === 'submit_approved_file'
+      || toolName === 'submit_approved_content'
+      || toolName === 'search_documents'
+      || toolName === 'get_document'
     ) {
       return;
     }

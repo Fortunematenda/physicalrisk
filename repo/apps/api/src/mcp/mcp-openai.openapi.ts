@@ -183,21 +183,39 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'Same-chat: prefer submit_approved_file when an original DOCX/XLSX/PDF/PPTX exists '
-        + '(exact binary via fileUrl, uploadId, fileContentBase64, or prepare+browser upload). '
-        + 'Excel workbooks MUST use FILE_PRESERVE — never Markdown→PDF/XLSX rebuild (loses sheets/formulas). '
+        'DOCX and XLSX binary import IS SUPPORTED. ChatGPT Actions cannot attach file bytes — '
+        + 'call prepare_approved_document (or submit_approved_file) and give the user result.uploadUrl '
+        + 'to upload the exact .docx/.xlsx in a browser (FILE_PRESERVE; sheets/formulas kept). '
+        + 'NEVER claim the connector only accepts Markdown→PDF. '
         + 'Use submit_approved_content only for intentional Markdown imports. '
-        + 'Legacy submit_approved_document still accepted. '
-        + 'Supports NEW documents and NEW_VERSION revisions '
-        + '(mode=NEW_VERSION + existingDocumentId/documentCode; server bumps Rev). '
+        + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + existingDocumentId/documentCode). '
         + 'search_documents lists the Master Document Index. '
-        + 'writes Document Information, applies routing, '
-        + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.24.0',
+      version: '1.25.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
+      // Binary import first so ChatGPT Actions discover DOCX/XLSX support immediately.
+      '/api/mcp/tools/prepare_approved_document': post(
+        'prepare_approved_document',
+        'Upload URL for original DOCX/XLSX/PDF (exact binary)',
+        {
+          required: true,
+          content: { 'application/json': { schema: payloadSchema } },
+        },
+        'PRIMARY for original DOCX/XLSX/PDF/PPTX (any size). Returns uploadUrl — user uploads exact binary '
+          + 'in browser. FILE_PRESERVE. Never say DOCX is unsupported.',
+      ),
+      '/api/mcp/tools/submit_approved_file': post(
+        'submit_approved_file',
+        'Import original DOCX/XLSX/PDF/PPTX bytes (exact)',
+        {
+          required: true,
+          content: { 'application/json': { schema: filePreservePayloadSchema } },
+        },
+        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX bytes. Prefer fileUrl/uploadId/fileContentBase64. '
+          + 'If bytes missing, returns uploadUrl for browser upload. Never Markdown→PDF for originals.',
+      ),
       '/api/mcp/tools/list_repository_projects': post(
         'list_repository_projects',
         'List repository projects',
@@ -308,17 +326,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         },
         'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
       ),
-      '/api/mcp/tools/submit_approved_file': post(
-        'submit_approved_file',
-        'Import original XLSX/DOCX/PDF/PPTX bytes (exact)',
-        {
-          required: true,
-          content: { 'application/json': { schema: filePreservePayloadSchema } },
-        },
-        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX bytes. Prefer fileUrl/uploadId/fileContentBase64. '
-          + 'If bytes missing, returns uploadUrl for browser upload (ChatGPT cannot attach DOCX). '
-          + 'Never use documentContent for original Office files.',
-      ),
       '/api/mcp/tools/submit_approved_content': post(
         'submit_approved_content',
         'Create document from Markdown/text',
@@ -331,23 +338,13 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
       ),
       '/api/mcp/tools/submit_approved_document': post(
         'submit_approved_document',
-        'Legacy submit (prefer file or content tools)',
+        'Legacy submit (prefer prepare or submit_approved_file)',
         {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Legacy. Prefer submit_approved_file for originals, submit_approved_content for Markdown. '
+        'Legacy. Prefer prepare_approved_document for originals, submit_approved_content for Markdown. '
           + 'DOCX/XLSX fileName without bytes returns uploadUrl (no Markdown→PDF).',
-      ),
-      '/api/mcp/tools/prepare_approved_document': post(
-        'prepare_approved_document',
-        'Get browser upload URL for original DOCX/XLSX/PDF',
-        {
-          required: true,
-          content: { 'application/json': { schema: payloadSchema } },
-        },
-        'PRIMARY path for original DOCX/XLSX (any size). Returns uploadUrl — user uploads exact binary '
-          + 'in browser (FILE_PRESERVE). Required when ChatGPT cannot send file bytes.',
       ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
@@ -482,6 +479,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
+CRITICAL FACT (never contradict this):
+The Repo connector SUPPORTS exact DOCX, XLSX, PDF, and PPTX import. It is NOT Markdown-only. It does NOT require converting Office files to PDF.
+ChatGPT Actions cannot attach binary bytes — that is a ChatGPT limitation, not a Repo limitation.
+When the user has an original .docx/.xlsx: call prepare_approved_document, give them result.uploadUrl, and tell them to upload the exact file in the browser.
+NEVER say: "the connector cannot import DOCX", "only accepts Markdown", or "converts to PDF only".
+
 FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). From list_repository_projects.
 - module = Repository Module / folder (e.g. Articles). From list_repository_modules. NOT document type.
@@ -495,40 +498,32 @@ When user asks how many / list / what was imported / show index:
 3) Detail: get_document with documentCode (preferred) or documentId.
 Never invent documents. Never say the connector cannot list documents.
 
-════════════════════════════════════
-ORIGINAL DOCX / XLSX / PDF / PPTX (critical)
-════════════════════════════════════
-ChatGPT Actions CANNOT attach binary files. The Repo connector DOES support exact binary import.
-
-For ANY original .docx / .xlsx / .pdf / .pptx (small or large):
-1) After project + documentType + module are known, call prepare_approved_document (or submit_approved_file).
-2) Give the user result.uploadUrl as a clickable link immediately.
-3) Tell them: open the link, choose the exact original file, click Upload.
-4) Then call get_import_status with the importJobId from the upload success page / tool result.
-5) NEVER say "the connector cannot import DOCX/XLSX" or "only accepts Markdown→PDF" — that is false.
-6) NEVER put DOCX/XLSX content into documentContent and convert to PDF — that destroys structure/formulas.
-7) Large catalogues / big files: always prepare + browser upload (base64/payload will fail).
+ORIGINAL DOCX / XLSX / PDF / PPTX
+1) After project + documentType + module known → prepare_approved_document (or submit_approved_file).
+2) Immediately give clickable result.uploadUrl.
+3) User opens link → uploads exact original file → FILE_PRESERVE (structure/formulas kept).
+4) get_import_status with importJobId.
+5) Large files: always uploadUrl (never paste into documentContent).
 
 IMPORT MODE
-1) ORIGINAL FILE → prepare_approved_document / submit_approved_file → uploadUrl (FILE_PRESERVE).
-2) MARKDOWN you wrote in chat (no original Office file) → submit_approved_content + outputFormat.
-3) Legacy submit_approved_document: if fileName is .docx/.xlsx and no bytes, server returns uploadUrl — give that link to the user.
+1) Original file → prepare_approved_document / submit_approved_file → uploadUrl.
+2) Markdown you wrote (no original Office file) → submit_approved_content + outputFormat.
+3) Legacy submit_approved_document with .docx/.xlsx and no bytes → server returns uploadUrl; give that link.
 
 APPROVAL FLOW
 When user says approved / import / submit:
 STEP A — list_repository_projects, list_document_types; after project pick, list_repository_modules.
 STEP B — Numbered menus one at a time (project → type → module). "Reply with the number only (e.g. 2)."
-STEP C — Auto fields: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences you write.
-STEP D — Original file → prepare_approved_document + give uploadUrl. Markdown-only → submit_approved_content.
+STEP C — Auto: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences.
+STEP D — Original file → prepare_approved_document + uploadUrl. Markdown-only → submit_approved_content.
 
 FORBIDDEN
-- Claiming Repo only accepts Markdown→PDF when an original DOCX/XLSX exists.
-- Converting DOCX/XLSX/PPTX/TXT requests to PDF.
-- Pasting a whole large document into documentContent (use uploadUrl instead).
+- Claiming Repo only accepts Markdown→PDF.
+- Converting DOCX/XLSX/PPTX to PDF.
+- Pasting large documents into documentContent.
 - Swapping module and documentType; hardcoded approvedBy.
 
 NEW VERSION: check_document_exists → newVersionSubmitHints → mode=NEW_VERSION.
-
-WORKSPACES: create_workspace → return WS-YYYY-#####. Use find_workspaces / resume_workspace / list_workspace_documents.
+WORKSPACES: create_workspace → return WS-YYYY-#####.
 
 Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
