@@ -1209,9 +1209,12 @@ export class McpToolsService {
       versionNo: upload.versionNo,
       message:
         `${reason} `
-        + 'Open uploadUrl in a browser and upload the exact original .docx / .xlsx / .pdf / .pptx. '
-        + 'That stores the binary unchanged (sheets, formulas, and formatting preserved). '
+        + 'ZERO-CLICK option: call submit_approved_file again with fileUrl=https://… to the exact .docx/.xlsx '
+        + '(Repo downloads bytes — no browser page). '
+        + 'Or open uploadUrl and upload the exact original file once. '
         + 'Do NOT convert the file to Markdown or PDF.',
+      zeroClickHint:
+        'Pass fileUrl (public HTTPS to the exact DOCX/XLSX) to submit_approved_file for import without opening uploadUrl.',
       instructions: upload.instructions,
       project: upload.project,
       module: upload.module,

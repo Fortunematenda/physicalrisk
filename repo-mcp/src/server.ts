@@ -41,18 +41,17 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.27.0',
+    version: '1.28.0',
     description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
       + 'Use find_repository_documents / search_documents to list Master Document Index. '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
-      + 'DOCX/XLSX/PDF/PPTX ARE SUPPORTED. ChatGPT cannot attach file bytes — call upload_original_docx or '
-      + 'prepare_approved_document (metadata only) and give the user result.uploadUrl to upload the exact binary. '
-      + 'NEVER say Markdown-only or convert DOCX to Markdown/PDF. '
-      + 'Use submit_approved_file when fileUrl/uploadId/fileContentBase64 is available. '
-      + 'Use submit_approved_content ONLY for intentional Markdown you wrote. '
+      + 'ZERO-CLICK DOCX IMPORT (preferred after user says approved/import): call submit_approved_file with '
+      + 'fileUrl=https://… pointing at the exact .docx (FILE_PRESERVE). No browser link, no Markdown. '
       + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
-      + 'Imports return QUEUED — poll get_import_status; workspace creation is not import completion.',
+      + 'Only if no HTTPS fileUrl and no fileContentBase64: prepare_approved_document → uploadUrl (user must upload once). '
+      + 'NEVER say Markdown-only. NEVER convert DOCX to Markdown/PDF. '
+      + 'Imports return QUEUED — poll get_import_status.',
   });
 
   const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
@@ -296,10 +295,11 @@ function createMcpServer(authHeader?: string) {
 
   server.tool(
     'submit_approved_file',
-    'Import the exact original approved file (DOCX/XLSX/PDF/PPTX) without converting. '
-      + 'Provide fileContentBase64, fileUrl, or uploadId when available. '
-      + 'If ChatGPT cannot attach bytes, call returns uploadUrl — give that link to the user for browser upload (FILE_PRESERVE). '
-      + 'For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). Never convert to Markdown.',
+    'ZERO-CLICK FILE_PRESERVE import of exact DOCX/XLSX/PDF/PPTX. '
+      + 'PREFERRED after user says approved/import: pass fileUrl (public HTTPS to the exact .docx) OR fileContentBase64 OR uploadId. '
+      + 'For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
+      + 'Do NOT convert to Markdown. Do NOT ask the user to open uploadUrl when fileUrl/base64 is available. '
+      + 'Only if neither fileUrl nor bytes exist, response includes uploadUrl as last resort.',
     submitFileSchema,
     async (args) => {
       const body = args.payload
@@ -426,6 +426,30 @@ function createMcpServer(authHeader?: string) {
       + 'NEW_VERSION: mode=NEW_VERSION + documentCode. Same as upload_original_docx.',
     prepareUploadSchema,
     async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
+  server.tool(
+    'begin_document_upload',
+    'Start chunked FILE_PRESERVE upload when you can send DOCX bytes as base64 parts (no browser click). '
+      + 'Then call upload_document_chunk for each part, then submit_approved_file with uploadId.',
+    {
+      fileName: z.string().describe('e.g. MOSS-GS-003.docx'),
+      totalChunks: z.number().int().min(1).max(500),
+      mimeType: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('begin_document_upload', args)),
+  );
+
+  server.tool(
+    'upload_document_chunk',
+    'Upload one base64 chunk after begin_document_upload (zero-click FILE_PRESERVE path).',
+    {
+      uploadId: z.string(),
+      index: z.number().int().min(0),
+      total: z.number().int().min(1),
+      data: z.string().describe('Base64 chunk of the exact DOCX/XLSX bytes'),
+    },
+    async (args) => toolResult(await mcpTool('upload_document_chunk', args)),
   );
 
   server.tool(

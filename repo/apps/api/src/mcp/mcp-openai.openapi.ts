@@ -229,7 +229,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + documentCode e.g. MOSS-GS-003). '
         + 'search_documents lists the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.27.0',
+      version: '1.28.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -261,8 +261,8 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: filePreservePayloadSchema } },
         },
-        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX bytes. Prefer fileUrl/uploadId/fileContentBase64. '
-          + 'If bytes missing, returns uploadUrl for browser upload. Never Markdown→PDF for originals.',
+        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX. ZERO-CLICK: pass fileUrl or fileContentBase64/uploadId. '
+          + 'uploadUrl only if no URL/bytes. Never Markdown→PDF for originals.',
       ),
       '/api/mcp/tools/list_repository_projects': post(
         'list_repository_projects',
@@ -529,11 +529,19 @@ export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository as
 
 CRITICAL FACT (never contradict this):
 The Repo connector SUPPORTS exact DOCX, XLSX, PDF, and PPTX import. It is NOT Markdown-only. It does NOT require converting Office files to PDF.
-ChatGPT Actions cannot attach binary bytes — that is a ChatGPT limitation, not a Repo limitation.
-When the user has an original .docx/.xlsx: call upload_original_docx or prepare_approved_document with METADATA ONLY (no documentContent), give them result.uploadUrl, and tell them to upload the exact file in the browser.
+ChatGPT Actions/MCP cannot attach binary bytes as a native file — that is a ChatGPT limitation, not a Repo limitation.
+
+ZERO-CLICK IMPORT (use this when user says approved / import / submit — do NOT ask them to open a link first):
+1) Prefer submit_approved_file with fileUrl=https://… to the exact .docx/.xlsx (FILE_PRESERVE). Repo downloads bytes and queues import.
+2) Or submit_approved_file with fileContentBase64 / uploadId (chunked begin_document_upload + upload_document_chunk) if you can transmit the exact bytes.
+3) For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).
+4) Poll get_import_status. Never Markdown. Never split the catalogue.
+Only if the user has no HTTPS fileUrl AND you cannot send bytes: then prepare_approved_document / upload_original_docx and give uploadUrl (one browser upload).
+
 NEVER convert DOCX to Markdown for import. NEVER put catalogue text into documentContent.
-If you see "request entity too large" / 413: you wrongly sent Markdown. Discard it. Call prepare_approved_document / upload_original_docx with a tiny metadata payload and return uploadUrl.
+If you see "request entity too large" / 413: you wrongly sent Markdown. Discard it. Ask for a short HTTPS fileUrl or use uploadUrl — never paste Markdown.
 NEVER say: "the connector cannot import DOCX", "only accepts Markdown", "converts to PDF only", or "split into smaller documents".
+When user says approved/import: attempt zero-click submit_approved_file (fileUrl/base64) immediately — do not default to "open this link".
 
 FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). From list_repository_projects.
@@ -549,23 +557,22 @@ When user asks how many / list / what was imported / show index:
 Never invent documents. Never say the connector cannot list documents.
 
 ORIGINAL DOCX / XLSX / PDF / PPTX
-1) After project + documentType + module known → prepare_approved_document (or submit_approved_file).
-2) Immediately give clickable result.uploadUrl.
-3) User opens link → uploads exact original file → FILE_PRESERVE (structure/formulas kept).
-4) get_import_status with importJobId.
-5) Large files: always uploadUrl (never paste into documentContent).
+1) After project + documentType + module known → ZERO-CLICK: submit_approved_file with fileUrl (or fileContentBase64/uploadId).
+2) Only if no fileUrl/bytes → prepare_approved_document / upload_original_docx → uploadUrl (one browser upload).
+3) get_import_status with importJobId.
+4) Never paste large documents into documentContent.
 
 IMPORT MODE
-1) Original file → prepare_approved_document / submit_approved_file → uploadUrl.
-2) Markdown you wrote (no original Office file) → submit_approved_content + outputFormat.
-3) Legacy submit_approved_document with .docx/.xlsx and no bytes → server returns uploadUrl; give that link.
+1) Original file with HTTPS link or bytes → submit_approved_file (zero-click).
+2) Original file only in chat and no URL → prepare + uploadUrl (one click unavoidable).
+3) Markdown you wrote (no original Office file) → submit_approved_content + outputFormat.
 
 APPROVAL FLOW
 When user says approved / import / submit:
 STEP A — list_repository_projects, list_document_types; after project pick, list_repository_modules.
 STEP B — Numbered menus one at a time (project → type → module). "Reply with the number only (e.g. 2)."
 STEP C — Auto: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences.
-STEP D — Original file → prepare_approved_document + uploadUrl. Markdown-only → submit_approved_content.
+STEP D — Original file: ask for a public HTTPS fileUrl if needed, then submit_approved_file (zero-click). Only if no URL/bytes → prepare + uploadUrl. Markdown-only → submit_approved_content.
 
 FORBIDDEN
 - Claiming Repo only accepts Markdown→PDF.
@@ -573,11 +580,11 @@ FORBIDDEN
 - Pasting large documents into documentContent.
 - Swapping module and documentType; hardcoded approvedBy.
 
-NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003):
+NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003) — ZERO CLICK preferred:
 1) check_document_exists with documentCode → copy newVersionSubmitHints.
-2) upload_original_docx OR prepare_approved_document with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx (+ project/module/type). Payload must be tiny — NO documentContent.
-3) Give user uploadUrl immediately — they upload the exact file (FILE_PRESERVE). Never Markdown→PDF. Never split the document.
-4) get_import_status with importJobId.
+2) If user gives HTTPS fileUrl (or you have exact bytes): submit_approved_file with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx, fileUrl/fileContentBase64. Done — no browser link.
+3) Only if no URL and no bytes: upload_original_docx / prepare_approved_document → uploadUrl (one upload).
+4) get_import_status with importJobId. Never Markdown→PDF. Never split the document.
 WORKSPACES: create_workspace → return WS-YYYY-#####.
 
 Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, upload_original_docx, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
