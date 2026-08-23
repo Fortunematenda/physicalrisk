@@ -20,6 +20,7 @@ const MCP_TOOLS = [
   'search_documents',
   'get_document',
   'prepare_approved_document',
+  'upload_original_docx',
   'begin_document_upload',
   'upload_document_chunk',
   'submit_approved_file',

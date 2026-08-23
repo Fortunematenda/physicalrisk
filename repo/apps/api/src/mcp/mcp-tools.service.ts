@@ -100,31 +100,55 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
+      case 'upload_original_docx':
       case 'prepare_approved_document': {
         const parsed = this.parseSubmitPayload(args);
+        // Metadata only. NEVER accept documentContent here — ChatGPT Actions hit
+        // "request entity too large" when GPTs paste converted Markdown (~400KB+).
+        // Always return a browser uploadUrl for exact DOCX/XLSX/PDF bytes.
         const prepared = this.applySubmitDefaults(
-          parsed.dto,
-          parsed.documentContent,
+          {
+            ...parsed.dto,
+            // Strip any pasted Markdown so prepare stays a tiny Action call.
+            documentContent: undefined,
+            outputFormat: undefined,
+          } as PrepareApprovedDocumentDto,
+          undefined,
           this.defaultApproverName(integration),
         );
-        if (parsed.fileUrl || parsed.documentContent) {
-          return this.submitApprovedDocument(integration, {
-            ...prepared,
-            documentCode: prepared.documentCode,
-            description: prepared.description,
-            owner: prepared.owner,
-            metadataJson: prepared.metadataJson,
-            relationshipsJson: prepared.relationshipsJson,
-            mode: prepared.mode,
-            existingDocumentId: prepared.existingDocumentId,
-            fileName: prepared.fileName!,
-            mimeType: prepared.mimeType,
-            outputFormat: prepared.outputFormat,
-            fileUrl: parsed.fileUrl,
-            documentContent: parsed.documentContent,
-          }, ipAddress);
+        if (parsed.fileUrl?.trim()) {
+          return this.submitApprovedDocument(
+            integration,
+            {
+              ...prepared,
+              documentCode: prepared.documentCode,
+              description: prepared.description,
+              owner: prepared.owner,
+              metadataJson: prepared.metadataJson,
+              relationshipsJson: prepared.relationshipsJson,
+              mode: prepared.mode,
+              existingDocumentId: prepared.existingDocumentId,
+              fileName: prepared.fileName!,
+              mimeType: prepared.mimeType,
+              fileUrl: parsed.fileUrl,
+              documentContent: undefined,
+              outputFormat: undefined,
+            },
+            ipAddress,
+            { forceFilePreserve: true },
+          );
         }
-        return this.prepareApprovedDocument(integration, prepared);
+        const upload = await this.prepareApprovedDocument(integration, prepared);
+        if (parsed.documentContent?.trim()) {
+          return {
+            ...upload,
+            discardedDocumentContent: true,
+            message:
+              'Ignored documentContent (Markdown). Open uploadUrl and upload the exact original .docx/.xlsx — '
+              + 'do not paste converted Markdown (that causes request entity too large).',
+          };
+        }
+        return upload;
       }
       case 'begin_document_upload': {
         const input = args as unknown as BeginDocumentUploadDto;
@@ -1881,7 +1905,9 @@ export class McpToolsService {
       resolve_import_targets:
         'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType values for submission',
       prepare_approved_document:
-        'PREFERRED for ChatGPT: create a one-time browser upload URL for an APPROVED document (Custom GPTs cannot send PDF bytes)',
+        'PREFERRED: return uploadUrl for exact DOCX/XLSX/PDF browser upload. Metadata only — never documentContent/Markdown.',
+      upload_original_docx:
+        'Same as prepare_approved_document: uploadUrl for exact original DOCX/XLSX (FILE_PRESERVE). No Markdown.',
       begin_document_upload:
         'Advanced: start a chunked file upload session',
       upload_document_chunk:
@@ -1966,6 +1992,7 @@ export class McpToolsService {
           sectionKey: { type: 'string' },
           documentType: { type: 'string' },
           title: { type: 'string' },
+          documentCode: { type: 'string', description: 'e.g. MOSS-GS-003 for NEW_VERSION' },
           versionNo: { type: 'string' },
           approvalStatus: { type: 'string', enum: ['APPROVED'] },
           approvedBy: {
@@ -1973,10 +2000,32 @@ export class McpToolsService {
             description: 'Optional. Defaults to the MCP API key owner name from the repo.',
           },
           approvalDate: { type: 'string' },
-          fileName: { type: 'string' },
+          fileName: { type: 'string', description: 'e.g. Catalogue.docx — must match original extension' },
           mimeType: { type: 'string' },
-          fileUrl: { type: 'string', format: 'uri' },
-          documentContent: { type: 'string', description: 'Full Markdown body for same-chat submit' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          fileUrl: {
+            type: 'string',
+            format: 'uri',
+            description: 'Optional public URL of original binary. Prefer browser uploadUrl when unset.',
+          },
+        },
+      },
+      upload_original_docx: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        properties: {
+          projectCode: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          documentCode: { type: 'string' },
+          fileName: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvalDate: { type: 'string' },
         },
       },
       begin_document_upload: {

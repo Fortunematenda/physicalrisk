@@ -387,6 +387,7 @@ export class McpAuthService {
     if (
       toolName === 'resolve_import_targets'
       || toolName === 'prepare_approved_document'
+      || toolName === 'upload_original_docx'
       || toolName === 'begin_document_upload'
       || toolName === 'upload_document_chunk'
       || toolName === 'submit_approved_file'

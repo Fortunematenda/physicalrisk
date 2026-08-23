@@ -25,6 +25,8 @@ export const MCP_TOOL_NAMES = [
   'resolve_import_targets',
   'check_document_exists',
   'prepare_approved_document',
+  /** Alias of prepare_approved_document — browser upload for exact DOCX/XLSX (no Markdown). */
+  'upload_original_docx',
   'begin_document_upload',
   'upload_document_chunk',
   'submit_approved_document',

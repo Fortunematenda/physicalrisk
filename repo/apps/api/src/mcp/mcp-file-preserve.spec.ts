@@ -290,6 +290,41 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     );
   });
 
+  it('TEST H — prepare_approved_document ignores huge documentContent and returns uploadUrl', async () => {
+    (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
+      title: '100 Control Catalogue',
+      documentType: 'Article',
+      versionNo: 'Rev 1.1',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+    });
+
+    const result = await service.dispatchTool(
+      integration,
+      'prepare_approved_document',
+      {
+        payload: JSON.stringify({
+          projectCode: 'MOSS',
+          documentType: 'Article',
+          title: '100 Control Catalogue',
+          fileName: 'MOSS-GS-003.docx',
+          mode: 'NEW_VERSION',
+          documentCode: 'MOSS-GS-003',
+          documentContent: 'x'.repeat(400_000),
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({
+      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
+      discardedDocumentContent: true,
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+    });
+    expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
+  });
+
   it('TEST F — submit_approved_content marks CONTENT_CREATE and may convert', async () => {
     const result = await service.dispatchTool(
       integration,

@@ -229,11 +229,21 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + documentCode e.g. MOSS-GS-003). '
         + 'search_documents lists the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.26.0',
+      version: '1.27.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
       // Binary import first so ChatGPT Actions discover DOCX/XLSX support immediately.
+      '/api/mcp/tools/upload_original_docx': post(
+        'upload_original_docx',
+        'Get uploadUrl for exact DOCX/XLSX (no Markdown)',
+        {
+          required: true,
+          content: { 'application/json': { schema: prepareFilePreserveSchema } },
+        },
+        'Returns uploadUrl only. Metadata payload must be small. NEVER send documentContent. '
+          + 'User uploads exact .docx in browser. NEW_VERSION + documentCode supported.',
+      ),
       '/api/mcp/tools/prepare_approved_document': post(
         'prepare_approved_document',
         'Upload URL for original DOCX/XLSX/PDF (exact binary)',
@@ -242,7 +252,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
         'PRIMARY for original DOCX/XLSX/PDF/PPTX. Returns uploadUrl — user uploads exact binary. '
-          + 'NEW_VERSION: mode=NEW_VERSION + documentCode. FILE_PRESERVE. Never Markdown-only.',
+          + 'NEW_VERSION: mode=NEW_VERSION + documentCode. Never send documentContent (causes 413).',
       ),
       '/api/mcp/tools/submit_approved_file': post(
         'submit_approved_file',
@@ -520,8 +530,10 @@ export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository as
 CRITICAL FACT (never contradict this):
 The Repo connector SUPPORTS exact DOCX, XLSX, PDF, and PPTX import. It is NOT Markdown-only. It does NOT require converting Office files to PDF.
 ChatGPT Actions cannot attach binary bytes — that is a ChatGPT limitation, not a Repo limitation.
-When the user has an original .docx/.xlsx: call prepare_approved_document, give them result.uploadUrl, and tell them to upload the exact file in the browser.
-NEVER say: "the connector cannot import DOCX", "only accepts Markdown", or "converts to PDF only".
+When the user has an original .docx/.xlsx: call upload_original_docx or prepare_approved_document with METADATA ONLY (no documentContent), give them result.uploadUrl, and tell them to upload the exact file in the browser.
+NEVER convert DOCX to Markdown for import. NEVER put catalogue text into documentContent.
+If you see "request entity too large" / 413: you wrongly sent Markdown. Discard it. Call prepare_approved_document / upload_original_docx with a tiny metadata payload and return uploadUrl.
+NEVER say: "the connector cannot import DOCX", "only accepts Markdown", "converts to PDF only", or "split into smaller documents".
 
 FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). From list_repository_projects.
@@ -563,9 +575,9 @@ FORBIDDEN
 
 NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003):
 1) check_document_exists with documentCode → copy newVersionSubmitHints.
-2) prepare_approved_document with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx (+ project/module/type).
-3) Give user uploadUrl immediately — they upload the exact file (FILE_PRESERVE). Never Markdown→PDF.
+2) upload_original_docx OR prepare_approved_document with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx (+ project/module/type). Payload must be tiny — NO documentContent.
+3) Give user uploadUrl immediately — they upload the exact file (FILE_PRESERVE). Never Markdown→PDF. Never split the document.
 4) get_import_status with importJobId.
 WORKSPACES: create_workspace → return WS-YYYY-#####.
 
-Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
+Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, upload_original_docx, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
