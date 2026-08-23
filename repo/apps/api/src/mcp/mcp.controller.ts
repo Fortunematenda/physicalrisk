@@ -151,7 +151,9 @@ export class McpController {
 <main>
   <h1>Upload Approved Document</h1>
   <p class="meta"><strong>${title}</strong><br/>Project: ${project}<br/>Type: ${pending.documentType}</p>
-  <p>Select the approved file (PDF, Word, Excel, PowerPoint, or text) and upload. This queues it into the Repository Import Queue.</p>
+  <p>Select the <strong>exact original file</strong> (.docx, .xlsx, .pdf, .pptx, or text) and upload.
+  The binary is stored unchanged — Excel sheets/formulas and Word formatting are preserved (not converted from Markdown).</p>
+  <p class="meta">Maximum size: 100 MB.</p>
   <form id="f" method="post" enctype="multipart/form-data">
     <input type="file" name="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv,text/markdown" required />
     <button type="submit">Upload to Import Queue</button>

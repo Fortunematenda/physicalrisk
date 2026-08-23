@@ -837,15 +837,31 @@ export class McpToolsService {
     }
     if (!fileContentBase64 && input.documentContent != null) {
       if (options?.forceFilePreserve) {
-        return {
-          status: 'ORIGINAL_FILE_UNAVAILABLE',
-          message:
-            'The Repository connector did not receive the original source artifact. '
-            + 'The file has NOT been reconstructed from text. '
-            + 'Please reattach the original file or use a supported file transfer path.',
-          conversionPerformed: false,
-          importMode: 'FILE_PRESERVE',
-        };
+        return this.offerBrowserUploadForOriginal(
+          integration,
+          input,
+          'The Repository connector did not receive the original source artifact.',
+        );
+      }
+      // Office/PDF fileName + Markdown body without CONTENT_CREATE = GPT trying to "import DOCX"
+      // via text. Refuse conversion and give a browser upload link instead.
+      if (
+        !options?.forceContentCreate
+        && this.looksLikeOriginalBinaryFile(fileName, mimeType)
+      ) {
+        await this.audit.record({
+          action: 'MCP_ORIGINAL_FILE_UNAVAILABLE',
+          entityType: 'McpIntegration',
+          entityId: integration.id,
+          message: `Refused Markdown rebuild for ${fileName || 'binary'}; offering browser upload`,
+          after: { tool: 'submit_approved_document', fileName, mimeType },
+          ipAddress,
+        });
+        return this.offerBrowserUploadForOriginal(
+          integration,
+          input,
+          `Refused to rebuild ${fileName || 'the Office/PDF file'} from Markdown (that would destroy structure/formulas).`,
+        );
       }
       const content = String(input.documentContent);
       if (!content.trim()) {
@@ -855,7 +871,9 @@ export class McpToolsService {
       const maxChars = 500 * 1024;
       if (content.length > maxChars) {
         throw new BadRequestException(
-          `documentContent exceeds ${maxChars} characters; shorten the document or use fileUrl/uploadUrl`,
+          `documentContent exceeds ${maxChars} characters. `
+          + 'For large DOCX/XLSX files, call prepare_approved_document (or submit_approved_file) '
+          + 'and upload the original binary via the returned uploadUrl — do not paste the whole document as Markdown.',
         );
       }
       conversionPerformed = true;
@@ -927,18 +945,15 @@ export class McpToolsService {
     }
     if (!fileContentBase64) {
       if (options?.forceFilePreserve) {
-        return {
-          status: 'ORIGINAL_FILE_UNAVAILABLE',
-          message:
-            'The Repository connector did not receive the original source artifact. '
-            + 'The file has NOT been reconstructed from text. '
-            + 'Please reattach the original file or use a supported file transfer path.',
-          conversionPerformed: false,
-          importMode: 'FILE_PRESERVE',
-        };
+        return this.offerBrowserUploadForOriginal(
+          integration,
+          input,
+          'The Repository connector did not receive the original source artifact.',
+        );
       }
       throw new BadRequestException(
-        'Provide documentContent (same-chat), fileUrl, uploadId, or fileContentBase64',
+        'Provide documentContent (same-chat), fileUrl, uploadId, or fileContentBase64. '
+        + 'For original DOCX/XLSX, call prepare_approved_document and upload via uploadUrl.',
       );
     }
     // Final channel: sniff bytes + align extension/MIME so Repo stores the real format
@@ -1085,6 +1100,86 @@ export class McpToolsService {
     }
   }
 
+  /** True when the request names an Office/PDF binary that must not be rebuilt from Markdown. */
+  private looksLikeOriginalBinaryFile(fileName?: string, mimeType?: string): boolean {
+    const name = String(fileName || '').toLowerCase();
+    if (/\.(docx|xlsx|pptx|pdf|doc|xls|ppt)$/i.test(name)) return true;
+    const mime = String(mimeType || '').toLowerCase();
+    return (
+      mime.includes('wordprocessingml')
+      || mime.includes('spreadsheetml')
+      || mime.includes('presentationml')
+      || mime === 'application/pdf'
+      || mime === 'application/msword'
+      || mime.includes('ms-excel')
+      || mime.includes('ms-powerpoint')
+    );
+  }
+
+  /**
+   * ChatGPT Actions cannot attach DOCX/XLSX bytes. Create a one-time browser upload URL
+   * so the user can submit the exact original file (FILE_PRESERVE).
+   */
+  private async offerBrowserUploadForOriginal(
+    integration: McpIntegration,
+    input: {
+      projectId?: string;
+      projectCode?: string;
+      module?: string;
+      sectionKey?: string;
+      documentType?: string;
+      title?: string;
+      versionNo?: string;
+      approvalStatus?: string;
+      approvedBy?: string;
+      approvalDate?: string;
+      fileName?: string;
+      mimeType?: string;
+    },
+    reason: string,
+  ) {
+    const prepared = this.applySubmitDefaults(
+      {
+        projectId: input.projectId,
+        projectCode: input.projectCode,
+        module: input.module,
+        sectionKey: input.sectionKey,
+        documentType: input.documentType || 'Article',
+        title: input.title || 'Approved document',
+        versionNo: input.versionNo || '1.0',
+        approvalStatus: input.approvalStatus || 'APPROVED',
+        approvedBy: input.approvedBy,
+        approvalDate: input.approvalDate || new Date().toISOString().slice(0, 10),
+        fileName: input.fileName || 'document.docx',
+        mimeType: input.mimeType,
+      } as PrepareApprovedDocumentDto,
+      undefined,
+      this.defaultApproverName(integration),
+    );
+    const upload = await this.prepareApprovedDocument(integration, prepared);
+    return {
+      status: 'ORIGINAL_FILE_UNAVAILABLE' as const,
+      ready: true,
+      uploadUrl: upload.uploadUrl,
+      expiresAt: upload.expiresAt,
+      conversionPerformed: false,
+      importMode: 'FILE_PRESERVE' as const,
+      preserveOriginal: true,
+      message:
+        `${reason} `
+        + 'Open uploadUrl in a browser and upload the exact original .docx / .xlsx / .pdf / .pptx. '
+        + 'That stores the binary unchanged (sheets, formulas, and formatting preserved). '
+        + 'Do NOT convert the file to Markdown or PDF.',
+      instructions: upload.instructions,
+      project: upload.project,
+      module: upload.module,
+      sectionKey: upload.sectionKey,
+      documentType: upload.documentType,
+      title: upload.title,
+      fileName: prepared.fileName,
+    };
+  }
+
   /**
    * FILE_PRESERVE: import exact original bytes. Never converts Markdown to Office/PDF.
    */
@@ -1101,7 +1196,7 @@ export class McpToolsService {
         action: 'MCP_ORIGINAL_FILE_UNAVAILABLE',
         entityType: 'McpIntegration',
         entityId: integration.id,
-        message: 'submit_approved_file called without usable file bytes/reference',
+        message: 'submit_approved_file called without usable file bytes/reference — offering browser upload',
         after: {
           tool: 'submit_approved_file',
           fileName: input.fileName,
@@ -1109,16 +1204,11 @@ export class McpToolsService {
         },
         ipAddress,
       });
-      return {
-        status: 'ORIGINAL_FILE_UNAVAILABLE',
-        message:
-          'The Repository connector did not receive the original source artifact. '
-          + 'The file has NOT been reconstructed from text. '
-          + 'Please reattach the original file (fileContentBase64, fileUrl, or uploadId) '
-          + 'or use submit_approved_content only when intentionally creating from Markdown.',
-        conversionPerformed: false,
-        importMode: 'FILE_PRESERVE',
-      };
+      return this.offerBrowserUploadForOriginal(
+        integration,
+        input,
+        'ChatGPT Actions cannot attach binary DOCX/XLSX bytes in the Action call.',
+      );
     }
 
     const defaults = this.applySubmitDefaults(

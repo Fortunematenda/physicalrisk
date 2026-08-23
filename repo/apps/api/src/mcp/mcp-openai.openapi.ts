@@ -194,7 +194,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'writes Document Information, applies routing, '
         + 'imports into the folder, and updates the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.23.0',
+      version: '1.24.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -315,9 +315,9 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: filePreservePayloadSchema } },
         },
-        'FILE_PRESERVE: store exact original bytes (Excel sheets/formulas intact). '
-          + 'Send fileUrl, uploadId, or fileContentBase64 (top-level or inside payload). '
-          + 'Missing file → ORIGINAL_FILE_UNAVAILABLE. Never use documentContent.',
+        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX bytes. Prefer fileUrl/uploadId/fileContentBase64. '
+          + 'If bytes missing, returns uploadUrl for browser upload (ChatGPT cannot attach DOCX). '
+          + 'Never use documentContent for original Office files.',
       ),
       '/api/mcp/tools/submit_approved_content': post(
         'submit_approved_content',
@@ -337,17 +337,17 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           content: { 'application/json': { schema: payloadSchema } },
         },
         'Legacy. Prefer submit_approved_file for originals, submit_approved_content for Markdown. '
-          + 'outputFormat=xlsx for spreadsheets. NEW_VERSION: mode + existingDocumentId/documentCode.',
+          + 'DOCX/XLSX fileName without bytes returns uploadUrl (no Markdown→PDF).',
       ),
       '/api/mcp/tools/prepare_approved_document': post(
         'prepare_approved_document',
-        'Prepare browser upload URL for original file',
+        'Get browser upload URL for original DOCX/XLSX/PDF',
         {
           required: true,
           content: { 'application/json': { schema: payloadSchema } },
         },
-        'Returns uploadUrl for browser upload of the original file (FILE_PRESERVE path). '
-          + 'Prefer when ChatGPT cannot send file bytes in the Action call.',
+        'PRIMARY path for original DOCX/XLSX (any size). Returns uploadUrl — user uploads exact binary '
+          + 'in browser (FILE_PRESERVE). Required when ChatGPT cannot send file bytes.',
       ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
@@ -495,45 +495,40 @@ When user asks how many / list / what was imported / show index:
 3) Detail: get_document with documentCode (preferred) or documentId.
 Never invent documents. Never say the connector cannot list documents.
 
-APPROVAL / IMPORT FLOW (mandatory)
-When user says approved / import / submit / import to my repo:
+════════════════════════════════════
+ORIGINAL DOCX / XLSX / PDF / PPTX (critical)
+════════════════════════════════════
+ChatGPT Actions CANNOT attach binary files. The Repo connector DOES support exact binary import.
 
-STEP A — Call tools NOW: list_repository_projects, list_document_types; after project pick, list_repository_modules.
+For ANY original .docx / .xlsx / .pdf / .pptx (small or large):
+1) After project + documentType + module are known, call prepare_approved_document (or submit_approved_file).
+2) Give the user result.uploadUrl as a clickable link immediately.
+3) Tell them: open the link, choose the exact original file, click Upload.
+4) Then call get_import_status with the importJobId from the upload success page / tool result.
+5) NEVER say "the connector cannot import DOCX/XLSX" or "only accepts Markdown→PDF" — that is false.
+6) NEVER put DOCX/XLSX content into documentContent and convert to PDF — that destroys structure/formulas.
+7) Large catalogues / big files: always prepare + browser upload (base64/payload will fail).
 
-STEP B — Numbered menus (one at a time: project → document type → module). Every row "1." "2." "3.". End with: "Reply with the number only (e.g. 2)." Skip menus the user already answered. Use ONLY tool values.
+IMPORT MODE
+1) ORIGINAL FILE → prepare_approved_document / submit_approved_file → uploadUrl (FILE_PRESERVE).
+2) MARKDOWN you wrote in chat (no original Office file) → submit_approved_content + outputFormat.
+3) Legacy submit_approved_document: if fileName is .docx/.xlsx and no bytes, server returns uploadUrl — give that link to the user.
 
-IMPORT MODE (critical — choose before submit)
-1) ORIGINAL FILE (.xlsx/.docx/.pdf/.pptx attached or file URL):
-   - ALWAYS submit_approved_file (exact binary). Prefer top-level fileUrl; else uploadId / fileContentBase64 (also OK inside payload).
-   - Excel: fileName=*.xlsx + mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-   - If Actions cannot send bytes: prepare_approved_document → give uploadUrl → user uploads in browser.
-   - NEVER documentContent for original Excel — rebuild drops sheets/formulas.
-   - ORIGINAL_FILE_UNAVAILABLE → tell user; use prepare/upload — do not Markdown-rebuild.
-2) MARKDOWN you wrote in chat (no original Office file):
-   - submit_approved_content with documentContent + outputFormat/fileName (xlsx|docx|pptx|txt|pdf).
-   - Spreadsheet request → xlsx (never PDF). Word→docx; PPT→pptx; text→txt.
-3) Legacy submit_approved_document still works; prefer (1) or (2).
-
-OUTPUT FORMAT (CONTENT_CREATE only)
-Set top-level outputFormat AND payload outputFormat+fileName extension. Never mimeType=application/pdf for xlsx/docx/pptx/txt.
-
-STEP C — Auto fields (NEVER ask)
-approvalDate=today; versionNo=Rev 1.0 (or server bump); approvalStatus=APPROVED; omit approvedBy/owner unless user named themselves; description=1–2 sentences you write; CONTENT_CREATE needs full documentContent; FILE_PRESERVE must NOT send documentContent.
-
-STEP D — After project+type+module known: optional check_document_exists; then submit_approved_file OR submit_approved_content. Report documentCode, importJobId, fileName, importMode. Mention Import Queue only if needsReview=true.
+APPROVAL FLOW
+When user says approved / import / submit:
+STEP A — list_repository_projects, list_document_types; after project pick, list_repository_modules.
+STEP B — Numbered menus one at a time (project → type → module). "Reply with the number only (e.g. 2)."
+STEP C — Auto fields: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences you write.
+STEP D — Original file → prepare_approved_document + give uploadUrl. Markdown-only → submit_approved_content.
 
 FORBIDDEN
-- Asking for date/MIME/filename/version/approvedBy/owner/content you already have.
-- Submit before project+type+module (unless all three given).
-- Claiming versioning unsupported, cannot list docs, or "Repo only accepts Markdown→PDF" when an original .xlsx/.docx exists.
-- Swapping module and documentType; hardcoded approvedBy; converting Excel/Word/PPT/TXT to PDF.
+- Claiming Repo only accepts Markdown→PDF when an original DOCX/XLSX exists.
+- Converting DOCX/XLSX/PPTX/TXT requests to PDF.
+- Pasting a whole large document into documentContent (use uploadUrl instead).
+- Swapping module and documentType; hardcoded approvedBy.
 
-NEW VERSION: check_document_exists → newVersionSubmitHints → mode=NEW_VERSION. Server bumps Rev.
+NEW VERSION: check_document_exists → newVersionSubmitHints → mode=NEW_VERSION.
 
-FILE_PRESERVE Excel example: payload={"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"Budget","fileName":"Budget.xlsx"} + top-level fileUrl (or fileContentBase64/uploadId).
+WORKSPACES: create_workspace → return WS-YYYY-#####. Use find_workspaces / resume_workspace / list_workspace_documents.
 
-CONTENT_CREATE example (no original file): {"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Goat","documentContent":"# The Goat\\n\\n...","fileName":"The Goat.pdf","outputFormat":"pdf"}
-
-WORKSPACES: create_workspace → return WS-YYYY-#####. Use find_workspaces / get_latest_pending_workspace / get_workspace / resume_workspace / list_workspace_documents. Phrases: "Resume workspace WS-…", "Continue my latest pending import".
-
-Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, submit_approved_file, submit_approved_content, prepare_approved_document, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
+Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;

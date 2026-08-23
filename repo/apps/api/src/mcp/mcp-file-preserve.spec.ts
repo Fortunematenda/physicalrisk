@@ -56,6 +56,17 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     renderTxt: jest.fn(async () => Buffer.from('converted-txt')),
   };
 
+  const browserUploads = {
+    create: jest.fn((input: any) => ({
+      token: 'upload-token-1',
+      expiresAt: Date.now() + 60_000,
+      ...input,
+    })),
+    get: jest.fn(),
+    consume: jest.fn(),
+    assertNotExpired: jest.fn(),
+  };
+
   const service = new McpToolsService(
     {
       projects: { find: jest.fn().mockResolvedValue([{ id: 'project-allowed', code: 'MOSS', name: 'MOSS', status: 'ACTIVE' }]) },
@@ -67,7 +78,7 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     orchestrator as any,
     { record: jest.fn() } as any,
     { begin: jest.fn(), addChunk: jest.fn(), takeBase64: jest.fn() } as any,
-    { create: jest.fn(), get: jest.fn(), consume: jest.fn(), assertNotExpired: jest.fn() } as any,
+    browserUploads as any,
     { fetchApprovedDocument: jest.fn() } as any,
     { render: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4')) } as any,
     markdownOffice as any,
@@ -101,15 +112,44 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     (service as any).defaultApproverName = jest.fn(() => 'Test User');
   });
 
-  it('TEST E — submit_approved_file without artifact returns ORIGINAL_FILE_UNAVAILABLE', async () => {
+  it('TEST E — submit_approved_file without artifact returns uploadUrl for browser FILE_PRESERVE', async () => {
     const result = await service.submitApprovedFile(integration, {
       title: 'Test',
       documentType: 'Article',
+      projectCode: 'MOSS',
       fileName: 'test.docx',
     } as any);
 
     expect(result).toMatchObject({
       status: 'ORIGINAL_FILE_UNAVAILABLE',
+      conversionPerformed: false,
+      importMode: 'FILE_PRESERVE',
+      preserveOriginal: true,
+      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
+    });
+    expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
+    expect(markdownOffice.renderDocx).not.toHaveBeenCalled();
+    expect(browserUploads.create).toHaveBeenCalled();
+  });
+
+  it('TEST E2 — DOCX fileName + Markdown without CONTENT_CREATE offers uploadUrl (no PDF)', async () => {
+    const result = await service.submitApprovedDocument(
+      integration,
+      {
+        title: 'Repo Import Test',
+        documentType: 'Article',
+        projectCode: 'MOSS',
+        fileName: 'Repo_Import_Test_Small.docx',
+        documentContent: '# Fake body that must not become a PDF',
+        versionNo: '1.0',
+        approvalStatus: 'APPROVED',
+        approvalDate: '2026-08-23',
+      } as any,
+    );
+
+    expect(result).toMatchObject({
+      status: 'ORIGINAL_FILE_UNAVAILABLE',
+      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
       conversionPerformed: false,
       importMode: 'FILE_PRESERVE',
     });
