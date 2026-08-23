@@ -15,6 +15,10 @@ export type PendingApprovedUpload = {
   approvalDate: string;
   fileName?: string;
   mimeType?: string;
+  /** NEW_VERSION when uploading a revision to an existing document. */
+  mode?: 'NEW' | 'NEW_VERSION';
+  documentCode?: string;
+  existingDocumentId?: string;
   integrationId: string;
   createdAt: number;
   expiresAt: number;

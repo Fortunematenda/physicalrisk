@@ -71,7 +71,7 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     {
       projects: { find: jest.fn().mockResolvedValue([{ id: 'project-allowed', code: 'MOSS', name: 'MOSS', status: 'ACTIVE' }]) },
       documents: { findOne: jest.fn().mockResolvedValue(null), createQueryBuilder: jest.fn() },
-      projectSections: { findOne: jest.fn() },
+      projectSections: { findOne: jest.fn(), find: jest.fn().mockResolvedValue([]) },
       documentTypes: { find: jest.fn().mockResolvedValue([{ name: 'Article', active: true }]) },
     } as any,
     auth as unknown as McpAuthService,
@@ -218,6 +218,76 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
       }),
     );
     expect(markdownOffice.renderXlsx).not.toHaveBeenCalled();
+  });
+
+  it('TEST G — prepare_approved_document NEW_VERSION stores revision fields on browser upload token', async () => {
+    (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
+      title: 'Governance Standard',
+      documentType: 'Article',
+      versionNo: 'Rev 1.1',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+    });
+
+    const result = await service.prepareApprovedDocument(integration, {
+      projectCode: 'MOSS',
+      documentType: 'Article',
+      title: 'Governance Standard',
+      versionNo: 'Rev 1.0',
+      approvalStatus: 'APPROVED',
+      approvalDate: '2026-08-23',
+      fileName: 'MOSS-GS-003.docx',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+    } as any);
+
+    expect(result).toMatchObject({
+      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
+      importMode: 'FILE_PRESERVE',
+      preserveOriginal: true,
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+      versionNo: 'Rev 1.1',
+    });
+    expect(browserUploads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'NEW_VERSION',
+        documentCode: 'MOSS-GS-003',
+        existingDocumentId: 'doc-existing-1',
+        versionNo: 'Rev 1.1',
+        fileName: 'MOSS-GS-003.docx',
+      }),
+    );
+  });
+
+  it('TEST G2 — submit_approved_file without bytes passes NEW_VERSION to browser upload', async () => {
+    (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
+      title: 'Governance Standard',
+      documentType: 'Article',
+      versionNo: 'Rev 1.1',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+    });
+
+    await service.submitApprovedFile(integration, {
+      projectCode: 'MOSS',
+      documentType: 'Article',
+      title: 'Governance Standard',
+      fileName: 'MOSS-GS-003.docx',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+    } as any);
+
+    expect(browserUploads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'NEW_VERSION',
+        documentCode: 'MOSS-GS-003',
+        existingDocumentId: 'doc-existing-1',
+      }),
+    );
   });
 
   it('TEST F — submit_approved_content marks CONTENT_CREATE and may convert', async () => {

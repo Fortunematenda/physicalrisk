@@ -4,7 +4,7 @@ describe('buildChatGptActionsOpenApi', () => {
   it('uses a single payload string for submit to avoid UnrecognizedKwargsError', () => {
     const doc = buildChatGptActionsOpenApi('https://repo.physicalrisk.com/');
     expect(doc.openapi).toBe('3.1.0');
-    expect(doc.info.version).toBe('1.25.0');
+    expect(doc.info.version).toBe('1.26.0');
     expect((doc.paths as any)['/api/mcp/tools/search_documents']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/get_document']).toBeDefined();
     expect((doc.paths as any)['/api/mcp/tools/find_workspaces']).toBeDefined();
@@ -19,6 +19,13 @@ describe('buildChatGptActionsOpenApi', () => {
     expect(filePreserveSchema.properties.fileUrl).toBeDefined();
     expect(filePreserveSchema.properties.uploadId).toBeDefined();
     expect(filePreserveSchema.properties.fileContentBase64).toBeDefined();
+    expect(filePreserveSchema.properties.mode).toBeDefined();
+    expect(filePreserveSchema.properties.documentCode).toBeDefined();
+    const prepareSchema = prepare.requestBody.content['application/json'].schema;
+    expect(prepareSchema.properties.mode).toBeDefined();
+    expect(prepareSchema.properties.documentCode).toBeDefined();
+    expect(prepareSchema.properties.payload.description).toContain('NEW_VERSION');
+    expect(prepareSchema.properties.payload.description).toMatch(/No documentContent|never documentContent/i);
     expect(filePreserve.description.toLowerCase()).toContain('excel');
     expect(doc.info.description.toLowerCase()).toContain('docx');
     expect(doc.info.description.toLowerCase()).toContain('supported');

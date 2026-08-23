@@ -713,20 +713,24 @@ export class McpToolsService {
     }
 
     const approvedBy = input.approvedBy?.trim() || this.defaultApproverName(integration);
+    const versioned = await this.resolveNewVersionSubmit(projectId, input as SubmitApprovedDocumentDto);
     const pending = this.browserUploads.create({
       integrationId: integration.id,
       projectId,
       projectCode: project.code,
       module: input.module,
       sectionKey,
-      documentType: input.documentType,
-      title: input.title,
-      versionNo: input.versionNo,
+      documentType: versioned.documentType || input.documentType,
+      title: versioned.title,
+      versionNo: versioned.versionNo,
       approvalStatus: input.approvalStatus,
       approvedBy,
       approvalDate: input.approvalDate,
       fileName: input.fileName,
       mimeType: input.mimeType || undefined,
+      mode: versioned.mode,
+      documentCode: versioned.documentCode,
+      existingDocumentId: versioned.existingDocumentId,
     });
 
     const baseUrl = this.publicBaseUrl();
@@ -735,15 +739,22 @@ export class McpToolsService {
       ready: true,
       uploadUrl,
       expiresAt: new Date(pending.expiresAt).toISOString(),
+      importMode: 'FILE_PRESERVE' as const,
+      preserveOriginal: true,
+      mode: versioned.mode ?? 'NEW',
+      documentCode: versioned.documentCode ?? null,
+      existingDocumentId: versioned.existingDocumentId ?? null,
+      versionNo: versioned.versionNo,
       project: { id: project.id, code: project.code, name: project.name },
       module: input.module ?? null,
       sectionKey: sectionKey ?? null,
-      documentType: input.documentType,
-      title: input.title,
+      documentType: versioned.documentType || input.documentType,
+      title: versioned.title,
+      fileName: input.fileName ?? null,
       instructions:
-        'Open uploadUrl in a browser, choose the approved file (PDF, Word, Excel, PowerPoint, or text), and click Upload. '
-        + 'That queues the Approved Document into the Import Queue. '
-        + 'Then call get_import_status after the user confirms upload completed, or ask them for the import job id shown on the success page.',
+        'Open uploadUrl in a browser and upload the exact original file (.docx, .xlsx, .pdf, .pptx). '
+        + 'Binary is stored unchanged (FILE_PRESERVE). '
+        + 'Then call get_import_status after upload completes, or use the import job id from the success page.',
     };
   }
 
@@ -780,6 +791,9 @@ export class McpToolsService {
         approvalDate: consumed.approvalDate,
         module: consumed.module,
         sectionKey: consumed.sectionKey,
+        mode: consumed.mode,
+        documentCode: consumed.documentCode,
+        existingDocumentId: consumed.existingDocumentId,
         fileName,
         mimeType: uploadedMime || consumed.mimeType,
         fileContentBase64: file.buffer.toString('base64'),
@@ -1135,6 +1149,9 @@ export class McpToolsService {
       approvalDate?: string;
       fileName?: string;
       mimeType?: string;
+      mode?: 'NEW' | 'NEW_VERSION';
+      documentCode?: string;
+      existingDocumentId?: string;
     },
     reason: string,
   ) {
@@ -1152,6 +1169,9 @@ export class McpToolsService {
         approvalDate: input.approvalDate || new Date().toISOString().slice(0, 10),
         fileName: input.fileName || 'document.docx',
         mimeType: input.mimeType,
+        mode: input.mode,
+        documentCode: input.documentCode,
+        existingDocumentId: input.existingDocumentId,
       } as PrepareApprovedDocumentDto,
       undefined,
       this.defaultApproverName(integration),
@@ -1165,6 +1185,10 @@ export class McpToolsService {
       conversionPerformed: false,
       importMode: 'FILE_PRESERVE' as const,
       preserveOriginal: true,
+      mode: upload.mode,
+      documentCode: upload.documentCode,
+      existingDocumentId: upload.existingDocumentId,
+      versionNo: upload.versionNo,
       message:
         `${reason} `
         + 'Open uploadUrl in a browser and upload the exact original .docx / .xlsx / .pdf / .pptx. '

@@ -76,6 +76,43 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     },
   };
 
+  const revisionFields = {
+    mode: {
+      type: 'string',
+      enum: ['NEW', 'NEW_VERSION'],
+      description:
+        'NEW_VERSION adds a revision to an existing document. Use with documentCode (e.g. MOSS-GS-003) or existingDocumentId.',
+    },
+    documentCode: {
+      type: 'string',
+      description: 'Existing repository document code, e.g. MOSS-GS-003 (for NEW_VERSION).',
+    },
+    existingDocumentId: {
+      type: 'string',
+      format: 'uuid',
+      description: 'UUID of existing document (alternative to documentCode for NEW_VERSION).',
+    },
+  };
+
+  /** Browser upload URL — exact binary; no Markdown. */
+  const prepareFilePreserveSchema = {
+    type: 'object',
+    required: ['payload'],
+    properties: {
+      payload: {
+        type: 'string',
+        description:
+          'JSON: projectCode, module, documentType, title, fileName (.docx/.xlsx/.pdf). '
+          + 'For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). No documentContent.',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original filename with extension, e.g. Governance-Standard.docx',
+      },
+      ...revisionFields,
+    },
+  };
+
   const payloadSchema = {
     type: 'object',
     required: ['payload'],
@@ -136,6 +173,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         description:
           'Optional MIME. For Excel use application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       },
+      ...revisionFields,
     },
   };
 
@@ -188,10 +226,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         + 'to upload the exact .docx/.xlsx in a browser (FILE_PRESERVE; sheets/formulas kept). '
         + 'NEVER claim the connector only accepts Markdown→PDF. '
         + 'Use submit_approved_content only for intentional Markdown imports. '
-        + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + existingDocumentId/documentCode). '
+        + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + documentCode e.g. MOSS-GS-003). '
         + 'search_documents lists the Master Document Index. '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.25.0',
+      version: '1.26.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -201,10 +239,10 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Upload URL for original DOCX/XLSX/PDF (exact binary)',
         {
           required: true,
-          content: { 'application/json': { schema: payloadSchema } },
+          content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
-        'PRIMARY for original DOCX/XLSX/PDF/PPTX (any size). Returns uploadUrl — user uploads exact binary '
-          + 'in browser. FILE_PRESERVE. Never say DOCX is unsupported.',
+        'PRIMARY for original DOCX/XLSX/PDF/PPTX. Returns uploadUrl — user uploads exact binary. '
+          + 'NEW_VERSION: mode=NEW_VERSION + documentCode. FILE_PRESERVE. Never Markdown-only.',
       ),
       '/api/mcp/tools/submit_approved_file': post(
         'submit_approved_file',
@@ -523,7 +561,11 @@ FORBIDDEN
 - Pasting large documents into documentContent.
 - Swapping module and documentType; hardcoded approvedBy.
 
-NEW VERSION: check_document_exists → newVersionSubmitHints → mode=NEW_VERSION.
+NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003):
+1) check_document_exists with documentCode → copy newVersionSubmitHints.
+2) prepare_approved_document with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx (+ project/module/type).
+3) Give user uploadUrl immediately — they upload the exact file (FILE_PRESERVE). Never Markdown→PDF.
+4) get_import_status with importJobId.
 WORKSPACES: create_workspace → return WS-YYYY-#####.
 
 Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
