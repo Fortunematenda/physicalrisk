@@ -41,14 +41,17 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.18.0',
+    version: '1.27.0',
     description:
       'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
       + 'Use find_repository_documents / search_documents to list Master Document Index. '
       + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
-      + 'FILE IMPORTS: when an original DOCX/XLSX/PDF/PPTX (or other approved artifact) exists, use submit_approved_file '
-      + 'with fileContentBase64/fileUrl/uploadId — never convert that file to Markdown first. '
-      + 'Use submit_approved_content only for intentional Markdown/text → generated document. '
+      + 'DOCX/XLSX/PDF/PPTX ARE SUPPORTED. ChatGPT cannot attach file bytes — call upload_original_docx or '
+      + 'prepare_approved_document (metadata only) and give the user result.uploadUrl to upload the exact binary. '
+      + 'NEVER say Markdown-only or convert DOCX to Markdown/PDF. '
+      + 'Use submit_approved_file when fileUrl/uploadId/fileContentBase64 is available. '
+      + 'Use submit_approved_content ONLY for intentional Markdown you wrote. '
+      + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
       + 'Imports return QUEUED — poll get_import_status; workspace creation is not import completion.',
   });
 
@@ -270,13 +273,33 @@ function createMcpServer(authHeader?: string) {
     payload: z.string().optional(),
   };
 
+  const prepareUploadSchema = {
+    projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
+    module: z.string().optional().describe('Module/section name e.g. Governance Standards'),
+    documentType: z.string().optional().describe('e.g. Article'),
+    title: z.string().optional(),
+    documentCode: z.string().optional().describe('Existing code e.g. MOSS-GS-003 for NEW_VERSION'),
+    mode: z.enum(['NEW', 'NEW_VERSION']).optional().describe(
+      'NEW_VERSION = same document, next Rev. Use with documentCode.',
+    ),
+    versionNo: z.string().optional(),
+    fileName: z.string().optional().describe('Original filename with extension, e.g. Catalogue.docx'),
+    mimeType: z.string().optional(),
+    workspaceCode: z.string().optional().describe('WS-YYYY-#####'),
+    owner: z.string().optional(),
+    description: z.string().optional(),
+    existingDocumentId: z.string().uuid().optional(),
+    payload: z.string().optional().describe(
+      'JSON metadata only: projectCode, module, documentType, title, fileName, mode, documentCode. NEVER documentContent.',
+    ),
+  };
+
   server.tool(
     'submit_approved_file',
-    'Import the exact original approved file into the Physical Risk Repository without converting or reconstructing it. '
-      + 'Prefer this whenever a real generated/uploaded DOCX, XLSX, PDF, PPTX, ZIP or other approved source artifact is available. '
-      + 'Do not convert the source to Markdown or recreate it. '
-      + 'Provide fileContentBase64, fileUrl, or uploadId. '
-      + 'If the original artifact cannot be supplied, returns ORIGINAL_FILE_UNAVAILABLE (no Markdown fallback).',
+    'Import the exact original approved file (DOCX/XLSX/PDF/PPTX) without converting. '
+      + 'Provide fileContentBase64, fileUrl, or uploadId when available. '
+      + 'If ChatGPT cannot attach bytes, call returns uploadUrl — give that link to the user for browser upload (FILE_PRESERVE). '
+      + 'For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). Never convert to Markdown.',
     submitFileSchema,
     async (args) => {
       const body = args.payload
@@ -306,7 +329,7 @@ function createMcpServer(authHeader?: string) {
   server.tool(
     'submit_approved_content',
     'Create a Repository document from supplied text/Markdown. '
-      + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use submit_approved_file instead. '
+      + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use upload_original_docx or submit_approved_file instead. '
       + 'Converts Markdown to PDF/DOCX/XLSX/PPTX/TXT from fileName/outputFormat.',
     submitContentSchema,
     async (args) => {
@@ -334,7 +357,8 @@ function createMcpServer(authHeader?: string) {
 
   server.tool(
     'submit_approved_document',
-    'Legacy combined submit. Prefer submit_approved_file for original artifacts, or submit_approved_content for Markdown. '
+    'Legacy combined submit. Prefer upload_original_docx / prepare_approved_document for original DOCX, '
+      + 'or submit_approved_content for Markdown you wrote. '
       + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode. '
       + 'When working in a workspace, ALWAYS pass workspaceCode.',
     submitDocSchema,
@@ -364,35 +388,44 @@ function createMcpServer(authHeader?: string) {
     },
   );
 
+  const callPrepareUpload = async (args: Record<string, unknown>) => {
+    // Never forward documentContent — ChatGPT stuffing Markdown causes 413 / wrong "Markdown only" claims.
+    const body = typeof args.payload === 'string'
+      ? { payload: args.payload }
+      : {
+          projectCode: args.projectCode,
+          module: args.module,
+          documentType: args.documentType,
+          title: args.title,
+          documentCode: args.documentCode,
+          mode: args.mode,
+          versionNo: args.versionNo,
+          fileName: args.fileName,
+          mimeType: args.mimeType,
+          workspaceCode: args.workspaceCode,
+          owner: args.owner,
+          description: args.description,
+          existingDocumentId: args.existingDocumentId,
+        };
+    return toolResult(await mcpTool('prepare_approved_document', body));
+  };
+
+  server.tool(
+    'upload_original_docx',
+    'PRIMARY for original DOCX/XLSX/PDF. Returns uploadUrl — user uploads exact binary in browser (FILE_PRESERVE). '
+      + 'Metadata only (projectCode, module, documentType, title, fileName, mode, documentCode). '
+      + 'NEVER send documentContent or Markdown. NEW_VERSION: mode=NEW_VERSION + documentCode=MOSS-GS-003.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
   server.tool(
     'prepare_approved_document',
-    'Prepare or submit (alias of submit_approved_document) — same fields as submit. '
-      + 'Without file bytes/content, returns a browser upload URL for FILE_PRESERVE.',
-    submitDocSchema,
-    async (args) => {
-      const body = args.payload
-        ? { payload: args.payload }
-        : {
-            projectCode: args.projectCode,
-            module: args.module,
-            documentType: args.documentType,
-            title: args.title,
-            documentContent: args.documentContent,
-            documentCode: args.documentCode,
-            mode: args.mode,
-            versionNo: args.versionNo,
-            fileName: args.fileName,
-            mimeType: args.mimeType,
-            outputFormat: args.outputFormat,
-            fileContentBase64: args.fileContentBase64,
-            fileUrl: args.fileUrl,
-            uploadId: args.uploadId,
-            workspaceCode: args.workspaceCode,
-            owner: args.owner,
-            description: args.description,
-          };
-      return toolResult(await mcpTool('prepare_approved_document', body));
-    },
+    'PRIMARY for original DOCX/XLSX/PDF/PPTX. Returns uploadUrl for exact browser upload (FILE_PRESERVE). '
+      + 'Metadata only — never documentContent/Markdown (that causes request entity too large). '
+      + 'NEW_VERSION: mode=NEW_VERSION + documentCode. Same as upload_original_docx.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
   );
 
   server.tool(
