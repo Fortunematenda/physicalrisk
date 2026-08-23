@@ -8,8 +8,6 @@ export type PublicNavItem = {
   children?: PublicNavItem[];
 };
 
-const QUESTIONNAIRE_URL = `${(process.env.NEXT_PUBLIC_MOSS_URL || 'http://moss.localhost').replace(/\/$/, '')}/start?source=wordpress`;
-
 export function PublicSiteHeader({
   wordpressUrl,
   items,
@@ -19,6 +17,8 @@ export function PublicSiteHeader({
 }) {
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  // Match WordPress home `.mheader` CTA → #contact
+  const ctaHref = `${wordpressUrl}/#contact`;
 
   useEffect(() => {
     if (!open) return;
@@ -31,11 +31,6 @@ export function PublicSiteHeader({
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [open]);
-
-  const keepQuestionnaireProgress = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (window.location.pathname === '/start') event.preventDefault();
-    setOpen(false);
-  };
 
   return (
     <header className="public-site-header">
@@ -85,7 +80,7 @@ export function PublicSiteHeader({
           </ul>
         </nav>
 
-        <a className="public-site-header__cta" href={QUESTIONNAIRE_URL} onClick={keepQuestionnaireProgress}>
+        <a className="public-site-header__cta" href={ctaHref} onClick={() => setOpen(false)}>
           Book MOSS Assessment
         </a>
       </div>
