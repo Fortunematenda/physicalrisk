@@ -197,16 +197,21 @@ export class McpController {
     if (!file?.buffer?.length) {
       throw new BadRequestException('Choose a file to upload (PDF, Word, Excel, PowerPoint, or text)');
     }
-    const result = await this.tools.completeBrowserUpload(token, file, request.ip);
-    return {
-      accepted: true,
-      result,
-      importJobId: 'importJobId' in result ? result.importJobId : undefined,
-      message:
-        'importJobId' in result && result.importJobId
-          ? 'Document queued in Import Queue'
-          : ('message' in result && result.message) || 'Upload processed',
-    };
+    try {
+      const result = await this.tools.completeBrowserUpload(token, file, request.ip);
+      return {
+        accepted: true,
+        result,
+        importJobId: 'importJobId' in result ? result.importJobId : undefined,
+        message:
+          'importJobId' in result && result.importJobId
+            ? 'Document queued in Import Queue'
+            : ('message' in result && result.message) || 'Upload processed',
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload failed';
+      throw new BadRequestException(message);
+    }
   }
 
   /**

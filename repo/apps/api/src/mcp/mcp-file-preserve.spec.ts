@@ -23,6 +23,16 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
   const auth = {
     assertProjectAllowed: jest.fn(),
     assertToolAllowed: jest.fn(),
+    resolveIntegrationForBrowserUpload: jest.fn(async (integrationId: string) => {
+      if (integrationId.startsWith('sso:')) {
+        return {
+          ...integration,
+          id: integrationId,
+          createdBy: { id: integrationId.slice(4), firstName: 'Test', lastName: 'User', email: 't@example.com' },
+        };
+      }
+      return integration;
+    }),
   };
 
   const queuedChecksum = createHash('sha256').update(Buffer.from('PK\x03\x04fake-docx')).digest('hex');
@@ -323,6 +333,62 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
       documentCode: 'MOSS-GS-003',
     });
     expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
+  });
+
+  it('TEST I — completeBrowserUpload resolves @Repo OAuth sso integration ids', async () => {
+    browserUploads.get.mockReturnValue({
+      token: 'upload-token-sso',
+      integrationId: 'sso:user-1',
+      projectId: 'project-allowed',
+      projectCode: 'MOSS',
+      documentType: 'Article',
+      title: '100 Control Catalogue',
+      versionNo: 'Rev 1.1',
+      approvalStatus: 'APPROVED',
+      approvedBy: 'Test User',
+      approvalDate: '2026-08-23',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+    });
+    browserUploads.consume.mockReturnValue({
+      token: 'upload-token-sso',
+      integrationId: 'sso:user-1',
+      projectId: 'project-allowed',
+      projectCode: 'MOSS',
+      documentType: 'Article',
+      title: '100 Control Catalogue',
+      versionNo: 'Rev 1.1',
+      approvalStatus: 'APPROVED',
+      approvedBy: 'Test User',
+      approvalDate: '2026-08-23',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+      fileName: 'MOSS-GS-003.docx',
+    });
+    (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
+      title: '100 Control Catalogue',
+      documentType: 'Article',
+      versionNo: 'Rev 1.1',
+      mode: 'NEW_VERSION',
+      documentCode: 'MOSS-GS-003',
+      existingDocumentId: 'doc-existing-1',
+    });
+
+    const bytes = Buffer.from('PK\x03\x04fake-docx');
+    const result = await service.completeBrowserUpload(
+      'upload-token-sso',
+      { buffer: bytes, originalname: 'MOSS-GS-003.docx', mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    );
+
+    expect(auth.resolveIntegrationForBrowserUpload).toHaveBeenCalledWith('sso:user-1');
+    expect(result).toMatchObject({
+      status: 'QUEUED',
+      importMode: 'FILE_PRESERVE',
+      conversionPerformed: false,
+    });
+    expect(orchestrator.queueMcpApprovedDocument).toHaveBeenCalled();
   });
 
   it('TEST F — submit_approved_content marks CONTENT_CREATE and may convert', async () => {

@@ -789,13 +789,7 @@ export class McpToolsService {
   ) {
     const pending = this.browserUploads.get(token);
     this.browserUploads.assertNotExpired(pending);
-    const integration = await this.db.mcpIntegrations.findOne({
-      where: { id: pending.integrationId },
-      relations: { createdBy: true },
-    });
-    if (!integration || integration.status !== McpIntegrationStatus.ACTIVE) {
-      throw new BadRequestException('MCP integration for this upload link is not active');
-    }
+    const integration = await this.auth.resolveIntegrationForBrowserUpload(pending.integrationId);
 
     const consumed = this.browserUploads.consume(token);
     // Prefer the uploaded file's real name/MIME — pending often still has a PDF placeholder.

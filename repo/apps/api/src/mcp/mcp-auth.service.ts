@@ -297,6 +297,33 @@ export class McpAuthService {
     } as McpIntegration;
   }
 
+  /**
+   * Browser upload tokens store integrationId from prepare_approved_document.
+   * @Repo OAuth uses synthetic ids (sso:<userId>) — never query those as UUIDs.
+   */
+  async resolveIntegrationForBrowserUpload(integrationId: string): Promise<McpIntegration> {
+    if (integrationId.startsWith('sso:')) {
+      const userId = integrationId.slice(4).trim();
+      if (!userId) {
+        throw new BadRequestException('Upload link SSO owner id is missing');
+      }
+      const user = await this.db.users.findOne({ where: { id: userId } });
+      if (!user) {
+        throw new BadRequestException('Upload link owner user was not found — reconnect @Repo and create a new upload link');
+      }
+      return this.syntheticSsoIntegration(user);
+    }
+
+    const integration = await this.db.mcpIntegrations.findOne({
+      where: { id: integrationId },
+      relations: { createdBy: true },
+    });
+    if (!integration || integration.status !== McpIntegrationStatus.ACTIVE) {
+      throw new BadRequestException('MCP integration for this upload link is not active');
+    }
+    return integration;
+  }
+
   private mapKeycloakRoleToRepo(realmRoles: string[]): string {
     if (realmRoles.includes('repo_admin')) return UserRole.ADMIN;
     if (realmRoles.includes('repo_importer')) return UserRole.IMPORTER;
