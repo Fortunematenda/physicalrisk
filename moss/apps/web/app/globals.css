@@ -1060,18 +1060,19 @@ textarea { min-height:90px; resize:vertical; }
 .pr-brand-text.light { color:#fff; }
 .public-site-header { position:sticky; top:0; z-index:9999; width:100%; background:#fff; }
 .public-site-header__inner {
-  width:min(1440px, 100%); min-height:68px; margin:0 auto; padding:11px 25px 12px;
+  width:100%; max-width:100%; min-height:68px; margin:0 auto; padding:11px 25px 12px;
   display:flex; align-items:center; justify-content:space-between; gap:40px;
   background:#fff; border-bottom:1px solid #ededed;
   font-family:var(--font-nunito-sans), "Nunito Sans", sans-serif;
+  box-sizing:border-box;
 }
 .public-site-header__brand { display:flex; flex:0 0 auto; align-items:center; }
-.public-site-header__brand img { display:block; width:187px; height:auto; }
+.public-site-header__brand img { display:block; width:270px; height:auto; }
 .public-site-header__nav { flex:1 1 auto; }
 .public-site-header__nav > ul { display:flex; align-items:center; justify-content:center; margin:0; padding:0; list-style:none; }
 .public-site-header__nav > ul > li { position:relative; margin:0 40px 0 0; padding:0; }
 .public-site-header__nav > ul > li:last-child { margin-right:0; }
-.public-site-header__nav a { color:#2c2c2c; text-decoration:none; font-size:12px; font-weight:400; line-height:23px; white-space:nowrap; transition:color .2s ease; }
+.public-site-header__nav a { color:#2c2c2c; text-decoration:none; font-size:16px; font-weight:400; line-height:23px; white-space:nowrap; transition:color .2s ease; }
 .public-site-header__nav a:hover, .public-site-header__nav a:focus-visible { color:#bc1717; outline:none; }
 .public-site-header__submenu {
   display:none; position:absolute; top:100%; left:0; min-width:220px; margin:0; padding:11px 16px 10px;
@@ -1164,7 +1165,7 @@ textarea { min-height:90px; resize:vertical; }
   .scl-exec--site-nav { --scl-page-gutter:15px; }
   .scl-exec--site-nav .pr-topbar {
     padding-left:var(--scl-page-inset);
-    padding-right:var(--scl-page-gutter);
+    padding-right:var(--scl-page-inset);
   }
   .public-site-header__inner { min-height:66px; padding:13px 15px; }
   .scl-exec--site-nav .public-site-header__inner { padding-left:var(--scl-page-gutter); padding-right:var(--scl-page-gutter); }
@@ -2831,40 +2832,49 @@ textarea { min-height:90px; resize:vertical; }
 .scl-exec-tag{font-style:normal;font-size:12px;color:var(--scl-red);font-weight:700}
 .scl-exec-navnote{font-size:12px;color:#555;text-decoration:none;border-bottom:1px solid #ddd;font-weight:600}
 .scl-exec-navnote:hover{color:var(--scl-red)}
+/* Match WordPress home .mheader rail: 100% + 25px gutters; 79% from 1900px up */
 .scl-exec--site-nav{
   --scl-header-stack:132px;
-  --scl-page-max:1440px;
+  --scl-page-rail:100%;
   --scl-page-gutter:25px;
-  --scl-page-inset:max(var(--scl-page-gutter), calc((100vw - var(--scl-page-max)) / 2 + var(--scl-page-gutter)));
+  --scl-page-side:0px;
+  --scl-page-inset:calc(var(--scl-page-side) + var(--scl-page-gutter));
 }
 .scl-exec--site-nav .pr-topbar{
   padding-left:var(--scl-page-inset);
-  padding-right:max(var(--scl-page-gutter), calc((100vw - var(--scl-page-max)) / 2 + var(--scl-page-gutter)));
+  padding-right:var(--scl-page-inset);
 }
 .scl-exec--site-nav .public-site-header__inner{
-  width:min(var(--scl-page-max), 100%);
+  width:var(--scl-page-rail);
+  max-width:var(--scl-page-rail);
+  margin-left:auto;
+  margin-right:auto;
   padding-left:var(--scl-page-gutter);
   padding-right:var(--scl-page-gutter);
 }
 .scl-exec--site-nav .scl-triage-hero-left{
   padding:8vh max(4vw, var(--scl-page-gutter)) 8vh var(--scl-page-inset);
 }
-/* Questionnaire, contact, and results stay centred — landing only aligns to logo rail */
-.scl-exec--site-nav .scl-exec-assessment .scl-exec-shell{
-  max-width:940px;
+/* Questionnaire + results share the same content rail as the WP header */
+.scl-exec--site-nav .scl-exec-assessment .scl-exec-shell,
+.scl-exec--site-nav .scl-exec-result .scl-triage-report-page{
+  width:var(--scl-page-rail);
+  max-width:var(--scl-page-rail);
   margin-left:auto;
   margin-right:auto;
-  padding-left:20px;
-  padding-right:20px;
+  padding-left:var(--scl-page-gutter);
+  padding-right:var(--scl-page-gutter);
   box-sizing:border-box;
 }
-.scl-exec--site-nav .scl-exec-result .scl-triage-report-page{
-  max-width:1050px;
-  margin-left:auto;
-  margin-right:auto;
-  padding-left:20px;
-  padding-right:20px;
-  box-sizing:border-box;
+@media (min-width: 1900px) {
+  .scl-exec--site-nav{
+    --scl-page-rail:79%;
+    --scl-page-side:calc((100% - var(--scl-page-rail)) / 2);
+  }
+  .public-site-header__inner{
+    width:79%;
+    max-width:79%;
+  }
 }
 .scl-exec--site-nav .scl-exec-assessment .scl-exec-assess-wrap{
   max-width:none;
