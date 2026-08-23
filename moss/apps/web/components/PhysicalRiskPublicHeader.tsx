@@ -70,7 +70,8 @@ export function PhysicalRiskPublicHeader() {
     let cancelled = false;
     const load = async () => {
       try {
-        const response = await fetch('/api/wordpress-nav', { cache: 'no-store' });
+        // Not under /api/* — nginx routes /api/ to moss-api, not Next.js.
+        const response = await fetch('/public-nav', { cache: 'no-store' });
         if (!response.ok) return;
         const data = (await response.json()) as WordpressPublicNav;
         if (!cancelled && Array.isArray(data.items) && data.items.length) {

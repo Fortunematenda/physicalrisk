@@ -3,12 +3,15 @@ import { fetchWordpressPublicNav } from '@/lib/wordpressPublicNav';
 
 export const dynamic = 'force-dynamic';
 
-/** Live WordPress home header (menu, CTA, utility strip) for /start and public shells. */
+/**
+ * Live WordPress home header for /start.
+ * Path is intentionally NOT under /api/* — nginx sends /api/ to moss-api.
+ */
 export async function GET() {
   const nav = await fetchWordpressPublicNav();
   return NextResponse.json(nav, {
     headers: {
-      'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+      'Cache-Control': 'no-store, max-age=0',
     },
   });
 }

@@ -142,12 +142,13 @@ export function parseWordpressPublicNav(html: string, base = wordpressBaseUrl())
 export async function fetchWordpressPublicNav(base = wordpressBaseUrl()): Promise<WordpressPublicNav> {
   const fallback = defaultWordpressPublicNav(base);
   try {
-    const response = await fetch(`${base}/`, {
+    const response = await fetch(`${base}/?moss-nav=${Date.now()}`, {
       headers: {
         Accept: 'text/html',
         'User-Agent': 'physicalrisk-moss-web/wordpress-nav',
+        'Cache-Control': 'no-cache',
       },
-      next: { revalidate: 60 },
+      cache: 'no-store',
     });
     if (!response.ok) return fallback;
     const html = await response.text();
