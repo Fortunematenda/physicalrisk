@@ -11,14 +11,18 @@ export type PublicNavItem = {
 export function PublicSiteHeader({
   wordpressUrl,
   items,
+  ctaLabel = 'Book MOSS Assessment',
+  ctaHref,
 }: {
   wordpressUrl: string;
   items: PublicNavItem[];
+  ctaLabel?: string;
+  ctaHref?: string;
 }) {
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
-  // Match WordPress home `.mheader` CTA → #contact
-  const ctaHref = `${wordpressUrl}/#contact`;
+  // Match WordPress home `.mheader` CTA → #contact (overridable from live WP fetch)
+  const resolvedCtaHref = ctaHref || `${wordpressUrl}/#contact`;
 
   useEffect(() => {
     if (!open) return;
@@ -80,8 +84,8 @@ export function PublicSiteHeader({
           </ul>
         </nav>
 
-        <a className="public-site-header__cta" href={ctaHref} onClick={() => setOpen(false)}>
-          Book MOSS Assessment
+        <a className="public-site-header__cta" href={resolvedCtaHref} onClick={() => setOpen(false)}>
+          {ctaLabel}
         </a>
       </div>
       <button

@@ -1,21 +1,17 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { PublicSiteHeader, type PublicNavItem } from './PublicSiteHeader';
+import {
+  defaultWordpressPublicNav,
+  type WordpressPublicNav,
+  wordpressBaseUrl,
+} from '@/lib/wordpressPublicNav';
 
-export const WORDPRESS_URL = (process.env.NEXT_PUBLIC_WORDPRESS_URL || 'https://test.physicalrisk.com').replace(
-  /\/$/,
-  '',
-);
+export const WORDPRESS_URL = wordpressBaseUrl();
 
-/** Same labels and targets as the WordPress home `#menu-main-menu` / `.mheader` nav. */
-export const PUBLIC_NAV_LINKS: PublicNavItem[] = [
-  { label: 'Security Governance', href: `${WORDPRESS_URL}/#ourservices` },
-  { label: 'Customer Solutions', href: `${WORDPRESS_URL}/#ourservices` },
-  { label: 'Insights', href: `${WORDPRESS_URL}/#insights` },
-  { label: 'Resources', href: `${WORDPRESS_URL}/#insights` },
-  { label: 'Consultant Network', href: `${WORDPRESS_URL}/#insights` },
-  { label: 'Contact', href: `${WORDPRESS_URL}/#contact` },
-];
+/** Static fallback used before/without the live WordPress fetch. */
+export const PUBLIC_NAV_LINKS: PublicNavItem[] = defaultWordpressPublicNav(WORDPRESS_URL).items;
 
 function PhoneIcon() {
   return (
@@ -66,24 +62,44 @@ function GlobeIcon() {
   );
 }
 
-/** WordPress home top bar + primary navigation (shared with /start questionnaire). */
+/** WordPress home top bar + primary navigation (synced live from the WP homepage). */
 export function PhysicalRiskPublicHeader() {
+  const [nav, setNav] = useState<WordpressPublicNav>(() => defaultWordpressPublicNav(WORDPRESS_URL));
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch('/api/wordpress-nav', { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = (await response.json()) as WordpressPublicNav;
+        if (!cancelled && Array.isArray(data.items) && data.items.length) {
+          setNav(data);
+        }
+      } catch {
+        // Keep fallback nav if WordPress is unreachable.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <>
       <div className="pr-topbar">
         <div className="pr-topbar__inner">
-          <span className="pr-topbar__tagline">
-            Independent, Accredited &amp; Experienced Security Risk Professionals
-          </span>
+          <span className="pr-topbar__tagline">{nav.tagline}</span>
           <div className="pr-topbar__right">
             <div className="pr-topbar-contact">
-              <a href="tel:+27210000000">
+              <a href={nav.phoneHref}>
                 <PhoneIcon />
-                <span>+27 (0) 21 000 0000</span>
+                <span>{nav.phoneLabel}</span>
               </a>
-              <a href="mailto:info@physicalrisk.com">
+              <a href={nav.emailHref}>
                 <MailIcon />
-                <span>info@physicalrisk.com</span>
+                <span>{nav.emailLabel}</span>
               </a>
             </div>
             <span className="pr-topbar__locale" aria-hidden="true">
@@ -92,7 +108,12 @@ export function PhysicalRiskPublicHeader() {
           </div>
         </div>
       </div>
-      <PublicSiteHeader wordpressUrl={WORDPRESS_URL} items={PUBLIC_NAV_LINKS} />
+      <PublicSiteHeader
+        wordpressUrl={WORDPRESS_URL}
+        items={nav.items}
+        ctaLabel={nav.ctaLabel}
+        ctaHref={nav.ctaHref}
+      />
     </>
   );
 }
