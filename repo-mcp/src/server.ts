@@ -39,13 +39,15 @@ function toolResult(data: unknown) {
 
 function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
+  // ChatGPT connector hard-caps ~17 approved tools and freezes that snapshot.
+  // Keep EXACTLY 17 tools, binary FILE_PRESERVE first, so refresh cannot omit import ops.
   const server = new McpServer({
-    name: 'physicalrisk-repo',
-    version: '1.30.2',
+    name: 'physicalrisk-repo-file-preserve',
+    version: '1.31.0',
     description:
-      'Physical Risk Repository MCP (~23 tools). Automatic FILE_PRESERVE import: check_document_exists → '
-      + 'prepare_automatic_file_import → upload_original_file_chunk → complete_automatic_file_import → '
-      + 'finalize_original_file_import. Also upload_original_docx (staged PUT). Never Markdown-only.',
+      'Physical Risk Repository MCP v1.31 (17 tools). FILE_PRESERVE first: check_document_exists, '
+      + 'upload_original_docx, prepare_automatic_file_import, upload_original_file_chunk, '
+      + 'complete_automatic_file_import, finalize_original_file_import. Never Markdown→PDF.',
   });
 
   const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
@@ -53,31 +55,6 @@ function createMcpServer(authHeader?: string) {
       idempotencyKey: typeof args.idempotencyKey === 'string' ? args.idempotencyKey : undefined,
     });
 
-  server.tool(
-    'list_repository_projects',
-    'List repository projects. Use this when choosing a projectCode (e.g. MCRD).',
-    {},
-    async () => toolResult(await mcpTool('list_repository_projects')),
-  );
-
-  server.tool(
-    'list_repository_modules',
-    'List modules/sections for a project. Use projectCode from list_repository_projects.',
-    {
-      projectCode: z.string().optional().describe('Project code e.g. MCRD'),
-      projectId: z.string().optional().describe('Project UUID if known'),
-    },
-    async (args) => toolResult(await mcpTool('list_repository_modules', args)),
-  );
-
-  server.tool(
-    'list_document_types',
-    'List active document types (e.g. Article).',
-    {},
-    async () => toolResult(await mcpTool('list_document_types')),
-  );
-
-  // ChatGPT MCP connectors truncate tools/list (~17–23). Register automatic FILE_PRESERVE import FIRST.
   const prepareUploadSchema = {
     projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
     module: z.string().optional().describe('Module/section name e.g. Governance Standards'),
@@ -140,6 +117,7 @@ function createMcpServer(authHeader?: string) {
     return toolResult(await mcpTool('prepare_original_file_import', body));
   };
 
+  // --- 1..9 FILE_PRESERVE (must be first; ChatGPT freezes ~17 tools) ---
   server.tool(
     'check_document_exists',
     'Before import: check if a document with this title/code already exists. '
@@ -226,33 +204,29 @@ function createMcpServer(authHeader?: string) {
     },
   );
 
+  // --- 8..17 discovery + minimal workspace ---
   server.tool(
-    'submit_approved_file',
-    'FILE_PRESERVE import via fileUrl, fileContentBase64, or uploadId. Prefer automatic chunk path for attachments.',
-    submitFileSchema,
-    async (args) => {
-      const body = args.payload
-        ? { payload: args.payload }
-        : {
-            projectCode: args.projectCode,
-            module: args.module,
-            documentType: args.documentType,
-            title: args.title,
-            documentCode: args.documentCode,
-            mode: args.mode,
-            versionNo: args.versionNo,
-            fileName: args.fileName,
-            mimeType: args.mimeType,
-            fileContentBase64: args.fileContentBase64,
-            fileUrl: args.fileUrl,
-            uploadId: args.uploadId,
-            sourceSha256: args.sourceSha256,
-            workspaceCode: args.workspaceCode,
-            owner: args.owner,
-            description: args.description,
-          };
-      return toolResult(await mcpTool('submit_approved_file', body));
+    'list_repository_projects',
+    'List repository projects. Use this when choosing a projectCode (e.g. MCRD).',
+    {},
+    async () => toolResult(await mcpTool('list_repository_projects')),
+  );
+
+  server.tool(
+    'list_repository_modules',
+    'List modules/sections for a project. Use projectCode from list_repository_projects.',
+    {
+      projectCode: z.string().optional().describe('Project code e.g. MCRD'),
+      projectId: z.string().optional().describe('Project UUID if known'),
     },
+    async (args) => toolResult(await mcpTool('list_repository_modules', args)),
+  );
+
+  server.tool(
+    'list_document_types',
+    'List active document types (e.g. Article).',
+    {},
+    async () => toolResult(await mcpTool('list_document_types')),
   );
 
   server.tool(
@@ -318,29 +292,6 @@ function createMcpServer(authHeader?: string) {
   );
 
   server.tool(
-    'get_latest_repository_workspace',
-    'Latest pending workspace for the signed-in user — use when resuming without a code',
-    {},
-    async () => toolResult(await mcpTool('get_latest_pending_workspace')),
-  );
-
-  server.tool(
-    'get_workspace_summary',
-    'Workspace progress + documents',
-    { workspaceCode: z.string() },
-    async ({ workspaceCode }) =>
-      toolResult(await mcpTool('get_workspace_summary', { workspaceCode })),
-  );
-
-  server.tool(
-    'list_workspace_documents',
-    'List documents attached to a workspace',
-    { workspaceCode: z.string() },
-    async ({ workspaceCode }) =>
-      toolResult(await mcpTool('list_workspace_documents', { workspaceCode })),
-  );
-
-  server.tool(
     'attach_document_to_workspace',
     'Attach an already-imported repository document to a workspace',
     {
@@ -350,22 +301,6 @@ function createMcpServer(authHeader?: string) {
       importJobId: z.string().optional(),
     },
     async (args) => toolResult(await mcpTool('attach_document_to_workspace', args)),
-  );
-
-  server.tool(
-    'submit_repository_workspace',
-    'Submit workspace import',
-    { workspaceCode: z.string() },
-    async ({ workspaceCode }) =>
-      toolResult(await mcpTool('submit_workspace', { workspaceCode })),
-  );
-
-  server.tool(
-    'resume_repository_workspace',
-    'Resume / continue a paused workspace',
-    { workspaceCode: z.string() },
-    async ({ workspaceCode }) =>
-      toolResult(await mcpTool('resume_workspace', { workspaceCode })),
   );
 
   return server;

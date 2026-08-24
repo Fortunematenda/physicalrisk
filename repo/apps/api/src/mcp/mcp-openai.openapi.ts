@@ -221,12 +221,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'BINARY ORIGINAL FILE IMPORT via MCP: check_document_exists, upload_original_docx, '
+        'BINARY ORIGINAL FILE IMPORT (v1.31): check_document_exists, upload_original_docx, '
         + 'prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, '
-        + 'finalize_original_file_import. Prefer @Repo MCP connector for automatic binary import. '
+        + 'finalize_original_file_import. Prefer @Repo MCP connector. Never Markdown→PDF. '
         + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.30.2',
+      version: '1.31.0',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -444,24 +444,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           },
         },
       ),
-      '/api/mcp/tools/submit_approved_content': post(
-        'submit_approved_content',
-        'GENERATED TEXT only (Markdown → repository document)',
-        {
-          required: true,
-          content: { 'application/json': { schema: contentCreatePayloadSchema } },
-        },
-        'Use only when the source is generated Markdown/text. Do NOT use for existing DOCX/XLSX/PDF attachments.',
-      ),
-      '/api/mcp/tools/submit_approved_document': post(
-        'submit_approved_document',
-        'GENERATED TEXT only — not binary DOCX upload',
-        {
-          required: true,
-          content: { 'application/json': { schema: payloadSchema } },
-        },
-        'Not a binary DOCX action. For originals use import_original_file or prepare_original_file_import.',
-      ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
         'Get import job status',
@@ -503,59 +485,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Returns workspaceCode to resume from another chat. Prefer projectCode (MCRD/MOSS/PROR).',
       ),
       '/api/mcp/tools/get_workspace': post('get_workspace', 'Get workspace by code', workspaceCodeBody),
-      '/api/mcp/tools/find_workspaces': post(
-        'find_workspaces',
-        'Find workspaces for current user',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  workspaceCode: { type: 'string' },
-                  name: { type: 'string' },
-                  projectCode: { type: 'string' },
-                  status: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-      ),
-      '/api/mcp/tools/get_latest_pending_workspace': post(
-        'get_latest_pending_workspace',
-        'Latest pending workspace for current user',
-        {
-          required: false,
-          content: { 'application/json': { schema: { type: 'object', properties: {} } } },
-        },
-      ),
-      '/api/mcp/tools/get_workspace_summary': post(
-        'get_workspace_summary',
-        'Workspace summary with documents',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/list_workspace_documents': post(
-        'list_workspace_documents',
-        'List documents in a workspace',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/resume_workspace': post(
-        'resume_workspace',
-        'Resume workspace by code',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/validate_workspace': post(
-        'validate_workspace',
-        'Validate workspace before submit',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/submit_workspace': post(
-        'submit_workspace',
-        'Submit ready workspace for import',
-        workspaceCodeBody,
-      ),
       '/api/mcp/tools/attach_document_to_workspace': post(
         'attach_document_to_workspace',
         'Attach imported document to workspace',
@@ -597,12 +526,13 @@ export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository as
 
 CRITICAL FACT (never contradict this):
 The Repo connector SUPPORTS exact DOCX/XLSX/PDF/PPTX FILE_PRESERVE. It is NOT Markdown-only.
-The binary upload action upload_original_docx IS available (also upload_original_xlsx / upload_original_pdf / upload_original_pptx).
-When the user says Import / Reimport / Add as new version of an EXISTING file:
-1) Prefer upload_original_docx (or upload_original_xlsx) → PUT exact bytes to uploadUrl → finalize_original_file_import.
-2) Or import_original_file with fileUrl / prepare_original_file_import.
-NEVER use submit_approved_document or submit_approved_content for an attached DOCX/XLSX/PDF.
-submit_approved_document is GENERATED TEXT only (Markdown you wrote in chat).
+Binary tools ARE available: check_document_exists, upload_original_docx, prepare_automatic_file_import,
+upload_original_file_chunk, complete_automatic_file_import, finalize_original_file_import, import_original_file.
+When importing an existing Office/PDF file:
+1) check_document_exists
+2) prepare_automatic_file_import → upload_original_file_chunk (all chunks) → complete_automatic_file_import → finalize_original_file_import
+   OR upload_original_docx → PUT uploadUrl → finalize_original_file_import
+   OR import_original_file with fileUrl
 NEVER convert Office originals to Markdown or PDF.
 NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).
 Report IMPORTED only after size and SHA-256 match — not after creating a session.
@@ -611,43 +541,30 @@ FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). From list_repository_projects.
 - module = Repository Module / folder (e.g. Articles). From list_repository_modules. NOT document type.
 - documentType = Document classification (e.g. Article). From list_document_types. NOT the folder name.
-- Correct: module=Articles + documentType=Article. Wrong: documentType=Articles or module=Article.
 
 LIST / SEARCH / COUNT (mandatory)
 When user asks how many / list / what was imported / show index:
-1) Call search_documents NOW (optional projectCode / search / limit).
+1) Call search_documents NOW.
 2) Report total + compact table: documentCode, title, projectCode, module, currentVersion, updatedAt.
-3) Detail: get_document with documentCode (preferred) or documentId.
-Never invent documents. Never say the connector cannot list documents.
-
-ORIGINAL DOCX / XLSX / PDF / PPTX
-1) import_original_file with fileUrl when available.
-2) Else prepare_original_file_import → PUT exact bytes to uploadUrl → finalize_original_file_import.
-3) Never paste into documentContent. Never submit_approved_document for originals.
-
-IMPORT MODE
-1) Existing attached/generated Office/PDF file → import_original_file / prepare_original_file_import (FILE_PRESERVE).
-2) Markdown you wrote (no original Office file) → submit_approved_content.
+3) Detail: get_document with documentCode.
+Never invent documents.
 
 APPROVAL FLOW
 When user says approved / import / submit:
 STEP A — list_repository_projects, list_document_types; after project pick, list_repository_modules.
-STEP B — Numbered menus one at a time (project → type → module). "Reply with the number only (e.g. 2)."
-STEP C — Auto: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences.
-STEP D — Existing file: import_original_file or prepare_original_file_import. Markdown you wrote → submit_approved_content. Never Markdown→PDF for an attached DOCX.
+STEP B — Numbered menus one at a time (project → type → module).
+STEP C — Existing file: automatic FILE_PRESERVE tools above. Never Markdown→PDF for an attached DOCX.
 
 FORBIDDEN
 - Claiming Repo only accepts Markdown→PDF.
+- Claiming upload_original_docx / prepare_automatic_file_import are unavailable.
 - Converting DOCX/XLSX/PPTX to PDF.
-- Pasting large documents into documentContent.
-- Swapping module and documentType; hardcoded approvedBy.
+- Creating a new unrelated document code when NEW_VERSION is required.
 
-NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003 ~125059 bytes):
-1) check_document_exists with documentCode.
-2) upload_original_docx with mode=NEW_VERSION, documentCode=MOSS-GS-003, module=Governance Standards, documentType=Master Control Catalogue.
-3) PUT the exact original DOCX bytes to uploadUrl, then finalize_original_file_import.
-4) Or import_original_file with fileUrl when available.
-5) Never Markdown→PDF. Never a new unrelated document code. Never claim upload_original_docx is unavailable.
-WORKSPACES: create_workspace → return WS-YYYY-#####.
+MOSS-GS-003 NEW_VERSION:
+1) check_document_exists with documentCode=MOSS-GS-003.
+2) prepare_automatic_file_import (mode=NEW_VERSION, documentCode=MOSS-GS-003, module=Governance Standards, documentType=Master Control Catalogue)
+   → upload_original_file_chunk until complete → complete_automatic_file_import → finalize_original_file_import.
+3) Or upload_original_docx with same metadata → PUT exact DOCX → finalize_original_file_import.
 
-Tools: upload_original_docx, upload_original_xlsx, upload_original_pdf, upload_original_pptx, list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, inspect_attachment_capability, import_original_file, prepare_original_file_import, finalize_original_file_import, prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
+Tools: check_document_exists, upload_original_docx, prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, finalize_original_file_import, import_original_file, list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, get_import_status, create_workspace, get_workspace, attach_document_to_workspace.`;
