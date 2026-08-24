@@ -221,15 +221,36 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'BINARY ORIGINAL FILE IMPORT IS AVAILABLE via upload_original_docx, upload_original_xlsx, upload_original_pdf, '
-        + 'upload_original_pptx, prepare_original_file_import, and import_original_file (FILE_PRESERVE exact bytes). '
-        + 'Do NOT claim Markdown-only or Markdown→PDF. submit_approved_document / submit_approved_content are GENERATED TEXT only. '
+        'BINARY ORIGINAL FILE IMPORT via MCP: check_document_exists, upload_original_docx, '
+        + 'prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, '
+        + 'finalize_original_file_import. Prefer @Repo MCP connector for automatic binary import. '
         + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.30.1',
+      version: '1.30.2',
     },
     servers: [{ url: baseUrl }],
     paths: {
+      '/api/mcp/tools/check_document_exists': post(
+        'check_document_exists',
+        'Check duplicates before import; use NEW_VERSION hints',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  projectCode: { type: 'string' },
+                  title: { type: 'string' },
+                  documentCode: { type: 'string' },
+                  fileName: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        'If exists=true, use mode=NEW_VERSION + documentCode. Never create duplicate codes.',
+      ),
       '/api/mcp/tools/upload_original_docx': post(
         'upload_original_docx',
         'PRIMARY binary DOCX/XLSX/PDF/PPTX FILE_PRESERVE upload (NEW_VERSION supported)',
@@ -238,94 +259,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
         'Returns uploadId+uploadUrl (PUT exact original bytes) then finalize_original_file_import. '
-          + 'Use for MOSS-GS-003 mode=NEW_VERSION. Never Markdown→PDF. This action IS available.',
-      ),
-      '/api/mcp/tools/upload_original_xlsx': post(
-        'upload_original_xlsx',
-        'PRIMARY binary XLSX FILE_PRESERVE upload (same as upload_original_docx)',
-        {
-          required: true,
-          content: { 'application/json': { schema: prepareFilePreserveSchema } },
-        },
-        'Exact Excel bytes. NEW_VERSION + documentCode supported. Never Markdown.',
-      ),
-      '/api/mcp/tools/upload_original_pdf': post(
-        'upload_original_pdf',
-        'PRIMARY binary PDF FILE_PRESERVE upload (same as upload_original_docx)',
-        {
-          required: true,
-          content: { 'application/json': { schema: prepareFilePreserveSchema } },
-        },
-        'Exact PDF bytes. NEW_VERSION + documentCode supported. Never Markdown conversion.',
-      ),
-      '/api/mcp/tools/upload_original_pptx': post(
-        'upload_original_pptx',
-        'PRIMARY binary PPTX FILE_PRESERVE upload (same as upload_original_docx)',
-        {
-          required: true,
-          content: { 'application/json': { schema: prepareFilePreserveSchema } },
-        },
-        'Exact PowerPoint bytes. NEW_VERSION + documentCode supported. Never Markdown.',
-      ),
-      '/api/mcp/tools/inspect_attachment_capability': post(
-        'inspect_attachment_capability',
-        'Detect automatic binary transport (fileUrl vs chunks)',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  fileName: { type: 'string' },
-                  fileUrl: { type: 'string' },
-                  attachmentReference: { type: 'string' },
-                  canProvideExactBytes: { type: 'boolean' },
-                  expectedFileSize: { type: 'integer' },
-                },
-              },
-            },
-          },
-        },
-        'Returns HOST_REFERENCE, CHUNKED_BINARY, or UNSUPPORTED. Never converts Markdown.',
-      ),
-      '/api/mcp/tools/import_original_file': post(
-        'import_original_file',
-        'Zero-click FILE_PRESERVE via HTTPS fileUrl',
-        {
-          required: true,
-          content: { 'application/json': { schema: filePreservePayloadSchema } },
-        },
-        'Downloads exact original bytes from fileUrl. NEVER Markdown or PDF conversion. NEW_VERSION + documentCode supported.',
-      ),
-      '/api/mcp/tools/prepare_original_file_import': post(
-        'prepare_original_file_import',
-        'Staged FILE_PRESERVE PUT of exact original file',
-        {
-          required: true,
-          content: { 'application/json': { schema: prepareFilePreserveSchema } },
-        },
-        'ALWAYS use instead of submit_approved_document for existing DOCX/XLSX/PDF. Returns uploadId+uploadUrl method PUT. Not Markdown→PDF.',
-      ),
-      '/api/mcp/tools/finalize_original_file_import': post(
-        'finalize_original_file_import',
-        'Verify original-file SHA-256 after staged PUT',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['uploadId'],
-                properties: {
-                  uploadId: { type: 'string' },
-                  uploadToken: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        'Returns UPLOAD_PENDING, VERIFIED, VERIFICATION_FAILED, or IMPORTED. Session create is not IMPORTED.',
+          + 'Use for MOSS-GS-003 mode=NEW_VERSION. Never Markdown→PDF.',
       ),
       '/api/mcp/tools/prepare_automatic_file_import': post(
         'prepare_automatic_file_import',
@@ -334,7 +268,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
-        'Returns uploadId+uploadToken+acceptedChunkSize. Then upload chunks automatically; never ask user to click.',
+        'Returns uploadId+uploadToken+acceptedChunkSize. Then upload_original_file_chunk automatically.',
       ),
       '/api/mcp/tools/upload_original_file_chunk': post(
         'upload_original_file_chunk',
@@ -359,39 +293,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
             },
           },
         },
-        'Validates chunk SHA-256. Idempotent. Continue until complete_automatic_file_import.',
-      ),
-      '/api/mcp/tools/get_automatic_file_import_progress': post(
-        'get_automatic_file_import_progress',
-        'Chunked import progress',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['uploadId', 'uploadToken'],
-                properties: { uploadId: { type: 'string' }, uploadToken: { type: 'string' } },
-              },
-            },
-          },
-        },
-      ),
-      '/api/mcp/tools/resume_automatic_file_import': post(
-        'resume_automatic_file_import',
-        'Resume interrupted chunked import',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['uploadId', 'uploadToken'],
-                properties: { uploadId: { type: 'string' }, uploadToken: { type: 'string' } },
-              },
-            },
-          },
-        },
+        'Idempotent chunk upload. Continue until complete_automatic_file_import.',
       ),
       '/api/mcp/tools/complete_automatic_file_import': post(
         'complete_automatic_file_import',
@@ -413,36 +315,36 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
             },
           },
         },
-        'Validates OOXML/PDF + SHA-256. Success only after validation — not after session create.',
+        'Validates OOXML/PDF + SHA-256. Success only after validation.',
       ),
-      '/api/mcp/tools/abort_automatic_file_import': post(
-        'abort_automatic_file_import',
-        'Abort chunked import; keep existing versions',
+      '/api/mcp/tools/finalize_original_file_import': post(
+        'finalize_original_file_import',
+        'Verify original-file SHA-256 after staged PUT or automatic import',
         {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['uploadId', 'uploadToken'],
+                required: ['uploadId'],
                 properties: {
                   uploadId: { type: 'string' },
                   uploadToken: { type: 'string' },
-                  reason: { type: 'string' },
                 },
               },
             },
           },
         },
+        'Returns UPLOAD_PENDING, VERIFIED, VERIFICATION_FAILED, or IMPORTED.',
       ),
-      '/api/mcp/tools/prepare_approved_document': post(
-        'prepare_approved_document',
-        'Alias of upload_original_docx — FILE_PRESERVE staged original-file import',
+      '/api/mcp/tools/import_original_file': post(
+        'import_original_file',
+        'Zero-click FILE_PRESERVE via HTTPS fileUrl',
         {
           required: true,
-          content: { 'application/json': { schema: prepareFilePreserveSchema } },
+          content: { 'application/json': { schema: filePreservePayloadSchema } },
         },
-        'Same as upload_original_docx. Never documentContent. Never Markdown→PDF.',
+        'Downloads exact original bytes from fileUrl. NEVER Markdown or PDF conversion. NEW_VERSION + documentCode supported.',
       ),
       '/api/mcp/tools/submit_approved_file': post(
         'submit_approved_file',
@@ -541,27 +443,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
             },
           },
         },
-      ),
-      '/api/mcp/tools/check_document_exists': post(
-        'check_document_exists',
-        'Check duplicates; returns newVersionSubmitHints',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  projectCode: { type: 'string' },
-                  title: { type: 'string' },
-                  documentCode: { type: 'string' },
-                  fileName: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
       ),
       '/api/mcp/tools/submit_approved_content': post(
         'submit_approved_content',
