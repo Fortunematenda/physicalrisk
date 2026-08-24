@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import AdmZip = require('adm-zip');
 import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, statfs, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { sha256AndSize } from '../common/file-hash.util';
 import { DatabaseService } from '../database/database.service';
 import { Project, ProjectStatus } from '../database/entities';
 import { IsNull } from 'typeorm';
@@ -170,6 +171,24 @@ export class VpsStorageService implements OnApplicationBootstrap {
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, data);
     return { relativePath, absolutePath };
+  }
+
+  /** Copy original bytes from disk into incoming staging (no re-encode / no conversion). */
+  async stageIncomingFromPath(fileName: string, sourceAbsolutePath: string) {
+    const relativePath = join('incoming', `${Date.now()}-${this.safeSegment(fileName)}`).replace(/\\/g, '/');
+    const absolutePath = this.resolveStoragePath(relativePath);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await copyFile(sourceAbsolutePath, absolutePath);
+    return { relativePath, absolutePath };
+  }
+
+  /** Stream SHA-256 of a staged incoming file without loading it entirely into memory. */
+  async hashIncoming(relativePath: string): Promise<{ sha256: string; size: number }> {
+    const normalized = relativePath.replace(/\\/g, '/');
+    if (!normalized.startsWith('incoming/')) {
+      throw new BadRequestException('hashIncoming is limited to incoming staging paths');
+    }
+    return sha256AndSize(this.resolveStoragePath(normalized));
   }
 
   /** Re-read a staged incoming file for integrity verification. */

@@ -49,5 +49,13 @@ App-level MOSS docs: `moss/docs/` (API, EspoCRM, methodology, WordPress entry, d
 | [chatgpt-repo-connector-notion-style.md](chatgpt-repo-connector-notion-style.md) | Mode B connector guide |
 | [chatgpt-import-versioning.md](chatgpt-import-versioning.md) | Import versioning rules |
 | [REPO_MCP_FILE_PRESERVE.md](REPO_MCP_FILE_PRESERVE.md) | Original file import (FILE_PRESERVE vs CONTENT_CREATE) |
+| [CHATGPT_MCP_BINARY_IMPORT_ROOT_CAUSE.md](CHATGPT_MCP_BINARY_IMPORT_ROOT_CAUSE.md) | Why ChatGPT DOCX became ~1.7KB |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_ARCHITECTURE.md](CHATGPT_MCP_AUTOMATIC_IMPORT_ARCHITECTURE.md) | Automatic FILE_PRESERVE architecture |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_API.md](CHATGPT_MCP_AUTOMATIC_IMPORT_API.md) | MCP tools for automatic binary import |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_TESTING.md](CHATGPT_MCP_AUTOMATIC_IMPORT_TESTING.md) | Unit/integration/host tests |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_DEPLOYMENT.md](CHATGPT_MCP_AUTOMATIC_IMPORT_DEPLOYMENT.md) | Staging deploy (no auto production) |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_ROLLBACK.md](CHATGPT_MCP_AUTOMATIC_IMPORT_ROLLBACK.md) | Rollback |
+| [CHATGPT_MCP_AUTOMATIC_IMPORT_VERIFICATION.md](CHATGPT_MCP_AUTOMATIC_IMPORT_VERIFICATION.md) | Smoke/verify commands |
+| [MCP_ORIGINAL_FILE_IMPORT_FIX.md](MCP_ORIGINAL_FILE_IMPORT_FIX.md) | Why ChatGPT saw Markdown-to-PDF only |
 | [repo-gpt-actions-workspaces.md](repo-gpt-actions-workspaces.md) | GPT Actions / workspaces |
 | [workspace-testing-checklist.md](workspace-testing-checklist.md) | Workspace UAT checklist |

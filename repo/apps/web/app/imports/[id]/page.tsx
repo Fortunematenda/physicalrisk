@@ -33,6 +33,15 @@ type ImportJobDetail = {
     approvalDate?: string;
     mode?: string;
     sectionKey?: string;
+    importMode?: string;
+    conversionPerformed?: boolean;
+    originalFilename?: string;
+    sourceSha256?: string;
+    storedSha256?: string;
+    checksumVerified?: boolean;
+    sourceSizeBytes?: number;
+    storedSizeBytes?: number;
+    originalMimeType?: string;
   } | null;
   routingDecision?: {
     projectCode?: string;
@@ -191,8 +200,32 @@ export default function ImportResultPage() {
                 </div>
                 <div className={styles.grid2}>
                   <Field label="File name" value={item.fileName} />
-                  <Field label="Size" value={formatBytes(item.fileSize ?? undefined)} />
-                  <Field label="MIME type" value={item.mimeType} />
+                  <Field label="Original filename" value={meta.originalFilename || item.version?.originalFileName} />
+                  <Field label="Size" value={formatBytes(item.fileSize ?? meta.sourceSizeBytes ?? undefined)} />
+                  <Field label="MIME type" value={item.mimeType || meta.originalMimeType} />
+                  <Field label="Preserve mode" value={meta.importMode === 'FILE_PRESERVE' ? 'Original bytes (FILE_PRESERVE)' : meta.importMode === 'CONTENT_CREATE' ? 'Generated content' : meta.importMode} />
+                  <Field
+                    label="Conversion"
+                    value={
+                      meta.conversionPerformed === true
+                        ? 'Converted (not original)'
+                        : meta.conversionPerformed === false
+                          ? 'None — original bytes stored'
+                          : null
+                    }
+                  />
+                  <Field label="Source SHA-256" value={meta.sourceSha256 || item.checksum} mono />
+                  <Field label="Stored SHA-256" value={meta.storedSha256 || item.checksum} mono />
+                  <Field
+                    label="Checksum match"
+                    value={
+                      meta.checksumVerified === true
+                        ? 'Yes'
+                        : meta.checksumVerified === false
+                          ? 'No'
+                          : null
+                    }
+                  />
                   <Field label="Checksum" value={item.checksum} mono />
                 </div>
               </section>

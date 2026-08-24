@@ -41,17 +41,13 @@ function createMcpServer(authHeader?: string) {
   const api = new RepositoryApiClient(authHeader);
   const server = new McpServer({
     name: 'physicalrisk-repo',
-    version: '1.28.0',
+    version: '1.30.1',
     description:
-      'Physical Risk Repository. Prefer projectCode from list_repository_projects (e.g. MCRD, MOSS, PROR). '
-      + 'Use find_repository_documents / search_documents to list Master Document Index. '
-      + 'Workspaces use codes WS-YYYY-##### — resume by workspace code, not chat history. '
-      + 'ZERO-CLICK DOCX IMPORT (preferred after user says approved/import): call submit_approved_file with '
-      + 'fileUrl=https://… pointing at the exact .docx (FILE_PRESERVE). No browser link, no Markdown. '
+      'Physical Risk Repository. Binary ORIGINAL FILE IMPORT is available: upload_original_docx, upload_original_xlsx, '
+      + 'upload_original_pdf, prepare_original_file_import, import_original_file (FILE_PRESERVE exact bytes). '
+      + 'NEVER claim Markdown-only or Markdown→PDF. submit_approved_document is GENERATED TEXT only. '
       + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
-      + 'Only if no HTTPS fileUrl and no fileContentBase64: prepare_approved_document → uploadUrl (user must upload once). '
-      + 'NEVER say Markdown-only. NEVER convert DOCX to Markdown/PDF. '
-      + 'Imports return QUEUED — poll get_import_status.',
+      + 'Prefer projectCode from list_repository_projects. Workspaces use WS-YYYY-#####.',
   });
 
   const mcpTool = (name: string, args: Record<string, unknown> = {}) =>
@@ -81,6 +77,102 @@ function createMcpServer(authHeader?: string) {
     'List active document types (e.g. Article).',
     {},
     async () => toolResult(await mcpTool('list_document_types')),
+  );
+
+  // Register FILE_PRESERVE tools FIRST (before workspaces). ChatGPT connectors often truncate
+  // tools/list — if upload_original_docx is late, the model claims "Markdown→PDF only".
+  const prepareUploadSchema = {
+    projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
+    module: z.string().optional().describe('Module/section name e.g. Governance Standards'),
+    documentType: z.string().optional().describe('e.g. Master Control Catalogue, Article'),
+    title: z.string().optional(),
+    documentCode: z.string().optional().describe('Existing code e.g. MOSS-GS-003 for NEW_VERSION'),
+    mode: z.enum(['NEW', 'NEW_VERSION']).optional().describe(
+      'NEW_VERSION = same document, next Rev. Use with documentCode.',
+    ),
+    versionNo: z.string().optional(),
+    fileName: z.string().optional().describe('Original filename with extension, e.g. Catalogue.docx'),
+    mimeType: z.string().optional(),
+    workspaceCode: z.string().optional().describe('WS-YYYY-#####'),
+    owner: z.string().optional(),
+    description: z.string().optional(),
+    existingDocumentId: z.string().uuid().optional(),
+    payload: z.string().optional().describe(
+      'JSON metadata only: projectCode, module, documentType, title, fileName, mode, documentCode. NEVER documentContent.',
+    ),
+  };
+
+  const callPrepareUpload = async (args: Record<string, unknown>) => {
+    // Never forward documentContent — ChatGPT stuffing Markdown causes 413 / wrong "Markdown only" claims.
+    const body = typeof args.payload === 'string'
+      ? { payload: args.payload }
+      : {
+          projectCode: args.projectCode,
+          module: args.module,
+          documentType: args.documentType,
+          title: args.title,
+          documentCode: args.documentCode,
+          mode: args.mode,
+          versionNo: args.versionNo,
+          fileName: args.fileName,
+          mimeType: args.mimeType,
+          workspaceCode: args.workspaceCode,
+          owner: args.owner,
+          description: args.description,
+          existingDocumentId: args.existingDocumentId,
+        };
+    return toolResult(await mcpTool('prepare_original_file_import', body));
+  };
+
+  const binaryUploadDesc =
+    'PRIMARY binary original-file upload (FILE_PRESERVE). Supports DOCX, XLSX, PDF, PPTX exact bytes. '
+    + 'Returns uploadId + uploadUrl (PUT original bytes) then finalize_original_file_import. '
+    + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
+    + 'module=Governance Standards, documentType=Master Control Catalogue when applicable. '
+    + 'NOT Markdown→PDF. This tool IS available — never claim the connector is Markdown-only.';
+
+  server.tool(
+    'upload_original_docx',
+    binaryUploadDesc,
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
+  server.tool(
+    'upload_original_xlsx',
+    binaryUploadDesc + ' Prefer for Excel (.xlsx) originals.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
+  server.tool(
+    'upload_original_pdf',
+    binaryUploadDesc + ' Prefer for PDF originals.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
+  server.tool(
+    'upload_original_pptx',
+    binaryUploadDesc + ' Prefer for PowerPoint (.pptx) originals.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
+  );
+
+  server.tool(
+    'prepare_original_file_import',
+    'Start FILE_PRESERVE staged import of the exact original DOCX/XLSX/PDF/PPTX. '
+      + 'ALWAYS use this (or upload_original_docx) instead of submit_approved_document when an existing source file must be preserved. '
+      + 'Returns uploadId, uploadUrl, method=PUT. PUT the original bytes, then finalize_original_file_import. Never Markdown or PDF conversion.',
+    prepareUploadSchema,
+    async (args) => toolResult(await mcpTool('prepare_original_file_import', args as Record<string, unknown>)),
+  );
+
+  server.tool(
+    'prepare_approved_document',
+    'Alias of upload_original_docx / prepare_original_file_import. FILE_PRESERVE staged original-file import. Not Markdown→PDF.',
+    prepareUploadSchema,
+    async (args) => callPrepareUpload(args as Record<string, unknown>),
   );
 
   server.tool(
@@ -272,26 +364,111 @@ function createMcpServer(authHeader?: string) {
     payload: z.string().optional(),
   };
 
-  const prepareUploadSchema = {
-    projectCode: z.string().optional().describe('e.g. MOSS, MCRD, PROR'),
-    module: z.string().optional().describe('Module/section name e.g. Governance Standards'),
-    documentType: z.string().optional().describe('e.g. Article'),
-    title: z.string().optional(),
-    documentCode: z.string().optional().describe('Existing code e.g. MOSS-GS-003 for NEW_VERSION'),
-    mode: z.enum(['NEW', 'NEW_VERSION']).optional().describe(
-      'NEW_VERSION = same document, next Rev. Use with documentCode.',
-    ),
-    versionNo: z.string().optional(),
-    fileName: z.string().optional().describe('Original filename with extension, e.g. Catalogue.docx'),
-    mimeType: z.string().optional(),
-    workspaceCode: z.string().optional().describe('WS-YYYY-#####'),
-    owner: z.string().optional(),
-    description: z.string().optional(),
-    existingDocumentId: z.string().uuid().optional(),
-    payload: z.string().optional().describe(
-      'JSON metadata only: projectCode, module, documentType, title, fileName, mode, documentCode. NEVER documentContent.',
-    ),
-  };
+  server.tool(
+    'inspect_attachment_capability',
+    'Detect automatic binary transport. Returns HOST_REFERENCE, CHUNKED_BINARY, or UNSUPPORTED. '
+      + 'Never converts Markdown. When user says Import, call this first.',
+    {
+      fileName: z.string().optional(),
+      fileUrl: z.string().optional(),
+      attachmentReference: z.string().optional(),
+      canProvideExactBytes: z.boolean().optional(),
+      expectedFileSize: z.number().int().optional(),
+      mimeType: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('inspect_attachment_capability', args)),
+  );
+
+  server.tool(
+    'import_original_file',
+    'Import an existing source file into the Physical Risk Repository while preserving the original file format and binary contents. '
+      + 'Use this tool for DOCX, XLSX, PDF and other uploaded/generated files when the user requests the original file to be imported. '
+      + 'Do not convert the file to Markdown or PDF. ALWAYS use this instead of submit_approved_document for existing Office/PDF files. '
+      + 'Pass fileUrl when available. NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).',
+    {
+      ...submitFileSchema,
+      attachmentReference: z.string().optional(),
+      expectedSha256: z.string().optional(),
+    },
+    async (args) => {
+      const body = args.payload
+        ? { payload: args.payload, attachmentReference: args.attachmentReference, expectedSha256: args.expectedSha256 }
+        : { ...args };
+      return toolResult(await mcpTool('import_original_file', body));
+    },
+  );
+
+  server.tool(
+    'finalize_original_file_import',
+    'Verify stored original file size and SHA-256 after staged PUT. '
+      + 'Returns UPLOAD_PENDING, VERIFIED, VERIFICATION_FAILED, or IMPORTED. Session create is not IMPORTED.',
+    {
+      uploadId: z.string(),
+      uploadToken: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('finalize_original_file_import', args)),
+  );
+
+  server.tool(
+    'prepare_automatic_file_import',
+    'Start automatic resumable chunked FILE_PRESERVE. Returns uploadId+uploadToken. '
+      + 'Then call upload_original_file_chunk for each chunk without waiting for another user message. Never Markdown.',
+    prepareUploadSchema,
+    async (args) => toolResult(await mcpTool('prepare_automatic_file_import', args as Record<string, unknown>)),
+  );
+
+  server.tool(
+    'upload_original_file_chunk',
+    'Upload one exact binary chunk (base64). Validates chunkSha256. Continue automatically until complete.',
+    {
+      uploadId: z.string(),
+      uploadToken: z.string(),
+      chunkIndex: z.number().int().min(0),
+      encodedContent: z.string().optional(),
+      chunkBase64: z.string().optional(),
+      chunkSha256: z.string(),
+      rawByteLength: z.number().int().min(1),
+    },
+    async (args) => toolResult(await mcpTool('upload_original_file_chunk', args)),
+  );
+
+  server.tool(
+    'get_automatic_file_import_progress',
+    'Progress for automatic chunked FILE_PRESERVE import.',
+    { uploadId: z.string(), uploadToken: z.string() },
+    async (args) => toolResult(await mcpTool('get_automatic_file_import_progress', args)),
+  );
+
+  server.tool(
+    'resume_automatic_file_import',
+    'Resume interrupted automatic chunked import; returns missingChunks.',
+    { uploadId: z.string(), uploadToken: z.string() },
+    async (args) => toolResult(await mcpTool('resume_automatic_file_import', args)),
+  );
+
+  server.tool(
+    'complete_automatic_file_import',
+    'Assemble/validate OOXML+SHA-256 then queue FILE_PRESERVE. Session create is not success.',
+    {
+      uploadId: z.string(),
+      uploadToken: z.string(),
+      expectedSha256: z.string().optional(),
+      expectedFileSize: z.number().int().optional(),
+      ...prepareUploadSchema,
+    },
+    async (args) => toolResult(await mcpTool('complete_automatic_file_import', args as Record<string, unknown>)),
+  );
+
+  server.tool(
+    'abort_automatic_file_import',
+    'Abort automatic import. Never deletes an existing valid document version.',
+    {
+      uploadId: z.string(),
+      uploadToken: z.string(),
+      reason: z.string().optional(),
+    },
+    async (args) => toolResult(await mcpTool('abort_automatic_file_import', args)),
+  );
 
   server.tool(
     'submit_approved_file',
@@ -328,9 +505,8 @@ function createMcpServer(authHeader?: string) {
 
   server.tool(
     'submit_approved_content',
-    'Create a Repository document from supplied text/Markdown. '
-      + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use upload_original_docx or submit_approved_file instead. '
-      + 'Converts Markdown to PDF/DOCX/XLSX/PPTX/TXT from fileName/outputFormat.',
+    'Use only when the authoritative source is generated text/Markdown and conversion to a repository-generated document is intended. '
+      + 'Do NOT use for an existing attached DOCX/XLSX/PDF — use import_original_file or prepare_original_file_import.',
     submitContentSchema,
     async (args) => {
       const body = args.payload
@@ -357,10 +533,8 @@ function createMcpServer(authHeader?: string) {
 
   server.tool(
     'submit_approved_document',
-    'Legacy combined submit. Prefer upload_original_docx / prepare_approved_document for original DOCX, '
-      + 'or submit_approved_content for Markdown you wrote. '
-      + 'ALWAYS call check_document_exists first. If it exists: mode=NEW_VERSION + documentCode. '
-      + 'When working in a workspace, ALWAYS pass workspaceCode.',
+    'GENERATED TEXT ONLY. Use only when the authoritative source is generated text/Markdown. '
+      + 'This is NOT a binary DOCX upload action. For existing DOCX/XLSX/PDF always use import_original_file or prepare_original_file_import.',
     submitDocSchema,
     async (args) => {
       const body = args.payload
@@ -386,46 +560,6 @@ function createMcpServer(authHeader?: string) {
           };
       return toolResult(await mcpTool('submit_approved_document', body));
     },
-  );
-
-  const callPrepareUpload = async (args: Record<string, unknown>) => {
-    // Never forward documentContent — ChatGPT stuffing Markdown causes 413 / wrong "Markdown only" claims.
-    const body = typeof args.payload === 'string'
-      ? { payload: args.payload }
-      : {
-          projectCode: args.projectCode,
-          module: args.module,
-          documentType: args.documentType,
-          title: args.title,
-          documentCode: args.documentCode,
-          mode: args.mode,
-          versionNo: args.versionNo,
-          fileName: args.fileName,
-          mimeType: args.mimeType,
-          workspaceCode: args.workspaceCode,
-          owner: args.owner,
-          description: args.description,
-          existingDocumentId: args.existingDocumentId,
-        };
-    return toolResult(await mcpTool('prepare_approved_document', body));
-  };
-
-  server.tool(
-    'upload_original_docx',
-    'PRIMARY for original DOCX/XLSX/PDF. Returns uploadUrl — user uploads exact binary in browser (FILE_PRESERVE). '
-      + 'Metadata only (projectCode, module, documentType, title, fileName, mode, documentCode). '
-      + 'NEVER send documentContent or Markdown. NEW_VERSION: mode=NEW_VERSION + documentCode=MOSS-GS-003.',
-    prepareUploadSchema,
-    async (args) => callPrepareUpload(args as Record<string, unknown>),
-  );
-
-  server.tool(
-    'prepare_approved_document',
-    'PRIMARY for original DOCX/XLSX/PDF/PPTX. Returns uploadUrl for exact browser upload (FILE_PRESERVE). '
-      + 'Metadata only — never documentContent/Markdown (that causes request entity too large). '
-      + 'NEW_VERSION: mode=NEW_VERSION + documentCode. Same as upload_original_docx.',
-    prepareUploadSchema,
-    async (args) => callPrepareUpload(args as Record<string, unknown>),
   );
 
   server.tool(

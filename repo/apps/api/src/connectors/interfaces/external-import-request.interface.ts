@@ -39,7 +39,10 @@ export interface McpApprovedDocumentRequest {
   mode?: 'NEW' | 'NEW_VERSION';
   existingDocumentId?: string;
   fileName: string;
-  fileContentBase64: string;
+  /** Base64 of original bytes. Prefer `filePath` for large FILE_PRESERVE imports. */
+  fileContentBase64?: string;
+  /** Absolute path to assembled original bytes (copied, never converted). */
+  filePath?: string;
   mimeType?: string;
   mcpIntegrationId?: string;
   /**

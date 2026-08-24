@@ -10,6 +10,8 @@ import { ConnectorImportJobService } from './connector-import-job.service';
 import { ConnectorSessionService } from './connector-session.service';
 import { McpAuthGuard } from './mcp-auth.guard';
 import { McpAuthService } from './mcp-auth.service';
+import { McpBinaryImportService } from './mcp-binary-import.service';
+import { McpBinaryImportScheduler } from './mcp-binary-import.scheduler';
 import { McpBrowserUploadService } from './mcp-browser-upload.service';
 import { McpMarkdownPdfService } from './mcp-markdown-pdf.service';
 import { McpMarkdownOfficeService } from './mcp-markdown-office.service';
@@ -31,6 +33,8 @@ import { McpUploadSessionService } from './mcp-upload-session.service';
     McpAuthGuard,
     McpToolsService,
     McpUploadSessionService,
+    McpBinaryImportService,
+    McpBinaryImportScheduler,
     McpBrowserUploadService,
     McpRemoteFileService,
     McpMarkdownPdfService,
@@ -43,6 +47,7 @@ import { McpUploadSessionService } from './mcp-upload-session.service';
   exports: [
     McpAuthService,
     McpToolsService,
+    McpBinaryImportService,
     ConnectorSessionService,
     ConnectorIdempotencyService,
     ConnectorImportJobService,

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef 
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { AuditService } from '../common/audit.service';
+import { sha256AndSize } from '../common/file-hash.util';
 import { assertFileSizeAllowed, assertMimeTypeAllowed } from '../connectors/connector-validation.util';
 import { ExternalImportRequest, McpApprovedDocumentRequest, McpExternalImportResult } from '../connectors/interfaces/external-import-request.interface';
 import { DatabaseService } from '../database/database.service';
@@ -204,20 +205,22 @@ export class ExternalImportOrchestratorService {
       throw new BadRequestException('Select an active source system configured in the database');
     }
 
-    const fileBuffer = this.decodeBase64File(request.fileContentBase64);
     const fileName = request.fileName.trim();
     const extension = extname(fileName).replace('.', '').toLowerCase();
     const fileType = await this.db.fileTypes.findOne({ where: { extension } });
     if (!fileType || !fileType.active) {
       throw new BadRequestException(`.${extension || 'unknown'} files are not enabled in the database`);
     }
-    assertFileSizeAllowed(fileBuffer.length, fileType);
+
+    const resolved = await this.resolveApprovedFileBytes(request, fileName);
+    assertFileSizeAllowed(resolved.size, fileType);
     const mimeType = request.mimeType?.trim() || 'application/octet-stream';
     assertMimeTypeAllowed(mimeType, fileType, fileName);
 
-    const checksum = createHash('sha256').update(fileBuffer).digest('hex');
+    const checksum = resolved.checksum;
     const sourceSha256 = (request.sourceSha256?.trim().toLowerCase() || checksum).toLowerCase();
     if (request.sourceSha256?.trim() && sourceSha256 !== checksum) {
+      await this.storage.remove(resolved.staged.relativePath).catch(() => undefined);
       throw new BadRequestException({
         status: 'FILE_INTEGRITY_MISMATCH',
         message: 'Client-reported source SHA-256 does not match received file bytes.',
@@ -225,10 +228,9 @@ export class ExternalImportOrchestratorService {
         receivedSha256: checksum,
       });
     }
-    const staged = await this.storage.stageIncoming(fileName, fileBuffer);
-    const storedBuffer = await this.storage.readIncoming(staged.relativePath);
-    const storedSha256 = createHash('sha256').update(storedBuffer).digest('hex');
-    const checksumVerified = storedSha256 === checksum && storedBuffer.length === fileBuffer.length;
+    const staged = resolved.staged;
+    const storedSha256 = resolved.storedSha256;
+    const checksumVerified = storedSha256 === checksum && resolved.storedSize === resolved.size;
     if (!checksumVerified) {
       await this.storage.remove(staged.relativePath).catch(() => undefined);
       throw new BadRequestException({
@@ -236,8 +238,8 @@ export class ExternalImportOrchestratorService {
         message: 'Stored file SHA-256 does not match source bytes. Import aborted.',
         sourceSha256: checksum,
         storedSha256,
-        sourceSizeBytes: fileBuffer.length,
-        storedSizeBytes: storedBuffer.length,
+        sourceSizeBytes: resolved.size,
+        storedSizeBytes: resolved.storedSize,
       });
     }
     const approvalDate = new Date(String(request.approvalDate).trim());
@@ -314,9 +316,9 @@ export class ExternalImportOrchestratorService {
       conversionPerformed,
       originalFilename,
       originalMimeType: mimeType,
-      sourceSizeBytes: fileBuffer.length,
+      sourceSizeBytes: resolved.size,
       sourceSha256: checksum,
-      storedSizeBytes: storedBuffer.length,
+      storedSizeBytes: resolved.storedSize,
       storedSha256,
       checksumVerified,
     };
@@ -330,7 +332,7 @@ export class ExternalImportOrchestratorService {
       fileName,
       incomingPath: staged.relativePath,
       mimeType,
-      fileSize: fileBuffer.length,
+      fileSize: resolved.size,
       checksum,
       // Must match Import Queue "External Imports" filter (READY_FOR_REVIEW / DUPLICATE / VERSION).
       status: dedup.importStatus,
@@ -371,8 +373,8 @@ export class ExternalImportOrchestratorService {
       conversionPerformed,
       originalFilename,
       mimeType,
-      sourceSizeBytes: fileBuffer.length,
-      storedSizeBytes: storedBuffer.length,
+      sourceSizeBytes: resolved.size,
+      storedSizeBytes: resolved.storedSize,
       sourceSha256: checksum,
       storedSha256,
       checksumVerified,
@@ -460,6 +462,47 @@ export class ExternalImportOrchestratorService {
         ...integrityFields,
       };
     }
+  }
+
+  private async resolveApprovedFileBytes(
+    request: McpApprovedDocumentRequest,
+    fileName: string,
+  ): Promise<{
+    size: number;
+    checksum: string;
+    storedSha256: string;
+    storedSize: number;
+    staged: { relativePath: string; absolutePath: string };
+  }> {
+    const filePath = request.filePath?.trim();
+    if (filePath) {
+      const source = await sha256AndSize(filePath);
+      const staged = await this.storage.stageIncomingFromPath(fileName, filePath);
+      const stored = await this.storage.hashIncoming(staged.relativePath);
+      return {
+        size: source.size,
+        checksum: source.sha256,
+        storedSha256: stored.sha256,
+        storedSize: stored.size,
+        staged,
+      };
+    }
+
+    if (!request.fileContentBase64?.trim()) {
+      throw new BadRequestException('Provide filePath or fileContentBase64 for FILE_PRESERVE import');
+    }
+
+    const fileBuffer = this.decodeBase64File(request.fileContentBase64);
+    const checksum = createHash('sha256').update(fileBuffer).digest('hex');
+    const staged = await this.storage.stageIncoming(fileName, fileBuffer);
+    const stored = await this.storage.hashIncoming(staged.relativePath);
+    return {
+      size: fileBuffer.length,
+      checksum,
+      storedSha256: stored.sha256,
+      storedSize: stored.size,
+      staged,
+    };
   }
 
   private decodeBase64File(content: string): Buffer {

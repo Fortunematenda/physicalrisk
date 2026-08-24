@@ -7,7 +7,7 @@ import {
   Header,
   Param,
   Patch,
-  Post,
+  Put,
   Req,
   Res,
   UploadedFile,
@@ -188,7 +188,7 @@ export class McpController {
 
   @Public()
   @Post('upload/:token')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 524288000 } }))
   async uploadPageSubmit(
     @Param('token') token: string,
     @UploadedFile() file: Express.Multer.File | undefined,
@@ -212,6 +212,47 @@ export class McpController {
       const message = error instanceof Error ? error.message : 'Upload failed';
       throw new BadRequestException(message);
     }
+  }
+
+  /** Staged FILE_PRESERVE PUT of exact original bytes (ChatGPT / MCP clients). */
+  @Public()
+  @Put('upload/:token')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 524288000 } }))
+  async uploadOriginalFilePut(
+    @Param('token') token: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Req() request: Request,
+  ) {
+    let buffer = file?.buffer;
+    let originalname = file?.originalname;
+    let mimetype = file?.mimetype;
+    if (!buffer?.length) {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      buffer = Buffer.concat(chunks);
+      const headerName = String(request.headers['x-file-name'] || request.headers['x-filename'] || '').trim();
+      originalname = headerName || undefined;
+      mimetype = String(request.headers['content-type'] || '').split(';')[0]?.trim() || undefined;
+    }
+    if (!buffer?.length) {
+      throw new BadRequestException('PUT the exact original file bytes (octet-stream or multipart file)');
+    }
+    const result = await this.tools.completeBrowserUpload(
+      token,
+      { buffer, originalname: originalname || 'document.bin', mimetype },
+      request.ip,
+    );
+    return {
+      accepted: true,
+      status: 'UPLOADED',
+      result,
+      importJobId: 'importJobId' in result ? result.importJobId : undefined,
+      conversionPerformed: false,
+      importMode: 'FILE_PRESERVE',
+      message: 'Original bytes received. Call finalize_original_file_import with this uploadId. Session create is not IMPORTED.',
+    };
   }
 
   /**
