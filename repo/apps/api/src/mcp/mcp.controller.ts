@@ -7,6 +7,7 @@ import {
   Header,
   Param,
   Patch,
+  Post,
   Put,
   Req,
   Res,
