@@ -10,6 +10,7 @@ import { ConnectorProvider, McpBinaryImportSession, McpBinaryImportStatus, McpIn
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
 import { BinaryImportErrorCode, binaryImportError } from './mcp-binary-import.errors';
+import { ConnectorImportJobService } from './connector-import-job.service';
 import { validateStoredBinary, validateStoredBinaryFromFile } from './mcp-ooxml-validate.util';
 import { McpRemoteFileService } from './mcp-remote-file.service';
 
@@ -92,6 +93,7 @@ export class McpBinaryImportService {
     private readonly remoteFiles: McpRemoteFileService,
     private readonly orchestrator: ExternalImportOrchestratorService,
     private readonly audit: AuditService,
+    private readonly connectorImports: ConnectorImportJobService,
   ) {}
 
   get enabled(): boolean {
@@ -308,6 +310,8 @@ export class McpBinaryImportService {
           checksum: queued.checksum,
         },
       });
+
+      await this.finishQueuedImport(queued, integration.createdBy?.id);
 
       return {
         transportMode: 'HOST_REFERENCE' as const,
@@ -645,6 +649,10 @@ export class McpBinaryImportService {
     });
 
     if (session.status === McpBinaryImportStatus.AVAILABLE && session.importJobId) {
+      // Recover stuck READY_FOR_REVIEW jobs from earlier builds that queued but never processed.
+      this.connectorImports.enqueueSingleImport(session.importJobId, {
+        userId: session.userId ?? integration.createdBy?.id ?? null,
+      });
       return {
         uploadId: session.id,
         transportMode: 'CHUNKED_BINARY' as const,
@@ -848,6 +856,8 @@ export class McpBinaryImportService {
       },
     });
 
+    await this.finishQueuedImport(queued, session.userId ?? integration.createdBy?.id);
+
     // Best-effort cleanup of chunk files (keep assembled briefly)
     this.cleanupChunks(session.tempDir, chunkCount).catch(() => undefined);
 
@@ -952,6 +962,21 @@ export class McpBinaryImportService {
         BinaryImportErrorCode.BINARY_IMPORT_DISABLED,
         'MCP binary FILE_PRESERVE import is disabled',
       );
+    }
+  }
+
+  /** Match submit_approved_document: stage then process when no human review needed. */
+  private async finishQueuedImport(
+    queued: { importJobId: string; needsReview?: boolean },
+    userId?: string | null,
+  ) {
+    if (queued.needsReview) return;
+    try {
+      await this.connectorImports.processReadyImport(queued.importJobId, {
+        userId: userId ?? null,
+      });
+    } catch {
+      // Binary session is already verified; leave job at READY_FOR_REVIEW for get_import_status retry.
     }
   }
 

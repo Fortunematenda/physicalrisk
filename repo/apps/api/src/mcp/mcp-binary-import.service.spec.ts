@@ -158,6 +158,7 @@ describe('McpBinaryImportService', () => {
       { fetchApprovedDocument: jest.fn(), parsePublicHttpUrl: jest.fn() } as any,
       orchestrator as any,
       { record: jest.fn() } as any,
+      { enqueueSingleImport: jest.fn(), processReadyImport: jest.fn().mockResolvedValue(undefined) } as any,
     );
   });
 

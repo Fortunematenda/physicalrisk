@@ -3,7 +3,7 @@ import { extname } from 'path';
 import { In, IsNull } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { alignStoredFileIdentity } from '../common/document-format.util';
-import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
+import { ConnectorProvider, Document, ImportStatus, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
 import { compareVersions, suggestNextVersion } from '../imports/version.util';
@@ -175,6 +175,22 @@ export class McpToolsService {
           attachmentReference: typeof args.attachmentReference === 'string' ? args.attachmentReference : undefined,
           mimeType: prepared.mimeType,
           sourceSha256: typeof args.expectedSha256 === 'string' ? args.expectedSha256 : undefined,
+        }).then(async (queued) => {
+          if (!queued.importJobId) return queued;
+          const status = await this.getImportStatus(integration, { importJobId: queued.importJobId });
+          return {
+            ...queued,
+            status: status.status,
+            importStatus: status.status,
+            imported: status.status === ImportStatus.IMPORTED,
+            document: status.document,
+            version: status.version,
+            message:
+              status.status === ImportStatus.IMPORTED
+                ? `Imported ${status.document?.code || queued.fileName} into the Master Document Index.`
+                : queued.message
+                  ?? 'Binary verified; repository import still processing — poll get_import_status.',
+          };
         });
       }
       case 'prepare_automatic_file_import': {
@@ -266,7 +282,7 @@ export class McpToolsService {
           mode: prepared.mode,
           existingDocumentId: prepared.existingDocumentId,
         } as SubmitApprovedDocumentDto);
-        return this.binaryImport.complete(
+        const completed = await this.binaryImport.complete(
           String(args.uploadId ?? ''),
           String(args.uploadToken ?? ''),
           integration,
@@ -288,6 +304,32 @@ export class McpToolsService {
             sourceSha256: typeof args.expectedSha256 === 'string' ? args.expectedSha256 : undefined,
           },
         );
+        if (completed.importJobId) {
+          const status = await this.getImportStatus(integration, { importJobId: completed.importJobId });
+          const fileHint =
+            ('fileName' in completed && typeof completed.fileName === 'string' && completed.fileName)
+            || status.originalFilename
+            || status.fileName
+            || 'document';
+          const priorMessage =
+            'message' in completed && typeof completed.message === 'string'
+              ? completed.message
+              : undefined;
+          return {
+            ...completed,
+            status: status.status,
+            importStatus: status.status,
+            imported: status.status === ImportStatus.IMPORTED,
+            document: status.document,
+            version: status.version,
+            message:
+              status.status === ImportStatus.IMPORTED
+                ? `Imported ${status.document?.code || fileHint} into the Master Document Index.`
+                : priorMessage
+                  ?? 'Binary verified; repository import still processing — poll get_import_status.',
+          };
+        }
+        return completed;
       }
       case 'abort_automatic_file_import':
         return this.binaryImport.abort(
@@ -1544,12 +1586,62 @@ export class McpToolsService {
   }
 
   async getImportStatus(integration: McpIntegration, input: GetImportStatusDto) {
-    const job = await this.db.importJobs.findOne({
+    let job = await this.db.importJobs.findOne({
       where: { id: input.importJobId },
       relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true },
     });
     if (!job) throw new NotFoundException('Import job not found');
     this.assertProjectAccess(integration, job.project.id);
+
+    const meta = (job.metadata ?? {}) as Record<string, unknown>;
+    const approvalStatus = String(meta.approvalStatus ?? '').toUpperCase();
+    const canAutoComplete =
+      job.status === ImportStatus.READY_FOR_REVIEW
+      && job.provider === ConnectorProvider.CHATGPT_MCP
+      && approvalStatus === 'APPROVED';
+
+    if (canAutoComplete) {
+      try {
+        await this.connectorImports.processReadyImport(job.id, {
+          userId: this.mcpActor(integration).id,
+        });
+        job = await this.db.importJobs.findOne({
+          where: { id: input.importJobId },
+          relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true },
+        }) ?? job;
+      } catch (error) {
+        // Surface process error on the job row / response; do not hide READY_FOR_REVIEW.
+        const message = error instanceof Error ? error.message : 'Auto-import failed';
+        return {
+          id: job.id,
+          status: job.status,
+          externalImportStatus: job.externalImportStatus,
+          provider: job.provider,
+          fileName: job.fileName,
+          checksum: job.checksum,
+          errorMessage: job.errorMessage || message,
+          importMode: meta.importMode ?? null,
+          conversionPerformed: meta.conversionPerformed ?? null,
+          checksumVerified: meta.checksumVerified ?? null,
+          originalFilename: meta.originalFilename ?? job.fileName,
+          sourceSizeBytes: meta.sourceSizeBytes ?? job.fileSize,
+          storedSizeBytes: meta.storedSizeBytes ?? job.fileSize,
+          sourceSha256: meta.sourceSha256 ?? job.checksum,
+          storedSha256: meta.storedSha256 ?? job.checksum,
+          project: { id: job.project.id, code: job.project.code, name: job.project.name },
+          sourceSystem: { id: job.sourceSystem.id, code: job.sourceSystem.code, name: job.sourceSystem.name },
+          resolvedSection: job.resolvedSection
+            ? { id: job.resolvedSection.id, sectionKey: job.resolvedSection.sectionKey, name: job.resolvedSection.name }
+            : null,
+          document: job.document ? { id: job.document.id, code: job.document.code, title: job.document.title } : null,
+          version: job.version ? { id: job.version.id, versionNo: job.version.versionNo } : null,
+          createdAt: job.createdAt,
+          completedAt: job.completedAt,
+          processingAttempted: true,
+          processingError: message,
+        };
+      }
+    }
 
     return {
       id: job.id,

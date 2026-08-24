@@ -6,7 +6,7 @@ describe('buildChatGptActionsOpenApi', () => {
     const paths = doc.paths as Record<string, unknown>;
     const keys = Object.keys(paths);
     expect(doc.openapi).toBe('3.1.0');
-    expect(doc.info.version).toBe('1.31.0');
+    expect(doc.info.version).toBe('1.31.1');
     expect(keys.length).toBeLessThanOrEqual(30);
     expect(keys.length).toBeLessThanOrEqual(20);
     for (const name of [

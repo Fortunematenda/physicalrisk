@@ -221,12 +221,12 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'BINARY ORIGINAL FILE IMPORT (v1.31): check_document_exists, upload_original_docx, '
+        'BINARY ORIGINAL FILE IMPORT (v1.31.1): check_document_exists, upload_original_docx, '
         + 'prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, '
         + 'finalize_original_file_import. Prefer @Repo MCP connector. Never Markdown→PDF. '
         + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.31.0',
+      version: '1.31.1',
     },
     servers: [{ url: baseUrl }],
     paths: {
@@ -566,5 +566,6 @@ MOSS-GS-003 NEW_VERSION:
 2) prepare_automatic_file_import (mode=NEW_VERSION, documentCode=MOSS-GS-003, module=Governance Standards, documentType=Master Control Catalogue)
    → upload_original_file_chunk until complete → complete_automatic_file_import → finalize_original_file_import.
 3) Or upload_original_docx with same metadata → PUT exact DOCX → finalize_original_file_import.
+4) Poll get_import_status with importJobId until status=IMPORTED (also completes stuck READY_FOR_REVIEW jobs).
 
 Tools: check_document_exists, upload_original_docx, prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, finalize_original_file_import, import_original_file, list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, get_import_status, create_workspace, get_workspace, attach_document_to_workspace.`;

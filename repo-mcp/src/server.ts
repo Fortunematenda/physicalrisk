@@ -43,9 +43,9 @@ function createMcpServer(authHeader?: string) {
   // Keep EXACTLY 17 tools, binary FILE_PRESERVE first, so refresh cannot omit import ops.
   const server = new McpServer({
     name: 'physicalrisk-repo-file-preserve',
-    version: '1.31.0',
+    version: '1.31.1',
     description:
-      'Physical Risk Repository MCP v1.31 (17 tools). FILE_PRESERVE first: check_document_exists, '
+      'Physical Risk Repository MCP v1.31.1 (17 tools). FILE_PRESERVE first: check_document_exists, '
       + 'upload_original_docx, prepare_automatic_file_import, upload_original_file_chunk, '
       + 'complete_automatic_file_import, finalize_original_file_import. Never Markdown→PDF.',
   });
