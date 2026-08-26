@@ -1,3 +1,4 @@
+import { AdvisoryModule } from './advisory/advisory.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +20,7 @@ import { ActionsModule } from './actions/actions.module';
 import { SettingsModule } from './settings/settings.module';
 import { MossModule } from './moss/moss.module';
 import { SomodModule } from './somod/somod.module';
+import { TriageModule } from './triage/triage.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { SomodModule } from './somod/somod.module';
     SettingsModule,
     MossModule,
     SomodModule,
-  ],
+    AdvisoryModule,
+    TriageModule,
+],
 })
 export class AppModule {}

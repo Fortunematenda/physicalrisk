@@ -1,18 +1,47 @@
 'use client';
-import { FormEvent, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
 import { apiFetch } from '../../../lib/api';
 
+const ADVISORY_PRODUCTS = new Set([
+  'EXECUTIVE_GOVERNANCE_TRIAGE',
+  'EXECUTIVE_ADVISORY_DIAGNOSTIC',
+  'CONTRACT_SLA_ASSURANCE',
+  'VENDOR_PERFORMANCE_ASSURANCE',
+  'GOVERNANCE_EXECUTIVE_ASSURANCE',
+  'CYBER_PHYSICAL_DEPENDENCY',
+  'SHIELD360',
+]);
+
+function engagementHref(productCode?: string, assessmentId?: string) {
+  if (!assessmentId) return null;
+  if (productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE') return `/triage/${assessmentId}`;
+  if (productCode === 'SCLI_COST_LEAKAGE') return `/assessments/${assessmentId}`;
+  if (productCode && ADVISORY_PRODUCTS.has(productCode)) return `/advisory/${assessmentId}`;
+  return `/assessments/${assessmentId}`;
+}
+
 export default function ReportPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams.get('view');
   const [report, setReport] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const productCode = String(report?.assessment?.productCode || '');
+  const isAdvisoryReport = useMemo(() => {
+    if (viewParam === 'advisory') return true;
+    if (viewParam === 'scl') return false;
+    return ADVISORY_PRODUCTS.has(productCode);
+  }, [viewParam, productCode]);
 
   useEffect(() => {
     apiFetch(`/reports/${id}`)
@@ -24,9 +53,14 @@ export default function ReportPage() {
           || data.contact?.email
           || '';
         if (suggested) setEmail(suggested);
+
+        const code = String(data.assessment?.productCode || '');
+        if (ADVISORY_PRODUCTS.has(code) && viewParam !== 'advisory') {
+          router.replace(`/reports/${id}?view=advisory`);
+        }
       })
       .catch((e) => setError(e.message));
-  }, [id]);
+  }, [id, router, viewParam]);
 
   async function issue(event: FormEvent) {
     event.preventDefault();
@@ -45,9 +79,13 @@ export default function ReportPage() {
     }
   }
 
+  const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
+  const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
+  const workHref = engagementHref(productCode, report?.assessment?.id);
+
   return (
     <AuthGate>
-      <Shell title="Executive Report">
+      <Shell title={report?.title || (isAdvisoryReport ? 'Advisory report' : 'Executive Report')}>
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
         {report ? (
@@ -57,14 +95,28 @@ export default function ReportPage() {
               <h2>{report.title}</h2>
               <p>{report.assessment.organisation.name}</p>
               <p><StatusBadge value={report.status} /></p>
-              <p className="muted">Generated {report.generatedAt ? new Date(report.generatedAt).toLocaleString('en-ZA') : 'Not yet generated'}</p>
-              {report.downloadUrl && (
-                <a className="btn" href={report.downloadUrl} target="_blank" rel="noreferrer">Download PDF</a>
-              )}
+              <p className="muted">
+                Generated {report.generatedAt ? new Date(report.generatedAt).toLocaleString('en-ZA') : 'Not yet generated'}
+              </p>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                {report.downloadUrl && (
+                  <a className="btn" href={report.downloadUrl} target="_blank" rel="noreferrer">Download PDF</a>
+                )}
+                {workHref ? (
+                  <Link className="btn secondary" href={workHref}>
+                    Open engagement
+                  </Link>
+                ) : null}
+                <Link className="btn secondary" href={backHref}>
+                  {backLabel}
+                </Link>
+              </div>
             </section>
             <form className="card" onSubmit={issue}>
               <h2>Issue report</h2>
-              <p className="muted small">Email the client the PDF report as an attachment, plus a secure seven-day download link. SMTP must be configured.</p>
+              <p className="muted small">
+                Email the client the PDF report as an attachment, plus a secure seven-day download link. SMTP must be configured.
+              </p>
               <div className="field">
                 <label>Recipient email</label>
                 <input

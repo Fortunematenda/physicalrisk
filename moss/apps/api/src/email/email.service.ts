@@ -355,6 +355,7 @@ export class EmailService {
   private renderBody(template: string, payload: Record<string, unknown> = {}) {
     const customerFacing = new Set([
       'submission_confirmation',
+      'triage_submission_confirmation',
       'missing_information',
       'report_issued',
       'report_available',
@@ -388,6 +389,16 @@ export class EmailService {
           lines.push(`<p>Our analysts will review your responses and be in contact shortly.</p>`);
         }
         break;
+      case 'triage_submission_confirmation':
+        lines.push(`<p>Dear ${payload.firstName || 'Colleague'},</p>`);
+        lines.push(`<p>Thank you for completing the complimentary Executive Governance Triage questionnaire for <strong>${payload.organisationName || 'your organisation'}</strong>.</p>`);
+        if (payload.attachmentStorageKey) {
+          lines.push(`<p>Your Preliminary Executive Governance Indication is attached${payload.reference ? ` (${payload.reference})` : ''}.</p>`);
+          if (payload.url) lines.push(`<p>You can also <a href="${payload.url}">open the secure report link</a>.</p>`);
+        }
+        lines.push('<p>This Level 1 output is an indicative questionnaire result only. It is not an assessment, audit, assurance opinion or Security Cost Leakage Assessment™.</p>');
+        lines.push('<p>If you request the paid Executive Advisory Diagnostic, a Physical Risk representative will contact you to discuss the Level 2 engagement.</p>');
+        break;
       case 'missing_information':
         lines.push(`<p>Dear ${payload.firstName || 'Colleague'},</p>`);
         lines.push(`<p>We need additional information for assessment <strong>${payload.reference || ''}</strong>.</p>`);
@@ -397,19 +408,69 @@ export class EmailService {
         lines.push(`<p>Assessment <strong>${payload.reference || ''}</strong> has been approved.</p>`);
         break;
       case 'report_issued':
-      case 'report_available':
+      case 'report_available': {
+        const productReportLabel =
+          String(payload.productReportLabel || '').trim() ||
+          (payload.productCode === 'SCLI_COST_LEAKAGE'
+            ? 'Cost Leakage executive report'
+            : payload.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+              ? 'Executive Advisory Diagnostic report'
+              : payload.productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE'
+                ? 'Executive Governance Triage report'
+                : 'Physical Risk executive report');
         lines.push(`<p>Dear Colleague,</p>`);
         lines.push(
-          `<p>Please find the Cost Leakage executive report for <strong>${payload.organisationName || 'your organisation'}</strong>${
-            payload.reference ? ` (${payload.reference})` : ''
+          `<p>Please find the ${escapeHtml(productReportLabel)} for <strong>${escapeHtml(
+            payload.organisationName || 'your organisation',
+          )}</strong>${
+            payload.reference ? ` (${escapeHtml(payload.reference)})` : ''
           } attached to this email as a PDF.</p>`,
         );
         if (payload.url) {
-          lines.push(`<p>You can also <a href="${payload.url}">open the secure report link</a> (valid for 7 days).</p>`);
+          lines.push(
+            `<p>You can also <a href="${escapeHtml(payload.url)}">open the secure report link</a> (valid for 7 days).</p>`,
+          );
         }
         break;
+      }
       case 'internal_submission':
         lines.push(`<p>A new assessment was submitted: <strong>${payload.reference || ''}</strong> (${payload.organisationName || ''}).</p>`);
+        break;
+      case 'triage_internal_submission':
+        lines.push(`<p>A complimentary Executive Governance Triage questionnaire was completed: <strong>${payload.reference || ''}</strong> (${payload.organisationName || ''}).</p>`);
+        lines.push('<p>The submission is already visible under Executive Triage → Triage Submissions. No diagnostic request is required for admin visibility.</p>');
+        break;
+      case 'triage_diagnostic_requested':
+        lines.push('<h2>Executive Advisory Diagnostic requested</h2>');
+        lines.push(`<p><strong>Organisation:</strong> ${escapeHtml(payload.organisationName)}</p>`);
+        lines.push(`<p><strong>Contact:</strong> ${escapeHtml(`${payload.firstName || ''} ${payload.lastName || ''}`.trim())}</p>`);
+        lines.push(`<p><strong>Email:</strong> ${escapeHtml(payload.email)}</p>`);
+        if (payload.phone) lines.push(`<p><strong>Phone:</strong> ${escapeHtml(payload.phone)}</p>`);
+        lines.push('<p>The Level 1 triage remains a questionnaire. This notification records buying intent for the paid Level 2 Executive Advisory Diagnostic.</p>');
+        break;
+      case 'triage_proposal_requested':
+        lines.push('<h2>Proposal requested — Executive Advisory Diagnostic</h2>');
+        lines.push(`<p><strong>Organisation:</strong> ${escapeHtml(payload.organisationName)}</p>`);
+        lines.push(`<p><strong>Contact:</strong> ${escapeHtml(`${payload.firstName || ''} ${payload.lastName || ''}`.trim())}</p>`);
+        lines.push(`<p><strong>Email:</strong> ${escapeHtml(payload.email)}</p>`);
+        if (payload.phone) lines.push(`<p><strong>Telephone:</strong> ${escapeHtml(payload.phone)}</p>`);
+        if (payload.industry) lines.push(`<p><strong>Industry:</strong> ${escapeHtml(payload.industry)}</p>`);
+        if (payload.completedAt) lines.push(`<p><strong>Triage completion:</strong> ${escapeHtml(payload.completedAt)}</p>`);
+        lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        lines.push(`<p><strong>Recommended product:</strong> ${escapeHtml(payload.recommendedProduct || 'Executive Advisory Diagnostic')}</p>`);
+        if (payload.requestedAt) lines.push(`<p><strong>Requested:</strong> ${escapeHtml(payload.requestedAt)}</p>`);
+        lines.push('<p>Commercial intent: Proposal Requested. Journey level: Level 2 opportunity. Source: Executive Governance Triage.</p>');
+        if (payload.adminLink) {
+          lines.push(`<p><a href="${escapeHtml(payload.adminLink)}">Open triage record in MOSS</a></p>`);
+        }
+        break;
+      case 'triage_proposal_acknowledgement':
+        lines.push('<h2>Executive Advisory Proposal Request Received</h2>');
+        lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
+        lines.push('<p>Physical Risk has received your request.</p>');
+        lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        lines.push(`<p><strong>Requested service:</strong> ${escapeHtml(payload.recommendedProduct || 'Executive Advisory Diagnostic')}</p>`);
+        lines.push('<p>A member of the advisory team will contact you.</p>');
         break;
       case 'website_contact_enquiry':
         lines.push('<h2>Website contact enquiry – Book a MOSS Assessment</h2>');

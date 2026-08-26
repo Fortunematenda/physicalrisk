@@ -9,6 +9,7 @@ import { ShellChromeProvider, useShellChrome } from '@/components/shell-chrome';
 function isPublicPath(pathname: string): boolean {
   if (pathname === '/login') return true;
   if (pathname === '/start' || pathname.startsWith('/start/')) return true;
+  if (pathname === '/request-proposal' || pathname.startsWith('/request-proposal/')) return true;
   if (pathname === '/auth' || pathname.startsWith('/auth/')) return true;
   return false;
 }

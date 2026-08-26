@@ -246,7 +246,7 @@ function drawPageOneBody(
   y += 22;
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(28)
-    .text('Security Cost Leakage Report', x, y, { width: contentW });
+    .text(input.isPreliminary ? 'Executive Governance Indication' : 'Security Cost Leakage Assessment Report', x, y, { width: contentW });
   y = doc.y + 16;
 
   const half = contentW / 2;
@@ -280,7 +280,7 @@ function drawPageOneBody(
   doc.rect(x + leftW, y, contentW - leftW, panelH).fill(CHAR);
 
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7)
-    .text('SECURITY COST LEAKAGE INDICATION', x + 16, y + 18, {
+    .text(input.isPreliminary ? 'INDICATIVE ASSURANCE POSITION' : 'SECURITY COST LEAKAGE EXPOSURE', x + 16, y + 18, {
       width: leftW - 28,
       characterSpacing: 0.5,
     });
@@ -294,6 +294,11 @@ function drawPageOneBody(
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
       .text('/100', x + 16 + scoreWidth + 3, y + 68, { lineBreak: false });
   }
+  const bandLabel = String(input.riskBand || '').trim();
+  if (bandLabel) {
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9)
+      .text(bandLabel.toUpperCase(), x + 16, y + 92, { width: leftW - 28, lineBreak: false });
+  }
 
   const posX = x + leftW + 20;
   const posW = contentW - leftW - 36;
@@ -304,8 +309,9 @@ function drawPageOneBody(
   const afterTitle = doc.y + 8;
   doc.fillColor('#d0d0d0').font('Helvetica').fontSize(9)
     .text(
-      'Your responses indicate where security cost leakage may require independent validation. ' +
-        'The result does not confirm that controls operate as described.',
+      input.isPreliminary
+        ? 'This Level 1 questionnaire indicates where governance, assurance or expenditure concerns may warrant a paid Executive Advisory Diagnostic. It is not an assessment or audit conclusion.'
+        : 'This Level 3 assessment indicates where security cost leakage requires evidence-led validation. Financial conclusions must be supported by the recorded evidence and confidence basis.',
       posX,
       Math.max(afterTitle, y + 62),
       { width: posW, lineGap: 2 },
@@ -334,7 +340,7 @@ function drawPageOneBody(
 
   // Dimension indications — single-row layout: label | gap | bar | value
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
-    .text('Dimension indications', x, y);
+    .text(input.isPreliminary ? 'Warning-indicator dimensions' : 'Exposure dimensions', x, y);
   y = doc.y + 14;
 
   const labelW = 172;
@@ -392,7 +398,7 @@ function drawPageOneBody(
   }
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
-    .text('Priority exposure indicators', x, y);
+    .text(input.isPreliminary ? 'Strongest warning indicators' : 'Priority exposure indicators', x, y);
   y = doc.y + 14;
 
   const gap = 18;
@@ -441,7 +447,7 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
   y = doc.y + 18;
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(12)
-    .text(`Focused route indicated: ${input.brand.productLine}™`, x, y, { width: contentW });
+    .text(input.isPreliminary ? 'Recommended entry product: Executive Advisory Diagnostic' : `Focused assurance product: ${input.brand.productLine}™`, x, y, { width: contentW });
   y = doc.y + 22;
 
   // Prominent remedial CTA panel
@@ -481,9 +487,9 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
   y = doc.y + 10;
   doc.fillColor(MUTED).font('Helvetica').fontSize(10)
     .text(
-      'This complimentary report is generated from unverified responses supplied by the participant. ' +
-        'It is a preliminary management indication and is not an audit, certification, legal opinion or independent ' +
-        'assurance conclusion. Physical Risk has not tested the supporting evidence at this stage.',
+      input.isPreliminary
+        ? 'This complimentary Level 1 output is generated from questionnaire responses supplied by the participant. It is triage and decision-support only: not an assessment, Security Cost Leakage Assessment™, diagnostic, audit, certification, legal opinion or independent assurance conclusion. Physical Risk has not tested supporting evidence at this stage.'
+        : 'This report is an evidence-led Level 3 focused assurance output. Conclusions and financial values must be read together with the recorded evidence basis, limitations and confidence assessment.',
       x,
       y,
       { width: contentW, lineGap: 2.5 },

@@ -49,9 +49,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback((value: boolean) => {
     const current = pendingRef.current;
+    if (!current) return;
     pendingRef.current = null;
     setPending(null);
-    current?.resolve(value);
+    current.resolve(value);
   }, []);
 
   const confirm = useCallback<ConfirmFn>((options) => {
@@ -74,6 +75,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       <AlertDialog
         open={open}
         onOpenChange={(next) => {
+          // Only treat dismiss (overlay / Escape) as cancel.
+          // Action/Cancel buttons call close() themselves first.
           if (!next) close(false);
         }}
       >
@@ -83,12 +86,20 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <AlertDialogDescription>{options?.description || ''}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => close(false)}>
+            <AlertDialogCancel
+              onClick={(event) => {
+                event.preventDefault();
+                close(false);
+              }}
+            >
               {options?.cancelLabel || 'Cancel'}
             </AlertDialogCancel>
             <AlertDialogAction
               variant={options?.variant || 'default'}
-              onClick={() => close(true)}
+              onClick={(event) => {
+                event.preventDefault();
+                close(true);
+              }}
             >
               {options?.confirmLabel || 'Continue'}
             </AlertDialogAction>

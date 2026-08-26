@@ -356,7 +356,7 @@
     volumes:
       - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./infrastructure/nginx/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - wordpress
       - keycloak

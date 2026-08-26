@@ -21,11 +21,25 @@ export class UsersService {
   ) {}
 
   private assertLocalUserAdminAllowed() {
-    if (this.config.get<string>('KEYCLOAK_ENABLED') === 'true') {
+    const keycloakOn = this.config.get<string>('KEYCLOAK_ENABLED') === 'true';
+    const legacyOn = this.config.get<string>('ENABLE_LEGACY_LOGIN') === 'true';
+    // When SSO is exclusive (no legacy login), accounts must be managed in Keycloak.
+    // Local admin create/edit remains available whenever legacy login is enabled.
+    if (keycloakOn && !legacyOn) {
       throw new ForbiddenException(
         'Users are managed in Keycloak SSO. Create or update accounts in the identity provider, not here.',
       );
     }
+  }
+
+  capabilities() {
+    const keycloakOn = this.config.get<string>('KEYCLOAK_ENABLED') === 'true';
+    const legacyOn = this.config.get<string>('ENABLE_LEGACY_LOGIN') === 'true';
+    return {
+      keycloakEnabled: keycloakOn,
+      legacyLoginEnabled: legacyOn,
+      localUserAdmin: !keycloakOn || legacyOn,
+    };
   }
 
   list(user: AuthUser) {

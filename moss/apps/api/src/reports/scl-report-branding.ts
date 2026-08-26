@@ -55,7 +55,7 @@ export const DEFAULT_SCL_REPORT_BRANDING: SclReportBrandConfig = {
   fileNameProductSegment: 'Physical-Risk-Security-Cost-Leakage',
   logoFileName: 'physical-risk-logo.jpg',
   ctaUrl: 'https://test.physicalrisk.com/#contact',
-  ctaLabel: 'Request a proposal',
+  ctaLabel: 'Request an Executive Advisory Proposal',
 };
 
 export type SclReportDocumentMeta = {

@@ -255,24 +255,33 @@ export default function OrganisationsPage() {
   }
 
   async function deleteOrganisation(org: Organisation) {
+    // Capture identity immediately and close the row menu so the confirm
+    // dialog cannot appear next to another row's open actions menu.
+    const targetId = org.id;
+    const targetName = org.name;
+    const targetEmail = org.primaryEmail?.trim() || '';
     const count = org._count?.assessments ?? 0;
+    setMenuOpenId(null);
+
+    const identity = targetEmail
+      ? `“${targetName}” (${targetEmail})`
+      : `“${targetName}”`;
     const ok = await confirm({
       title: 'Delete organisation',
       description:
         count > 0
-          ? `Delete “${org.name}” and its ${count} related assessment(s)? This cannot be undone.`
-          : `Delete “${org.name}”? This cannot be undone.`,
+          ? `Delete ${identity} and its ${count} related assessment${count === 1 ? '' : 's'}? This cannot be undone.`
+          : `Delete ${identity}? This cannot be undone.`,
       confirmLabel: 'Delete',
       variant: 'destructive',
     });
     if (!ok) return;
-    setMenuOpenId(null);
-    setBusyId(org.id);
+    setBusyId(targetId);
     setError('');
     try {
-      await apiFetch(`/organisations/${org.id}`, { method: 'DELETE' });
-      setItems((prev) => prev.filter((item) => item.id !== org.id));
-      if (editingId === org.id) {
+      await apiFetch(`/organisations/${targetId}`, { method: 'DELETE' });
+      setItems((prev) => prev.filter((item) => item.id !== targetId));
+      if (editingId === targetId) {
         setEditingId(null);
         setForm(emptyForm);
         setOpen(false);
@@ -524,8 +533,7 @@ export default function OrganisationsPage() {
                       <td>{org.industry || '—'}</td>
                       <td>
                         <div className="org2-contact">
-                          <strong>{org.primaryEmail ? org.primaryEmail.split('@')[0].replace(/[._]/g, ' ') : '—'}</strong>
-                          <span>{org.primaryEmail || 'No email'}</span>
+                          <strong>{org.primaryEmail || 'No email'}</strong>
                           <span>{org.primaryPhone || 'No phone'}</span>
                         </div>
                       </td>

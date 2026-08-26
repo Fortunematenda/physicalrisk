@@ -3,6 +3,7 @@ import { AssessmentsModule } from '../assessments/assessments.module';
 import { EvidenceModule } from '../evidence/evidence.module';
 import { EmailModule } from '../email/email.module';
 import { CrmModule } from '../crm/crm.module';
+import { ProposalTokenService } from '../common/proposal-token.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
@@ -14,7 +15,7 @@ import { ReportsService } from './reports.service';
     forwardRef(() => CrmModule),
   ],
   controllers: [ReportsController],
-  providers: [ReportsService],
+  providers: [ReportsService, ProposalTokenService],
   exports: [ReportsService],
 })
 export class ReportsModule {}

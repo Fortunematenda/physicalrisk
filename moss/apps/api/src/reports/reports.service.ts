@@ -1,6 +1,14 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, Optional, forwardRef } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ReportStatus, ReportType } from '@prisma/client';
+import { ProductCode, ReportStatus, ReportType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../evidence/storage.service';
 import { AuditService } from '../audit/audit.service';
@@ -16,6 +24,46 @@ import {
   resolveSclReportLogoPath,
 } from './scl-report-branding';
 import { buildScoringMatrixPanels, renderSclExecutivePdf } from './scl-report-pdf';
+import { ProposalTokenService } from '../common/proposal-token.service';
+import { PHYSICAL_RISK_PRODUCTS } from '@moss/shared';
+
+const ADVISORY_REPORT_PRODUCTS = new Set<ProductCode>([
+  ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
+  ProductCode.CONTRACT_SLA_ASSURANCE,
+  ProductCode.VENDOR_PERFORMANCE_ASSURANCE,
+  ProductCode.GOVERNANCE_EXECUTIVE_ASSURANCE,
+  ProductCode.CYBER_PHYSICAL_DEPENDENCY,
+  ProductCode.SHIELD360,
+]);
+
+const LEGACY_REPORT_PRODUCTS = new Set<string>(['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE']);
+
+function reportEmailLabels(productCode: string) {
+  const product = PHYSICAL_RISK_PRODUCTS[productCode as keyof typeof PHYSICAL_RISK_PRODUCTS];
+  const productName = product?.name || 'Physical Risk';
+  if (productCode === 'SCLI_COST_LEAKAGE') {
+    return {
+      subjectSuffix: 'Cost Leakage Executive Report',
+      productReportLabel: 'Cost Leakage executive report',
+    };
+  }
+  if (productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+    return {
+      subjectSuffix: 'Executive Advisory Diagnostic Report',
+      productReportLabel: 'Executive Advisory Diagnostic report',
+    };
+  }
+  if (productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
+    return {
+      subjectSuffix: 'Executive Governance Triage Report',
+      productReportLabel: 'Executive Governance Triage report',
+    };
+  }
+  return {
+    subjectSuffix: `${productName} Report`,
+    productReportLabel: `${productName} report`,
+  };
+}
 
 @Injectable()
 export class ReportsService {
@@ -26,8 +74,90 @@ export class ReportsService {
     private readonly assessments: AssessmentsService,
     private readonly config: ConfigService,
     private readonly email: EmailService,
+    private readonly proposalTokens: ProposalTokenService,
     @Optional() @Inject(forwardRef(() => EspoCrmService)) private readonly crm?: EspoCrmService,
   ) {}
+
+  /** Cost Leakage / triage and advisory PDFs share the Report table but use different product scopes. */
+  private async checkReportAccess(assessmentId: string, user: AuthUser) {
+    const session = await this.prisma.assessmentSession.findUnique({
+      where: { id: assessmentId },
+      select: { organisationId: true, productCode: true },
+    });
+    if (!session) throw new NotFoundException('Report not found.');
+
+    const productCode = String(session.productCode);
+    const supported =
+      ADVISORY_REPORT_PRODUCTS.has(session.productCode) || LEGACY_REPORT_PRODUCTS.has(productCode);
+    if (!supported) throw new NotFoundException('Report not found.');
+
+    if (INTERNAL_ROLES.has(user.role)) return;
+
+    const membership = await this.prisma.membership.findUnique({
+      where: { userId_organisationId: { userId: user.id, organisationId: session.organisationId } },
+    });
+    if (!membership) throw new ForbiddenException('You do not have access to this report.');
+  }
+
+  private async listReportSection(
+    user: AuthUser,
+    productFilter: { productCode: ProductCode | { in: ProductCode[] } },
+  ) {
+    const reports = await this.prisma.report.findMany({
+      where: {
+        status: { not: ReportStatus.SUPERSEDED },
+        assessment: {
+          productCode: productFilter.productCode,
+          ...(INTERNAL_ROLES.has(user.role)
+            ? {}
+            : { organisation: { memberships: { some: { userId: user.id } } } }),
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 500,
+      include: {
+        generatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
+        assessment: {
+          select: {
+            id: true,
+            reference: true,
+            title: true,
+            status: true,
+            productCode: true,
+            organisationId: true,
+            organisation: { select: { id: true, name: true, industry: true } },
+          },
+        },
+      },
+    });
+
+    const items = reports.map((report) => {
+      let uiStatus = String(report.status).toLowerCase();
+      if (report.status === 'GENERATED') uiStatus = 'generated';
+      if (report.status === 'ISSUED') uiStatus = 'issued';
+      if (report.status === 'DRAFT') uiStatus = 'draft';
+      if (report.status === 'APPROVED') uiStatus = 'pending';
+      if (report.status === 'SUPERSEDED') uiStatus = 'draft';
+
+      return {
+        ...report,
+        reference: `RPT-${report.id.slice(-6).toUpperCase()}`,
+        uiStatus,
+        fileSizeLabel: report.storageKey ? 'PDF' : '—',
+        delivery: { sent: 0, failed: 0, pending: 0 },
+      };
+    });
+
+    return {
+      items,
+      summary: {
+        total: items.length,
+        issued: items.filter((r) => r.status === 'ISSUED').length,
+        generated: items.filter((r) => r.status === 'GENERATED').length,
+        draft: items.filter((r) => r.status === 'DRAFT' || r.status === 'SUPERSEDED').length,
+      },
+    };
+  }
 
   private async createPdf(assessment: any, reportType: ReportType): Promise<Buffer> {
     const brand = resolveSclReportBrandConfig(this.config);
@@ -75,6 +205,15 @@ export class ReportsService {
     const prospectName = lead
       ? [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim()
       : '';
+
+    if (lead?.id) {
+      try {
+        brand.ctaUrl = this.proposalTokens.buildPublicUrl(lead.id);
+        brand.ctaLabel = 'Request an Executive Advisory Proposal';
+      } catch {
+        // Keep configured fallback CTA if token signing fails.
+      }
+    }
 
     return renderSclExecutivePdf({
       brand,
@@ -138,8 +277,8 @@ export class ReportsService {
       },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
-    if (assessment.productCode !== 'SCLI_COST_LEAKAGE') {
-      throw new BadRequestException('SCLI reports cannot be generated for MOSS assessments.');
+    if (!['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode))) {
+      throw new BadRequestException('This report renderer supports Executive Governance Triage and Security Cost Leakage only.');
     }
     if (!assessment.scoreSnapshots[0]) throw new BadRequestException('Evaluate the assessment before generating a report.');
 
@@ -149,6 +288,9 @@ export class ReportsService {
       reportType = approvedStatuses.has(assessment.status)
         ? ReportType.VERIFIED_EXECUTIVE
         : ReportType.PRELIMINARY_EXECUTIVE;
+    }
+    if (assessment.productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE' && reportType === ReportType.VERIFIED_EXECUTIVE) {
+      throw new BadRequestException('Level 1 triage cannot produce a verified executive assessment report.');
     }
     if (reportType === ReportType.VERIFIED_EXECUTIVE) {
       requireRole(user, APPROVER_ROLES, 'Approved executive reports require approver permission.');
@@ -232,6 +374,9 @@ export class ReportsService {
           },
         });
 
+    if (assessment.productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE' && reportType === ReportType.VERIFIED_EXECUTIVE) {
+      throw new BadRequestException('Level 1 triage cannot produce a verified executive assessment report.');
+    }
     if (reportType === ReportType.VERIFIED_EXECUTIVE) {
       await this.prisma.assessmentSession.update({
         where: { id: assessmentId },
@@ -258,7 +403,7 @@ export class ReportsService {
     requireRole(user, APPROVER_ROLES, 'Approver permission required to issue reports.');
     const report = await this.prisma.report.findUnique({ where: { id }, include: { assessment: { include: { organisation: true } } } });
     if (!report || !report.storageKey) throw new NotFoundException('Generated report not found.');
-    await this.assessments.checkAccess(report.assessmentId, user);
+    await this.checkReportAccess(report.assessmentId, user);
     const attachmentName =
       report.fileName ||
       buildSclReportFileName({
@@ -268,11 +413,12 @@ export class ReportsService {
         brand: resolveSclReportBrandConfig(this.config),
       });
     const url = await this.storage.signedDownloadUrl(report.storageKey, 60 * 60 * 24 * 7, attachmentName);
+    const emailLabels = reportEmailLabels(String(report.assessment.productCode));
 
     try {
       await this.email.enqueue({
         recipient,
-        subject: `${report.assessment.organisation.name} – Cost Leakage Executive Report`,
+        subject: `${report.assessment.organisation.name} – ${emailLabels.subjectSuffix}`,
         template: 'report_issued',
         relatedType: 'Report',
         relatedId: id,
@@ -281,6 +427,8 @@ export class ReportsService {
           url,
           reference: report.assessment.reference,
           organisationName: report.assessment.organisation.name,
+          productCode: report.assessment.productCode,
+          productReportLabel: emailLabels.productReportLabel,
           attachmentStorageKey: report.storageKey,
           attachmentFileName: attachmentName,
           attachmentContentType: 'application/pdf',
@@ -333,39 +481,18 @@ export class ReportsService {
   }
 
   async listAll(user: AuthUser) {
-    const where = {
-      // Cost Leakage Reports page must never list MOSS PDFs.
-      assessment: {
-        productCode: 'SCLI_COST_LEAKAGE' as const,
-        ...(INTERNAL_ROLES.has(user.role)
-          ? {}
-          : { organisation: { memberships: { some: { userId: user.id } } } }),
-      },
-    };
+    const executiveAdvisoryProducts = [
+      ...ADVISORY_REPORT_PRODUCTS,
+      ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE,
+    ];
 
-    const reports = await this.prisma.report.findMany({
-      where: {
-        ...where,
-        status: { not: 'SUPERSEDED' },
-      },
-      orderBy: [{ createdAt: 'desc' }],
-      take: 500,
-      include: {
-        generatedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
-        assessment: {
-          select: {
-            id: true,
-            reference: true,
-            title: true,
-            status: true,
-            organisationId: true,
-            organisation: { select: { id: true, name: true, industry: true } },
-          },
-        },
-      },
+    const sclSection = await this.listReportSection(user, { productCode: ProductCode.SCLI_COST_LEAKAGE });
+    const executiveAdvisorySection = await this.listReportSection(user, {
+      productCode: { in: executiveAdvisoryProducts },
     });
 
-    const reportIds = reports.map((r) => r.id);
+    const items = sclSection.items;
+    const reportIds = items.map((r) => r.id);
     const emailJobs = reportIds.length
       ? await this.prisma.emailJob.findMany({
           where: { relatedType: 'Report', relatedId: { in: reportIds } },
@@ -384,24 +511,13 @@ export class ReportsService {
       emailsByReport.set(job.relatedId, bucket);
     }
 
-    const items = reports.map((report) => {
+    for (const report of items) {
       const delivery = emailsByReport.get(report.id) || { sent: 0, failed: 0, pending: 0 };
-      let uiStatus = String(report.status).toLowerCase();
-      if (report.status === 'GENERATED') uiStatus = 'generated';
-      if (report.status === 'ISSUED') uiStatus = 'issued';
-      if (report.status === 'DRAFT') uiStatus = 'draft';
-      if (report.status === 'APPROVED') uiStatus = 'pending';
-      if (report.status === 'SUPERSEDED') uiStatus = 'draft';
-      if (delivery.failed > 0 && report.status !== 'ISSUED') uiStatus = 'failed';
-
-      return {
-        ...report,
-        reference: `RPT-${report.id.slice(-6).toUpperCase()}`,
-        uiStatus,
-        fileSizeLabel: report.storageKey ? 'PDF' : '—',
-        delivery,
-      };
-    });
+      if (delivery.failed > 0 && report.status !== 'ISSUED') {
+        report.uiStatus = 'failed';
+      }
+      report.delivery = delivery;
+    }
 
     const preliminary = items.filter((r) => r.reportType === 'PRELIMINARY_EXECUTIVE').length;
     const verified = items.filter((r) => r.reportType === 'VERIFIED_EXECUTIVE').length;
@@ -437,6 +553,8 @@ export class ReportsService {
 
     return {
       items,
+      scl: sclSection,
+      executiveAdvisory: executiveAdvisorySection,
       summary: {
         total: items.length,
         preliminary,
@@ -473,7 +591,7 @@ export class ReportsService {
       include: { assessment: { include: { organisation: true } }, generatedBy: { select: { id: true, email: true, firstName: true, lastName: true } } },
     });
     if (!report) throw new NotFoundException('Report not found.');
-    await this.assessments.checkAccess(report.assessmentId, user);
+    await this.checkReportAccess(report.assessmentId, user);
 
     const lead = await this.prisma.publicLead.findFirst({
       where: { assessmentId: report.assessmentId },

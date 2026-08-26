@@ -10,16 +10,10 @@ type Props = {
 };
 
 function categoryInterpretation(_category: string, score: number): string {
-  if (score >= 75) {
-    return 'Critical exposure indicators suggest priority independent review.';
-  }
-  if (score >= 60) {
-    return 'Elevated leakage or underperformance indicators warrant focused independent validation.';
-  }
-  if (score >= 40) {
-    return 'Assurance may not be consistently matched to independently verifiable delivery evidence.';
-  }
-  return 'Responses indicate relatively stronger control indicators; independent validation remains decision-support only.';
+  if (score >= 75) return 'Strong warning indicators suggest priority independent executive review.';
+  if (score >= 60) return 'Elevated governance or assurance indicators warrant independent validation.';
+  if (score >= 40) return 'Some assurance indicators may require targeted executive validation.';
+  return 'Relatively stronger indicators were reported; this remains questionnaire-based triage only.';
 }
 
 /** On-screen report matches the EGT visual layout (score /100, dimensions, priorities). */
@@ -46,7 +40,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
         <div className="scl-triage-report-heading">
           <div>
             <div className="scl-exec-eyebrow">Your complimentary report</div>
-            <h2>Preliminary Security Cost Leakage Indication Report</h2>
+            <h2>Preliminary Executive Governance Indication</h2>
           </div>
           {result.downloadUrl ? (
             <a className="scl-exec-btn scl-exec-btn-primary" href={result.downloadUrl} target="_blank" rel="noreferrer">
@@ -73,7 +67,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
           </div>
 
           <div className="scl-exec-eyebrow scl-triage-report-eyebrow">Complimentary preliminary indication</div>
-          <h3 className="scl-triage-report-title scl-triage-report-title-single">Security Cost Leakage Report</h3>
+          <h3 className="scl-triage-report-title scl-triage-report-title-single">Executive Governance Indication</h3>
 
           <div className="scl-triage-report-meta">
             <div>
@@ -98,11 +92,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
             className={`scl-triage-result-panel scl-triage-result-panel--${(result.colourName || 'RED').toLowerCase()}`}
           >
             <div className="scl-triage-score">
-              <small>
-                SECURITY COST
-                <br />
-                LEAKAGE INDICATION
-              </small>
+              <small>INDICATIVE ASSURANCE POSITION</small>
               <div className="scl-triage-score-big">
                 {score != null ? (
                   <>
@@ -110,15 +100,18 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
                     <span className="scl-triage-score-denom">/100</span>
                   </>
                 ) : (
-                  '—'
+                  result.riskBand || '—'
                 )}
               </div>
+              {score != null && result.riskBand ? (
+                <div className="scl-triage-score-band">{String(result.riskBand).toUpperCase()}</div>
+              ) : null}
             </div>
             <div className="scl-triage-position">
               <small>PRELIMINARY POSITION</small>
               <h2>{result.diagnosis}</h2>
               <p>
-                Your responses indicate where security cost leakage may require independent validation
+                Your responses indicate where governance, assurance, provider-performance or expenditure concerns may require independent validation
                 {result.accessibleLabel ? ` (${result.accessibleLabel})` : ''}. The result does not confirm
                 that controls operate as described.
               </p>
@@ -127,7 +120,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
 
           {categories.length > 0 ? (
             <div className="scl-egt-dimensions">
-              <h4>Dimension indications</h4>
+              <h4>Warning-indicator dimensions</h4>
               <ul>
                 {categories.map((c) => {
                   const s = Math.max(0, Math.min(100, Math.round(Number(c.score) || 0)));
@@ -137,7 +130,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
                       <span className="scl-egt-dim-track" aria-hidden>
                         <span className="scl-egt-dim-fill" style={{ width: `${s}%` }} />
                       </span>
-                      <span className="scl-egt-dim-value">{s}</span>
+                      <span className="scl-egt-dim-value">{s >= 75 ? 'Priority' : s >= 60 ? 'Elevated' : s >= 40 ? 'Watch' : 'Lower'}</span>
                     </li>
                   );
                 })}
@@ -146,7 +139,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
           ) : null}
 
           <div className="scl-egt-priorities">
-            <h4>Priority exposure indicators</h4>
+            <h4>Strongest warning indicators</h4>
             <div className="scl-egt-priority-grid">
               {priorities.map((p, i) => (
                 <article key={`${p.category}-${i}`} className="scl-egt-priority-card">
@@ -160,27 +153,28 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
 
           <div className="scl-egt-next">
             <div className="scl-exec-eyebrow">Recommended next step</div>
-            <h4>Convert the indication into defensible evidence.</h4>
+            <h4>Executive Advisory Diagnostic</h4>
             <p>
-              A focused Physical Risk diagnostic translates this preliminary Security Cost Leakage indication
-              into independently verifiable findings, contract enforceability gaps, and a practical executive
-              remediation sequence.
+              Your Executive Governance Triage indicates that an Executive Advisory Diagnostic may be appropriate.
+              Request a proposal for a consultant-led Executive Advisory Diagnostic. This remains preliminary triage —
+              not an assessment, audit, assurance opinion, or Security Cost Leakage Assessment™.
             </p>
             <hr />
             <p className="scl-egt-route">
-              <strong>Focused route indicated:</strong> Security Cost Leakage Assessment™
+              <strong>Recommended entry product:</strong> Executive Advisory Diagnostic
             </p>
             <a className="scl-exec-btn scl-exec-btn-primary" href={WORDPRESS_CONTACT} target="_blank" rel="noreferrer">
-              Request an Executive Advisory Diagnostic
+              Request Executive Advisory Proposal
             </a>
+            <p className="scl-triage-micro" style={{ marginTop: 12 }}>
+              Prefer a conversation first? Use Discuss my results for an Executive Discussion.
+            </p>
           </div>
 
           <div className="scl-egt-basis">
             <h4>Important basis of interpretation</h4>
             <p>
-              This complimentary indication is derived from questionnaire responses and the governed Security
-              Cost Leakage model. It is decision-support only and does not constitute an audit, assurance
-              opinion, or confirmation that controls operate as described. Reference {result.reference}.
+              This complimentary indication is derived from questionnaire responses only. It is Level 1 triage and decision-support: not an assessment, audit, assurance opinion, diagnostic conclusion, Security Cost Leakage Assessment™, or confirmation that controls operate as described. Reference {result.reference}.
             </p>
           </div>
 

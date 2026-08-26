@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { workflowTimeline } from '../common/workflow';
+import { assertManualLevel3CreationAllowed } from '../common/l3-governance';
 import { INTERNAL_ROLES as INTERNAL_ROLE_SET } from '../common/roles';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { generateAssessmentReference } from '../common/assessment-reference';
@@ -71,7 +72,7 @@ export class AssessmentsService {
       where: { id: assessmentId },
       select: { organisationId: true, productCode: true },
     });
-    if (!assessment || assessment.productCode !== 'SCLI_COST_LEAKAGE') {
+    if (!assessment || !['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode))) {
       throw new NotFoundException('Assessment not found.');
     }
     if (INTERNAL_ROLES.has(user.role)) return;
@@ -194,6 +195,7 @@ export class AssessmentsService {
       const membership = await this.prisma.membership.findUnique({ where: { userId_organisationId: { userId: user.id, organisationId: input.organisationId } } });
       if (!membership) throw new ForbiddenException('You cannot create an assessment for this organisation.');
     }
+    await assertManualLevel3CreationAllowed(this.prisma, input.organisationId, 'SCLI_COST_LEAKAGE');
     const assessment = await this.prisma.$transaction(async (tx) => {
       const reference = await generateAssessmentReference(tx, 'SCLI_COST_LEAKAGE');
       return tx.assessmentSession.create({
@@ -264,6 +266,14 @@ export class AssessmentsService {
     if (!definition) throw new BadRequestException('Input definition not found.');
 
     let persisted: unknown = value;
+    if (['C3', 'C4', 'C5'].includes(code)) {
+      const cleaned = String(value ?? '').replace(/[Rr$€£,\s]/g, '');
+      const n = Number(cleaned);
+      if (!Number.isFinite(n) || n < 0) throw new BadRequestException(`${code} must be a non-negative number.`);
+      if (code === 'C3' || code === 'C4') persisted = Math.round(n);
+      if (code === 'C5') persisted = Math.round(n);
+    }
+
     if (definition.valueType === 'CURRENCY' && isSclMoneyLossCode(code) && isMoneyRangeValue(value)) {
       // Monetary-loss bands (C6/C7): store structured ZAR range — never invent a midpoint amount.
       persisted = {
@@ -374,7 +384,7 @@ export class AssessmentsService {
     if (!assessment) throw new NotFoundException('Assessment not found.');
 
     const missingInputs = assessment.questionnaireVersion.inputDefinitions.filter(def => def.required && !assessment.inputValues.some(value => value.inputDefinitionId === def.id));
-    const isScli = assessment.productCode === 'SCLI_COST_LEAKAGE';
+    const isScli = ['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode));
     const missingQuestions = assessment.questionnaireVersion.questions.filter((question) => {
       if (!question.required) return false;
       // Active triage set only (Q7/Q14/Q16/Q18/Q19 retired) — match public website.

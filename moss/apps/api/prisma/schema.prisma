@@ -112,6 +112,9 @@ enum ReportStatus {
 
 enum ReportType {
   PRELIMINARY_EXECUTIVE
+  EXECUTIVE_ADVISORY_BRIEF
+  FOCUSED_ASSURANCE_REPORT
+  COMMITTEE_ASSURANCE_REPORT
   VERIFIED_EXECUTIVE
   ANALYST_WORKING_PAPER
   EVIDENCE_REGISTER
@@ -185,8 +188,33 @@ enum AssumptionRecordStatus {
 
 /// Product discriminator for AssessmentSession. SOMOD is intentionally omitted — do not attach SOMOD behaviour here.
 enum ProductCode {
+  EXECUTIVE_GOVERNANCE_TRIAGE
   SCLI_COST_LEAKAGE
+  EXECUTIVE_ADVISORY_DIAGNOSTIC
+  CONTRACT_SLA_ASSURANCE
+  VENDOR_PERFORMANCE_ASSURANCE
+  GOVERNANCE_EXECUTIVE_ASSURANCE
+  CYBER_PHYSICAL_DEPENDENCY
+  SHIELD360
   MOSS
+}
+
+/// Commercial proposal workflow for Level 1 Executive Governance Triage leads.
+enum ProposalStatus {
+  NOT_REQUESTED
+  REQUESTED
+  IN_PREPARATION
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+enum AdvisoryRoutePriority {
+  HIGH
+  RECOMMENDED
+  OPTIONAL
 }
 
 enum SiteStatus {
@@ -293,6 +321,8 @@ model User {
   mossRecommendations Recommendation[] @relation("MossRecommendationAuthor")
   somodAssessmentsCreated SomodAssessment[] @relation("SomodAssessmentCreator")
   somodFinancialApprovals SomodAssessment[] @relation("SomodFinancialApprover")
+  assignedTriageLeads PublicLead[] @relation("TriageAssignedAnalyst")
+  advisoryOutcomesConfirmed AdvisoryDiagnosticOutcome[] @relation("AdvisoryOutcomeConfirmer")
   auditEvents  AuditEvent[]
 }
 
@@ -500,6 +530,9 @@ model AssessmentSession {
   findings               Finding[]
   recommendations        Recommendation[]
   reports                Report[]
+  advisoryModuleReviews  AdvisoryModuleReview[]
+  diagnosticOutcome      AdvisoryDiagnosticOutcome?
+  spawnedFromRoute       AdvisoryConfirmedRoute? @relation("RouteSpawnedAssessment")
   crmSyncRecords         CrmSyncRecord[]
   assignments            AssessmentAssignment[]
   scoreOverrides         ScoreOverride[]
@@ -958,6 +991,71 @@ model Report {
   @@index([assessmentId, reportType, version])
 }
 
+model AdvisoryModuleReview {
+  id                   String   @id @default(cuid())
+  assessmentId         String
+  moduleCode           String
+  moduleName           String
+  principalQuestion    String
+  exposureRating       Int?
+  finding              String?
+  evidenceSummary      String?
+  businessConsequence  String?
+  accountableExecutive String?
+  requiredDecision     String?
+  recommendedProduct   ProductCode?
+  analystNote          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  assessment           AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, moduleCode])
+  @@index([assessmentId])
+}
+
+/// Immutable snapshot when an EAD is completed and Level 3 routing is confirmed.
+model AdvisoryDiagnosticOutcome {
+  id                    String         @id @default(cuid())
+  assessmentId          String         @unique
+  confirmedAt           DateTime
+  confirmedById         String
+  commercialReference   String?        @unique
+  commercialStatus      ProposalStatus @default(NOT_REQUESTED)
+  commercialRequestedAt DateTime?
+  commercialSentAt      DateTime?
+  commercialAcceptedAt  DateTime?
+  commercialDeclinedAt  DateTime?
+  commercialExpiredAt   DateTime?
+  commercialAdminNotes  String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  assessment            AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  confirmedBy           User           @relation("AdvisoryOutcomeConfirmer", fields: [confirmedById], references: [id])
+  routes                AdvisoryConfirmedRoute[]
+
+  @@index([commercialStatus])
+}
+
+/// Confirmed Level 3 product recommendation from a completed EAD.
+model AdvisoryConfirmedRoute {
+  id                  String                @id @default(cuid())
+  outcomeId           String
+  productCode         ProductCode
+  priority            AdvisoryRoutePriority @default(RECOMMENDED)
+  rationale           String?
+  sourceModuleCode    String?
+  sourceModuleName    String?
+  createdAssessmentId String?               @unique
+  sortOrder           Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  outcome             AdvisoryDiagnosticOutcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+  createdAssessment   AssessmentSession?    @relation("RouteSpawnedAssessment", fields: [createdAssessmentId], references: [id], onDelete: SetNull)
+
+  @@unique([outcomeId, productCode])
+  @@index([outcomeId])
+}
+
 model CrmSyncRecord {
   id             String     @id @default(cuid())
   organisationId String?
@@ -1054,11 +1152,34 @@ model PublicLead {
   lastProgressAt        DateTime?
   thankYouSentAt        DateTime?
   completedAt           DateTime?
+  reviewedAt            DateTime?
+  contactedAt           DateTime?
+  diagnosticRequestedAt DateTime?
+  convertedAt           DateTime?
+  convertedAssessmentId String?
+  closedAt              DateTime?
+  adminNotes            String?
+  proposalStatus        ProposalStatus @default(NOT_REQUESTED)
+  proposalRequestedAt   DateTime?
+  proposalSentAt        DateTime?
+  proposalAcceptedAt    DateTime?
+  proposalDeclinedAt    DateTime?
+  proposalExpiredAt     DateTime?
+  proposalReference     String?   @unique
+  proposalAdminNotes    String?
+  proposalPreparedById  String?
+  assignedAnalystId     String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  assignedAnalyst       User?     @relation("TriageAssignedAnalyst", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
   @@index([email])
   @@index([status])
   @@index([assessmentId])
+  @@index([diagnosticRequestedAt])
+  @@index([convertedAt])
+  @@index([proposalStatus])
+  @@index([proposalRequestedAt])
+  @@index([assignedAnalystId])
 }
 
 model ContactSubmission {

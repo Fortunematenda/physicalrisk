@@ -227,6 +227,7 @@
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+      ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
     depends_on:
       moss-db:
         condition: service_healthy
@@ -391,7 +392,7 @@
       - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
       # Required for production SSL (apps/repo/moss/auth). Safe if missing locally.
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./infrastructure/nginx/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - wordpress
       - keycloak

@@ -39,6 +39,12 @@ export class UsersController {
     return this.users.list(user);
   }
 
+  @Get('capabilities')
+  @Roles('SUPER_ADMIN', 'REVIEWER', 'ANALYST')
+  capabilities() {
+    return this.users.capabilities();
+  }
+
   @Get('analysts')
   @Roles('SUPER_ADMIN', 'REVIEWER', 'ANALYST')
   analysts(@CurrentUser() user: AuthUser) {

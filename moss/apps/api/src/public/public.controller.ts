@@ -149,6 +149,25 @@ export class PublicController {
     return this.publicService.completeAssessment({ ...body, leadId: this.sessionLead(session.leadId, body.leadId) });
   }
 
+  @Post('leads/:id/request-diagnostic')
+  requestDiagnostic(@Param('id') id: string, @Req() req: Request) {
+    this.limit(req, 'request-diagnostic', 5, 60 * 60_000);
+    const session = this.sessions.verify(req.headers.cookie);
+    return this.publicService.requestDiagnostic(this.sessionLead(session.leadId, id));
+  }
+
+  @Get('triage/proposal')
+  getProposal(@Query('token') token: string, @Req() req: Request) {
+    this.limit(req, 'proposal-preview', 60, 60 * 60_000);
+    return this.publicService.getProposalRequestPreview(String(token || ''));
+  }
+
+  @Post('triage/proposal')
+  requestProposal(@Body() body: { token?: string }, @Query('token') token: string, @Req() req: Request) {
+    this.limit(req, 'proposal-request', 10, 60 * 60_000);
+    return this.publicService.requestProposal(String(body?.token || token || ''));
+  }
+
   private sessionLead(sessionLeadId?: string, requestedLeadId?: string): string {
     if (!sessionLeadId || (requestedLeadId && requestedLeadId !== sessionLeadId)) {
       throw new BadRequestException('Assessment session does not match.');

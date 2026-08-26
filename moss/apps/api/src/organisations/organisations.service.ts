@@ -11,6 +11,7 @@ const DEFAULT_INDUSTRIES = [
   'Manufacturing',
   'Retail',
   'Financial Services',
+  'Enterprise Management Systems Providers',
   'Data Centres',
   'Government / Public Infrastructure',
   'Healthcare',
@@ -358,7 +359,23 @@ export class OrganisationsService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.publicLead.deleteMany({ where: { organisationId: id } });
-      await tx.somodAssessment.deleteMany({ where: { organisationId: id } });
+      await tx.crmSyncRecord.deleteMany({ where: { organisationId: id } });
+      await tx.actionItem.deleteMany({ where: { organisationId: id } });
+
+      const somodIds = await tx.somodAssessment.findMany({
+        where: { organisationId: id },
+        select: { id: true },
+      });
+      for (const somod of somodIds) {
+        await tx.somodAssessment.delete({ where: { id: somod.id } });
+      }
+
+      // Break parent/child assessment links before delete (Restrict by default).
+      await tx.assessmentSession.updateMany({
+        where: { organisationId: id },
+        data: { parentAssessmentId: null },
+      });
+
       const assessments = await tx.assessmentSession.findMany({
         where: { organisationId: id },
         select: { id: true },
@@ -366,6 +383,7 @@ export class OrganisationsService {
       for (const assessment of assessments) {
         await tx.assessmentSession.delete({ where: { id: assessment.id } });
       }
+
       await tx.organisation.delete({ where: { id } });
     });
 

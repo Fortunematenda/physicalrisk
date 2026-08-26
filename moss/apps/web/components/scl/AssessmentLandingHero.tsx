@@ -18,7 +18,7 @@ export function AssessmentLandingHero({ onStart }: Props) {
     <main id="landing" className="scl-triage-landing">
       <section className="scl-triage-hero">
         <div className="scl-triage-hero-left">
-          <p className="scl-exec-eyebrow">Complimentary executive self-assessment</p>
+          <p className="scl-exec-eyebrow">Complimentary executive questionnaire</p>
           <h1>Can your organisation prove that security is governed, delivered and worth what it costs?</h1>
           <p className="scl-exec-lead">
             The Executive Governance Triage identifies preliminary indicators of governance exposure,
@@ -26,7 +26,7 @@ export function AssessmentLandingHero({ onStart }: Props) {
           </p>
           <div className="scl-exec-actions">
             <button type="button" className="scl-exec-btn scl-exec-btn-primary" onClick={onStart}>
-              Start the 3-minute assessment
+              Start the 3-minute questionnaire
             </button>
           </div>
           <p className="scl-triage-micro">

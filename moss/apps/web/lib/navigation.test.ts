@@ -7,18 +7,24 @@ import {
 } from './navigation';
 
 describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
-  it('groups Cost Leakage, MOSS, and SOMOD as separate collapsible sidebar sections', () => {
+  it('groups executive journey and assurance programmes in the sidebar', () => {
+    const triage = NAV_SECTIONS.find((s) => s.id === 'triage');
+    const advisory = NAV_SECTIONS.find((s) => s.id === 'advisory');
     const scl = NAV_SECTIONS.find((s) => s.id === 'scl');
     const moss = NAV_SECTIONS.find((s) => s.id === 'moss');
     const somod = NAV_SECTIONS.find((s) => s.id === 'somod');
-    expect(scl?.label).toBe('Cost Leakage');
+    expect(triage?.label).toBe('Executive Triage');
+    expect(advisory?.label).toBe('Executive Advisory');
+    expect(scl?.label).toBe('Security Cost Leakage');
     expect(moss?.label).toBe('MOSS');
     expect(somod?.label).toBe('SOMOD');
+    expect(triage?.group).toBe('journey');
+    expect(advisory?.group).toBe('journey');
+    expect(scl?.group).toBe('assurance');
+    expect(moss?.group).toBe('enterprise');
     expect(scl?.collapsible).toBe(true);
     expect(moss?.collapsible).toBe(true);
     expect(somod?.collapsible).toBe(true);
-    expect(scl?.group).toBeUndefined();
-    expect(moss?.group).toBeUndefined();
     expect(scl?.items.map((i) => i.href)).toEqual(
       expect.arrayContaining([
         '/dashboard',
@@ -45,14 +51,20 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
       expect.arrayContaining(['/somod', '/somod/assessments']),
     );
     expect(somod?.items.map((i) => i.href)).not.toContain('/somod/assessments/new');
+    const triageIndex = NAV_SECTIONS.findIndex((s) => s.id === 'triage');
+    const advisoryIndex = NAV_SECTIONS.findIndex((s) => s.id === 'advisory');
     const sclIndex = NAV_SECTIONS.findIndex((s) => s.id === 'scl');
     const mossIndex = NAV_SECTIONS.findIndex((s) => s.id === 'moss');
     const somodIndex = NAV_SECTIONS.findIndex((s) => s.id === 'somod');
+    expect(triageIndex).toBeLessThan(advisoryIndex);
+    expect(advisoryIndex).toBeLessThan(sclIndex);
     expect(sclIndex).toBeLessThan(mossIndex);
     expect(mossIndex).toBeLessThan(somodIndex);
   });
 
   it('marks product context from pathname', () => {
+    expect(activeDiagnosticProduct('/triage/abc')).toBe('TRIAGE');
+    expect(activeDiagnosticProduct('/advisory/abc')).toBe('ADVISORY');
     expect(activeDiagnosticProduct('/assessments')).toBe('SCL');
     expect(activeDiagnosticProduct('/dashboard')).toBe('SCL');
     expect(activeDiagnosticProduct('/start')).toBe('SCL');
@@ -91,8 +103,24 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
 
   it('filters product sections for analysts', () => {
     const filtered = filterNavSections(NAV_SECTIONS, 'ANALYST');
+    expect(filtered.some((s) => s.id === 'triage')).toBe(true);
+    expect(filtered.some((s) => s.id === 'advisory')).toBe(true);
     expect(filtered.some((s) => s.id === 'scl')).toBe(true);
     expect(filtered.some((s) => s.id === 'moss')).toBe(true);
     expect(filtered.some((s) => s.id === 'somod')).toBe(true);
+  });
+
+  it('separates advisory and cost leakage report links', () => {
+    expect(isNavItemActive('/reports', '/reports', '#executive-advisory-reports')).toBe(false);
+    expect(isNavItemActive('/reports', '/reports', '')).toBe(true);
+    expect(
+      isNavItemActive('/reports', '/reports#executive-advisory-reports', '#executive-advisory-reports'),
+    ).toBe(true);
+    expect(isNavItemActive('/reports', '/reports#executive-advisory-reports', '')).toBe(false);
+    expect(isNavItemActive('/reports/abc', '/reports', '', '?view=advisory')).toBe(false);
+    expect(
+      isNavItemActive('/reports/abc', '/reports#executive-advisory-reports', '', '?view=advisory'),
+    ).toBe(true);
+    expect(isNavItemActive('/reports/abc', '/reports', '', '')).toBe(true);
   });
 });

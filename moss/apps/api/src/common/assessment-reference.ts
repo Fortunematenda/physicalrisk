@@ -1,18 +1,24 @@
 import { ProductCode, type Prisma } from '@prisma/client';
 
-/** User-facing assessment reference prefix. DB enum stays SCLI_COST_LEAKAGE. */
-export function assessmentReferencePrefix(productCode: string): 'SCL' | 'MOSS' {
-  if (productCode === 'MOSS' || productCode === ProductCode.MOSS) return 'MOSS';
-  if (productCode === 'SCLI_COST_LEAKAGE' || productCode === ProductCode.SCLI_COST_LEAKAGE) {
-    return 'SCL';
-  }
-  throw new Error(`Unsupported productCode for assessment reference: ${productCode}`);
+const PREFIX_BY_PRODUCT: Record<string, string> = {
+  EXECUTIVE_GOVERNANCE_TRIAGE: 'EGT',
+  SCLI_COST_LEAKAGE: 'SCL',
+  EXECUTIVE_ADVISORY_DIAGNOSTIC: 'EAD',
+  CONTRACT_SLA_ASSURANCE: 'CSLA',
+  VENDOR_PERFORMANCE_ASSURANCE: 'VPA',
+  GOVERNANCE_EXECUTIVE_ASSURANCE: 'SGEA',
+  CYBER_PHYSICAL_DEPENDENCY: 'CPD',
+  SHIELD360: 'SH360',
+  MOSS: 'MOSS',
+};
+
+export function assessmentReferencePrefix(productCode: string): string {
+  const prefix = PREFIX_BY_PRODUCT[productCode];
+  if (!prefix) throw new Error(`Unsupported productCode for assessment reference: ${productCode}`);
+  return prefix;
 }
 
-/**
- * Race-safe sequential reference: {PREFIX}-{YEAR}-{000001}
- * SCL and MOSS use separate sequences scoped by productCode.
- */
+/** Race-safe sequential reference: {PREFIX}-{YEAR}-{000001}, scoped by product. */
 export async function generateAssessmentReference(
   tx: Prisma.TransactionClient,
   productCode: string,
@@ -20,29 +26,21 @@ export async function generateAssessmentReference(
 ): Promise<string> {
   const label = assessmentReferencePrefix(productCode);
   const prefix = `${label}-${year}-`;
-  const prismaProduct =
-    label === 'MOSS' ? ProductCode.MOSS : ProductCode.SCLI_COST_LEAKAGE;
+  const prismaProduct = productCode as ProductCode;
 
   for (let attempt = 0; attempt < 8; attempt++) {
     const rows = await tx.assessmentSession.findMany({
       where: { productCode: prismaProduct, reference: { startsWith: prefix } },
       select: { reference: true },
     });
-
     let max = 0;
     for (const row of rows) {
       const n = Number(row.reference.slice(prefix.length));
       if (Number.isFinite(n) && n > max) max = n;
     }
-
-    const seq = max + 1 + attempt;
-    const reference = `${prefix}${String(seq).padStart(6, '0')}`;
-    const clash = await tx.assessmentSession.findUnique({
-      where: { reference },
-      select: { id: true },
-    });
+    const reference = `${prefix}${String(max + 1 + attempt).padStart(6, '0')}`;
+    const clash = await tx.assessmentSession.findUnique({ where: { reference }, select: { id: true } });
     if (!clash) return reference;
   }
-
   return `${prefix}${Date.now().toString().slice(-6)}`;
 }

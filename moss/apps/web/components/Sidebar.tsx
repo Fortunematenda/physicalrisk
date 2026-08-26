@@ -86,7 +86,7 @@ export function Sidebar({
   const roleLabel = user ? roleDisplayLabel(user.role) : 'User';
 
   useEffect(() => {
-    const productIds = new Set(['scl', 'moss', 'somod']);
+    const productIds = new Set(['advisory', 'scl', 'moss', 'somod']);
     const activeProductId =
       sections.find(
         (section) => productIds.has(section.id) && sectionHasActiveItem(pathname, section),
@@ -118,7 +118,7 @@ export function Sidebar({
     const willOpen = !isSectionOpen(section);
     setManualOpen((prev) => {
       const next = { ...prev, [section.id]: willOpen };
-      const productIds = ['scl', 'moss', 'somod'] as const;
+      const productIds = ['advisory', 'scl', 'moss', 'somod'] as const;
       if (willOpen && productIds.includes(section.id as (typeof productIds)[number])) {
         for (const id of productIds) {
           if (id !== section.id) next[id] = false;
@@ -168,7 +168,7 @@ export function Sidebar({
           const showGroup = Boolean(section.group && section.group !== prevGroup);
           const open = isSectionOpen(section);
           const isProduct =
-            section.id === 'scl' || section.id === 'moss' || section.id === 'somod';
+            section.id === 'advisory' || section.id === 'scl' || section.id === 'moss' || section.id === 'somod';
           return (
             <div
               className={`sidebar-section${isProduct ? ' sidebar-section-product' : ''}`}

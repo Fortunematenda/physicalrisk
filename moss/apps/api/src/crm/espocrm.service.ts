@@ -886,6 +886,15 @@ export class EspoCrmService {
         totalSites ? `Operational sites: ${totalSites}` : null,
         securityExpenditure ? `Security expenditure: ${securityExpenditure}` : null,
         primaryConcern ? `Primary concern: ${primaryConcern}` : null,
+        `Executive Governance Triage status: ${lead.status}`,
+        lead.diagnosticRequestedAt ? `Executive Discussion requested: ${lead.diagnosticRequestedAt.toISOString()}` : null,
+        lead.proposalRequestedAt
+          ? `Commercial Intent: Proposal Requested (${lead.proposalStatus}) at ${lead.proposalRequestedAt.toISOString()}`
+          : null,
+        lead.proposalReference ? `Proposal Reference: ${lead.proposalReference}` : null,
+        lead.proposalRequestedAt
+          ? 'Physical Risk Product: Executive Advisory Diagnostic | Journey Level: Level 2 opportunity | Source: Executive Governance Triage'
+          : null,
         lead.source ? `MOSS source: ${lead.source}` : null,
         attribution
           ? `Attribution: ${JSON.stringify({

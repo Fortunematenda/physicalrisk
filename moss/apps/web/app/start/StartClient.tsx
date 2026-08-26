@@ -745,7 +745,10 @@ export default function StartAssessmentClient() {
       )}
 
       {uiPhase === 'submitted' && (
-        <AssessmentSubmittedPage email={details.email.trim()} reference={submittedReference} />
+        <AssessmentSubmittedPage
+          email={details.email.trim()}
+          reference={submittedReference}
+        />
       )}
     </SclAssessmentShell>
   );

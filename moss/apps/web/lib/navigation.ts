@@ -13,6 +13,7 @@ import {
   IconSettings,
   IconShieldCheck,
   IconSlidersHorizontal,
+  IconUsers,
 } from '../components/NavIcons';
 import type { MvpNavRole } from './auth-user';
 
@@ -31,8 +32,14 @@ export type NavItemConfig = {
 export type NavSectionConfig = {
   id: string;
   label: string;
+  /** Product level badge shown in the sidebar (e.g. L1, L2, L3). */
+  level?: string;
+  /** Short helper shown under the section title when expanded. */
+  description?: string;
+  /** Sidebar grouping — controls section dividers and accordion behaviour. */
+  group?: 'journey' | 'assurance' | 'enterprise' | 'platform' | 'system';
   /** Optional parent heading (e.g. DIAGNOSTICS) shown once above grouped sections. */
-  group?: string;
+  groupLabel?: string;
   /** When true, section header toggles expand/collapse of its items. */
   collapsible?: boolean;
   items: NavItemConfig[];
@@ -45,8 +52,37 @@ export type NavSectionConfig = {
  */
 export const NAV_SECTIONS: NavSectionConfig[] = [
   {
+    id: 'triage',
+    label: 'Executive Triage',
+    level: 'L1',
+    description: 'Governance funnel · complimentary indication',
+    group: 'journey',
+    groupLabel: 'Executive journey',
+    collapsible: true,
+    items: [
+      { id: 'triage-submissions', label: 'Triage submissions', href: '/triage', icon: IconClipboardList, roles: ['ADMIN', 'ANALYST'] },
+    ],
+  },
+  {
+    id: 'advisory',
+    label: 'Executive Advisory',
+    level: 'L2',
+    description: 'Paid diagnostic · routing · assurance handoff',
+    group: 'journey',
+    collapsible: true,
+    items: [
+      { id: 'advisory-engagements', label: 'Diagnostics & assurance', href: '/advisory', icon: IconShieldCheck, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
+      { id: 'advisory-reports', label: 'Advisory reports', href: '/reports#executive-advisory-reports', icon: IconFileText, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
+      { id: 'advisory-new', label: 'New paid engagement', href: '/advisory/new', icon: IconClipboardList, roles: ['ADMIN', 'ANALYST'] },
+    ],
+  },
+  {
     id: 'scl',
-    label: 'Cost Leakage',
+    label: 'Security Cost Leakage',
+    level: 'L3',
+    description: 'Evidence-led cost leakage assessment',
+    group: 'assurance',
+    groupLabel: 'Assurance programmes',
     collapsible: true,
     items: [
       {
@@ -65,21 +101,21 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
       },
       {
         id: 'scl-review-queue',
-        label: 'Review Queue',
+        label: 'Review queue',
         href: '/assessments/assigned',
         icon: IconListChecks,
         roles: ['ADMIN', 'ANALYST'],
       },
       {
         id: 'scl-reports',
-        label: 'Reports',
+        label: 'Cost leakage reports',
         href: '/reports',
         icon: IconFileText,
         roles: ['ADMIN', 'ANALYST', 'CLIENT'],
       },
       {
         id: 'scl-methodology',
-        label: 'Questionnaire & Calibration',
+        label: 'Questionnaire & calibration',
         href: '/admin/methodology',
         icon: IconSlidersHorizontal,
         roles: ['ADMIN'],
@@ -96,6 +132,10 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
   {
     id: 'moss',
     label: 'MOSS',
+    level: 'Enterprise',
+    description: 'Operating security maturity',
+    group: 'enterprise',
+    groupLabel: 'Enterprise programmes',
     collapsible: true,
     items: [
       {
@@ -138,6 +178,9 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
   {
     id: 'somod',
     label: 'SOMOD',
+    level: 'Enterprise',
+    description: 'Security operations model diagnostic',
+    group: 'enterprise',
     collapsible: true,
     items: [
       {
@@ -157,9 +200,10 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     ],
   },
   {
-    // Shared across Cost Leakage, MOSS, and SOMOD — standalone, above SYSTEM.
     id: 'organisations',
     label: '',
+    group: 'platform',
+    groupLabel: 'Platform',
     items: [
       {
         id: 'organisations',
@@ -172,8 +216,11 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
   },
   {
     id: 'system',
-    label: 'SYSTEM',
+    label: 'System',
+    group: 'system',
     items: [
+      { id: 'consultants', label: 'Consultants & Analysts', href: '/admin/consultants', icon: IconBuilding2, roles: ['ADMIN', 'ANALYST'] },
+      { id: 'users', label: 'User administration', href: '/admin/users', icon: IconUsers, roles: ['ADMIN'] },
       {
         id: 'emails',
         label: 'Email Logs',
@@ -207,25 +254,95 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
 ];
 
 /** Active product for brand subtitle / context. */
-export function activeDiagnosticProduct(pathname: string): 'SCL' | 'MOSS' | 'SOMOD' | 'PLATFORM' {
+export function activeDiagnosticProduct(pathname: string): 'TRIAGE' | 'ADVISORY' | 'SCL' | 'MOSS' | 'SOMOD' | 'PLATFORM' {
+  if (pathname === '/triage' || pathname.startsWith('/triage/')) return 'TRIAGE';
+  if (pathname === '/advisory' || pathname.startsWith('/advisory/')) return 'ADVISORY';
   if (pathname === '/moss' || pathname.startsWith('/moss/')) return 'MOSS';
   if (pathname === '/somod' || pathname.startsWith('/somod/')) return 'SOMOD';
   if (
     pathname === '/dashboard'
     || pathname === '/start'
     || pathname.startsWith('/assessments')
-    || pathname.startsWith('/reports')
     || pathname.startsWith('/admin/methodology')
     || pathname.startsWith('/admin/assumptions')
     || pathname.startsWith('/actions')
   ) {
     return 'SCL';
   }
+  // Report list/detail product context depends on advisory vs SCL view — callers with search/hash should override.
+  if (pathname === '/reports' || pathname.startsWith('/reports/')) {
+    return 'SCL';
+  }
   return 'PLATFORM';
 }
 
-export function isNavItemActive(pathname: string, href: string): boolean {
-  if (href === '/dashboard') return pathname === '/dashboard';
+export function activeReportsProduct(
+  pathname: string,
+  hash = '',
+  search = '',
+): 'ADVISORY' | 'SCL' | null {
+  if (pathname !== '/reports' && !pathname.startsWith('/reports/')) return null;
+  return isReportsAdvisoryContext(hash, search) ? 'ADVISORY' : 'SCL';
+}
+
+export const PRODUCT_CONTEXT_LABELS: Record<ReturnType<typeof activeDiagnosticProduct>, string> = {
+  TRIAGE: 'Level 1 · Executive Triage',
+  ADVISORY: 'Level 2 · Executive Advisory',
+  SCL: 'Level 3 · Security Cost Leakage',
+  MOSS: 'MOSS · Enterprise programme',
+  SOMOD: 'SOMOD · Enterprise programme',
+  PLATFORM: 'Physical Risk portal',
+};
+
+export function splitNavHref(href: string): { path: string; hashId?: string } {
+  const [path, hashId] = href.split('#');
+  return { path, hashId: hashId || undefined };
+}
+
+/** Scroll to a sidebar hash target (e.g. executive-advisory-reports). */
+export function scrollToNavHash(hashId: string, behavior: ScrollBehavior = 'smooth') {
+  const el = document.getElementById(hashId);
+  if (el) el.scrollIntoView({ behavior, block: 'start' });
+}
+
+/** Update the URL hash and notify listeners (for same-page hash nav in the App Router). */
+export function applyNavHash(href: string) {
+  const { hashId } = splitNavHref(href);
+  if (!hashId || typeof window === 'undefined') return;
+  const next = `#${hashId}`;
+  if (window.location.hash !== next) {
+    window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${next}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  }
+  scrollToNavHash(hashId);
+}
+
+/** True when the user is in the Executive & Advisory reports surface (list hash or report detail). */
+export function isReportsAdvisoryContext(hash = '', search = ''): boolean {
+  if (hash.includes('executive-advisory')) return true;
+  const raw = search.startsWith('?') ? search.slice(1) : search;
+  try {
+    return new URLSearchParams(raw).get('view') === 'advisory';
+  } catch {
+    return false;
+  }
+}
+
+export function isNavItemActive(pathname: string, href: string, hash = '', search = ''): boolean {
+  const [path, itemHash] = href.split('#');
+
+  if (itemHash) {
+    if (pathname !== path && !pathname.startsWith(`${path}/`)) return false;
+    if (itemHash === 'executive-advisory-reports') {
+      if (pathname.startsWith('/reports/')) {
+        return isReportsAdvisoryContext(hash, search);
+      }
+      return hash === `#${itemHash}` || hash === itemHash;
+    }
+    return hash === `#${itemHash}` || hash === itemHash;
+  }
+
+  if (path === '/dashboard') return pathname === '/dashboard';
 
   if (href === '/assessments/new') {
     return pathname === '/assessments/new' || pathname.startsWith('/assessments/new/');
@@ -289,7 +406,8 @@ export function isNavItemActive(pathname: string, href: string): boolean {
     );
   }
 
-  if (href === '/reports') {
+  if (path === '/reports') {
+    if (isReportsAdvisoryContext(hash, search)) return false;
     return pathname === '/reports' || pathname.startsWith('/reports/');
   }
 
@@ -301,8 +419,8 @@ export function isNavItemActive(pathname: string, href: string): boolean {
 }
 
 /** True when any item in the section matches the current path. */
-export function sectionHasActiveItem(pathname: string, section: NavSectionConfig): boolean {
-  return section.items.some((item) => isNavItemActive(pathname, item.href));
+export function sectionHasActiveItem(pathname: string, section: NavSectionConfig, hash = '', search = ''): boolean {
+  return section.items.some((item) => isNavItemActive(pathname, item.href, hash, search));
 }
 
 export function filterNavSections(sections: NavSectionConfig[], userRole: MvpNavRole): NavSectionConfig[] {

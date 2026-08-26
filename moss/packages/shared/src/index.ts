@@ -8,3 +8,6 @@ export * from './money';
 export * from './percent-range';
 export * from './scl-money-ranges';
 export * from './scl-public-triage';
+
+export * from './product-architecture';
+export * from './ead-routing';

@@ -1,12 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ReportType } from '@prisma/client';
+import { ProposalStatus, ReportType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssessmentsService } from '../assessments/assessments.service';
 import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { ReportsService } from '../reports/reports.service';
+import { generateAssessmentReference } from '../common/assessment-reference';
+import { generateProposalReference } from '../common/proposal-reference';
+import { ProposalTokenService } from '../common/proposal-token.service';
 import {
   buildPriorityActionText,
   resolveSclClassificationVisual,
@@ -52,6 +55,7 @@ export class PublicService {
     private readonly email: EmailService,
     private readonly crm: EspoCrmService,
     private readonly reports: ReportsService,
+    private readonly proposalTokens: ProposalTokenService,
   ) {}
 
   async getPublishedQuestionnaire(code = 'SCLI') {
@@ -120,14 +124,25 @@ export class PublicService {
     });
 
     const systemUser = await this.getSystemUser();
-    const assessment = await this.assessments.create(
-      {
-        organisationId: organisation.id,
-        questionnaireCode: 'SCLI',
-        title: `${organisation.name} Security Cost Leakage Assessment`,
-      },
-      { id: systemUser.id, email: systemUser.email, role: String(systemUser.systemRole) },
-    );
+    const questionnaire = await this.prisma.questionnaire.findUnique({
+      where: { code: 'SCLI' },
+      include: { versions: { where: { status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, take: 1 } },
+    });
+    if (!questionnaire?.versions[0]) throw new BadRequestException('Published Executive Governance Triage questionnaire not found.');
+    const assessment = await this.prisma.$transaction(async (tx) => {
+      const reference = await generateAssessmentReference(tx, 'EXECUTIVE_GOVERNANCE_TRIAGE');
+      return tx.assessmentSession.create({
+        data: {
+          reference,
+          organisationId: organisation.id,
+          questionnaireVersionId: questionnaire.versions[0].id,
+          productCode: 'EXECUTIVE_GOVERNANCE_TRIAGE',
+          createdById: systemUser.id,
+          title: `${organisation.name} Executive Governance Triage`,
+          status: 'IN_PROGRESS',
+        },
+      });
+    });
 
     const lead = await this.prisma.publicLead.create({
       data: {
@@ -186,9 +201,9 @@ export class PublicService {
     if (!lead || !lead.assessmentId) {
       throw new NotFoundException('No in-progress assessment found for this email.');
     }
-    if (lead.status === 'COMPLETED') {
+    if (lead.completedAt || ['COMPLETED', 'REVIEWED', 'CONTACTED', 'DIAGNOSTIC_REQUESTED', 'CONVERTED', 'CLOSED'].includes(lead.status)) {
       throw new BadRequestException(
-        'This assessment was already completed. Start again with a new submission if needed.',
+        'This questionnaire was already completed. Start again with a new submission if needed.',
       );
     }
 
@@ -258,8 +273,8 @@ export class PublicService {
   }) {
     const lead = await this.prisma.publicLead.findUnique({ where: { id: input.leadId } });
     if (!lead || !lead.assessmentId) throw new NotFoundException('Lead not found.');
-    if (lead.status === 'COMPLETED') {
-      return { leadId: lead.id, status: lead.status, message: 'Assessment already completed.' };
+    if (lead.completedAt || ['COMPLETED', 'REVIEWED', 'CONTACTED', 'DIAGNOSTIC_REQUESTED', 'CONVERTED', 'CLOSED'].includes(lead.status)) {
+      return { leadId: lead.id, status: lead.status, message: 'Questionnaire already completed.' };
     }
 
     const systemUser = await this.getSystemUser();
@@ -303,8 +318,8 @@ export class PublicService {
   }) {
     const lead = await this.prisma.publicLead.findUnique({ where: { id: input.leadId } });
     if (!lead || !lead.assessmentId) throw new NotFoundException('Lead not found. Please start again from your details.');
-    if (lead.status === 'COMPLETED' || lead.status === 'SUBMITTING') {
-      throw new BadRequestException('This assessment has already been submitted.');
+    if (lead.completedAt || ['COMPLETED', 'REVIEWED', 'CONTACTED', 'DIAGNOSTIC_REQUESTED', 'CONVERTED', 'CLOSED', 'SUBMITTING'].includes(lead.status)) {
+      throw new BadRequestException('This questionnaire has already been submitted.');
     }
 
     const systemUser = await this.getSystemUser();
@@ -327,7 +342,7 @@ export class PublicService {
         lastProgressAt: new Date(),
       },
     });
-    if (claimed.count !== 1) throw new BadRequestException('This assessment has already been submitted.');
+    if (claimed.count !== 1) throw new BadRequestException('This questionnaire has already been submitted.');
 
     let evaluated = false;
     try {
@@ -370,7 +385,7 @@ export class PublicService {
         phone: input.phone?.trim() || lead.phone,
         industry: input.industry?.trim() || lead.industry,
         progressPhase: 'completed',
-        progressLabel: 'Submitted & evaluated',
+        progressLabel: 'Questionnaire completed',
         progressPercent: 100,
         lastProgressAt: new Date(),
       },
@@ -417,13 +432,13 @@ export class PublicService {
       : null;
     const diagnosis =
       visual?.band === 'Controlled'
-        ? 'Controlled cost leakage profile indicated'
+        ? 'Lower apparent assurance exposure'
         : visual?.band === 'Moderate'
-          ? 'Moderate cost leakage exposure indicated'
+          ? 'Moderate apparent assurance exposure'
           : visual?.band === 'High'
-            ? 'Significant cost leakage exposure indicated'
+            ? 'Elevated apparent assurance exposure'
             : visual?.band === 'Critical'
-              ? 'Critical cost leakage exposure indicated'
+              ? 'Priority apparent assurance exposure'
               : 'Preliminary indication complete';
     const recommendedAction = buildPriorityActionText({
       recommendations: assessment?.recommendations || [],
@@ -434,7 +449,7 @@ export class PublicService {
 
     await this.audit.record({
       userId: systemUser.id,
-      action: 'PUBLIC_ASSESSMENT_COMPLETED',
+      action: 'PUBLIC_TRIAGE_COMPLETED',
       entityType: 'PublicLead',
       entityId: lead.id,
       metadata: {
@@ -460,10 +475,11 @@ export class PublicService {
       thankYouSent: true,
       crmLeadSynced: crmLeadSync.synced,
       crmLeadSyncReason: crmLeadSync.reason || null,
-      message: 'Thank you for finishing. Our experts will be in contact with you.',
+      message: 'Thank you for completing the Executive Governance Triage. Your preliminary indication is ready.',
       downloadUrl: reportAttachment?.url || null,
       fileName: reportAttachment?.attachmentFileName || null,
       reference: assessment?.reference || reportAttachment?.reference || lead.assessmentId,
+      proposalRequestUrl: this.proposalTokens.buildPublicUrl(updated.id),
       result: {
         assessmentId: lead.assessmentId,
         reference: assessment?.reference || lead.assessmentId,
@@ -491,6 +507,223 @@ export class PublicService {
         fileName: reportAttachment?.attachmentFileName || null,
         reportId: null,
       },
+    };
+  }
+
+  async requestDiagnostic(leadId: string) {
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
+    if (!lead || !lead.assessmentId) throw new NotFoundException('Triage submission not found.');
+    if (!lead.completedAt) {
+      throw new BadRequestException('Complete the Executive Governance Triage before requesting a diagnostic.');
+    }
+    if (lead.closedAt) throw new BadRequestException('This submission has been closed. Please contact Physical Risk directly.');
+
+    if (lead.diagnosticRequestedAt) {
+      return {
+        ok: true,
+        alreadyRequested: true,
+        leadId: lead.id,
+        requestedAt: lead.diagnosticRequestedAt,
+        message: 'Your Executive Advisory Diagnostic request has already been received.',
+      };
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.publicLead.update({
+      where: { id: lead.id },
+      data: {
+        status: lead.convertedAt ? 'CONVERTED' : 'DIAGNOSTIC_REQUESTED',
+        diagnosticRequestedAt: now,
+        lastProgressAt: now,
+      },
+    });
+
+    const systemUser = await this.getSystemUser();
+    await this.audit.record({
+      userId: systemUser.id,
+      action: 'PUBLIC_DIAGNOSTIC_REQUESTED',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: {
+        assessmentId: lead.assessmentId,
+        organisationName: lead.organisationName,
+        email: lead.email,
+      },
+    });
+
+    const notify = this.config.get<string>('LEAD_NOTIFY_EMAIL') || this.config.get<string>('SEED_ADMIN_EMAIL');
+    if (notify) {
+      await this.email.enqueue({
+        recipient: notify,
+        subject: `Executive Advisory Diagnostic requested: ${lead.organisationName}`,
+        template: 'triage_diagnostic_requested',
+        relatedType: 'PublicLead',
+        relatedId: lead.id,
+        organisationId: lead.organisationId || undefined,
+        payload: {
+          message: `${lead.firstName} ${lead.lastName} from ${lead.organisationName} requested the paid Executive Advisory Diagnostic.`,
+          firstName: lead.firstName,
+          lastName: lead.lastName,
+          organisationName: lead.organisationName,
+          email: lead.email,
+          phone: lead.phone || '',
+          assessmentId: lead.assessmentId,
+        },
+      }).catch(() => undefined);
+    }
+
+    try {
+      await this.crm.queueLeadSync(lead.id);
+    } catch {
+      // CRM downtime must never block a public buying-intent request.
+    }
+
+    return {
+      ok: true,
+      alreadyRequested: false,
+      leadId: updated.id,
+      requestedAt: updated.diagnosticRequestedAt,
+      message: 'Your Executive Advisory Diagnostic request has been received. A Physical Risk representative will follow up.',
+    };
+  }
+
+  async getProposalRequestPreview(token: string) {
+    const { leadId } = this.proposalTokens.verify(token);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
+    if (!lead || lead.closedAt) {
+      throw new BadRequestException('This proposal link is invalid or has expired.');
+    }
+    const already =
+      lead.proposalStatus !== ProposalStatus.NOT_REQUESTED && Boolean(lead.proposalRequestedAt);
+    return {
+      organisationName: lead.organisationName,
+      recommendedProduct: 'Executive Advisory Diagnostic',
+      alreadyRequested: already,
+      proposalReference: lead.proposalReference,
+      proposalStatus: lead.proposalStatus,
+      message: already
+        ? 'Your proposal request has already been received.'
+        : 'Based on your Executive Governance Triage, the recommended next step is an Executive Advisory Diagnostic.',
+    };
+  }
+
+  async requestProposal(token: string) {
+    const { leadId } = this.proposalTokens.verify(token);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
+    if (!lead || lead.closedAt) {
+      throw new BadRequestException('This proposal link is invalid or has expired.');
+    }
+    if (!lead.completedAt) {
+      throw new BadRequestException(
+        'Complete the Executive Governance Triage before requesting a proposal.',
+      );
+    }
+
+    if (lead.proposalStatus !== ProposalStatus.NOT_REQUESTED && lead.proposalRequestedAt) {
+      return {
+        ok: true,
+        alreadyRequested: true,
+        proposalReference: lead.proposalReference,
+        proposalStatus: lead.proposalStatus,
+        requestedAt: lead.proposalRequestedAt,
+        message: 'Your proposal request has already been received.',
+      };
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const proposalReference = lead.proposalReference || (await generateProposalReference(tx));
+      return tx.publicLead.update({
+        where: { id: lead.id },
+        data: {
+          proposalStatus: ProposalStatus.REQUESTED,
+          proposalRequestedAt: now,
+          proposalReference,
+          lastProgressAt: now,
+        },
+      });
+    });
+
+    const systemUser = await this.getSystemUser();
+    await this.audit.record({
+      userId: systemUser.id,
+      action: 'PROPOSAL_REQUESTED',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: {
+        proposalReference: updated.proposalReference,
+        previousStatus: lead.proposalStatus,
+        newStatus: ProposalStatus.REQUESTED,
+        organisationName: lead.organisationName,
+      },
+    });
+
+    const adminUrlBase = (
+      this.config.get<string>('PUBLIC_URL') ||
+      this.config.get<string>('WEB_URL') ||
+      this.config.get<string>('MOSS_WEB_URL') ||
+      ''
+    ).replace(/\/$/, '');
+    const adminLink = adminUrlBase ? `${adminUrlBase}/triage/${lead.id}` : null;
+    const notify =
+      this.config.get<string>('LEAD_NOTIFY_EMAIL') || this.config.get<string>('SEED_ADMIN_EMAIL');
+    if (notify) {
+      await this.email
+        .enqueue({
+          recipient: notify,
+          subject: `Proposal Requested — ${lead.organisationName}`,
+          template: 'triage_proposal_requested',
+          relatedType: 'PublicLead',
+          relatedId: lead.id,
+          organisationId: lead.organisationId || undefined,
+          payload: {
+            organisationName: lead.organisationName,
+            firstName: lead.firstName,
+            lastName: lead.lastName,
+            email: lead.email,
+            phone: lead.phone || '',
+            industry: lead.industry || '',
+            completedAt: lead.completedAt?.toISOString() || '',
+            proposalReference: updated.proposalReference,
+            recommendedProduct: 'Executive Advisory Diagnostic',
+            requestedAt: now.toISOString(),
+            adminLink,
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    await this.email
+      .enqueue({
+        recipient: lead.email,
+        subject: 'Executive Advisory Proposal Request Received',
+        template: 'triage_proposal_acknowledgement',
+        relatedType: 'PublicLead',
+        relatedId: lead.id,
+        organisationId: lead.organisationId || undefined,
+        payload: {
+          firstName: lead.firstName,
+          organisationName: lead.organisationName,
+          proposalReference: updated.proposalReference,
+          recommendedProduct: 'Executive Advisory Diagnostic',
+        },
+      })
+      .catch(() => undefined);
+
+    try {
+      await this.crm.queueLeadSync(lead.id);
+    } catch {
+      // CRM downtime must never lose the commercial request.
+    }
+
+    return {
+      ok: true,
+      alreadyRequested: false,
+      proposalReference: updated.proposalReference,
+      proposalStatus: updated.proposalStatus,
+      requestedAt: updated.proposalRequestedAt,
+      message:
+        'The Physical Risk advisory team has received your request and will contact you regarding the Executive Advisory Diagnostic.',
     };
   }
 
@@ -581,8 +814,8 @@ export class PublicService {
     try {
       await this.email.enqueue({
         recipient: lead.email,
-        subject: 'Thank you for completing the Cost Leakage Questionnaire',
-        template: 'submission_confirmation',
+        subject: 'Your Executive Governance Triage indication',
+        template: 'triage_submission_confirmation',
         relatedType: 'AssessmentSession',
         relatedId: lead.assessmentId || undefined,
         payload: {
@@ -599,8 +832,8 @@ export class PublicService {
       if (notify) {
         await this.email.enqueue({
           recipient: notify,
-          subject: `New Cost Leakage assessment submitted: ${lead.organisationName}`,
-          template: 'internal_submission',
+          subject: `New Executive Governance Triage completed: ${lead.organisationName}`,
+          template: 'triage_internal_submission',
           relatedType: 'AssessmentSession',
           relatedId: lead.assessmentId || undefined,
           payload: {

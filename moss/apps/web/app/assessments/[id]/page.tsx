@@ -14,6 +14,7 @@ import { AuthGate } from '../../../components/AuthGate';
 import { IndustryWithOtherField } from '../../../components/IndustryWithOtherField';
 import { MoneyRangeSelector } from '../../../components/MoneyRangeSelector';
 import { PercentRangeSelector } from '../../../components/PercentRangeSelector';
+import { ZarCurrencyInput } from '../../../components/ZarCurrencyInput';
 import { Shell } from '../../../components/Shell';
 import { MetricCard, StatusBadge } from '../../../components/Ui';
 import { ApiError, apiFetch, money, pct } from '../../../lib/api';
@@ -428,11 +429,14 @@ export default function AssessmentDetailPage() {
                         value={stored}
                         onChange={(next: MoneyRangeValue) => void saveInput(def, next)}
                       />
+                    ) : def.code === 'C5' && def.valueType === 'CURRENCY' ? (
+                      <ZarCurrencyInput value={stored} id={def.id} step={100000} onCommit={(next) => void saveInput(def, next)} />
                     ) : (
                       <input
                         key={`${def.id}-${stored === undefined ? 'empty' : 'set'}`}
                         type={def.valueType === 'TEXT' ? 'text' : 'number'}
                         step="1"
+                        min={def.valueType === 'NUMBER' || def.valueType === 'CURRENCY' ? 0 : undefined}
                         defaultValue={stored === undefined ? '' : (stored ?? '')}
                         onBlur={(e) => saveInput(def, e.target.value)}
                         id={def.id}
@@ -628,19 +632,19 @@ export default function AssessmentDetailPage() {
                   <div>
                     <p className="eyebrow">Evaluation outcome</p>
                     <h2>{snapshot.riskBand}</h2>
-                    <p className="muted">SCLI risk {Number(snapshot.overallRiskScore).toFixed(1)}/100 · Maturity {Number(snapshot.maturityScore).toFixed(1)}/100</p>
+                    <p className="muted">Exposure score {Number(snapshot.overallRiskScore).toFixed(1)}/100 · higher scores indicate greater exposure</p>
                   </div>
                   <div className="results-hero-leak">
-                    <span>Likely leakage</span>
+                    <span>Modelled leakage estimate</span>
                     <strong>{money(leakage.likelyLeakageValue)}</strong>
-                    <small>{pct(leakage.likelyLeakageRate)} of annual security spend</small>
+                    <small>{pct(leakage.likelyLeakageRate)} of annual security spend · evidence validation required</small>
                   </div>
                 </section>
                 <div className="grid metrics">
-                  <MetricCard label="SCLI risk score" value={`${Number(snapshot.overallRiskScore).toFixed(1)}/100`} detail={snapshot.riskBand} />
-                  <MetricCard label="Maturity view" value={`${Number(snapshot.maturityScore).toFixed(1)}/100`} detail="100 minus risk" />
-                  <MetricCard label="Likely leakage" value={money(leakage.likelyLeakageValue)} detail={pct(leakage.likelyLeakageRate)} />
-                  <MetricCard label="Recoverable range" value={`${money(leakage.recoverableLow)} – ${money(leakage.recoverableHigh)}`} detail={`Opportunity ${Number(snapshot.opportunityScore).toFixed(1)}/100`} />
+                  <MetricCard label="Exposure score" value={`${Number(snapshot.overallRiskScore).toFixed(1)}/100`} detail={snapshot.riskBand} />
+                  <MetricCard label="Evidence confidence" value={`${Number(snapshot.evidenceConfidence ?? 0).toFixed(1)}/100`} detail="Confidence in supporting evidence" />
+                  <MetricCard label="Modelled leakage" value={money(leakage.likelyLeakageValue)} detail={pct(leakage.likelyLeakageRate)} />
+                  <MetricCard label="Modelled recoverable range" value={`${money(leakage.recoverableLow)} – ${money(leakage.recoverableHigh)}`} detail={`Opportunity ${Number(snapshot.opportunityScore).toFixed(1)}/100`} />
                 </div>
                 <div className="grid two-col">
                   <section className="card">
@@ -652,7 +656,7 @@ export default function AssessmentDetailPage() {
                         <strong>{Number(c.score).toFixed(1)}</strong>
                       </div>
                     ))}
-                    <h3 className="section-title">Leakage range</h3>
+                    <h3 className="section-title">Modelled leakage range — validate against evidence</h3>
                     <div className="three-col grid">
                       <div className="risk-box"><span className="muted small">Minimum</span><strong style={{ display: 'block', fontSize: 20 }}>{money(leakage.minimumLeakageValue)}</strong><span>{pct(leakage.minimumLeakageRate)}</span></div>
                       <div className="risk-box"><span className="muted small">Likely</span><strong style={{ display: 'block', fontSize: 20 }}>{money(leakage.likelyLeakageValue)}</strong><span>{pct(leakage.likelyLeakageRate)}</span></div>

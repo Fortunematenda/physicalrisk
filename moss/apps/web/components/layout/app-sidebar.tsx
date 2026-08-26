@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Building2,
   Calculator,
@@ -18,6 +18,7 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -34,22 +35,27 @@ import {
   getStoredUser,
   getUserDisplayName,
   resolveMvpNavRole,
-  roleDisplayLabel,
   type StoredUser,
 } from '@/lib/auth-user';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import {
+  applyNavHash,
   filterNavSections,
   isNavItemActive,
   NAV_SECTIONS,
   sectionHasActiveItem,
+  splitNavHref,
   type NavSectionConfig,
 } from '@/lib/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export const NAV_ICON_MAP: Record<string, LucideIcon> = {
+  'triage-submissions': ClipboardList,
+  'advisory-engagements': ShieldCheck,
+  'advisory-reports': FileText,
+  'advisory-new': ClipboardList,
   'scl-dashboard': LayoutDashboard,
   'scl-assessments': ClipboardList,
   'scl-review-queue': ListChecks,
@@ -77,6 +83,7 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
   methodology: SlidersHorizontal,
   assumptions: Calculator,
   emails: Mail,
+  users: Users,
   espocrm: Cable,
   'audit-logs': ScrollText,
   settings: Settings,
@@ -191,8 +198,30 @@ type SidebarNavListProps = {
   className?: string;
 };
 
-/** Cost Leakage, MOSS, and SOMOD are mutually exclusive accordion product groups. */
-const PRODUCT_SECTION_IDS = new Set(['scl', 'moss', 'somod']);
+/** Product section accent colours in the sidebar. */
+const SECTION_ACCENTS: Record<string, string> = {
+  triage: 'border-l-[#d30f2f]',
+  advisory: 'border-l-[#b45309]',
+  scl: 'border-l-[#2563eb]',
+  moss: 'border-l-[#059669]',
+  somod: 'border-l-[#7c3aed]',
+};
+
+function isAccordionSection(section: NavSectionConfig): boolean {
+  return Boolean(section.collapsible && section.label);
+}
+
+function useLocationHash(): string {
+  const pathname = usePathname() || '';
+  const [hash, setHash] = useState('');
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash || '');
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, [pathname]);
+  return hash;
+}
 
 export function SidebarNavList({
   collapsed = false,
@@ -200,141 +229,163 @@ export function SidebarNavList({
   className,
 }: SidebarNavListProps) {
   const pathname = usePathname() || '';
+  const hash = useLocationHash();
+  const searchParams = useSearchParams();
+  const search = searchParams?.toString() ? `?${searchParams.toString()}` : '';
   const sections = useFilteredNavSections();
   const badges = useNavBadges();
   const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const activeProductId =
-      sections.find(
-        (section) =>
-          PRODUCT_SECTION_IDS.has(section.id) && sectionHasActiveItem(pathname, section),
-      )?.id ?? null;
-
-    if (!activeProductId) return;
+    const activeSection = sections.find(
+      (section) => isAccordionSection(section) && sectionHasActiveItem(pathname, section, hash, search),
+    );
+    if (!activeSection) return;
 
     setManualOpen((prev) => {
       const next = { ...prev };
       let changed = false;
-      for (const id of PRODUCT_SECTION_IDS) {
-        const shouldOpen = id === activeProductId;
-        if (next[id] !== shouldOpen) {
-          next[id] = shouldOpen;
+      for (const section of sections) {
+        if (!isAccordionSection(section)) continue;
+        const shouldOpen = section.id === activeSection.id;
+        if (next[section.id] !== shouldOpen) {
+          next[section.id] = shouldOpen;
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [pathname, sections]);
+  }, [pathname, hash, search, sections]);
 
   function isSectionOpen(section: NavSectionConfig): boolean {
     if (!section.collapsible || collapsed) return true;
     if (manualOpen[section.id] !== undefined) return manualOpen[section.id];
-    // Default: only the product that matches the current route is expanded.
-    return sectionHasActiveItem(pathname, section);
+    return sectionHasActiveItem(pathname, section, hash, search);
   }
 
   function toggleSection(section: NavSectionConfig) {
     const willOpen = !isSectionOpen(section);
     setManualOpen((prev) => {
-      const next = { ...prev, [section.id]: willOpen };
-      // Opening one product group closes the others.
-      if (willOpen && PRODUCT_SECTION_IDS.has(section.id)) {
-        for (const id of PRODUCT_SECTION_IDS) {
-          if (id !== section.id) next[id] = false;
+      const next = { ...prev };
+      if (willOpen && isAccordionSection(section)) {
+        for (const other of sections) {
+          if (isAccordionSection(other) && other.id !== section.id) {
+            next[other.id] = false;
+          }
         }
       }
+      next[section.id] = willOpen;
       return next;
     });
   }
 
   return (
     <TooltipProvider delayDuration={0}>
-      <nav className={cn('flex-1 overflow-y-auto', className)} aria-label="Portal sections">
+      <nav className={cn('relative z-10 flex-1 overflow-y-auto', className)} aria-label="Portal sections">
         {sections.map((section) => {
           const open = isSectionOpen(section);
-          const isProduct = PRODUCT_SECTION_IDS.has(section.id);
+          const isProductCard = Boolean(section.collapsible && section.label);
+
           return (
-          <div
-            key={section.id}
-            className={cn(
-              'mb-3',
-              isProduct && 'rounded-lg border border-white/10 bg-white/[0.02] p-2',
-            )}
-          >
-            {!collapsed && section.collapsible ? (
-              <button
-                type="button"
-                className={cn(
-                  'mb-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[12px] font-bold tracking-wide text-white transition-colors hover:bg-white/10',
-                  open && 'bg-white/5',
-                )}
-                aria-expanded={open}
-                onClick={() => toggleSection(section)}
-              >
-                <span className="min-w-0 flex-1 truncate uppercase tracking-[0.1em]">
-                  {section.label}
-                </span>
-                <ChevronDown
+            <div
+              key={section.id}
+              className={cn(
+                'mb-2',
+                isProductCard &&
+                  cn(
+                    'rounded-lg border border-white/10 bg-white/[0.03]',
+                    'border-l-[3px]',
+                    SECTION_ACCENTS[section.id] ?? 'border-l-white/20',
+                  ),
+              )}
+            >
+              {!collapsed && section.collapsible ? (
+                <button
+                  type="button"
                   className={cn(
-                    'size-4 shrink-0 text-white/70 transition-transform duration-200',
-                    open ? 'rotate-0' : '-rotate-90',
+                    'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.06]',
+                    open && 'bg-white/[0.04]',
                   )}
-                  aria-hidden="true"
-                />
-              </button>
-            ) : (
-              !collapsed && !!section.label && (
-                <p className="mb-2 px-3 text-[11px] font-semibold tracking-wider text-white/40">
-                  {section.label}
-                </p>
-              )
-            )}
-            {open && (
-            <ul className="space-y-0.5">
-              {section.items.map((item) => {
-                const active = isNavItemActive(pathname, item.href);
-                const Icon = NAV_ICON_MAP[item.id] ?? LayoutDashboard;
-                const link = (
-                  <Link
-                    href={item.href}
-                    scroll={false}
-                    aria-current={active ? 'page' : undefined}
-                    onClick={onNavigate}
+                  aria-expanded={open}
+                  onClick={() => toggleSection(section)}
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">
+                    {section.label}
+                  </span>
+                  <ChevronDown
                     className={cn(
-                      'group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                      active
-                        ? 'bg-[#d30f2f] text-white'
-                        : 'text-white/70 hover:bg-white/5 hover:text-white',
-                      collapsed && 'justify-center px-2',
+                      'size-4 shrink-0 text-white/50 transition-transform duration-200',
+                      open ? 'rotate-0' : '-rotate-90',
                     )}
-                  >
-                    <Icon className="size-4 shrink-0" aria-hidden="true" />
-                    {!collapsed && (
-                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    )}
-                    {!collapsed && renderNavBadge(item.id, badges)}
-                  </Link>
-                );
+                    aria-hidden="true"
+                  />
+                </button>
+              ) : (
+                !collapsed &&
+                !!section.label && (
+                  <p className="mb-1 px-2.5 py-1 text-[12px] font-semibold text-white/70">{section.label}</p>
+                )
+              )}
 
-                if (collapsed) {
-                  return (
-                    <li key={item.id}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>{link}</TooltipTrigger>
-                        <TooltipContent side="right" className="bg-[#111318] text-white">
-                          {section.label ? `${section.label}: ${item.label}` : item.label}
-                        </TooltipContent>
-                      </Tooltip>
-                    </li>
-                  );
-                }
+              {open && (
+                <ul className={cn('space-y-0.5', isProductCard && 'px-1.5 pb-1.5')}>
+                  {section.items.map((item) => {
+                    const active = isNavItemActive(pathname, item.href, hash, search);
+                    const Icon = NAV_ICON_MAP[item.id] ?? LayoutDashboard;
+                    const { path: itemPath, hashId } = splitNavHref(item.href);
+                    const link = (
+                      <Link
+                        href={item.href}
+                        scroll={false}
+                        aria-current={active ? 'page' : undefined}
+                        onClick={(event) => {
+                          onNavigate?.();
+                          if (hashId) {
+                            if (pathname === itemPath) {
+                              event.preventDefault();
+                              applyNavHash(item.href);
+                            }
+                            return;
+                          }
+                          if (pathname === itemPath && window.location.hash) {
+                            event.preventDefault();
+                            window.history.pushState(null, '', itemPath);
+                            window.dispatchEvent(new HashChangeEvent('hashchange'));
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }
+                        }}
+                        className={cn(
+                          'relative z-10 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
+                          active
+                            ? 'bg-[#d30f2f] text-white'
+                            : 'text-white/75 hover:bg-white/[0.08] hover:text-white',
+                          collapsed && 'justify-center px-2',
+                        )}
+                      >
+                        <Icon className="size-4 shrink-0" aria-hidden="true" />
+                        {!collapsed && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+                        {!collapsed && renderNavBadge(item.id, badges)}
+                      </Link>
+                    );
 
-                return <li key={item.id}>{link}</li>;
-              })}
-            </ul>
-            )}
-          </div>
+                    if (collapsed) {
+                      return (
+                        <li key={item.id}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>{link}</TooltipTrigger>
+                            <TooltipContent side="right" className="border-white/10 bg-[#111318] text-white">
+                              {section.label ? `${section.label}: ${item.label}` : item.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        </li>
+                      );
+                    }
+
+                    return <li key={item.id}>{link}</li>;
+                  })}
+                </ul>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -349,10 +400,7 @@ type SidebarBrandProps = {
 export function SidebarBrand({ collapsed = false }: SidebarBrandProps) {
   return (
     <div
-      className={cn(
-        'flex min-w-0 flex-col items-start',
-        collapsed && 'items-center',
-      )}
+      className={cn('flex min-w-0 flex-col items-start', collapsed && 'items-center')}
       title="Physical Risk"
     >
       <img
@@ -372,7 +420,6 @@ type SidebarUserFooterProps = {
 export function SidebarUserFooter({ collapsed = false, onLogout }: SidebarUserFooterProps) {
   const user = useSidebarUser();
   const displayName = user ? getUserDisplayName(user) : 'Signed in user';
-  const roleLabel = user ? roleDisplayLabel(user.role) : 'User';
 
   const logoutButton = (
     <Button
@@ -402,7 +449,6 @@ export function SidebarUserFooter({ collapsed = false, onLogout }: SidebarUserFo
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-white">{displayName}</p>
-              <p className="truncate text-xs text-white/50">{roleLabel}</p>
             </div>
           </div>
         )}
@@ -439,8 +485,8 @@ export function AppSidebar({
   return (
     <aside
       className={cn(
-        'sticky top-0 hidden h-screen shrink-0 flex-col bg-[#111318] text-white md:flex',
-        collapsed ? 'w-[72px]' : 'w-[248px]',
+        'sticky top-0 hidden h-screen shrink-0 flex-col border-r border-white/[0.06] bg-[#0f1117] text-white md:flex',
+        collapsed ? 'w-[72px]' : 'w-[260px]',
         className,
       )}
       aria-label="Main navigation"
