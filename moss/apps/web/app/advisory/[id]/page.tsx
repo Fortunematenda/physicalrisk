@@ -18,6 +18,7 @@ import {
   Loader2,
   Menu,
   Save,
+  UserRound,
 } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { useConfirm } from '@/components/confirm-dialog';
@@ -26,6 +27,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -82,10 +90,12 @@ type ConfirmedRoute = {
 
 type ModuleStatus = 'not_started' | 'in_progress' | 'needs_attention' | 'complete';
 
-const REQUIRED_FIELDS = [
-  { key: 'finding' as const, label: 'Finding' },
-  { key: 'businessConsequence' as const, label: 'Business consequence' },
-  { key: 'requiredDecision' as const, label: 'Required executive decision' },
+type RequiredFieldKey = 'finding' | 'businessConsequence' | 'requiredDecision';
+
+const REQUIRED_FIELDS: Array<{ key: RequiredFieldKey; label: string }> = [
+  { key: 'finding', label: 'Finding' },
+  { key: 'businessConsequence', label: 'Business consequence' },
+  { key: 'requiredDecision', label: 'Required executive decision' },
 ];
 
 function isModuleComplete(m: ModuleReview) {
@@ -110,13 +120,23 @@ function moduleHasAnyContent(m: ModuleReview) {
 }
 
 function missingRequiredFields(m: ModuleReview) {
-  return REQUIRED_FIELDS.filter((f) => !String(m[f.key] || '').trim()).map((f) => f.label);
+  return REQUIRED_FIELDS.filter((f) => !String(m[f.key] || '').trim());
 }
 
-function getModuleStatus(m: ModuleReview): ModuleStatus {
+/**
+ * Display status only — does not change save/complete rules.
+ * Untouched modules stay Not started until validation is requested.
+ * Partial work is In progress; after Save & next / Review / Complete
+ * attempts, incomplete modules become Needs attention.
+ */
+function getModuleStatus(
+  m: ModuleReview,
+  opts?: { forceAttention?: boolean; reviewAttempted?: boolean },
+): ModuleStatus {
   if (isModuleComplete(m)) return 'complete';
-  if (moduleHasAnyContent(m)) return 'needs_attention';
-  return 'not_started';
+  if (opts?.forceAttention || opts?.reviewAttempted) return 'needs_attention';
+  if (!moduleHasAnyContent(m)) return 'not_started';
+  return 'in_progress';
 }
 
 function emptyRoute(): ConfirmedRoute {
@@ -162,15 +182,25 @@ function statusBadgeProps(status: ModuleStatus): {
 }
 
 function StatusIcon({ status }: { status: ModuleStatus }) {
-  if (status === 'complete') return <CheckCircle2 className="size-4 shrink-0 text-moss-success" aria-hidden="true" />;
-  if (status === 'needs_attention') return <AlertCircle className="size-4 shrink-0 text-amber-600" aria-hidden="true" />;
-  if (status === 'in_progress') return <Loader2 className="size-4 shrink-0 text-moss-info" aria-hidden="true" />;
+  if (status === 'complete') {
+    return <CheckCircle2 className="size-4 shrink-0 text-moss-success" aria-hidden="true" />;
+  }
+  if (status === 'needs_attention') {
+    return <AlertCircle className="size-4 shrink-0 text-amber-600" aria-hidden="true" />;
+  }
+  if (status === 'in_progress') {
+    return <Circle className="size-4 shrink-0 fill-moss-info/30 text-moss-info" aria-hidden="true" />;
+  }
   return <Circle className="size-4 shrink-0 text-slate-400" aria-hidden="true" />;
 }
 
 function fmtTime(d: Date | null) {
   if (!d) return null;
   return d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fieldDomId(moduleCode: string, key: string) {
+  return `mod-${moduleCode}-${key}`;
 }
 
 export default function AdvisoryDetail() {
@@ -190,6 +220,14 @@ export default function AdvisoryDetail() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState('');
   const [navOpen, setNavOpen] = useState(false);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  /** Modules that failed validation after Save & next / explicit check. */
+  const [attentionCodes, setAttentionCodes] = useState<Set<string>>(() => new Set());
+  /** After Review / Complete attempt — show needs-attention for incomplete modules. */
+  const [reviewAttempted, setReviewAttempted] = useState(false);
+  /** Touched fields: `${moduleCode}:${fieldKey}` */
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
   const dirtyRef = useRef(false);
   const modulesRef = useRef(modules);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -255,9 +293,48 @@ export default function AdvisoryDetail() {
 
   const completeCount = modules.filter((m) => isModuleComplete(m)).length;
   const progressPct = modules.length ? Math.round((completeCount / modules.length) * 100) : 0;
+  const anyStarted = modules.some((m) => moduleHasAnyContent(m) || isModuleComplete(m));
   const activeModule = modules.find((m) => m.moduleCode === activeCode) || modules[0] || null;
   const activeIndex = modules.findIndex((m) => m.moduleCode === (activeModule?.moduleCode || ''));
   const isLastModule = activeIndex >= 0 && activeIndex === modules.length - 1;
+
+  const attentionModules = useMemo(
+    () =>
+      modules.filter((m) => {
+        if (isModuleComplete(m)) return false;
+        if (missingRequiredFields(m).length === 0) return false;
+        return reviewAttempted || attentionCodes.has(m.moduleCode);
+      }),
+    [modules, reviewAttempted, attentionCodes],
+  );
+
+  const attentionFieldCount = useMemo(
+    () => attentionModules.reduce((n, m) => n + missingRequiredFields(m).length, 0),
+    [attentionModules],
+  );
+
+  function moduleStatusFor(m: ModuleReview): ModuleStatus {
+    return getModuleStatus(m, {
+      forceAttention: attentionCodes.has(m.moduleCode),
+      reviewAttempted,
+    });
+  }
+
+  function markFieldTouched(moduleCode: string, key: string) {
+    setTouchedFields((prev) => {
+      const next = new Set(prev);
+      next.add(`${moduleCode}:${key}`);
+      return next;
+    });
+  }
+
+  function shouldShowFieldError(moduleCode: string, key: RequiredFieldKey, value: string) {
+    if (value.trim()) return false;
+    if (touchedFields.has(`${moduleCode}:${key}`)) return true;
+    if (attentionCodes.has(moduleCode)) return true;
+    if (reviewAttempted) return true;
+    return false;
+  }
 
   function rebuildSuggestedRoutes(nextModules: ModuleReview[] = modules) {
     const byProduct = new Map<string, ConfirmedRoute & { maxExposure: number }>();
@@ -347,32 +424,29 @@ export default function AdvisoryDetail() {
       dirtyRef.current = false;
       setLastSavedAt(new Date());
       setSaveError('');
+      if (isModuleComplete(m)) {
+        setAttentionCodes((prev) => {
+          if (!prev.has(moduleCode)) return prev;
+          const next = new Set(prev);
+          next.delete(moduleCode);
+          return next;
+        });
+      }
     } catch (e: any) {
       const message = e.message || 'Unable to save module.';
       setSaveError(message);
-      if (!opts?.quiet) {
-        toast({
-          id: 'save-error',
-          variant: 'error',
-          title: "Couldn't save changes",
-          description: 'Your latest changes have not been saved.',
-          action: {
-            label: 'Retry',
-            onClick: () => void saveModule(moduleCode),
-          },
-        });
-      } else {
-        toast({
-          id: 'save-error',
-          variant: 'error',
-          title: "Couldn't save changes",
-          description: 'Autosave failed. Your latest changes have not been saved.',
-          action: {
-            label: 'Retry',
-            onClick: () => void saveModule(moduleCode),
-          },
-        });
-      }
+      toast({
+        id: 'save-error',
+        variant: 'error',
+        title: 'Save failed',
+        description: opts?.quiet
+          ? 'Autosave failed. Your latest changes have not been saved.'
+          : 'Your latest changes have not been saved.',
+        action: {
+          label: 'Retry',
+          onClick: () => void saveModule(moduleCode),
+        },
+      });
       throw e;
     } finally {
       setSavingModule(false);
@@ -386,8 +460,8 @@ export default function AdvisoryDetail() {
       toast({
         id: 'save-success',
         variant: 'success',
-        title: 'Assessment saved',
-        description: 'All changes are up to date.',
+        title: 'Module saved',
+        description: 'Your changes are up to date.',
       });
       await load();
     } catch {
@@ -395,18 +469,52 @@ export default function AdvisoryDetail() {
     }
   }
 
+  function markModulesAttention(codes: string[]) {
+    setAttentionCodes((prev) => {
+      const next = new Set(prev);
+      for (const code of codes) next.add(code);
+      return next;
+    });
+    setTouchedFields((prev) => {
+      const next = new Set(prev);
+      for (const code of codes) {
+        for (const f of REQUIRED_FIELDS) next.add(`${code}:${f.key}`);
+      }
+      return next;
+    });
+  }
+
+  function markModuleAttention(moduleCode: string) {
+    markModulesAttention([moduleCode]);
+  }
+
   async function saveAndNext() {
     if (!activeModule) return;
+    const gaps = missingRequiredFields(activeModule);
+    if (gaps.length) {
+      markModuleAttention(activeModule.moduleCode);
+      toast({
+        id: 'module-validation',
+        variant: 'warning',
+        title: 'Needs attention',
+        description: `${gaps.length} required field${gaps.length === 1 ? '' : 's'} still need information.`,
+      });
+      const first = gaps[0];
+      requestAnimationFrame(() => {
+        document.getElementById(fieldDomId(activeModule.moduleCode, first.key))?.focus();
+      });
+      return;
+    }
     try {
       await persistSingleModule(activeModule.moduleCode);
       const next = modules[activeIndex + 1];
       toast({
         id: 'save-success',
         variant: 'success',
-        title: 'Assessment saved',
+        title: 'Module saved',
         description: next
           ? `${activeModule.moduleName} saved. Moved to ${next.moduleName}.`
-          : 'All changes are up to date.',
+          : 'Your changes are up to date.',
       });
       if (next) setActiveCode(next.moduleCode);
       await load();
@@ -428,7 +536,7 @@ export default function AdvisoryDetail() {
         id: 'save-success',
         variant: 'success',
         title: 'Assessment saved',
-        description: 'All changes are up to date.',
+        description: 'Your changes are up to date.',
       });
       await load();
     } catch (e: any) {
@@ -436,7 +544,7 @@ export default function AdvisoryDetail() {
       toast({
         id: 'save-error',
         variant: 'error',
-        title: "Couldn't save changes",
+        title: 'Save failed',
         description: 'Your latest changes have not been saved.',
         action: {
           label: 'Retry',
@@ -465,6 +573,21 @@ export default function AdvisoryDetail() {
     setNavOpen(false);
   }
 
+  async function focusIssue(moduleCode: string, fieldKey?: RequiredFieldKey) {
+    setIssuesOpen(false);
+    setNavOpen(false);
+    await selectModule(moduleCode);
+    requestAnimationFrame(() => {
+      if (fieldKey) {
+        document.getElementById(fieldDomId(moduleCode, fieldKey))?.focus();
+        document.getElementById(fieldDomId(moduleCode, fieldKey))?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }
+    });
+  }
+
   async function assign(userId: string) {
     if (!userId) return;
     setError('');
@@ -481,6 +604,7 @@ export default function AdvisoryDetail() {
         title: 'Consultant updated',
         description: `${name} is now the primary analyst.`,
       });
+      setAssignOpen(false);
       await load();
     } catch (e: any) {
       toast({
@@ -502,6 +626,8 @@ export default function AdvisoryDetail() {
       await persistModules(modulesRef.current);
       const stillMissing = incompleteModules(modulesRef.current);
       if (stillMissing.length) {
+        setReviewAttempted(true);
+        markModulesAttention(stillMissing.map((m) => m.moduleCode));
         throw new Error(
           `Complete finding, business consequence and required decision for all modules. Missing: ${stillMissing
             .map((m) => m.moduleName)
@@ -548,6 +674,19 @@ export default function AdvisoryDetail() {
       router.push(`/advisory/${id}/outcome`);
       return;
     }
+    const stillMissing = incompleteModules(modulesRef.current);
+    if (stillMissing.length) {
+      setReviewAttempted(true);
+      markModulesAttention(stillMissing.map((m) => m.moduleCode));
+      setIssuesOpen(true);
+      toast({
+        id: 'review-validation',
+        variant: 'warning',
+        title: `${stillMissing.length} module${stillMissing.length === 1 ? '' : 's'} need attention`,
+        description: 'Resolve required fields before completing the assessment.',
+      });
+      return;
+    }
     const ok = await confirm({
       title: 'Complete this assessment?',
       description:
@@ -568,6 +707,8 @@ export default function AdvisoryDetail() {
         await persistModules(modulesRef.current);
         const stillMissing = incompleteModules(modulesRef.current);
         if (stillMissing.length) {
+          setReviewAttempted(true);
+          markModulesAttention(stillMissing.map((m) => m.moduleCode));
           throw new Error(
             `Complete finding, business consequence and required decision for all product modules before generating the report. Missing: ${stillMissing
               .map((m) => m.moduleName)
@@ -595,6 +736,12 @@ export default function AdvisoryDetail() {
   }
 
   function scrollToCompletion() {
+    setReviewAttempted(true);
+    if (missing.length) {
+      markModulesAttention(missing.map((m) => m.moduleCode));
+      setIssuesOpen(true);
+      return;
+    }
     completionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -619,42 +766,48 @@ export default function AdvisoryDetail() {
   }
 
   const productTitle = x.productLabel || PRODUCT_LABELS[x.productCode] || x.title;
-  const activeStatus = activeModule ? getModuleStatus(activeModule) : 'not_started';
+  const activeStatus = activeModule ? moduleStatusFor(activeModule) : 'not_started';
+  const activeBadge = statusBadgeProps(activeStatus);
   const exposureLabel = exposureBandLabel(activeModule?.exposureRating);
   const exposureValue =
     activeModule?.exposureRating != null && Number.isFinite(Number(activeModule.exposureRating))
       ? Number(activeModule.exposureRating)
       : null;
+  const primaryName = primary
+    ? [primary.user?.firstName, primary.user?.lastName].filter(Boolean).join(' ').trim() ||
+      primary.user?.email ||
+      'Assigned'
+    : null;
 
   const moduleNav = (
     <nav className="space-y-1" aria-label="Assessment modules">
-      <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <p className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
         Assessment modules
       </p>
       {modules.map((m) => {
-        const status = getModuleStatus(m);
+        const status = moduleStatusFor(m);
         const badge = statusBadgeProps(status);
         const selected = m.moduleCode === activeModule?.moduleCode;
-        const missingLabels = missingRequiredFields(m);
+        const missingCount = missingRequiredFields(m).length;
         return (
           <button
             key={m.moduleCode}
             type="button"
             onClick={() => void selectModule(m.moduleCode)}
             className={cn(
-              'flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors',
+              'flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors',
               selected
-                ? 'border-moss-info/40 bg-moss-info/[0.08] text-slate-900 shadow-sm'
+                ? 'border-moss-info/35 bg-moss-info/[0.07] text-slate-900 shadow-sm ring-1 ring-inset ring-moss-info/20'
                 : 'border-transparent text-slate-700 hover:bg-slate-50',
             )}
             aria-current={selected ? 'page' : undefined}
           >
             <StatusIcon status={status} />
             <span className="min-w-0 flex-1">
-              <span className="block font-medium leading-snug">{m.moduleName}</span>
+              <span className="block font-medium leading-snug text-slate-900">{m.moduleName}</span>
               <span
                 className={cn(
-                  'mt-0.5 block text-xs',
+                  'mt-0.5 block text-xs leading-snug',
                   status === 'complete' && 'text-moss-success',
                   status === 'needs_attention' && 'text-amber-700',
                   status === 'not_started' && 'text-slate-500',
@@ -662,17 +815,14 @@ export default function AdvisoryDetail() {
                 )}
               >
                 {badge.label}
-                {status === 'needs_attention' && missingLabels.length
-                  ? ` · ${missingLabels[0]}${missingLabels.length > 1 ? '…' : ''}`
+                {status === 'needs_attention' && missingCount
+                  ? ` · ${missingCount} required field${missingCount === 1 ? '' : 's'}`
                   : ''}
               </span>
             </span>
           </button>
         );
       })}
-      <p className="px-2 pt-3 text-xs font-medium text-slate-500">
-        {completeCount} of {modules.length} modules complete
-      </p>
     </nav>
   );
 
@@ -680,46 +830,72 @@ export default function AdvisoryDetail() {
     <AuthGate>
       <Shell title={productTitle} hideSearch>
         <div className="advisory-workspace pb-4">
-          {/* Sticky assessment header */}
+          {/* Workspace identity — product name lives in Shell; avoid repeating at the same size */}
           <div className="sticky top-0 z-30 -mx-1 mb-4 border-b border-slate-200 bg-white/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/90">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {x.reference}
-                </div>
-                <h1 className="mt-1 max-w-3xl text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
-                  {productTitle}
-                </h1>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                  <span>{x.organisation?.name || 'Organisation'}</span>
-                  <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
-                    {humanizeStatus(x.status)}
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="m-0 text-base font-semibold text-slate-900 sm:text-lg">
+                  <span className="font-semibold tracking-tight">{x.reference}</span>
+                  <span className="mx-2 text-slate-300" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="font-medium text-slate-700">{x.organisation?.name || 'Organisation'}</span>
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="info" className="shrink-0 whitespace-nowrap">
+                    {humanizeStatus(x.status) === 'Draft' || progressPct < 100
+                      ? 'In progress'
+                      : humanizeStatus(x.status)}
                   </Badge>
-                  <Badge
-                    variant={progressPct === 100 ? 'success' : 'info'}
-                    className="shrink-0 gap-1 whitespace-nowrap"
-                  >
-                    {progressPct === 100 ? (
-                      <CheckCircle2 className="size-3.5" aria-hidden="true" />
-                    ) : null}
-                    {progressPct}% complete
-                  </Badge>
+                  <span className="text-sm text-slate-600">
+                    {completeCount} of {modules.length} complete
+                  </span>
                 </div>
               </div>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[220px] space-y-1.5">
-                  <Label className="text-xs text-slate-500">Primary consultant / analyst</Label>
-                  <FilterSelect
-                    value={primary?.userId || ''}
-                    onChange={(next) => void assign(next)}
-                    disabled={locked}
-                    placeholder="Unassigned — select consultant"
-                    triggerClassName="h-10 min-w-[220px] shrink-0"
-                    options={analysts.map((a) => ({
-                      value: a.id,
-                      label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
-                    }))}
-                  />
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-[200px] rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Primary consultant
+                  </p>
+                  {primaryName ? (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="m-0 truncate text-sm font-medium text-slate-900">{primaryName}</p>
+                        <p className="m-0 text-xs text-slate-500">Primary analyst</p>
+                      </div>
+                      {!locked ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 shrink-0 whitespace-nowrap px-2 text-xs"
+                          onClick={() => setAssignOpen(true)}
+                        >
+                          Change
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <p className="m-0 text-sm text-slate-700">
+                        Not assigned
+                        <span className="text-amber-700"> · Required</span>
+                      </p>
+                      {!locked ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 whitespace-nowrap px-2.5"
+                          onClick={() => setAssignOpen(true)}
+                        >
+                          <UserRound className="size-3.5" />
+                          Assign consultant
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
                 <Button
                   type="button"
@@ -755,8 +931,42 @@ export default function AdvisoryDetail() {
             </Card>
           ) : (
             <>
-              {/* Ready / validation */}
-              {missing.length === 0 ? (
+              {/* Calm progress — never treat 0% as an error */}
+              <Card className="mb-4 rounded-xl border-slate-200 shadow-sm">
+                <CardContent className="space-y-3 p-4 sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="m-0 text-sm font-semibold text-slate-900">Assessment progress</p>
+                      <p className="m-0 mt-0.5 text-sm text-slate-600">
+                        {completeCount} of {modules.length} modules complete
+                      </p>
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums text-slate-700">{progressPct}%</span>
+                  </div>
+                  <div
+                    className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100"
+                    role="progressbar"
+                    aria-valuenow={progressPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Assessment progress"
+                  >
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-all duration-300',
+                        progressPct === 100 ? 'bg-moss-success' : 'bg-moss-info',
+                      )}
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+                  <p className="m-0 text-xs text-slate-500">
+                    Primary consultant: {primaryName || 'Not assigned'}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Compact validation summary — only after genuine attention signals */}
+              {missing.length === 0 && anyStarted ? (
                 <Card className="mb-4 rounded-xl border-moss-success/30 bg-moss-success/[0.04] shadow-sm">
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
                     <div className="flex min-w-0 gap-3">
@@ -784,36 +994,32 @@ export default function AdvisoryDetail() {
                     ) : null}
                   </CardContent>
                 </Card>
-              ) : (
-                <Alert className="mb-4 border-amber-200 bg-amber-50 text-amber-950">
-                  <AlertCircle className="size-4 text-amber-600" />
-                  <AlertTitle>
-                    {missing.length} module{missing.length === 1 ? '' : 's'} need attention
-                  </AlertTitle>
-                  <AlertDescription>
-                    <ul className="mt-2 space-y-1">
-                      {missing.map((m) => (
-                        <li key={m.moduleCode}>
-                          <button
-                            type="button"
-                            className="text-left font-medium text-amber-900 underline-offset-2 hover:underline"
-                            onClick={() => void selectModule(m.moduleCode)}
-                          >
-                            ! {m.moduleName}
-                          </button>
-                          <span className="text-amber-800/80">
-                            {' '}
-                            — {missingRequiredFields(m)[0] || 'Required information'} missing
-                            {missingRequiredFields(m).length > 1 ? ' (and more)' : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </AlertDescription>
-                </Alert>
-              )}
+              ) : attentionModules.length > 0 ? (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="m-0 text-sm font-semibold text-amber-950">
+                        {attentionModules.length} module{attentionModules.length === 1 ? '' : 's'} need attention
+                      </p>
+                      <p className="m-0 mt-0.5 text-sm text-amber-900/80">
+                        {attentionFieldCount} required field{attentionFieldCount === 1 ? '' : 's'} still need
+                        information.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 shrink-0 whitespace-nowrap border-amber-300 bg-white px-3 text-amber-950"
+                    onClick={() => setIssuesOpen(true)}
+                  >
+                    View issues
+                  </Button>
+                </div>
+              ) : null}
 
-              <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="grid gap-4 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
                 <aside className="hidden lg:block">
                   <Card className="sticky top-[7.5rem] rounded-xl border-slate-200 shadow-sm">
                     <CardContent className="p-3">
@@ -834,8 +1040,8 @@ export default function AdvisoryDetail() {
                           <Menu className="size-4 shrink-0" />
                           <span className="truncate">{activeModule?.moduleName || 'Select module'}</span>
                         </span>
-                        <Badge variant={statusBadgeProps(activeStatus).variant} className="shrink-0">
-                          {statusBadgeProps(activeStatus).label}
+                        <Badge variant={activeBadge.variant} className="shrink-0">
+                          {activeBadge.label}
                         </Badge>
                       </Button>
                     </SheetTrigger>
@@ -854,19 +1060,21 @@ export default function AdvisoryDetail() {
                       <CardHeader className="space-y-3 border-b border-slate-100 pb-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {activeModule.moduleCode}
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                              {activeModule.moduleCode.replaceAll('_', ' ')}
                             </div>
-                            <CardTitle className="mt-1 flex flex-wrap items-center gap-2 text-xl leading-snug">
-                              <StatusIcon status={activeStatus} />
-                              <span>{activeModule.moduleName}</span>
+                            <CardTitle className="mt-1 text-xl leading-snug text-slate-900">
+                              {activeModule.moduleName}
                             </CardTitle>
                             <CardDescription className="mt-2 text-sm leading-relaxed text-slate-600">
                               {activeModule.principalQuestion}
                             </CardDescription>
                           </div>
-                          <Badge variant={statusBadgeProps(activeStatus).variant} className="shrink-0">
-                            {statusBadgeProps(activeStatus).label}
+                          <Badge variant={activeBadge.variant} className="shrink-0 gap-1 whitespace-nowrap">
+                            {activeStatus === 'complete' ? (
+                              <CheckCircle2 className="size-3.5" aria-hidden="true" />
+                            ) : null}
+                            {activeBadge.label}
                           </Badge>
                         </div>
 
@@ -956,13 +1164,21 @@ export default function AdvisoryDetail() {
                       <CardContent className="space-y-4 pt-5">
                         <div className="grid gap-4 md:grid-cols-2">
                           <FieldText
+                            id={fieldDomId(activeModule.moduleCode, 'finding')}
                             label="Finding"
                             value={activeModule.finding || ''}
                             disabled={locked || busy || savingModule}
                             onChange={(v) => patchModule(activeModule.moduleCode, { finding: v })}
+                            onBlur={() => markFieldTouched(activeModule.moduleCode, 'finding')}
                             required
+                            showError={shouldShowFieldError(
+                              activeModule.moduleCode,
+                              'finding',
+                              activeModule.finding || '',
+                            )}
                           />
                           <FieldText
+                            id={fieldDomId(activeModule.moduleCode, 'evidenceSummary')}
                             label="Supporting evidence / limitation"
                             value={activeModule.evidenceSummary || ''}
                             disabled={locked || busy || savingModule}
@@ -971,22 +1187,36 @@ export default function AdvisoryDetail() {
                             }
                           />
                           <FieldText
+                            id={fieldDomId(activeModule.moduleCode, 'businessConsequence')}
                             label="Business consequence"
                             value={activeModule.businessConsequence || ''}
                             disabled={locked || busy || savingModule}
                             onChange={(v) =>
                               patchModule(activeModule.moduleCode, { businessConsequence: v })
                             }
+                            onBlur={() => markFieldTouched(activeModule.moduleCode, 'businessConsequence')}
                             required
+                            showError={shouldShowFieldError(
+                              activeModule.moduleCode,
+                              'businessConsequence',
+                              activeModule.businessConsequence || '',
+                            )}
                           />
                           <FieldText
+                            id={fieldDomId(activeModule.moduleCode, 'requiredDecision')}
                             label="Required executive decision"
                             value={activeModule.requiredDecision || ''}
                             disabled={locked || busy || savingModule}
                             onChange={(v) =>
                               patchModule(activeModule.moduleCode, { requiredDecision: v })
                             }
+                            onBlur={() => markFieldTouched(activeModule.moduleCode, 'requiredDecision')}
                             required
+                            showError={shouldShowFieldError(
+                              activeModule.moduleCode,
+                              'requiredDecision',
+                              activeModule.requiredDecision || '',
+                            )}
                           />
                           <div className="space-y-1.5">
                             <Label>Accountable executive</Label>
@@ -1190,7 +1420,6 @@ export default function AdvisoryDetail() {
                 </div>
               </div>
 
-              {/* Sticky module footer — inside content column so Previous is never clipped by sidebar */}
               {activeModule && !locked ? (
                 <div className="sticky bottom-0 z-40 mt-6 -mx-4 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_20px_rgba(15,23,42,0.06)] backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
                   <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
@@ -1218,9 +1447,20 @@ export default function AdvisoryDetail() {
                           Saving…
                         </span>
                       ) : saveError ? (
-                        <span className="inline-flex items-center gap-1.5 font-medium text-moss-danger">
-                          <AlertCircle className="size-4" aria-hidden="true" />
-                          Save failed
+                        <span className="inline-flex flex-wrap items-center justify-center gap-2 font-medium text-moss-danger">
+                          <span className="inline-flex items-center gap-1.5">
+                            <AlertCircle className="size-4" aria-hidden="true" />
+                            Save failed
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 shrink-0 whitespace-nowrap px-2 text-moss-danger"
+                            onClick={() => void saveModule(activeModule.moduleCode)}
+                          >
+                            Retry
+                          </Button>
                         </span>
                       ) : lastSavedAt ? (
                         <span className="inline-flex items-center gap-1.5 text-moss-success">
@@ -1228,7 +1468,7 @@ export default function AdvisoryDetail() {
                           Saved {fmtTime(lastSavedAt)}
                         </span>
                       ) : (
-                        <span className="text-slate-400">Unsaved changes auto-save after a short pause</span>
+                        <span className="text-slate-400">Not saved</span>
                       )}
                     </div>
 
@@ -1282,44 +1522,119 @@ export default function AdvisoryDetail() {
             </>
           )}
         </div>
+
+        <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Assign primary consultant</DialogTitle>
+              <DialogDescription>
+                Select the analyst responsible for this Executive Advisory Diagnostic.
+              </DialogDescription>
+            </DialogHeader>
+            <FilterSelect
+              value={primary?.userId || ''}
+              onChange={(next) => void assign(next)}
+              disabled={locked}
+              placeholder="Select consultant"
+              triggerClassName="h-11 w-full"
+              options={analysts.map((a) => ({
+                value: a.id,
+                label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
+              }))}
+            />
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={issuesOpen} onOpenChange={setIssuesOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Issues to resolve</DialogTitle>
+              <DialogDescription>
+                Select a field to jump to it in the assessment workspace.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[min(60vh,420px)] space-y-4 overflow-y-auto pr-1">
+              {attentionModules.map((m) => (
+                <div key={m.moduleCode} className="space-y-1.5">
+                  <button
+                    type="button"
+                    className="text-left text-sm font-semibold text-slate-900 underline-offset-2 hover:underline"
+                    onClick={() => void focusIssue(m.moduleCode)}
+                  >
+                    {m.moduleName}
+                  </button>
+                  <ul className="m-0 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                    {missingRequiredFields(m).map((f) => (
+                      <li key={f.key}>
+                        <button
+                          type="button"
+                          className="text-left underline-offset-2 hover:underline"
+                          onClick={() => void focusIssue(m.moduleCode, f.key)}
+                        >
+                          {f.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {!attentionModules.length ? (
+                <p className="text-sm text-slate-500">No open issues.</p>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
       </Shell>
     </AuthGate>
   );
 }
 
 function FieldText({
+  id,
   label,
   value,
   disabled,
   onChange,
+  onBlur,
   required,
+  showError,
 }: {
+  id?: string;
   label: string;
   value: string;
   disabled?: boolean;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   required?: boolean;
+  showError?: boolean;
 }) {
-  const empty = required && !value.trim();
+  const errorId = id ? `${id}-error` : undefined;
+  const invalid = Boolean(showError && required && !value.trim());
   return (
     <div className="space-y-1.5">
-      <Label>
+      <Label htmlFor={id}>
         {label}
         {required ? <span className="text-[#c41230]"> *</span> : null}
       </Label>
       <Textarea
+        id={id}
         rows={4}
         className={cn(
           'min-h-[110px] resize-y',
-          empty && 'border-amber-300 focus-visible:ring-amber-400',
+          invalid && 'border-amber-400 focus-visible:ring-amber-400',
         )}
         disabled={disabled}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        aria-invalid={empty || undefined}
+        onBlur={onBlur}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? errorId : undefined}
       />
-      {empty ? (
-        <p className="m-0 text-xs font-medium text-amber-700">Required — add this before completion.</p>
+      {invalid ? (
+        <p id={errorId} className="m-0 inline-flex items-center gap-1 text-xs font-medium text-amber-800">
+          <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+          {label} is required.
+        </p>
       ) : null}
     </div>
   );
