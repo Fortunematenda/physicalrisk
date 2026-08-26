@@ -80,6 +80,8 @@ type ReportRow = {
     productCode?: string;
     organisation?: { id: string; name: string };
   };
+  /** PublicLead id for triage reports — use this for /triage/... links. */
+  triageSubmissionId?: string | null;
 };
 
 type ReportsResponse = {
@@ -134,10 +136,13 @@ function formatDateTime(iso?: string | null) {
 }
 
 function engagementHref(row: ReportRow) {
+  const code = row.assessment?.productCode || '';
+  if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
+    const triageId = row.triageSubmissionId || row.assessment?.id;
+    return triageId ? `/triage/${triageId}` : null;
+  }
   const id = row.assessment?.id;
   if (!id) return null;
-  const code = row.assessment?.productCode || '';
-  if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE') return `/triage/${id}`;
   if (
     [
       'EXECUTIVE_ADVISORY_DIAGNOSTIC',

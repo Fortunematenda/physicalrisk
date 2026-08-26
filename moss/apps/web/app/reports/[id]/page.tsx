@@ -17,9 +17,12 @@ const ADVISORY_PRODUCTS = new Set([
   'SHIELD360',
 ]);
 
-function engagementHref(productCode?: string, assessmentId?: string) {
+function engagementHref(productCode?: string, assessmentId?: string, triageSubmissionId?: string | null) {
+  if (productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
+    const triageId = triageSubmissionId || assessmentId;
+    return triageId ? `/triage/${triageId}` : null;
+  }
   if (!assessmentId) return null;
-  if (productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE') return `/triage/${assessmentId}`;
   if (productCode === 'SCLI_COST_LEAKAGE') return `/assessments/${assessmentId}`;
   if (productCode && ADVISORY_PRODUCTS.has(productCode)) return `/advisory/${assessmentId}`;
   return `/assessments/${assessmentId}`;
@@ -81,7 +84,7 @@ export default function ReportPage() {
 
   const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
   const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
-  const workHref = engagementHref(productCode, report?.assessment?.id);
+  const workHref = engagementHref(productCode, report?.assessment?.id, report?.triageSubmissionId);
 
   return (
     <AuthGate>

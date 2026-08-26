@@ -668,7 +668,7 @@ export default function AdvisoryOutcomePage() {
               <CardContent className="p-5 pt-0 sm:p-6 sm:pt-0">
                 <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
                   <Link
-                    href={`/triage/${engagement.parentAssessment.id}`}
+                    href={`/triage/${engagement.parentAssessment.triageSubmissionId || engagement.parentAssessment.id}`}
                     className="font-medium text-slate-800 underline-offset-2 hover:underline"
                   >
                     Level 1 triage {engagement.parentAssessment.reference}

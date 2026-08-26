@@ -131,6 +131,27 @@ export class ReportsService {
       },
     });
 
+    const triageAssessmentIds = [
+      ...new Set(
+        reports
+          .filter((r) => r.assessment?.productCode === ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE)
+          .map((r) => r.assessment.id),
+      ),
+    ];
+    const triageLeads = triageAssessmentIds.length
+      ? await this.prisma.publicLead.findMany({
+          where: { assessmentId: { in: triageAssessmentIds } },
+          select: { id: true, assessmentId: true },
+          orderBy: { updatedAt: 'desc' },
+        })
+      : [];
+    const triageSubmissionByAssessment = new Map<string, string>();
+    for (const lead of triageLeads) {
+      if (lead.assessmentId && !triageSubmissionByAssessment.has(lead.assessmentId)) {
+        triageSubmissionByAssessment.set(lead.assessmentId, lead.id);
+      }
+    }
+
     const items = reports.map((report) => {
       let uiStatus = String(report.status).toLowerCase();
       if (report.status === 'GENERATED') uiStatus = 'generated';
@@ -145,6 +166,8 @@ export class ReportsService {
         uiStatus,
         fileSizeLabel: report.storageKey ? 'PDF' : '—',
         delivery: { sent: 0, failed: 0, pending: 0 },
+        // Canonical triage workspace id (PublicLead), not assessmentSession id.
+        triageSubmissionId: triageSubmissionByAssessment.get(report.assessment.id) || null,
       };
     });
 
@@ -596,7 +619,7 @@ export class ReportsService {
     const lead = await this.prisma.publicLead.findFirst({
       where: { assessmentId: report.assessmentId },
       orderBy: { updatedAt: 'desc' },
-      select: { email: true, firstName: true, lastName: true },
+      select: { id: true, email: true, firstName: true, lastName: true },
     });
 
     const recipientEmail =
@@ -610,6 +633,7 @@ export class ReportsService {
         ? await this.storage.signedDownloadUrl(report.storageKey, 900, report.fileName || undefined)
         : null,
       suggestedRecipientEmail: recipientEmail,
+      triageSubmissionId: lead?.id || null,
       contact: lead
         ? { email: lead.email, name: `${lead.firstName} ${lead.lastName}`.trim() }
         : {

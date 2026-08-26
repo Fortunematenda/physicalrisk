@@ -287,12 +287,27 @@ export class AdvisoryService {
       },
     });
     if (!engagement) throw new NotFoundException('Advisory engagement not found.');
+    let parentTriageSubmissionId: string | null = null;
+    if (engagement.parentAssessmentId) {
+      const parentLead = await this.prisma.publicLead.findFirst({
+        where: { assessmentId: engagement.parentAssessmentId },
+        select: { id: true },
+        orderBy: { updatedAt: 'desc' },
+      });
+      parentTriageSubmissionId = parentLead?.id || null;
+    }
     const suggestedRoutes =
       engagement.productCode === ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC && !engagement.diagnosticOutcome
         ? this.suggestRoutesFromModules(engagement.advisoryModuleReviews)
         : [];
     return {
       ...engagement,
+      parentAssessment: engagement.parentAssessment
+        ? {
+            ...engagement.parentAssessment,
+            triageSubmissionId: parentTriageSubmissionId,
+          }
+        : null,
       productLabel: PRODUCT_LABELS[engagement.productCode] || engagement.productCode,
       suggestedRoutes,
     };

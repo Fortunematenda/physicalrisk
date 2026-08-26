@@ -37,23 +37,60 @@ export class TriageService {
     }
   }
 
-  /** Resolve by publicLead id or triage assessmentSession id (reports/advisory links use the latter). */
-  private async resolveLead(idOrAssessmentId: string) {
+  /** Resolve by publicLead id, triage assessment id, converted EAD id, or report id. */
+  private async resolveLead(idOrKey: string) {
     const include = {
       assignedAnalyst: {
         select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
       },
     } as const;
+
     const byId = await this.prisma.publicLead.findUnique({
-      where: { id: idOrAssessmentId },
+      where: { id: idOrKey },
       include,
     });
     if (byId) return byId;
+
     const byAssessment = await this.prisma.publicLead.findFirst({
-      where: { assessmentId: idOrAssessmentId },
+      where: { assessmentId: idOrKey },
       include,
+      orderBy: { updatedAt: 'desc' },
     });
     if (byAssessment) return byAssessment;
+
+    const byConverted = await this.prisma.publicLead.findFirst({
+      where: { convertedAssessmentId: idOrKey },
+      include,
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (byConverted) return byConverted;
+
+    const report = await this.prisma.report.findUnique({
+      where: { id: idOrKey },
+      select: { assessmentId: true },
+    });
+    if (report?.assessmentId) {
+      const byReportAssessment = await this.prisma.publicLead.findFirst({
+        where: { assessmentId: report.assessmentId },
+        include,
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (byReportAssessment) return byReportAssessment;
+    }
+
+    const session = await this.prisma.assessmentSession.findUnique({
+      where: { id: idOrKey },
+      select: { parentAssessmentId: true },
+    });
+    if (session?.parentAssessmentId) {
+      const byParent = await this.prisma.publicLead.findFirst({
+        where: { assessmentId: session.parentAssessmentId },
+        include,
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (byParent) return byParent;
+    }
+
     throw new NotFoundException('Triage submission not found.');
   }
 
