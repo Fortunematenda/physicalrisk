@@ -262,10 +262,10 @@ export class SeedService implements OnApplicationBootstrap {
     }
 
     const fileTypes: Array<[string, string, string[], number, boolean]> = [
-      ['docx', 'Microsoft Word Document', ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 50, true],
-      ['pdf', 'PDF Document', ['application/pdf'], 50, true],
-      ['xlsx', 'Microsoft Excel Workbook', ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], 50, true],
-      ['pptx', 'Microsoft PowerPoint Presentation', ['application/vnd.openxmlformats-officedocument.presentationml.presentation'], 50, true],
+      ['docx', 'Microsoft Word Document', ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 500, true],
+      ['pdf', 'PDF Document', ['application/pdf'], 500, true],
+      ['xlsx', 'Microsoft Excel Workbook', ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], 500, true],
+      ['pptx', 'Microsoft PowerPoint Presentation', ['application/vnd.openxmlformats-officedocument.presentationml.presentation'], 500, true],
       ['md', 'Markdown Document', ['text/markdown', 'text/plain'], 10, true], ['txt', 'Plain Text Document', ['text/plain'], 10, true],
       ['csv', 'CSV Dataset', ['text/csv'], 25, true], ['png', 'PNG Image', ['image/png'], 25, false],
       ['jpg', 'JPEG Image', ['image/jpeg'], 25, false],

@@ -664,6 +664,65 @@ export class SystemSetting {
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
 }
 
+export enum McpBinaryImportStatus {
+  PREPARING = 'PREPARING',
+  RECEIVING = 'RECEIVING',
+  PAUSED = 'PAUSED',
+  ASSEMBLING = 'ASSEMBLING',
+  VALIDATING = 'VALIDATING',
+  AVAILABLE = 'AVAILABLE',
+  FAILED = 'FAILED',
+  ABORTED = 'ABORTED',
+  EXPIRED = 'EXPIRED',
+}
+
+/** Durable ChatGPT MCP Mode C chunked binary FILE_PRESERVE upload session. */
+@Entity('mcp_binary_import_sessions')
+@Index(['uploadTokenHash'])
+@Index(['status', 'expiresAt'])
+export class McpBinaryImportSession {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'upload_token_hash' }) uploadTokenHash!: string;
+  @Column({ name: 'integration_key', type: 'varchar', length: 120 }) integrationKey!: string;
+  @Column({ name: 'user_id', type: 'uuid', nullable: true }) userId!: string | null;
+  @Column({ name: 'project_id', type: 'uuid', nullable: true }) projectId!: string | null;
+  @Column({ name: 'project_code', type: 'varchar', nullable: true }) projectCode!: string | null;
+  @Column({ type: 'varchar', nullable: true }) module!: string | null;
+  @Column({ name: 'section_key', type: 'varchar', nullable: true }) sectionKey!: string | null;
+  @Column({ name: 'document_type', type: 'varchar', nullable: true }) documentType!: string | null;
+  @Column({ name: 'document_id', type: 'uuid', nullable: true }) documentId!: string | null;
+  @Column({ name: 'document_code', type: 'varchar', nullable: true }) documentCode!: string | null;
+  @Column({ type: 'varchar', default: 'NEW_DOCUMENT' }) mode!: string;
+  @Column({ type: 'varchar', default: 'CHATGPT' }) source!: string;
+  @Column({ name: 'transport_mode', type: 'varchar', nullable: true }) transportMode!: string | null;
+  @Column({ name: 'original_file_name' }) originalFileName!: string;
+  @Column({ name: 'expected_file_size', type: 'bigint', nullable: true }) expectedFileSize!: string | null;
+  @Column({ name: 'actual_file_size', type: 'bigint', nullable: true }) actualFileSize!: string | null;
+  @Column({ name: 'expected_sha256', type: 'varchar', nullable: true }) expectedSha256!: string | null;
+  @Column({ name: 'actual_sha256', type: 'varchar', nullable: true }) actualSha256!: string | null;
+  @Column({ name: 'declared_mime_type', type: 'varchar', nullable: true }) declaredMimeType!: string | null;
+  @Column({ name: 'detected_mime_type', type: 'varchar', nullable: true }) detectedMimeType!: string | null;
+  @Column({ name: 'chunk_size', type: 'int' }) chunkSize!: number;
+  @Column({ name: 'expected_chunk_count', type: 'int', nullable: true }) expectedChunkCount!: number | null;
+  @Column({ name: 'received_chunk_count', type: 'int', default: 0 }) receivedChunkCount!: number;
+  @Column({ name: 'received_chunks', type: 'jsonb', default: [] }) receivedChunks!: number[];
+  @Column({ name: 'temp_dir' }) tempDir!: string;
+  @Column({ name: 'host_reference_type', type: 'varchar', nullable: true }) hostReferenceType!: string | null;
+  @Column({ type: 'enum', enum: McpBinaryImportStatus, default: McpBinaryImportStatus.PREPARING })
+  status!: McpBinaryImportStatus;
+  @Column({ name: 'validation_status', type: 'varchar', nullable: true }) validationStatus!: string | null;
+  @Column({ name: 'validation_details', type: 'jsonb', nullable: true }) validationDetails!: unknown;
+  @Column({ name: 'error_code', type: 'varchar', nullable: true }) errorCode!: string | null;
+  @Column({ name: 'error_message', type: 'text', nullable: true }) errorMessage!: string | null;
+  @Column({ type: 'boolean', default: false }) retryable!: boolean;
+  @Column({ name: 'import_job_id', type: 'uuid', nullable: true }) importJobId!: string | null;
+  @Column({ name: 'expires_at', type: 'timestamptz' }) expiresAt!: Date;
+  @Column({ name: 'last_activity_at', type: 'timestamptz' }) lastActivityAt!: Date;
+  @Column({ name: 'completed_at', type: 'timestamptz', nullable: true }) completedAt!: Date | null;
+  @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
+  @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
+}
+
 export const ENTITIES = [
   User, DirectoryTemplate, DirectoryTemplateSection, Project, ProjectSection,
   SourceConnection, SourceFolderMapping, ConnectorSyncRun, ExternalImportReference, McpIntegration,
@@ -671,4 +730,5 @@ export const ENTITIES = [
   ImportJob, AuditLog, SystemSetting,
   SequenceCounter, RepositoryWorkspace, WorkspaceDocument, WorkspaceActivity,
   ConnectorSession, ConnectorIdempotencyKey, ConnectorImportJob,
+  McpBinaryImportSession,
 ];

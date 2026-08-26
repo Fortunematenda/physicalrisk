@@ -221,38 +221,130 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
     info: {
       title: 'Physical Risk Repo MCP',
       description:
-        'DOCX and XLSX binary import IS SUPPORTED. ChatGPT Actions cannot attach file bytes — '
-        + 'call prepare_approved_document (or submit_approved_file) and give the user result.uploadUrl '
-        + 'to upload the exact .docx/.xlsx in a browser (FILE_PRESERVE; sheets/formulas kept). '
-        + 'NEVER claim the connector only accepts Markdown→PDF. '
-        + 'Use submit_approved_content only for intentional Markdown imports. '
-        + 'Supports NEW and NEW_VERSION (mode=NEW_VERSION + documentCode e.g. MOSS-GS-003). '
-        + 'search_documents lists the Master Document Index. '
+        'BINARY ORIGINAL FILE IMPORT (v1.31.1): check_document_exists, upload_original_docx, '
+        + 'prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, '
+        + 'finalize_original_file_import. Prefer @Repo MCP connector. Never Markdown→PDF. '
+        + 'NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003). '
         + `Privacy: ${baseUrl}/privacy`,
-      version: '1.28.0',
+      version: '1.31.1',
     },
     servers: [{ url: baseUrl }],
     paths: {
-      // Binary import first so ChatGPT Actions discover DOCX/XLSX support immediately.
+      '/api/mcp/tools/check_document_exists': post(
+        'check_document_exists',
+        'Check duplicates before import; use NEW_VERSION hints',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  projectCode: { type: 'string' },
+                  title: { type: 'string' },
+                  documentCode: { type: 'string' },
+                  fileName: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        'If exists=true, use mode=NEW_VERSION + documentCode. Never create duplicate codes.',
+      ),
       '/api/mcp/tools/upload_original_docx': post(
         'upload_original_docx',
-        'Get uploadUrl for exact DOCX/XLSX (no Markdown)',
+        'PRIMARY binary DOCX/XLSX/PDF/PPTX FILE_PRESERVE upload (NEW_VERSION supported)',
         {
           required: true,
           content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
-        'Returns uploadUrl only. Metadata payload must be small. NEVER send documentContent. '
-          + 'User uploads exact .docx in browser. NEW_VERSION + documentCode supported.',
+        'Returns uploadId+uploadUrl (PUT exact original bytes) then finalize_original_file_import. '
+          + 'Use for MOSS-GS-003 mode=NEW_VERSION. Never Markdown→PDF.',
       ),
-      '/api/mcp/tools/prepare_approved_document': post(
-        'prepare_approved_document',
-        'Upload URL for original DOCX/XLSX/PDF (exact binary)',
+      '/api/mcp/tools/prepare_automatic_file_import': post(
+        'prepare_automatic_file_import',
+        'Start automatic chunked FILE_PRESERVE session',
         {
           required: true,
           content: { 'application/json': { schema: prepareFilePreserveSchema } },
         },
-        'PRIMARY for original DOCX/XLSX/PDF/PPTX. Returns uploadUrl — user uploads exact binary. '
-          + 'NEW_VERSION: mode=NEW_VERSION + documentCode. Never send documentContent (causes 413).',
+        'Returns uploadId+uploadToken+acceptedChunkSize. Then upload_original_file_chunk automatically.',
+      ),
+      '/api/mcp/tools/upload_original_file_chunk': post(
+        'upload_original_file_chunk',
+        'Upload one exact binary chunk (base64)',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['uploadId', 'uploadToken', 'chunkIndex', 'chunkSha256', 'rawByteLength'],
+                properties: {
+                  uploadId: { type: 'string' },
+                  uploadToken: { type: 'string' },
+                  chunkIndex: { type: 'integer' },
+                  encodedContent: { type: 'string' },
+                  chunkBase64: { type: 'string' },
+                  chunkSha256: { type: 'string' },
+                  rawByteLength: { type: 'integer' },
+                },
+              },
+            },
+          },
+        },
+        'Idempotent chunk upload. Continue until complete_automatic_file_import.',
+      ),
+      '/api/mcp/tools/complete_automatic_file_import': post(
+        'complete_automatic_file_import',
+        'Assemble/validate chunks then queue FILE_PRESERVE',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['uploadId', 'uploadToken'],
+                properties: {
+                  uploadId: { type: 'string' },
+                  uploadToken: { type: 'string' },
+                  expectedSha256: { type: 'string' },
+                  payload: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        'Validates OOXML/PDF + SHA-256. Success only after validation.',
+      ),
+      '/api/mcp/tools/finalize_original_file_import': post(
+        'finalize_original_file_import',
+        'Verify original-file SHA-256 after staged PUT or automatic import',
+        {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['uploadId'],
+                properties: {
+                  uploadId: { type: 'string' },
+                  uploadToken: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        'Returns UPLOAD_PENDING, VERIFIED, VERIFICATION_FAILED, or IMPORTED.',
+      ),
+      '/api/mcp/tools/import_original_file': post(
+        'import_original_file',
+        'Zero-click FILE_PRESERVE via HTTPS fileUrl',
+        {
+          required: true,
+          content: { 'application/json': { schema: filePreservePayloadSchema } },
+        },
+        'Downloads exact original bytes from fileUrl. NEVER Markdown or PDF conversion. NEW_VERSION + documentCode supported.',
       ),
       '/api/mcp/tools/submit_approved_file': post(
         'submit_approved_file',
@@ -261,8 +353,7 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           required: true,
           content: { 'application/json': { schema: filePreservePayloadSchema } },
         },
-        'FILE_PRESERVE: exact original Excel/Word/PDF/PPTX. ZERO-CLICK: pass fileUrl or fileContentBase64/uploadId. '
-          + 'uploadUrl only if no URL/bytes. Never Markdown→PDF for originals.',
+        'FILE_PRESERVE via fileUrl/fileContentBase64/uploadId. Prefer import_original_file for HTTPS URLs.',
       ),
       '/api/mcp/tools/list_repository_projects': post(
         'list_repository_projects',
@@ -353,47 +444,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
           },
         },
       ),
-      '/api/mcp/tools/check_document_exists': post(
-        'check_document_exists',
-        'Check duplicates; returns newVersionSubmitHints',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  projectCode: { type: 'string' },
-                  title: { type: 'string' },
-                  documentCode: { type: 'string' },
-                  fileName: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-        'If exists=true, copy matches[0].newVersionSubmitHints into submit payload for NEW_VERSION.',
-      ),
-      '/api/mcp/tools/submit_approved_content': post(
-        'submit_approved_content',
-        'Create document from Markdown/text',
-        {
-          required: true,
-          content: { 'application/json': { schema: contentCreatePayloadSchema } },
-        },
-        'CONTENT_CREATE: intentional Markdown → generated file. Set outputFormat for Office/TXT. '
-          + 'Do not use when an original DOCX/XLSX/PDF must be preserved.',
-      ),
-      '/api/mcp/tools/submit_approved_document': post(
-        'submit_approved_document',
-        'Legacy submit (prefer prepare or submit_approved_file)',
-        {
-          required: true,
-          content: { 'application/json': { schema: payloadSchema } },
-        },
-        'Legacy. Prefer prepare_approved_document for originals, submit_approved_content for Markdown. '
-          + 'DOCX/XLSX fileName without bytes returns uploadUrl (no Markdown→PDF).',
-      ),
       '/api/mcp/tools/get_import_status': post(
         'get_import_status',
         'Get import job status',
@@ -435,59 +485,6 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
         'Returns workspaceCode to resume from another chat. Prefer projectCode (MCRD/MOSS/PROR).',
       ),
       '/api/mcp/tools/get_workspace': post('get_workspace', 'Get workspace by code', workspaceCodeBody),
-      '/api/mcp/tools/find_workspaces': post(
-        'find_workspaces',
-        'Find workspaces for current user',
-        {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  workspaceCode: { type: 'string' },
-                  name: { type: 'string' },
-                  projectCode: { type: 'string' },
-                  status: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
-      ),
-      '/api/mcp/tools/get_latest_pending_workspace': post(
-        'get_latest_pending_workspace',
-        'Latest pending workspace for current user',
-        {
-          required: false,
-          content: { 'application/json': { schema: { type: 'object', properties: {} } } },
-        },
-      ),
-      '/api/mcp/tools/get_workspace_summary': post(
-        'get_workspace_summary',
-        'Workspace summary with documents',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/list_workspace_documents': post(
-        'list_workspace_documents',
-        'List documents in a workspace',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/resume_workspace': post(
-        'resume_workspace',
-        'Resume workspace by code',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/validate_workspace': post(
-        'validate_workspace',
-        'Validate workspace before submit',
-        workspaceCodeBody,
-      ),
-      '/api/mcp/tools/submit_workspace': post(
-        'submit_workspace',
-        'Submit ready workspace for import',
-        workspaceCodeBody,
-      ),
       '/api/mcp/tools/attach_document_to_workspace': post(
         'attach_document_to_workspace',
         'Attach imported document to workspace',
@@ -528,63 +525,47 @@ export function buildChatGptActionsOpenApi(publicBaseUrl: string) {
 export const CHATGPT_GPT_INSTRUCTIONS = `You are the Physical Risk Repository assistant.
 
 CRITICAL FACT (never contradict this):
-The Repo connector SUPPORTS exact DOCX, XLSX, PDF, and PPTX import. It is NOT Markdown-only. It does NOT require converting Office files to PDF.
-ChatGPT Actions/MCP cannot attach binary bytes as a native file — that is a ChatGPT limitation, not a Repo limitation.
-
-ZERO-CLICK IMPORT (use this when user says approved / import / submit — do NOT ask them to open a link first):
-1) Prefer submit_approved_file with fileUrl=https://… to the exact .docx/.xlsx (FILE_PRESERVE). Repo downloads bytes and queues import.
-2) Or submit_approved_file with fileContentBase64 / uploadId (chunked begin_document_upload + upload_document_chunk) if you can transmit the exact bytes.
-3) For revisions: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).
-4) Poll get_import_status. Never Markdown. Never split the catalogue.
-Only if the user has no HTTPS fileUrl AND you cannot send bytes: then prepare_approved_document / upload_original_docx and give uploadUrl (one browser upload).
-
-NEVER convert DOCX to Markdown for import. NEVER put catalogue text into documentContent.
-If you see "request entity too large" / 413: you wrongly sent Markdown. Discard it. Ask for a short HTTPS fileUrl or use uploadUrl — never paste Markdown.
-NEVER say: "the connector cannot import DOCX", "only accepts Markdown", "converts to PDF only", or "split into smaller documents".
-When user says approved/import: attempt zero-click submit_approved_file (fileUrl/base64) immediately — do not default to "open this link".
+The Repo connector SUPPORTS exact DOCX/XLSX/PDF/PPTX FILE_PRESERVE. It is NOT Markdown-only.
+Binary tools ARE available: check_document_exists, upload_original_docx, prepare_automatic_file_import,
+upload_original_file_chunk, complete_automatic_file_import, finalize_original_file_import, import_original_file.
+When importing an existing Office/PDF file:
+1) check_document_exists
+2) prepare_automatic_file_import → upload_original_file_chunk (all chunks) → complete_automatic_file_import → finalize_original_file_import
+   OR upload_original_docx → PUT uploadUrl → finalize_original_file_import
+   OR import_original_file with fileUrl
+NEVER convert Office originals to Markdown or PDF.
+NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).
+Report IMPORTED only after size and SHA-256 match — not after creating a session.
 
 FIELD MAPPING (never swap)
 - projectCode = Repository Project (e.g. MOSS). From list_repository_projects.
 - module = Repository Module / folder (e.g. Articles). From list_repository_modules. NOT document type.
 - documentType = Document classification (e.g. Article). From list_document_types. NOT the folder name.
-- Correct: module=Articles + documentType=Article. Wrong: documentType=Articles or module=Article.
 
 LIST / SEARCH / COUNT (mandatory)
 When user asks how many / list / what was imported / show index:
-1) Call search_documents NOW (optional projectCode / search / limit).
+1) Call search_documents NOW.
 2) Report total + compact table: documentCode, title, projectCode, module, currentVersion, updatedAt.
-3) Detail: get_document with documentCode (preferred) or documentId.
-Never invent documents. Never say the connector cannot list documents.
-
-ORIGINAL DOCX / XLSX / PDF / PPTX
-1) After project + documentType + module known → ZERO-CLICK: submit_approved_file with fileUrl (or fileContentBase64/uploadId).
-2) Only if no fileUrl/bytes → prepare_approved_document / upload_original_docx → uploadUrl (one browser upload).
-3) get_import_status with importJobId.
-4) Never paste large documents into documentContent.
-
-IMPORT MODE
-1) Original file with HTTPS link or bytes → submit_approved_file (zero-click).
-2) Original file only in chat and no URL → prepare + uploadUrl (one click unavoidable).
-3) Markdown you wrote (no original Office file) → submit_approved_content + outputFormat.
+3) Detail: get_document with documentCode.
+Never invent documents.
 
 APPROVAL FLOW
 When user says approved / import / submit:
 STEP A — list_repository_projects, list_document_types; after project pick, list_repository_modules.
-STEP B — Numbered menus one at a time (project → type → module). "Reply with the number only (e.g. 2)."
-STEP C — Auto: approvalDate=today; versionNo=Rev 1.0; approvalStatus=APPROVED; omit approvedBy unless user named themselves; description=1–2 sentences.
-STEP D — Original file: ask for a public HTTPS fileUrl if needed, then submit_approved_file (zero-click). Only if no URL/bytes → prepare + uploadUrl. Markdown-only → submit_approved_content.
+STEP B — Numbered menus one at a time (project → type → module).
+STEP C — Existing file: automatic FILE_PRESERVE tools above. Never Markdown→PDF for an attached DOCX.
 
 FORBIDDEN
 - Claiming Repo only accepts Markdown→PDF.
+- Claiming upload_original_docx / prepare_automatic_file_import are unavailable.
 - Converting DOCX/XLSX/PPTX to PDF.
-- Pasting large documents into documentContent.
-- Swapping module and documentType; hardcoded approvedBy.
+- Creating a new unrelated document code when NEW_VERSION is required.
 
-NEW VERSION + original DOCX/XLSX (e.g. MOSS-GS-003) — ZERO CLICK preferred:
-1) check_document_exists with documentCode → copy newVersionSubmitHints.
-2) If user gives HTTPS fileUrl (or you have exact bytes): submit_approved_file with mode=NEW_VERSION, documentCode=MOSS-GS-003, fileName=*.docx, fileUrl/fileContentBase64. Done — no browser link.
-3) Only if no URL and no bytes: upload_original_docx / prepare_approved_document → uploadUrl (one upload).
-4) get_import_status with importJobId. Never Markdown→PDF. Never split the document.
-WORKSPACES: create_workspace → return WS-YYYY-#####.
+MOSS-GS-003 NEW_VERSION:
+1) check_document_exists with documentCode=MOSS-GS-003.
+2) prepare_automatic_file_import (mode=NEW_VERSION, documentCode=MOSS-GS-003, module=Governance Standards, documentType=Master Control Catalogue)
+   → upload_original_file_chunk until complete → complete_automatic_file_import → finalize_original_file_import.
+3) Or upload_original_docx with same metadata → PUT exact DOCX → finalize_original_file_import.
+4) Poll get_import_status with importJobId until status=IMPORTED (also completes stuck READY_FOR_REVIEW jobs).
 
-Tools: list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, check_document_exists, upload_original_docx, prepare_approved_document, submit_approved_file, submit_approved_content, submit_approved_document, get_import_status, create_workspace, get_workspace, find_workspaces, get_latest_pending_workspace, get_workspace_summary, list_workspace_documents, resume_workspace, validate_workspace, submit_workspace, attach_document_to_workspace.`;
+Tools: check_document_exists, upload_original_docx, prepare_automatic_file_import, upload_original_file_chunk, complete_automatic_file_import, finalize_original_file_import, import_original_file, list_repository_projects, list_document_types, list_repository_modules, resolve_import_targets, search_documents, get_document, get_import_status, create_workspace, get_workspace, attach_document_to_workspace.`;

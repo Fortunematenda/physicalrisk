@@ -95,6 +95,18 @@ export class ConnectorImportJobService {
     });
   }
 
+  /**
+   * Await processing for a staged MCP job (READY_FOR_REVIEW / READY / RECEIVED).
+   * Used after FILE_PRESERVE finalize and when get_import_status recovers a stuck queue item.
+   */
+  async processReadyImport(importJobId: string, opts?: {
+    workspaceCode?: string | null;
+    userId?: string | null;
+    batchJobId?: string | null;
+  }): Promise<void> {
+    await this.processSingleImport(importJobId, opts);
+  }
+
   private scheduleProcess(batchId: string): void {
     setImmediate(() => {
       void this.processBatch(batchId).catch((error) => {

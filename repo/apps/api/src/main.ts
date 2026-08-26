@@ -1,11 +1,18 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Disable default 100kb JSON limit so chunked FILE_PRESERVE (~256–512KB raw → ~700KB base64) works.
+  // Keep 2mb — do not raise enough to encourage whole-file base64 Action payloads.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  app.use(json({ limit: '2mb' }));
+  app.use(urlencoded({ extended: true, limit: '2mb' }));
+
   const config = app.get(ConfigService);
   const port = Number(config.get('API_PORT') ?? 4000);
   const corsOrigin = config.get<string>('CORS_ORIGIN') ?? 'http://localhost:3000';

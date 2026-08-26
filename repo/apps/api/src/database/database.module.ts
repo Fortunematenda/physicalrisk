@@ -12,6 +12,7 @@ import { AddFolderMappingReviewFields1721600000001 } from './migrations/17216000
 import { AddRepositoryWorkspaces1721700000000 } from './migrations/1721700000000-AddRepositoryWorkspaces';
 import { AddConnectorSessionsAndImportJobs1721800000000 } from './migrations/1721800000000-AddConnectorSessionsAndImportJobs';
 import { AddDocumentRecycleBin1721900000000 } from './migrations/1721900000000-AddDocumentRecycleBin';
+import { AddMcpBinaryImportSessions1722000000000 } from './migrations/1722000000000-AddMcpBinaryImportSessions';
 
 @Global()
 @Module({
@@ -33,6 +34,7 @@ import { AddDocumentRecycleBin1721900000000 } from './migrations/1721900000000-A
             AddRepositoryWorkspaces1721700000000,
             AddConnectorSessionsAndImportJobs1721800000000,
             AddDocumentRecycleBin1721900000000,
+            AddMcpBinaryImportSessions1722000000000,
           ],
           migrationsRun: !synchronize,
           synchronize,

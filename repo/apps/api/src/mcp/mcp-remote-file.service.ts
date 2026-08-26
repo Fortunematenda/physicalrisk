@@ -3,7 +3,7 @@ import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
 import { alignStoredFileIdentity } from '../common/document-format.util';
 
-const MAX_BYTES = 100 * 1024 * 1024;
+const MAX_BYTES = Number(process.env.MCP_BINARY_IMPORT_MAX_FILE_SIZE ?? 524_288_000);
 const MAX_REDIRECTS = 3;
 const FETCH_TIMEOUT_MS = 30_000;
 

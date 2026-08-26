@@ -24,9 +24,21 @@ export type PendingApprovedUpload = {
   expiresAt: number;
 };
 
+export type CompletedOriginalUpload = {
+  uploadId: string;
+  importJobId?: string;
+  status: string;
+  fileName?: string;
+  fileSize?: number;
+  sha256?: string;
+  checksumVerified?: boolean;
+  completedAt: number;
+};
+
 @Injectable()
 export class McpBrowserUploadService {
   private readonly pending = new Map<string, PendingApprovedUpload>();
+  private readonly completed = new Map<string, CompletedOriginalUpload>();
   private readonly ttlMs = 60 * 60 * 1000;
 
   create(input: Omit<PendingApprovedUpload, 'token' | 'createdAt' | 'expiresAt'>) {
@@ -56,10 +68,22 @@ export class McpBrowserUploadService {
     return row;
   }
 
+  rememberCompleted(row: CompletedOriginalUpload) {
+    this.completed.set(row.uploadId, row);
+  }
+
+  getCompleted(uploadId: string): CompletedOriginalUpload | null {
+    this.purge();
+    return this.completed.get(uploadId) ?? null;
+  }
+
   private purge() {
     const now = Date.now();
     for (const [token, row] of this.pending) {
       if (row.expiresAt <= now) this.pending.delete(token);
+    }
+    for (const [token, row] of this.completed) {
+      if (now - row.completedAt > this.ttlMs) this.completed.delete(token);
     }
   }
 

@@ -5,7 +5,7 @@ import {
   AuditLog, ConnectorIdempotencyKey, ConnectorImportJob, ConnectorSession, ConnectorSyncRun,
   DirectoryTemplate, DirectoryTemplateSection, Document, DocumentNote,
   DocumentRelationship, DocumentType, DocumentVersion, ExternalImportReference, FileType, ImportJob,
-  McpIntegration, MetadataField, Project, ProjectSection, RepositoryWorkspace, RoutingRule,
+  McpBinaryImportSession, McpIntegration, MetadataField, Project, ProjectSection, RepositoryWorkspace, RoutingRule,
   SequenceCounter, SourceConnection, SourceFolderMapping, SourceSystem, SystemSetting, User,
   WorkspaceActivity, WorkspaceDocument,
 } from './entities';
@@ -43,5 +43,6 @@ export class DatabaseService {
     @InjectRepository(ConnectorSession) public readonly connectorSessions: Repository<ConnectorSession>,
     @InjectRepository(ConnectorIdempotencyKey) public readonly connectorIdempotencyKeys: Repository<ConnectorIdempotencyKey>,
     @InjectRepository(ConnectorImportJob) public readonly connectorImportJobs: Repository<ConnectorImportJob>,
+    @InjectRepository(McpBinaryImportSession) public readonly mcpBinaryImportSessions: Repository<McpBinaryImportSession>,
   ) {}
 }

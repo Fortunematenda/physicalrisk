@@ -75,6 +75,8 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     get: jest.fn(),
     consume: jest.fn(),
     assertNotExpired: jest.fn(),
+    rememberCompleted: jest.fn(),
+    getCompleted: jest.fn(),
   };
 
   const service = new McpToolsService(
@@ -97,6 +99,21 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     {} as any,
     { beginOrReplay: jest.fn(async ({ execute }) => ({ result: await execute(), replayed: false })) } as any,
     { enqueueSingleImport: jest.fn(), createJob: jest.fn(), getByCodeOrId: jest.fn(), retry: jest.fn(), toView: jest.fn() } as any,
+    {
+      inspectAttachmentCapability: jest.fn((input: any) => ({
+        supportedTransport: input?.canProvideExactBytes ? 'CHUNKED_BINARY' : 'UNSUPPORTED',
+        errorCode: input?.canProvideExactBytes ? undefined : 'AUTOMATIC_TRANSFER_UNSUPPORTED_BY_HOST',
+        message: 'stub',
+        neverConvertsMarkdownToOffice: true,
+      })),
+      importOriginalFile: jest.fn(),
+      prepareAutomaticFileImport: jest.fn(),
+      uploadOriginalFileChunk: jest.fn(),
+      getProgress: jest.fn(),
+      resume: jest.fn(),
+      complete: jest.fn(),
+      abort: jest.fn(),
+    } as any,
   );
 
   beforeEach(() => {
@@ -122,7 +139,7 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     (service as any).defaultApproverName = jest.fn(() => 'Test User');
   });
 
-  it('TEST E — submit_approved_file without artifact returns uploadUrl for browser FILE_PRESERVE', async () => {
+  it('TEST E — submit_approved_file without artifact does not convert Markdown', async () => {
     const result = await service.submitApprovedFile(integration, {
       title: 'Test',
       documentType: 'Article',
@@ -131,18 +148,17 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     } as any);
 
     expect(result).toMatchObject({
-      status: 'ORIGINAL_FILE_UNAVAILABLE',
+      status: 'AUTOMATIC_TRANSFER_UNSUPPORTED_BY_HOST',
       conversionPerformed: false,
       importMode: 'FILE_PRESERVE',
       preserveOriginal: true,
-      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
+      neverConvertsMarkdownToOffice: true,
     });
     expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
     expect(markdownOffice.renderDocx).not.toHaveBeenCalled();
-    expect(browserUploads.create).toHaveBeenCalled();
   });
 
-  it('TEST E2 — DOCX fileName + Markdown without CONTENT_CREATE offers uploadUrl (no PDF)', async () => {
+  it('TEST E2 — DOCX fileName + Markdown without CONTENT_CREATE refuses rebuild (no PDF)', async () => {
     const result = await service.submitApprovedDocument(
       integration,
       {
@@ -158,8 +174,6 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     );
 
     expect(result).toMatchObject({
-      status: 'ORIGINAL_FILE_UNAVAILABLE',
-      uploadUrl: expect.stringContaining('/api/mcp/upload/'),
       conversionPerformed: false,
       importMode: 'FILE_PRESERVE',
     });
@@ -272,17 +286,18 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     );
   });
 
-  it('TEST G2 — submit_approved_file without bytes passes NEW_VERSION to browser upload', async () => {
-    (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
-      title: 'Governance Standard',
-      documentType: 'Article',
-      versionNo: 'Rev 1.1',
-      mode: 'NEW_VERSION',
-      documentCode: 'MOSS-GS-003',
-      existingDocumentId: 'doc-existing-1',
-    });
+  it('exposes import_original_file as FILE_PRESERVE not Markdown-to-PDF', () => {
+    const tools = service.listToolDefinitions();
+    const original = tools.find((item) => item.name === 'import_original_file');
+    const generated = tools.find((item) => item.name === 'submit_approved_document');
+    expect(original?.description).toMatch(/preserving the original file format/i);
+    expect(original?.description).toMatch(/Do not convert the file to Markdown or PDF/i);
+    expect(generated?.description).toMatch(/GENERATED TEXT ONLY/i);
+    expect(generated?.description).toMatch(/NOT a binary DOCX upload/i);
+  });
 
-    await service.submitApprovedFile(integration, {
+  it('TEST G2 — submit_approved_file without bytes returns UNSUPPORTED (no Markdown conversion)', async () => {
+    const result = await service.submitApprovedFile(integration, {
       projectCode: 'MOSS',
       documentType: 'Article',
       title: 'Governance Standard',
@@ -291,16 +306,16 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
       documentCode: 'MOSS-GS-003',
     } as any);
 
-    expect(browserUploads.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mode: 'NEW_VERSION',
-        documentCode: 'MOSS-GS-003',
-        existingDocumentId: 'doc-existing-1',
-      }),
-    );
+    expect(result).toMatchObject({
+      status: 'AUTOMATIC_TRANSFER_UNSUPPORTED_BY_HOST',
+      conversionPerformed: false,
+      documentCode: 'MOSS-GS-003',
+    });
+    expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
+    expect(markdownOffice.renderDocx).not.toHaveBeenCalled();
   });
 
-  it('TEST H — prepare_approved_document ignores huge documentContent and returns uploadUrl', async () => {
+  it('TEST H — prepare_approved_document ignores huge documentContent and does not convert', async () => {
     (service as any).resolveNewVersionSubmit = jest.fn().mockResolvedValue({
       title: '100 Control Catalogue',
       documentType: 'Article',
@@ -327,10 +342,10 @@ describe('McpToolsService FILE_PRESERVE / CONTENT_CREATE', () => {
     );
 
     expect(result).toMatchObject({
+      status: 'UPLOAD_PENDING',
+      conversionPerformed: false,
+      importMode: 'FILE_PRESERVE',
       uploadUrl: expect.stringContaining('/api/mcp/upload/'),
-      discardedDocumentContent: true,
-      mode: 'NEW_VERSION',
-      documentCode: 'MOSS-GS-003',
     });
     expect(orchestrator.queueMcpApprovedDocument).not.toHaveBeenCalled();
   });

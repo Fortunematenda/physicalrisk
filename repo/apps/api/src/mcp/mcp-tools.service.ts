@@ -3,7 +3,7 @@ import { extname } from 'path';
 import { In, IsNull } from 'typeorm';
 import { AuditService } from '../common/audit.service';
 import { alignStoredFileIdentity } from '../common/document-format.util';
-import { ConnectorProvider, Document, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
+import { ConnectorProvider, Document, ImportStatus, McpIntegration, McpIntegrationStatus, ProjectStatus } from '../database/entities';
 import { DatabaseService } from '../database/database.service';
 import { ExternalImportOrchestratorService } from '../imports/external-import-orchestrator.service';
 import { compareVersions, suggestNextVersion } from '../imports/version.util';
@@ -34,6 +34,7 @@ import { WorkspaceActivitySource } from '../database/entities';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ConnectorIdempotencyService } from './connector-idempotency.service';
 import { ConnectorImportJobService } from './connector-import-job.service';
+import { McpBinaryImportService } from './mcp-binary-import.service';
 
 @Injectable()
 export class McpToolsService {
@@ -52,6 +53,7 @@ export class McpToolsService {
     private readonly documents: DocumentsService,
     private readonly idempotency: ConnectorIdempotencyService,
     private readonly connectorImports: ConnectorImportJobService,
+    private readonly binaryImport: McpBinaryImportService,
   ) {}
 
   private mcpActor(integration: McpIntegration) {
@@ -77,7 +79,7 @@ export class McpToolsService {
     toolName: McpToolName,
     args: Record<string, unknown> = {},
     ipAddress?: string,
-  ) {
+  ): Promise<unknown> {
     await this.audit.record({
       action: 'MCP_REQUEST_RECEIVED',
       entityType: 'McpIntegration',
@@ -100,16 +102,253 @@ export class McpToolsService {
         return this.resolveImportTargets(integration, args as unknown as ResolveImportTargetsDto);
       case 'check_document_exists':
         return this.checkDocumentExists(integration, args as unknown as CheckDocumentExistsDto);
+      case 'inspect_attachment_capability':
+        return this.binaryImport.inspectAttachmentCapability({
+          fileName: typeof args.fileName === 'string' ? args.fileName : undefined,
+          attachmentReference:
+            typeof args.attachmentReference === 'string' ? args.attachmentReference : undefined,
+          fileUrl: typeof args.fileUrl === 'string' ? args.fileUrl : undefined,
+          canProvideExactBytes: args.canProvideExactBytes === true,
+          declaredMimeType: typeof args.mimeType === 'string' ? args.mimeType : undefined,
+          expectedFileSize: args.expectedFileSize != null ? Number(args.expectedFileSize) : undefined,
+        });
+      case 'prepare_original_file_import': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          { ...parsed.dto, documentContent: undefined, outputFormat: undefined } as PrepareApprovedDocumentDto,
+          undefined,
+          this.defaultApproverName(integration),
+        );
+        if (parsed.fileUrl?.trim()) {
+          return this.dispatchTool(integration, 'import_original_file', args, ipAddress);
+        }
+        return this.prepareOriginalFileImport(integration, prepared);
+      }
+      case 'finalize_original_file_import':
+        return this.finalizeOriginalFileImport(integration, args);
+      case 'import_original_file': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          { ...parsed.dto, documentContent: undefined, outputFormat: undefined } as PrepareApprovedDocumentDto,
+          undefined,
+          this.defaultApproverName(integration),
+        );
+        const projectId = await this.resolveProjectId(
+          integration,
+          prepared.projectId,
+          prepared.projectCode,
+        );
+        let sectionKey = prepared.sectionKey?.trim() || undefined;
+        if (!sectionKey && prepared.module?.trim()) {
+          const resolved = await this.resolveImportTargets(integration, {
+            project: projectId,
+            module: prepared.module,
+          });
+          sectionKey = resolved.module?.sectionKey;
+        }
+        const versioned = await this.resolveNewVersionSubmit(projectId, {
+          ...prepared,
+          documentCode: prepared.documentCode,
+          mode: prepared.mode,
+          existingDocumentId: prepared.existingDocumentId,
+        } as SubmitApprovedDocumentDto);
+        const fileUrl =
+          parsed.fileUrl?.trim()
+          || (typeof args.fileUrl === 'string' ? args.fileUrl.trim() : undefined)
+          || (typeof args.attachmentReference === 'string' ? args.attachmentReference.trim() : undefined);
+        return this.binaryImport.importOriginalFile(integration, {
+          projectId,
+          fileName: prepared.fileName || 'document.docx',
+          title: versioned.title,
+          documentType: versioned.documentType || prepared.documentType,
+          description: versioned.description,
+          owner: versioned.owner,
+          versionNo: versioned.versionNo,
+          approvalStatus: prepared.approvalStatus,
+          approvedBy: prepared.approvedBy || this.defaultApproverName(integration),
+          approvalDate: prepared.approvalDate,
+          sectionKey,
+          mode: versioned.mode === 'NEW_VERSION' ? 'NEW_VERSION' : versioned.mode === 'NEW' ? 'NEW' : undefined,
+          existingDocumentId: versioned.existingDocumentId,
+          documentCode: versioned.documentCode,
+          fileUrl,
+          attachmentReference: typeof args.attachmentReference === 'string' ? args.attachmentReference : undefined,
+          mimeType: prepared.mimeType,
+          sourceSha256: typeof args.expectedSha256 === 'string' ? args.expectedSha256 : undefined,
+        }).then(async (queued) => {
+          if (!queued.importJobId) return queued;
+          const status = await this.getImportStatus(integration, { importJobId: queued.importJobId });
+          return {
+            ...queued,
+            status: status.status,
+            importStatus: status.status,
+            imported: status.status === ImportStatus.IMPORTED,
+            document: status.document,
+            version: status.version,
+            message:
+              status.status === ImportStatus.IMPORTED
+                ? `Imported ${status.document?.code || queued.fileName} into the Master Document Index.`
+                : queued.message
+                  ?? 'Binary verified; repository import still processing — poll get_import_status.',
+          };
+        });
+      }
+      case 'prepare_automatic_file_import': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          { ...parsed.dto, documentContent: undefined, outputFormat: undefined } as PrepareApprovedDocumentDto,
+          undefined,
+          this.defaultApproverName(integration),
+        );
+        const projectId = await this.resolveProjectId(
+          integration,
+          prepared.projectId,
+          prepared.projectCode,
+        );
+        let sectionKey = prepared.sectionKey?.trim() || undefined;
+        if (!sectionKey && prepared.module?.trim()) {
+          const resolved = await this.resolveImportTargets(integration, {
+            project: projectId,
+            module: prepared.module,
+          });
+          sectionKey = resolved.module?.sectionKey;
+        }
+        const versioned = await this.resolveNewVersionSubmit(projectId, {
+          ...prepared,
+          documentCode: prepared.documentCode,
+          mode: prepared.mode,
+          existingDocumentId: prepared.existingDocumentId,
+        } as SubmitApprovedDocumentDto);
+        return this.binaryImport.prepareAutomaticFileImport(integration, {
+          projectId,
+          projectCode: prepared.projectCode,
+          userId: integration.createdBy?.id ?? null,
+          fileName: prepared.fileName || 'document.docx',
+          expectedFileSize: args.expectedFileSize != null ? Number(args.expectedFileSize) : undefined,
+          expectedSha256: typeof args.expectedSha256 === 'string' ? args.expectedSha256 : undefined,
+          declaredMimeType: prepared.mimeType,
+          expectedChunkCount: args.expectedChunkCount != null ? Number(args.expectedChunkCount) : undefined,
+          documentType: versioned.documentType || prepared.documentType,
+          documentId: versioned.existingDocumentId,
+          documentCode: versioned.documentCode,
+          sectionKey,
+          module: prepared.module,
+          mode: versioned.mode === 'NEW_VERSION' ? 'NEW_VERSION' : 'NEW_DOCUMENT',
+          title: versioned.title,
+          versionNo: versioned.versionNo,
+          approvalStatus: prepared.approvalStatus,
+          approvedBy: prepared.approvedBy || this.defaultApproverName(integration),
+          approvalDate: prepared.approvalDate,
+          description: versioned.description,
+          owner: versioned.owner,
+        });
+      }
+      case 'upload_original_file_chunk':
+        return this.binaryImport.uploadOriginalFileChunk({
+          uploadId: String(args.uploadId ?? ''),
+          uploadToken: String(args.uploadToken ?? ''),
+          chunkIndex: Number(args.chunkIndex ?? args.chunkNumber ?? 0),
+          chunkBase64: String(args.encodedContent ?? args.chunkBase64 ?? args.data ?? ''),
+          chunkSha256: String(args.chunkSha256 ?? ''),
+          rawByteLength: Number(args.rawByteLength ?? 0),
+        });
+      case 'get_automatic_file_import_progress':
+        return this.binaryImport.getProgress(String(args.uploadId ?? ''), String(args.uploadToken ?? ''));
+      case 'resume_automatic_file_import':
+        return this.binaryImport.resume(String(args.uploadId ?? ''), String(args.uploadToken ?? ''));
+      case 'complete_automatic_file_import': {
+        const parsed = this.parseSubmitPayload(args);
+        const prepared = this.applySubmitDefaults(
+          { ...parsed.dto, documentContent: undefined, outputFormat: undefined } as PrepareApprovedDocumentDto,
+          undefined,
+          this.defaultApproverName(integration),
+        );
+        const projectId = await this.resolveProjectId(
+          integration,
+          prepared.projectId,
+          prepared.projectCode,
+        );
+        let sectionKey = prepared.sectionKey?.trim() || undefined;
+        if (!sectionKey && prepared.module?.trim()) {
+          const resolved = await this.resolveImportTargets(integration, {
+            project: projectId,
+            module: prepared.module,
+          });
+          sectionKey = resolved.module?.sectionKey;
+        }
+        const versioned = await this.resolveNewVersionSubmit(projectId, {
+          ...prepared,
+          documentCode: prepared.documentCode,
+          mode: prepared.mode,
+          existingDocumentId: prepared.existingDocumentId,
+        } as SubmitApprovedDocumentDto);
+        const completed = await this.binaryImport.complete(
+          String(args.uploadId ?? ''),
+          String(args.uploadToken ?? ''),
+          integration,
+          {
+            projectId,
+            fileName: prepared.fileName,
+            title: versioned.title,
+            documentType: versioned.documentType || prepared.documentType || 'Article',
+            description: versioned.description,
+            owner: versioned.owner,
+            versionNo: versioned.versionNo,
+            approvalStatus: prepared.approvalStatus || 'APPROVED',
+            approvedBy: prepared.approvedBy || this.defaultApproverName(integration),
+            approvalDate: prepared.approvalDate || new Date().toISOString().slice(0, 10),
+            sectionKey,
+            mode: versioned.mode === 'NEW_VERSION' ? 'NEW_VERSION' : versioned.mode === 'NEW' ? 'NEW' : undefined,
+            existingDocumentId: versioned.existingDocumentId,
+            documentCode: versioned.documentCode,
+            sourceSha256: typeof args.expectedSha256 === 'string' ? args.expectedSha256 : undefined,
+          },
+        );
+        if (completed.importJobId) {
+          const status = await this.getImportStatus(integration, { importJobId: completed.importJobId });
+          const fileHint =
+            ('fileName' in completed && typeof completed.fileName === 'string' && completed.fileName)
+            || status.originalFilename
+            || status.fileName
+            || 'document';
+          const priorMessage =
+            'message' in completed && typeof completed.message === 'string'
+              ? completed.message
+              : undefined;
+          return {
+            ...completed,
+            status: status.status,
+            importStatus: status.status,
+            imported: status.status === ImportStatus.IMPORTED,
+            document: status.document,
+            version: status.version,
+            message:
+              status.status === ImportStatus.IMPORTED
+                ? `Imported ${status.document?.code || fileHint} into the Master Document Index.`
+                : priorMessage
+                  ?? 'Binary verified; repository import still processing — poll get_import_status.',
+          };
+        }
+        return completed;
+      }
+      case 'abort_automatic_file_import':
+        return this.binaryImport.abort(
+          String(args.uploadId ?? ''),
+          String(args.uploadToken ?? ''),
+          typeof args.reason === 'string' ? args.reason : undefined,
+        );
       case 'upload_original_docx':
+      case 'upload_original_xlsx':
+      case 'upload_original_pdf':
+      case 'upload_original_pptx':
       case 'prepare_approved_document': {
         const parsed = this.parseSubmitPayload(args);
         // Metadata only. NEVER accept documentContent here — ChatGPT Actions hit
         // "request entity too large" when GPTs paste converted Markdown (~400KB+).
-        // Always return a browser uploadUrl for exact DOCX/XLSX/PDF bytes.
+        // Prefer import_original_file (fileUrl) or prepare_automatic_file_import (chunks).
         const prepared = this.applySubmitDefaults(
           {
             ...parsed.dto,
-            // Strip any pasted Markdown so prepare stays a tiny Action call.
             documentContent: undefined,
             outputFormat: undefined,
           } as PrepareApprovedDocumentDto,
@@ -117,38 +356,9 @@ export class McpToolsService {
           this.defaultApproverName(integration),
         );
         if (parsed.fileUrl?.trim()) {
-          return this.submitApprovedDocument(
-            integration,
-            {
-              ...prepared,
-              documentCode: prepared.documentCode,
-              description: prepared.description,
-              owner: prepared.owner,
-              metadataJson: prepared.metadataJson,
-              relationshipsJson: prepared.relationshipsJson,
-              mode: prepared.mode,
-              existingDocumentId: prepared.existingDocumentId,
-              fileName: prepared.fileName!,
-              mimeType: prepared.mimeType,
-              fileUrl: parsed.fileUrl,
-              documentContent: undefined,
-              outputFormat: undefined,
-            },
-            ipAddress,
-            { forceFilePreserve: true },
-          );
+          return this.dispatchTool(integration, 'import_original_file', args, ipAddress);
         }
-        const upload = await this.prepareApprovedDocument(integration, prepared);
-        if (parsed.documentContent?.trim()) {
-          return {
-            ...upload,
-            discardedDocumentContent: true,
-            message:
-              'Ignored documentContent (Markdown). Open uploadUrl and upload the exact original .docx/.xlsx — '
-              + 'do not paste converted Markdown (that causes request entity too large).',
-          };
-        }
-        return upload;
+        return this.prepareOriginalFileImport(integration, prepared);
       }
       case 'begin_document_upload': {
         const input = args as unknown as BeginDocumentUploadDto;
@@ -761,10 +971,23 @@ export class McpToolsService {
     const uploadUrl = `${baseUrl}/api/mcp/upload/${pending.token}`;
     return {
       ready: true,
+      status: 'UPLOAD_PENDING',
+      uploadId: pending.token,
       uploadUrl,
+      method: 'PUT',
       expiresAt: new Date(pending.expiresAt).toISOString(),
+      maxFileSize: 524_288_000,
+      acceptedMimeTypes: [
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/pdf',
+      ],
       importMode: 'FILE_PRESERVE' as const,
       preserveOriginal: true,
+      preservationMode: 'ORIGINAL_BINARY',
+      source: 'CHATGPT_MCP',
+      conversionPerformed: false,
       mode: versioned.mode ?? 'NEW',
       documentCode: versioned.documentCode ?? null,
       existingDocumentId: versioned.existingDocumentId ?? null,
@@ -776,10 +999,96 @@ export class McpToolsService {
       title: versioned.title,
       fileName: input.fileName ?? null,
       instructions:
-        'Open uploadUrl in a browser and upload the exact original file (.docx, .xlsx, .pdf, .pptx). '
-        + 'Binary is stored unchanged (FILE_PRESERVE). '
-        + 'Then call get_import_status after upload completes, or use the import job id from the success page.',
+        'FILE_PRESERVE staged upload. PUT the exact original bytes to uploadUrl (or POST multipart field "file"). '
+        + 'Do not convert to Markdown or PDF. Then call finalize_original_file_import with uploadId. '
+        + 'Creating this session is not IMPORTED.',
     };
+  }
+
+  /**
+   * Dedicated original-file staged session. Same FILE_PRESERVE contract as prepareApprovedDocument,
+   * with an explicit name so ChatGPT does not use Markdown→PDF submit_approved_document.
+   */
+  async prepareOriginalFileImport(integration: McpIntegration, input: PrepareApprovedDocumentDto) {
+    return this.prepareApprovedDocument(integration, input);
+  }
+
+  async finalizeOriginalFileImport(integration: McpIntegration, args: Record<string, unknown>) {
+    const uploadId = String(args.uploadId ?? '').trim();
+    const uploadToken = String(args.uploadToken ?? '').trim();
+    if (!uploadId) {
+      throw new BadRequestException('uploadId is required');
+    }
+
+    if (uploadToken) {
+      return this.binaryImport.complete(uploadId, uploadToken, integration, {
+        projectId: String(args.projectId ?? ''),
+        fileName: typeof args.fileName === 'string' ? args.fileName : undefined,
+        title: typeof args.title === 'string' ? args.title : undefined,
+        documentType: typeof args.documentType === 'string' ? args.documentType : 'Article',
+        versionNo: typeof args.versionNo === 'string' ? args.versionNo : 'Rev 1.0',
+        approvalStatus: 'APPROVED',
+        approvedBy: this.defaultApproverName(integration),
+        approvalDate: new Date().toISOString().slice(0, 10),
+        documentCode: typeof args.documentCode === 'string' ? args.documentCode : undefined,
+        mode: args.mode === 'NEW_VERSION' ? 'NEW_VERSION' : args.mode === 'NEW' ? 'NEW' : undefined,
+      } as any);
+    }
+
+    const completed = this.browserUploads.getCompleted(uploadId);
+    if (completed) {
+      if (completed.importJobId) {
+        const status = await this.getImportStatus(integration, { importJobId: completed.importJobId });
+        const imported = status.status === 'IMPORTED';
+        return {
+          ...completed,
+          status: imported ? 'IMPORTED' : completed.checksumVerified ? 'VERIFIED' : status.status,
+          imported,
+          uploadId,
+          importJob: status,
+          conversionPerformed: false,
+          importMode: 'FILE_PRESERVE',
+          preservationMode: 'ORIGINAL_BINARY',
+        };
+      }
+      return {
+        ...completed,
+        status: completed.checksumVerified ? 'VERIFIED' : 'VERIFICATION_FAILED',
+        imported: false,
+        uploadId,
+        conversionPerformed: false,
+        importMode: 'FILE_PRESERVE',
+      };
+    }
+
+    try {
+      this.browserUploads.get(uploadId);
+      return {
+        status: 'UPLOAD_PENDING',
+        ready: false,
+        imported: false,
+        uploadId,
+        conversionPerformed: false,
+        importMode: 'FILE_PRESERVE',
+        message:
+          'Original file has not been PUT/POSTed to uploadUrl yet. Do not convert to Markdown. '
+          + 'Do not report IMPORTED.',
+      };
+    } catch {
+      /* token not pending */
+    }
+
+    try {
+      return await this.getImportStatus(integration, { importJobId: uploadId });
+    } catch {
+      return {
+        status: 'VERIFICATION_FAILED',
+        imported: false,
+        uploadId,
+        conversionPerformed: false,
+        message: 'uploadId is not a pending original-file session or import job.',
+      };
+    }
   }
 
   async completeBrowserUpload(
@@ -819,6 +1128,16 @@ export class McpToolsService {
       ipAddress,
       { forceFilePreserve: true },
     );
+    this.browserUploads.rememberCompleted({
+      uploadId: token,
+      importJobId: 'importJobId' in result ? String(result.importJobId ?? '') || undefined : undefined,
+      status: 'status' in result ? String(result.status) : 'UPLOADED',
+      fileName,
+      fileSize: file.buffer.length,
+      sha256: 'storedSha256' in result ? String((result as { storedSha256?: string }).storedSha256 ?? '') : undefined,
+      checksumVerified: 'checksumVerified' in result ? Boolean((result as { checksumVerified?: boolean }).checksumVerified) : undefined,
+      completedAt: Date.now(),
+    });
     return result;
   }
 
@@ -1149,8 +1468,8 @@ export class McpToolsService {
   }
 
   /**
-   * ChatGPT Actions cannot attach DOCX/XLSX bytes. Create a one-time browser upload URL
-   * so the user can submit the exact original file (FILE_PRESERVE).
+   * ChatGPT Actions cannot attach DOCX/XLSX bytes. Prefer HTTPS fileUrl (Mode A) or
+   * prepare_automatic_file_import chunks (Mode C). Do not treat browser upload as success UX.
    */
   private async offerBrowserUploadForOriginal(
     integration: McpIntegration,
@@ -1173,55 +1492,33 @@ export class McpToolsService {
     },
     reason: string,
   ) {
-    const prepared = this.applySubmitDefaults(
-      {
-        projectId: input.projectId,
-        projectCode: input.projectCode,
-        module: input.module,
-        sectionKey: input.sectionKey,
-        documentType: input.documentType || 'Article',
-        title: input.title || 'Approved document',
-        versionNo: input.versionNo || '1.0',
-        approvalStatus: input.approvalStatus || 'APPROVED',
-        approvedBy: input.approvedBy,
-        approvalDate: input.approvalDate || new Date().toISOString().slice(0, 10),
-        fileName: input.fileName || 'document.docx',
-        mimeType: input.mimeType,
-        mode: input.mode,
-        documentCode: input.documentCode,
-        existingDocumentId: input.existingDocumentId,
-      } as PrepareApprovedDocumentDto,
-      undefined,
-      this.defaultApproverName(integration),
-    );
-    const upload = await this.prepareApprovedDocument(integration, prepared);
+    const capability = this.binaryImport.inspectAttachmentCapability({
+      fileName: input.fileName,
+      canProvideExactBytes: false,
+    });
     return {
-      status: 'ORIGINAL_FILE_UNAVAILABLE' as const,
-      ready: true,
-      uploadUrl: upload.uploadUrl,
-      expiresAt: upload.expiresAt,
+      status: 'AUTOMATIC_TRANSFER_UNSUPPORTED_BY_HOST' as const,
+      ready: false,
       conversionPerformed: false,
       importMode: 'FILE_PRESERVE' as const,
       preserveOriginal: true,
-      mode: upload.mode,
-      documentCode: upload.documentCode,
-      existingDocumentId: upload.existingDocumentId,
-      versionNo: upload.versionNo,
+      errorCode: 'AUTOMATIC_TRANSFER_UNSUPPORTED_BY_HOST',
+      supportedTransport: capability.supportedTransport,
+      mode: input.mode,
+      documentCode: input.documentCode ?? null,
+      existingDocumentId: input.existingDocumentId ?? null,
+      fileName: input.fileName ?? null,
+      title: input.title ?? null,
       message:
         `${reason} `
-        + 'ZERO-CLICK option: call submit_approved_file again with fileUrl=https://… to the exact .docx/.xlsx '
-        + '(Repo downloads bytes — no browser page). '
-        + 'Or open uploadUrl and upload the exact original file once. '
-        + 'Do NOT convert the file to Markdown or PDF.',
+        + 'Host did not supply fileUrl/attachmentReference or exact binary chunks. '
+        + 'Do NOT convert to Markdown/PDF. Do NOT claim import succeeded. '
+        + 'ZERO-CLICK: resubmit with fileUrl=https://… to the exact file, or call '
+        + 'prepare_automatic_file_import and upload_original_file_chunk if the host can send exact bytes.',
       zeroClickHint:
-        'Pass fileUrl (public HTTPS to the exact DOCX/XLSX) to submit_approved_file for import without opening uploadUrl.',
-      instructions: upload.instructions,
-      project: upload.project,
-      module: upload.module,
-      sectionKey: upload.sectionKey,
-      documentType: upload.documentType,
-      title: upload.title,
-      fileName: prepared.fileName,
+        'Pass fileUrl (public HTTPS to the exact DOCX/XLSX) to import_original_file / submit_approved_file.',
+      neverConvertsMarkdownToOffice: true,
+      browserUploadForbiddenAsPrimaryUx: true,
     };
   }
 
@@ -1241,7 +1538,7 @@ export class McpToolsService {
         action: 'MCP_ORIGINAL_FILE_UNAVAILABLE',
         entityType: 'McpIntegration',
         entityId: integration.id,
-        message: 'submit_approved_file called without usable file bytes/reference — offering browser upload',
+        message: 'submit_approved_file called without usable file bytes/reference',
         after: {
           tool: 'submit_approved_file',
           fileName: input.fileName,
@@ -1252,7 +1549,7 @@ export class McpToolsService {
       return this.offerBrowserUploadForOriginal(
         integration,
         input,
-        'ChatGPT Actions cannot attach binary DOCX/XLSX bytes in the Action call.',
+        'ChatGPT Actions/MCP did not supply original binary bytes or HTTPS fileUrl.',
       );
     }
 
@@ -1289,12 +1586,62 @@ export class McpToolsService {
   }
 
   async getImportStatus(integration: McpIntegration, input: GetImportStatusDto) {
-    const job = await this.db.importJobs.findOne({
+    let job = await this.db.importJobs.findOne({
       where: { id: input.importJobId },
       relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true },
     });
     if (!job) throw new NotFoundException('Import job not found');
     this.assertProjectAccess(integration, job.project.id);
+
+    const meta = (job.metadata ?? {}) as Record<string, unknown>;
+    const approvalStatus = String(meta.approvalStatus ?? '').toUpperCase();
+    const canAutoComplete =
+      job.status === ImportStatus.READY_FOR_REVIEW
+      && job.provider === ConnectorProvider.CHATGPT_MCP
+      && approvalStatus === 'APPROVED';
+
+    if (canAutoComplete) {
+      try {
+        await this.connectorImports.processReadyImport(job.id, {
+          userId: this.mcpActor(integration).id,
+        });
+        job = await this.db.importJobs.findOne({
+          where: { id: input.importJobId },
+          relations: { project: true, sourceSystem: true, resolvedSection: true, document: true, version: true },
+        }) ?? job;
+      } catch (error) {
+        // Surface process error on the job row / response; do not hide READY_FOR_REVIEW.
+        const message = error instanceof Error ? error.message : 'Auto-import failed';
+        return {
+          id: job.id,
+          status: job.status,
+          externalImportStatus: job.externalImportStatus,
+          provider: job.provider,
+          fileName: job.fileName,
+          checksum: job.checksum,
+          errorMessage: job.errorMessage || message,
+          importMode: meta.importMode ?? null,
+          conversionPerformed: meta.conversionPerformed ?? null,
+          checksumVerified: meta.checksumVerified ?? null,
+          originalFilename: meta.originalFilename ?? job.fileName,
+          sourceSizeBytes: meta.sourceSizeBytes ?? job.fileSize,
+          storedSizeBytes: meta.storedSizeBytes ?? job.fileSize,
+          sourceSha256: meta.sourceSha256 ?? job.checksum,
+          storedSha256: meta.storedSha256 ?? job.checksum,
+          project: { id: job.project.id, code: job.project.code, name: job.project.name },
+          sourceSystem: { id: job.sourceSystem.id, code: job.sourceSystem.code, name: job.sourceSystem.name },
+          resolvedSection: job.resolvedSection
+            ? { id: job.resolvedSection.id, sectionKey: job.resolvedSection.sectionKey, name: job.resolvedSection.name }
+            : null,
+          document: job.document ? { id: job.document.id, code: job.document.code, title: job.document.title } : null,
+          version: job.version ? { id: job.version.id, versionNo: job.version.versionNo } : null,
+          createdAt: job.createdAt,
+          completedAt: job.completedAt,
+          processingAttempted: true,
+          processingError: message,
+        };
+      }
+    }
 
     return {
       id: job.id,
@@ -1901,10 +2248,47 @@ export class McpToolsService {
       list_document_types: 'List active document types configured in the gateway',
       resolve_import_targets:
         'Resolve human-readable project / module / document type names into projectId, sectionKey, and documentType values for submission',
+      inspect_attachment_capability:
+        'Detect whether ChatGPT can supply original binary (HTTPS fileUrl/reference or exact-byte chunks). '
+        + 'Never converts Markdown. Returns HOST_REFERENCE, CHUNKED_BINARY, or UNSUPPORTED.',
+      import_original_file:
+        'Import an existing source file into the Physical Risk Repository while preserving the original file format and binary contents. '
+        + 'Use this tool for DOCX, XLSX, PDF and other uploaded/generated files when the user requests the original file to be imported. '
+        + 'Do not convert the file to Markdown or PDF. ALWAYS use this action instead of submit_approved_document when an existing DOCX, XLSX, PDF, PPTX or other source file must be preserved exactly. '
+        + 'Pass fileUrl when available. For NEW_VERSION use mode=NEW_VERSION and documentCode (e.g. MOSS-GS-003). '
+        + 'Creating a session is not IMPORTED — report success only after size and SHA-256 match.',
+      prepare_original_file_import:
+        'Start FILE_PRESERVE staged import of the exact original DOCX/XLSX/PDF/PPTX. Returns uploadId, uploadUrl, method=PUT. '
+        + 'ALWAYS use this instead of submit_approved_document when an existing Office/PDF file must be preserved. '
+        + 'Never convert to Markdown or PDF. Then PUT original bytes to uploadUrl and call finalize_original_file_import.',
+      finalize_original_file_import:
+        'Verify the stored original file (byte size + SHA-256) after staged PUT/chunk upload. '
+        + 'Returns UPLOAD_PENDING, VERIFIED, VERIFICATION_FAILED, or IMPORTED. Never treat session creation as IMPORTED.',
+      prepare_automatic_file_import:
+        'Start durable automatic chunked FILE_PRESERVE import. Returns uploadId + uploadToken + acceptedChunkSize. '
+        + 'Then upload_original_file_chunk repeatedly without waiting for another user message. Never Markdown.',
+      upload_original_file_chunk:
+        'Upload one Base64-encoded exact binary chunk. Validates chunkSha256 and rawByteLength. Idempotent. Never UTF-8-interpret bytes.',
+      get_automatic_file_import_progress:
+        'Progress for automatic chunked import (received/missing chunks, bytes, status).',
+      resume_automatic_file_import:
+        'Resume interrupted automatic chunked import; returns missingChunks and nextExpectedChunk.',
+      complete_automatic_file_import:
+        'Assemble chunks, validate OOXML/PDF signature + SHA-256/size, then queue FILE_PRESERVE. '
+        + 'Creating a session is not success — report AVAILABLE/queued only after validation.',
+      abort_automatic_file_import:
+        'Abort automatic import; never deletes an existing valid document version.',
       prepare_approved_document:
-        'PREFERRED: return uploadUrl for exact DOCX/XLSX/PDF browser upload. Metadata only — never documentContent/Markdown.',
+        'Alias of upload_original_docx: FILE_PRESERVE staged PUT of the exact original file. Not Markdown→PDF.',
       upload_original_docx:
-        'Same as prepare_approved_document: uploadUrl for exact original DOCX/XLSX (FILE_PRESERVE). No Markdown.',
+        'PRIMARY binary original-file upload (FILE_PRESERVE) for DOCX/XLSX/PDF/PPTX. '
+        + 'Returns uploadUrl for exact bytes PUT. NEW_VERSION + documentCode supported. Not Markdown→PDF. This tool IS available.',
+      upload_original_xlsx:
+        'PRIMARY binary XLSX FILE_PRESERVE upload (same as upload_original_docx). Not Markdown.',
+      upload_original_pdf:
+        'PRIMARY binary PDF FILE_PRESERVE upload (same as upload_original_docx). Not Markdown.',
+      upload_original_pptx:
+        'PRIMARY binary PPTX FILE_PRESERVE upload (same as upload_original_docx). Not Markdown.',
       begin_document_upload:
         'Advanced: start a chunked file upload session',
       upload_document_chunk:
@@ -1912,19 +2296,15 @@ export class McpToolsService {
       check_document_exists:
         'Check whether a document already exists; returns newVersionSubmitHints for the next revision',
       submit_approved_document:
-        'Legacy combined submit. Prefer submit_approved_file when an original DOCX/XLSX/PDF/PPTX exists, '
-        + 'or submit_approved_content for intentional Markdown→document creation. '
-        + 'If the same title already exists, submits as NEW_VERSION unless mode=NEW. '
-        + 'Pass workspaceCode (WS-YYYY-#####) to attach after import.',
+        'GENERATED TEXT ONLY. Use only when the authoritative source is generated text/Markdown and conversion to a repository-generated document is intended. '
+        + 'Do NOT use for an existing attached DOCX/XLSX/PDF/PPTX — use import_original_file or prepare_original_file_import instead. '
+        + 'This is not a binary DOCX upload action.',
       submit_approved_file:
-        'Import the exact original approved file into the Physical Risk Repository without converting or reconstructing it. '
-        + 'Use whenever a real generated/uploaded DOCX, XLSX, PDF, PPTX, ZIP or other approved artifact is available. '
-        + 'Pass fileContentBase64, fileUrl, or uploadId — do NOT convert the source to Markdown first. '
-        + 'If the original artifact cannot be supplied, returns ORIGINAL_FILE_UNAVAILABLE (no text reconstruction).',
+        'FILE_PRESERVE import of exact original bytes via fileUrl, fileContentBase64, or uploadId. '
+        + 'ALWAYS prefer import_original_file for attached DOCX/XLSX/PDF. Never convert to Markdown.',
       submit_approved_content:
-        'Create a Repository document from supplied text/Markdown. '
-        + 'Not appropriate when preserving an existing binary DOCX/XLSX/PDF is required — use submit_approved_file instead. '
-        + 'Converts Markdown to PDF/DOCX/XLSX/PPTX/TXT from fileName/outputFormat.',
+        'Use only when the authoritative source is generated text/Markdown and conversion to a repository-generated document is intended. '
+        + 'Not for preserving an existing DOCX/XLSX/PDF attachment — use import_original_file.',
       get_import_status: 'Get the processing status of an import job by id',
       create_workspace: 'Create a Repository Workspace (returns WS-YYYY-#####)',
       get_workspace: 'Get a workspace by workspaceCode',
@@ -1979,6 +2359,124 @@ export class McpToolsService {
           documentType: { type: 'string', description: 'Document type name or code (e.g. Articles)' },
         },
       },
+      inspect_attachment_capability: {
+        type: 'object',
+        properties: {
+          fileName: { type: 'string' },
+          fileUrl: { type: 'string', format: 'uri' },
+          attachmentReference: { type: 'string' },
+          canProvideExactBytes: { type: 'boolean' },
+          expectedFileSize: { type: 'integer' },
+          mimeType: { type: 'string' },
+        },
+      },
+      import_original_file: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        properties: {
+          projectCode: { type: 'string' },
+          projectId: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          fileName: { type: 'string' },
+          fileUrl: { type: 'string', format: 'uri' },
+          attachmentReference: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          documentCode: { type: 'string' },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          expectedSha256: { type: 'string' },
+          payload: { type: 'string' },
+        },
+      },
+      prepare_original_file_import: {
+        type: 'object',
+        required: ['fileName', 'documentType', 'title'],
+        properties: {
+          projectCode: { type: 'string' },
+          workspaceCode: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          documentCode: { type: 'string' },
+          versionNo: { type: 'string' },
+          fileName: { type: 'string' },
+          mimeType: { type: 'string' },
+          fileUrl: { type: 'string', format: 'uri' },
+          payload: { type: 'string' },
+        },
+      },
+      finalize_original_file_import: {
+        type: 'object',
+        required: ['uploadId'],
+        properties: {
+          uploadId: { type: 'string' },
+          uploadToken: { type: 'string' },
+        },
+      },
+      prepare_automatic_file_import: {
+        type: 'object',
+        required: ['fileName', 'documentType', 'title'],
+        properties: {
+          projectCode: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          fileName: { type: 'string' },
+          expectedFileSize: { type: 'integer' },
+          expectedSha256: { type: 'string' },
+          expectedChunkCount: { type: 'integer' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          documentCode: { type: 'string' },
+          payload: { type: 'string' },
+        },
+      },
+      upload_original_file_chunk: {
+        type: 'object',
+        required: ['uploadId', 'uploadToken', 'chunkIndex', 'chunkSha256', 'rawByteLength'],
+        properties: {
+          uploadId: { type: 'string' },
+          uploadToken: { type: 'string' },
+          chunkIndex: { type: 'integer' },
+          chunkNumber: { type: 'integer' },
+          encodedContent: { type: 'string', description: 'Base64 of exact binary chunk' },
+          chunkBase64: { type: 'string' },
+          chunkSha256: { type: 'string' },
+          rawByteLength: { type: 'integer' },
+        },
+      },
+      get_automatic_file_import_progress: {
+        type: 'object',
+        required: ['uploadId', 'uploadToken'],
+        properties: { uploadId: { type: 'string' }, uploadToken: { type: 'string' } },
+      },
+      resume_automatic_file_import: {
+        type: 'object',
+        required: ['uploadId', 'uploadToken'],
+        properties: { uploadId: { type: 'string' }, uploadToken: { type: 'string' } },
+      },
+      complete_automatic_file_import: {
+        type: 'object',
+        required: ['uploadId', 'uploadToken'],
+        properties: {
+          uploadId: { type: 'string' },
+          uploadToken: { type: 'string' },
+          expectedSha256: { type: 'string' },
+          expectedFileSize: { type: 'integer' },
+          payload: { type: 'string' },
+        },
+      },
+      abort_automatic_file_import: {
+        type: 'object',
+        required: ['uploadId', 'uploadToken'],
+        properties: {
+          uploadId: { type: 'string' },
+          uploadToken: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      },
       prepare_approved_document: {
         type: 'object',
         required: ['title', 'documentType'],
@@ -2009,6 +2507,57 @@ export class McpToolsService {
         },
       },
       upload_original_docx: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        properties: {
+          projectCode: { type: 'string' },
+          module: { type: 'string', description: 'e.g. Governance Standards' },
+          documentType: { type: 'string', description: 'e.g. Master Control Catalogue' },
+          title: { type: 'string' },
+          documentCode: { type: 'string', description: 'e.g. MOSS-GS-003 for NEW_VERSION' },
+          fileName: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvalDate: { type: 'string' },
+        },
+      },
+      upload_original_xlsx: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        properties: {
+          projectCode: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          documentCode: { type: 'string' },
+          fileName: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvalDate: { type: 'string' },
+        },
+      },
+      upload_original_pdf: {
+        type: 'object',
+        required: ['title', 'documentType', 'fileName'],
+        properties: {
+          projectCode: { type: 'string' },
+          module: { type: 'string' },
+          documentType: { type: 'string' },
+          title: { type: 'string' },
+          documentCode: { type: 'string' },
+          fileName: { type: 'string' },
+          mode: { type: 'string', enum: ['NEW', 'NEW_VERSION'] },
+          existingDocumentId: { type: 'string', format: 'uuid' },
+          versionNo: { type: 'string' },
+          approvalStatus: { type: 'string', enum: ['APPROVED'] },
+          approvalDate: { type: 'string' },
+        },
+      },
+      upload_original_pptx: {
         type: 'object',
         required: ['title', 'documentType', 'fileName'],
         properties: {

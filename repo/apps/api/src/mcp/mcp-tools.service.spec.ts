@@ -38,11 +38,15 @@ describe('McpToolsService project permissions', () => {
     { create: jest.fn(), get: jest.fn(), consume: jest.fn(), assertNotExpired: jest.fn() } as any,
     { fetchApprovedDocument: jest.fn() } as any,
     { render: jest.fn().mockResolvedValue(Buffer.from('%PDF-1.4')) } as any,
+    { renderDocx: jest.fn(), renderXlsx: jest.fn(), renderPptx: jest.fn(), renderTxt: jest.fn() } as any,
     { get: jest.fn().mockReturnValue('https://repo.physicalrisk.com') } as any,
     {} as any,
     {} as any,
     { beginOrReplay: jest.fn(async ({ execute }) => ({ result: await execute(), replayed: false })) } as any,
     { enqueueSingleImport: jest.fn(), createJob: jest.fn(), getByCodeOrId: jest.fn(), retry: jest.fn(), toView: jest.fn() } as any,
+    {
+      inspectAttachmentCapability: jest.fn(() => ({ supportedTransport: 'UNSUPPORTED' })),
+    } as any,
   );
 
   beforeEach(() => {
