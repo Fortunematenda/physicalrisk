@@ -376,10 +376,6 @@ export default function TriageSubmissionDetailPage() {
 
   const level1Complete = Boolean(item?.completedAt);
   const isConverted = Boolean(item?.convertedAt || item?.convertedEngagement?.id);
-  const commercialLabel =
-    item?.intent && item.intent !== 'NONE'
-      ? humanizeStatus(item.intent)
-      : humanizeStatus(proposalStatus === 'NOT_REQUESTED' ? null : proposalStatus);
 
   const l2Status = (() => {
     if (isConverted && item?.convertedEngagement) {
@@ -534,13 +530,9 @@ export default function TriageSubmissionDetailPage() {
             </Alert>
           ) : (
             <div className="space-y-3">
-              <Skeleton className="h-28 w-full rounded-xl" />
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Skeleton className="h-24 rounded-xl" />
-                <Skeleton className="h-24 rounded-xl" />
-                <Skeleton className="h-24 rounded-xl" />
-                <Skeleton className="h-24 rounded-xl" />
-              </div>
+              <Skeleton className="h-36 w-full rounded-xl" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+              <Skeleton className="h-64 w-full rounded-xl" />
             </div>
           )}
         </Shell>
@@ -562,7 +554,7 @@ export default function TriageSubmissionDetailPage() {
             </Alert>
           ) : null}
 
-          {/* Header */}
+          {/* Information card */}
           <Card className="rounded-xl border-slate-200 shadow-sm">
             <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
               <div className="min-w-0 flex-1 space-y-2">
@@ -603,198 +595,109 @@ export default function TriageSubmissionDetailPage() {
                   {item.phone ? ` · ${item.phone}` : ''}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" asChild className="h-11 shrink-0 whitespace-nowrap px-4">
-                  <Link href="/triage">Back to triage</Link>
-                </Button>
-                {item.convertedEngagement?.id ? (
-                  <Button asChild className="h-11 shrink-0 whitespace-nowrap px-4">
-                    <Link href={`/advisory/${item.convertedEngagement.id}`}>Open Level 2</Link>
+
+              <div className="flex w-full min-w-[220px] max-w-sm flex-col items-stretch gap-3 sm:w-auto">
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  <Button variant="outline" asChild className="h-11 shrink-0 whitespace-nowrap px-4">
+                    <Link href="/triage">Back to triage</Link>
                   </Button>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Summary metrics */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <MetricCard
-              label="EGT indication"
-              value={score != null ? `${score} / 100` : '—'}
-              hint={band || 'Pending indication'}
-              className={band === 'Controlled' ? 'border-moss-success/25' : undefined}
-            />
-            <MetricCard
-              label="Progress"
-              value={`${progress}%`}
-              hint={item.completedAt ? 'Complete' : item.progressLabel || 'In progress'}
-            />
-            <MetricCard
-              label="Commercial"
-              value={
-                isConverted
-                  ? 'Converted'
-                  : proposalStatus !== 'NOT_REQUESTED'
-                    ? humanizeStatus(proposalStatus)
-                    : commercialLabel !== '—'
-                      ? commercialLabel
-                      : 'None'
-              }
-              hint={item.proposalReference || 'No PRP yet'}
-            />
-            <Card className="min-w-0 rounded-xl border-slate-200 shadow-sm">
-              <CardContent className="space-y-2 p-4 sm:p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Analyst</p>
-                <p className="truncate text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                  {analystName || 'Not assigned'}
-                </p>
-                {analystName ? (
-                  <p className="text-xs font-medium text-slate-400">Primary analyst</p>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 shrink-0 whitespace-nowrap px-3"
-                    disabled={busy}
-                    onClick={() => setAssignOpen(true)}
-                  >
-                    Assign analyst
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Product journey */}
-          <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-stretch sm:gap-3 sm:p-5">
-              <JourneyStage
-                level="Level 1"
-                title="Triage"
-                status={level1Complete ? 'Completed' : 'In progress'}
-                tone={level1Complete ? 'success' : 'warning'}
-              />
-              <div className="hidden items-center sm:flex" aria-hidden="true">
-                <ArrowRight className="size-4 text-slate-300" />
-              </div>
-              <JourneyStage
-                level="Level 2"
-                title="Executive Advisory Diagnostic"
-                status={l2Status.label}
-                tone={l2Status.tone}
-              />
-              <div className="hidden items-center sm:flex" aria-hidden="true">
-                <ArrowRight className="size-4 text-slate-300" />
-              </div>
-              <JourneyStage level="Level 3" title="Assurance" status={l3Status.label} tone={l3Status.tone} />
-            </CardContent>
-          </Card>
-
-          {/* Commercial handoff + Next action */}
-          <div className="grid gap-3 lg:grid-cols-2">
-            {hasCommercial ? (
-              <Card
-                className={cn(
-                  'rounded-xl shadow-sm',
-                  commercialNeedsAction
-                    ? 'border-amber-200 bg-amber-50/50'
-                    : isConverted
-                      ? 'border-moss-success/30 bg-moss-success/[0.03]'
-                      : 'border-slate-200',
-                )}
-              >
-                <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
-                  <div className="min-w-0 space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="m-0 text-sm font-semibold text-slate-900">Commercial handoff</p>
-                      <Badge
-                        variant={proposalBadgeVariant(isConverted ? 'CONVERTED' : proposalStatus)}
-                        className="shrink-0 whitespace-nowrap"
-                      >
-                        {isConverted ? 'Converted' : humanizeStatus(proposalStatus)}
-                      </Badge>
-                    </div>
-                    <p className="m-0 text-sm font-medium text-slate-800">
-                      {item.proposalReference || 'No proposal reference'}
-                    </p>
-                    <p className="m-0 text-sm text-slate-600">Executive Advisory Diagnostic</p>
-                    <p className="m-0 text-xs text-slate-500">
-                      Requested {fmt(item.proposalRequestedAt || item.diagnosticRequestedAt)}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="h-10 shrink-0 whitespace-nowrap px-4"
-                    onClick={() => setTab('commercial')}
-                  >
-                    Open commercial record
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="rounded-xl border-slate-200 shadow-sm">
-                <CardContent className="p-4 sm:p-5">
-                  <p className="m-0 text-sm font-semibold text-slate-900">Commercial handoff</p>
-                  <p className="m-0 mt-1 text-sm text-slate-600">No commercial intent recorded yet.</p>
-                </CardContent>
-              </Card>
-            )}
-
-            {nextAction ? (
-              <Card className="rounded-xl border-moss-info/30 bg-moss-info/[0.04] shadow-sm">
-                <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
-                  <div className="min-w-0 space-y-1">
-                    <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-info">
-                      Next action
-                    </p>
-                    <p className="m-0 text-sm font-semibold text-slate-900">{nextAction.title}</p>
-                    <p className="m-0 text-sm text-slate-600">{nextAction.body}</p>
-                  </div>
-                  {nextAction.action}
-                </CardContent>
-              </Card>
-            ) : null}
-          </div>
-
-          {/* Assign analyst panel */}
-          {assignOpen ? (
-            <Card className="rounded-xl border-slate-200 shadow-sm">
-              <CardContent className="flex flex-wrap items-end gap-3 p-4 sm:p-5">
-                <div className="min-w-[240px] flex-1 space-y-1.5">
-                  <p className="text-sm font-medium text-slate-800">Assign Level 2 analyst</p>
-                  <FilterSelect
-                    value={item.assignedAnalystId || ''}
-                    onChange={(next) => void assignAnalyst(next)}
-                    disabled={busy}
-                    placeholder="Select analyst"
-                    triggerClassName="h-10 w-full"
-                    options={analysts.map((a) => ({
-                      value: a.id,
-                      label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
-                    }))}
-                  />
+                  {item.convertedEngagement?.id ? (
+                    <Button asChild className="h-11 shrink-0 whitespace-nowrap px-4">
+                      <Link href={`/advisory/${item.convertedEngagement.id}`}>
+                        Open Level 2
+                        <ArrowRight className="size-4" />
+                      </Link>
+                    </Button>
+                  ) : level1Complete && !item.convertedAt && !item.closedAt ? (
+                    <Button
+                      className="h-11 shrink-0 whitespace-nowrap px-4"
+                      disabled={busy}
+                      onClick={() => void convert()}
+                    >
+                      Convert to Level 2
+                    </Button>
+                  ) : null}
                 </div>
-                {item.assignedAnalystId ? (
-                  <Button
-                    variant="outline"
-                    className="h-10 shrink-0 whitespace-nowrap px-4"
-                    disabled={busy}
-                    onClick={() => void assignAnalyst('')}
-                  >
-                    Unassign
-                  </Button>
-                ) : null}
-                <Button
-                  variant="ghost"
-                  className="h-10 shrink-0 whitespace-nowrap px-4"
-                  onClick={() => setAssignOpen(false)}
-                >
-                  Cancel
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
 
+                <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
+                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Primary analyst
+                  </p>
+                  {assignOpen ? (
+                    <div className="mt-2 space-y-2">
+                      <FilterSelect
+                        value={item.assignedAnalystId || ''}
+                        onChange={(next) => void assignAnalyst(next)}
+                        disabled={busy}
+                        placeholder="Select analyst"
+                        triggerClassName="h-10 w-full"
+                        options={analysts.map((a) => ({
+                          value: a.id,
+                          label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
+                        }))}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {item.assignedAnalystId ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 shrink-0 whitespace-nowrap px-3"
+                            disabled={busy}
+                            onClick={() => void assignAnalyst('')}
+                          >
+                            Unassign
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 shrink-0 whitespace-nowrap px-3"
+                          onClick={() => setAssignOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : analystName ? (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="m-0 truncate text-sm font-semibold text-slate-900">{analystName}</p>
+                        <p className="m-0 truncate text-xs text-slate-500">
+                          {item.assignedAnalyst?.email || 'Assigned'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 shrink-0 whitespace-nowrap px-2 text-xs"
+                        disabled={busy}
+                        onClick={() => setAssignOpen(true)}
+                      >
+                        Change
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <p className="m-0 text-sm text-slate-700">Not assigned</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 whitespace-nowrap px-2.5"
+                        disabled={busy}
+                        onClick={() => setAssignOpen(true)}
+                      >
+                        Assign analyst
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Tabs directly below information card */}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="min-w-0">
               <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
@@ -829,6 +732,87 @@ export default function TriageSubmissionDetailPage() {
                 </TabsList>
 
                 <TabsContent value="overview" className="mt-0 space-y-4">
+                  {/* Product journey */}
+                  <Card className="rounded-xl border-slate-200 shadow-sm">
+                    <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-stretch sm:gap-3 sm:p-5">
+                      <JourneyStage
+                        level="Level 1"
+                        title="Triage"
+                        status={level1Complete ? 'Completed' : 'In progress'}
+                        tone={level1Complete ? 'success' : 'warning'}
+                      />
+                      <div className="hidden items-center sm:flex" aria-hidden="true">
+                        <ArrowRight className="size-4 text-slate-300" />
+                      </div>
+                      <JourneyStage
+                        level="Level 2"
+                        title="Executive Advisory Diagnostic"
+                        status={l2Status.label}
+                        tone={l2Status.tone}
+                      />
+                      <div className="hidden items-center sm:flex" aria-hidden="true">
+                        <ArrowRight className="size-4 text-slate-300" />
+                      </div>
+                      <JourneyStage level="Level 3" title="Assurance" status={l3Status.label} tone={l3Status.tone} />
+                    </CardContent>
+                  </Card>
+
+                  {nextAction ? (
+                    <Card className="rounded-xl border-moss-info/30 bg-moss-info/[0.04] shadow-sm">
+                      <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
+                        <div className="min-w-0 space-y-1">
+                          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-info">
+                            Next action
+                          </p>
+                          <p className="m-0 text-sm font-semibold text-slate-900">{nextAction.title}</p>
+                          <p className="m-0 text-sm text-slate-600">{nextAction.body}</p>
+                        </div>
+                        {nextAction.action}
+                      </CardContent>
+                    </Card>
+                  ) : null}
+
+                  {hasCommercial ? (
+                    <Card
+                      className={cn(
+                        'rounded-xl shadow-sm',
+                        commercialNeedsAction
+                          ? 'border-amber-200 bg-amber-50/50'
+                          : isConverted
+                            ? 'border-moss-success/30 bg-moss-success/[0.03]'
+                            : 'border-slate-200',
+                      )}
+                    >
+                      <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
+                        <div className="min-w-0 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="m-0 text-sm font-semibold text-slate-900">Commercial handoff</p>
+                            <Badge
+                              variant={proposalBadgeVariant(isConverted ? 'CONVERTED' : proposalStatus)}
+                              className="shrink-0 whitespace-nowrap"
+                            >
+                              {isConverted ? 'Converted' : humanizeStatus(proposalStatus)}
+                            </Badge>
+                          </div>
+                          <p className="m-0 text-sm font-medium text-slate-800">
+                            {item.proposalReference || 'No proposal reference'}
+                          </p>
+                          <p className="m-0 text-sm text-slate-600">Executive Advisory Diagnostic</p>
+                          <p className="m-0 text-xs text-slate-500">
+                            Requested {fmt(item.proposalRequestedAt || item.diagnosticRequestedAt)}
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="h-10 shrink-0 whitespace-nowrap px-4"
+                          onClick={() => setTab('commercial')}
+                        >
+                          Open commercial record
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+
                   <div className="grid gap-4 md:grid-cols-2">
                     <Card className="rounded-xl border-slate-200 shadow-sm">
                       <CardHeader>
@@ -855,6 +839,11 @@ export default function TriageSubmissionDetailPage() {
                         <dl>
                           <Kv label="Reference">{assessment?.reference || '—'}</Kv>
                           <Kv label="Stage">{humanizeStatus(item.displayStatus)}</Kv>
+                          <Kv label="EGT indication">
+                            {score != null ? `${score} / 100` : '—'}
+                            {band ? ` · ${band}` : ''}
+                          </Kv>
+                          <Kv label="Progress">{item.completedAt ? 'Complete' : `${progress}%`}</Kv>
                           <Kv label="Created">{fmt(item.createdAt)}</Kv>
                           <Kv label="Completed">{fmt(item.completedAt)}</Kv>
                           <Kv label="Contacted">{fmt(item.contactedAt)}</Kv>
