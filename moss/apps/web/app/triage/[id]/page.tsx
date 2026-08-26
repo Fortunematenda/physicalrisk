@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES } from '@moss/shared';
 import {
   AlertCircle,
@@ -203,6 +203,7 @@ function JourneyStage({
 export default function TriageSubmissionDetailPage() {
   const confirm = useConfirm();
   const { toast } = useToast();
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = String(params?.id || '');
   const [item, setItem] = useState<any>(null);
@@ -224,12 +225,16 @@ export default function TriageSubmissionDetailPage() {
       setItem(data);
       setNotes(data?.adminNotes || '');
       setProposalNotes(data?.proposalAdminNotes || '');
+      // Reports link with assessment id; canonical URL uses the lead/submission id.
+      if (data?.id && data.id !== id) {
+        router.replace(`/triage/${data.id}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load submission.');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
     if (id) void load();

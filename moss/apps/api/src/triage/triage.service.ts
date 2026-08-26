@@ -37,6 +37,26 @@ export class TriageService {
     }
   }
 
+  /** Resolve by publicLead id or triage assessmentSession id (reports/advisory links use the latter). */
+  private async resolveLead(idOrAssessmentId: string) {
+    const include = {
+      assignedAnalyst: {
+        select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+      },
+    } as const;
+    const byId = await this.prisma.publicLead.findUnique({
+      where: { id: idOrAssessmentId },
+      include,
+    });
+    if (byId) return byId;
+    const byAssessment = await this.prisma.publicLead.findFirst({
+      where: { assessmentId: idOrAssessmentId },
+      include,
+    });
+    if (byAssessment) return byAssessment;
+    throw new NotFoundException('Triage submission not found.');
+  }
+
   private commercialIntent(lead: {
     proposalStatus: ProposalStatus;
     proposalRequestedAt: Date | null;
@@ -251,17 +271,9 @@ export class TriageService {
 
   async get(id: string, user: AuthUser) {
     this.assertInternal(user);
-    const lead = await this.prisma.publicLead.findUnique({
-      where: { id },
-      include: {
-        assignedAnalyst: {
-          select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
-        },
-      },
-    });
-    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const lead = await this.resolveLead(id);
     const list = await this.list(user, { q: lead.email });
-    const item = list.items.find((row) => row.id === id) || {
+    const item = list.items.find((row) => row.id === lead.id) || {
       ...lead,
       displayStatus: this.displayStatus(lead),
       intent: this.commercialIntent(lead),
@@ -269,7 +281,7 @@ export class TriageService {
       convertedEngagement: null,
     };
     const audit = await this.prisma.auditEvent.findMany({
-      where: { entityType: 'PublicLead', entityId: id },
+      where: { entityType: 'PublicLead', entityId: lead.id },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -396,8 +408,8 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.prisma.publicLead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const lead = await this.resolveLead(id);
+    const leadId = lead.id;
 
     const requestedStage = input.status?.trim().toUpperCase();
     if (requestedStage && !ADMIN_STAGES.has(requestedStage)) {
@@ -441,7 +453,7 @@ export class TriageService {
       data.closedAt = now;
     }
 
-    const updated = await this.prisma.publicLead.update({ where: { id }, data });
+    const updated = await this.prisma.publicLead.update({ where: { id: leadId }, data });
     await this.audit.record({
       userId: user.id,
       action: requestedStage
@@ -450,7 +462,7 @@ export class TriageService {
           ? 'TRIAGE_ANALYST_ASSIGNED'
           : 'TRIAGE_NOTES_UPDATED',
       entityType: 'PublicLead',
-      entityId: id,
+      entityId: leadId,
       metadata: {
         status: updated.status,
         diagnosticRequested: Boolean(updated.diagnosticRequestedAt),
@@ -458,7 +470,7 @@ export class TriageService {
         assignedAnalystId: updated.assignedAnalystId,
       },
     });
-    return this.get(id, user);
+    return this.get(leadId, user);
   }
 
   async updateProposal(
@@ -467,8 +479,8 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.prisma.publicLead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const lead = await this.resolveLead(id);
+    const leadId = lead.id;
     if (!lead.completedAt) {
       throw new BadRequestException('Complete the questionnaire before managing proposal status.');
     }
@@ -550,25 +562,25 @@ export class TriageService {
       auditAction = 'PROPOSAL_CANCELLED';
     }
 
-    await this.prisma.publicLead.update({ where: { id }, data });
+    await this.prisma.publicLead.update({ where: { id: leadId }, data });
     await this.audit.record({
       userId: user.id,
       action: auditAction,
       entityType: 'PublicLead',
-      entityId: id,
+      entityId: leadId,
       metadata: {
         proposalReference: lead.proposalReference,
         previousStatus: previous,
         newStatus: next,
       },
     });
-    return this.get(id, user);
+    return this.get(leadId, user);
   }
 
   async convert(id: string, user: AuthUser) {
     this.assertInternal(user);
-    const lead = await this.prisma.publicLead.findUnique({ where: { id } });
-    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const lead = await this.resolveLead(id);
+    const leadId = lead.id;
     if (!lead.completedAt || !lead.assessmentId || !lead.organisationId) {
       throw new BadRequestException('Only completed triage submissions can be converted to a paid diagnostic.');
     }
@@ -593,7 +605,7 @@ export class TriageService {
     );
 
     await this.prisma.publicLead.update({
-      where: { id },
+      where: { id: leadId },
       data: {
         status: 'CONVERTED',
         convertedAt: new Date(),
@@ -605,7 +617,7 @@ export class TriageService {
       userId: user.id,
       action: 'TRIAGE_CONVERTED_TO_LEVEL2',
       entityType: 'PublicLead',
-      entityId: id,
+      entityId: leadId,
       metadata: {
         triageAssessmentId: lead.assessmentId,
         diagnosticAssessmentId: engagement.id,
