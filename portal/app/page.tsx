@@ -162,7 +162,7 @@ function HomeInner() {
   const apps = [
     canMoss && {
       key: 'moss',
-      href: MOSS_URL,
+      href: `${MOSS_URL.replace(/\/$/, '')}/triage`,
       title: 'MOSS',
       eyebrow: 'Assessments & reporting',
       description:

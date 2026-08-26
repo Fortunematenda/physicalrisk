@@ -73,7 +73,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
       redirectStarted.current = true;
       if (!cancelled) setMessage('Redirecting to sign-in…');
-      await redirectToLogin(path || '/dashboard');
+      await redirectToLogin(path || '/triage');
     }
 
     check().catch(() => {

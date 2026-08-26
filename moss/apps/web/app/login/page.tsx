@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { API_BASE } from '@/lib/api';
 import {
   clearLogoutGuard,
+  DEFAULT_HOME_PATH,
   hasSsoSession,
   isSsoEnabled,
   sanitizeReturnPath,
@@ -28,7 +29,7 @@ import {
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = sanitizeReturnPath(params.get('next') || params.get('callbackUrl') || '/dashboard');
+  const next = sanitizeReturnPath(params.get('next') || params.get('callbackUrl') || DEFAULT_HOME_PATH);
   const oauthError = params.get('error');
   const stale = params.get('stale') === '1';
   const legacyLoginEnabled =
