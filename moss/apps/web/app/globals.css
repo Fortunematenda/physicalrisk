@@ -1916,6 +1916,10 @@ textarea { min-height:90px; resize:none; }
   font-family: Inter, sans-serif; font-size: 14px;
 }
 .org2-table-card { padding:0; overflow:visible; }
+.org2-table-card > .dash2-card-head {
+  padding: 18px 16px 0;
+  margin-bottom: 12px;
+}
 .org2-table-card > .table-wrap { overflow-x:auto; overflow-y:visible; }
 .org2-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:auto; }
 .org2-table th {

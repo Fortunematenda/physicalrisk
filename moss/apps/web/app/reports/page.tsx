@@ -2,12 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import {
-  AlertTriangle,
   BadgeCheck,
   ClipboardList,
-  FileCheck,
   FileText,
   Send,
 } from 'lucide-react';
@@ -16,13 +13,9 @@ import { Shell } from '../../components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '../../components/RowActionsMenu';
 import {
-  IconAlertTriangle,
   IconCalendar,
-  IconCheckCircle,
-  IconClock,
   IconDownload,
   IconEye,
-  IconFileText,
   IconMoreVertical,
   IconPlus,
   IconRotateCcw,
@@ -105,33 +98,9 @@ type ReportsResponse = {
     pending: number;
     failed: number;
   };
-  deliveryHealth?: {
-    sent: number;
-    failed: number;
-    pending: number;
-    sentPct: number;
-    failedPct: number;
-    pendingPct: number;
-  };
-  recentActivity?: Array<{
-    id: string;
-    title: string;
-    reference: string;
-    reportId: string;
-    at: string;
-    tone: string;
-  }>;
 };
 
 const PAGE_SIZE_OPTIONS = [8, 10, 20, 50];
-
-const STATUS_COLORS: Record<string, string> = {
-  issued: '#059669',
-  generated: '#2563eb',
-  pending: '#ea580c',
-  draft: '#64748b',
-  failed: '#c41230',
-};
 
 function initials(name: string) {
   return name
@@ -146,18 +115,6 @@ function displayName(user?: UserRef | null) {
   if (!user) return '';
   const full = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
   return full || user.email || 'System';
-}
-
-function relativeTime(iso?: string | null) {
-  if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${Math.max(mins, 1)}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function formatDate(iso?: string | null) {
@@ -279,10 +236,6 @@ export default function ReportsIndexPage() {
     pending: 0,
     failed: 0,
   };
-  const delivery = data.deliveryHealth || {
-    sent: 0, failed: 0, pending: 0, sentPct: 0, failedPct: 0, pendingPct: 0,
-  };
-  const recentActivity = data.recentActivity || [];
 
   const organisations = useMemo(() => {
     const map = new Map<string, string>();
@@ -359,26 +312,6 @@ export default function ReportsIndexPage() {
   useEffect(() => {
     setPage(1);
   }, [query, headerSearch, orgFilter, typeFilter, statusFilter, analystFilter, dateFrom, dateTo, pageSize]);
-
-  const statusDonut = useMemo(() => {
-    const counts = {
-      issued: summary.issued,
-      generated: summary.generated,
-      pending: summary.pending,
-      draft: summary.draft,
-      failed: summary.failed,
-    };
-    return (Object.entries(counts) as Array<[string, number]>)
-      .filter(([, value]) => value > 0)
-      .map(([key, value]) => ({
-        key,
-        name: statusLabel(key),
-        value,
-        color: STATUS_COLORS[key],
-      }));
-  }, [summary]);
-
-  const statusTotal = Math.max(summary.total, 1);
 
   function clearFilters() {
     setQuery('');
@@ -500,7 +433,7 @@ export default function ReportsIndexPage() {
   return (
     <AuthGate>
       <Shell
-        title={isAdvisoryView ? 'Executive & Advisory Reports' : 'Reports'}
+        title={isAdvisoryView ? 'Executive & Advisory Reports' : 'Security Cost Leakage Reports'}
         hideEyebrow
         subtitle={
           isAdvisoryView
@@ -667,6 +600,9 @@ export default function ReportsIndexPage() {
                 <IconDownload />
                 Export
               </button>
+              <Link href="/reports#executive-advisory-reports" className="queue2-view-all" style={{ alignSelf: 'center' }}>
+                View Executive &amp; Advisory reports
+              </Link>
             </div>
 
             {generateOpen && (
@@ -697,29 +633,13 @@ export default function ReportsIndexPage() {
               </section>
             )}
 
-            <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+            <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
                 icon={FileText}
                 title="Total Reports"
                 value={summary.total}
-                description="Portfolio deliverables"
+                description="Cost Leakage deliverables"
                 tone="blue"
-                loading={loading}
-              />
-              <StatCard
-                icon={ClipboardList}
-                title="Preliminary Reports"
-                value={summary.preliminary}
-                description="Pre-approval packs"
-                tone="amber"
-                loading={loading}
-              />
-              <StatCard
-                icon={FileCheck}
-                title="Approved Executive"
-                value={summary.verified}
-                description="Verified packs"
-                tone="green"
                 loading={loading}
               />
               <StatCard
@@ -735,16 +655,15 @@ export default function ReportsIndexPage() {
                 title="Generated"
                 value={summary.generated}
                 description="Awaiting issue"
-                tone="slate"
+                tone="green"
                 loading={loading}
               />
               <StatCard
-                icon={AlertTriangle}
-                title="Failed / Draft"
-                value={summary.failed + summary.draft}
-                description={summary.failed ? 'Needs attention' : 'Backlog drafts'}
-                tone={summary.failed ? 'red' : 'slate'}
-                trendTone={summary.failed > 0 ? 'down' : undefined}
+                icon={ClipboardList}
+                title="Draft"
+                value={summary.draft + summary.failed}
+                description={summary.failed ? 'Includes failed' : 'In progress'}
+                tone="amber"
                 loading={loading}
               />
             </div>
@@ -756,7 +675,7 @@ export default function ReportsIndexPage() {
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search reports…"
+                    placeholder="Search Cost Leakage reports…"
                     aria-label="Filter reports"
                   />
                 </label>
@@ -792,265 +711,159 @@ export default function ReportsIndexPage() {
               </div>
             </section>
 
-            <div className="queue2-layout">
-              <section className="dash2-card org2-table-card">
-                <div className="dash2-card-head">
-                  <div>
-                    <h2>Security Cost Leakage Reports</h2>
-                    <p>Preliminary and approved executive PDFs for Cost Leakage assessments only.</p>
-                  </div>
+            <section className="dash2-card org2-table-card">
+              <div className="dash2-card-head">
+                <div>
+                  <h2>Security Cost Leakage Reports</h2>
+                  <p>Preliminary and approved executive PDFs for Cost Leakage assessments only.</p>
                 </div>
-                <div className="table-wrap">
-                  <table className="reports2-table">
-                    <thead>
-                      <tr>
-                        <th>Report Reference</th>
-                        <th>Assessment</th>
-                        <th>Organisation</th>
-                        <th>Report Type</th>
-                        <th>Status</th>
-                        <th>Version</th>
-                        <th>Generated By</th>
-                        <th>Generated Date</th>
-                        <th>Issued Date</th>
-                        <th>File</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pageItems.map((r) => {
-                        const by = displayName(r.generatedBy);
-                        return (
-                          <tr key={r.id}>
-                            <td>
-                              <Link href={`/reports/${r.id}`}><strong>{r.reference}</strong></Link>
-                            </td>
-                            <td>
-                              <div className="assess2-ref-cell">
-                                {r.assessment?.id ? (
-                                  <Link href={engagementHref(r) || '#'}><strong>{r.assessment.reference}</strong></Link>
-                                ) : <strong>—</strong>}
-                                <span className="muted small">{r.assessment?.title || r.title}</span>
+              </div>
+              <div className="table-wrap">
+                <table className="reports2-table">
+                  <thead>
+                    <tr>
+                      <th>Report Reference</th>
+                      <th>Assessment</th>
+                      <th>Organisation</th>
+                      <th>Report Type</th>
+                      <th>Status</th>
+                      <th>Version</th>
+                      <th>Generated By</th>
+                      <th>Generated Date</th>
+                      <th>Issued Date</th>
+                      <th>File</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageItems.map((r) => {
+                      const by = displayName(r.generatedBy);
+                      const detailHref = reportDetailHref(r.id, 'scl');
+                      return (
+                        <tr key={r.id}>
+                          <td>
+                            <Link href={detailHref}><strong>{r.reference}</strong></Link>
+                          </td>
+                          <td>
+                            <div className="assess2-ref-cell">
+                              {r.assessment?.id ? (
+                                <Link href={engagementHref(r) || '#'}><strong>{r.assessment.reference}</strong></Link>
+                              ) : <strong>—</strong>}
+                              <span className="muted small">{r.assessment?.title || r.title}</span>
+                            </div>
+                          </td>
+                          <td>{r.assessment?.organisation?.name || '—'}</td>
+                          <td>{reportTypeLabel(r.reportType)}</td>
+                          <td>
+                            <span className={`reports2-status status-${r.uiStatus}`}>
+                              {statusLabel(r.uiStatus)}
+                            </span>
+                          </td>
+                          <td><strong>v{r.version}</strong></td>
+                          <td>
+                            {by ? (
+                              <div className="assess2-analyst">
+                                <span className="assess2-analyst-avatar">{initials(by)}</span>
+                                <strong>{by}</strong>
                               </div>
-                            </td>
-                            <td>{r.assessment?.organisation?.name || '—'}</td>
-                            <td>{reportTypeLabel(r.reportType)}</td>
-                            <td>
-                              <span className={`reports2-status status-${r.uiStatus}`}>
-                                {statusLabel(r.uiStatus)}
-                              </span>
-                            </td>
-                            <td><strong>v{r.version}</strong></td>
-                            <td>
-                              {by ? (
-                                <div className="assess2-analyst">
-                                  <span className="assess2-analyst-avatar">{initials(by)}</span>
-                                  <strong>{by}</strong>
-                                </div>
-                              ) : <span className="muted">—</span>}
-                            </td>
-                            <td className="muted small">{formatDate(r.generatedAt || r.createdAt)}</td>
-                            <td className="muted small">{formatDate(r.issuedAt)}</td>
-                            <td className="muted small">{r.fileSizeLabel || 'PDF'}</td>
-                            <td>
-                              <div className="reports2-actions">
-                                <Link href={`/reports/${r.id}`} className="reports2-icon-btn" title="View" aria-label="View report">
-                                  <IconEye />
-                                </Link>
-                                <Link href={`/reports/${r.id}`} className="reports2-icon-btn" title="Download" aria-label="Download report">
-                                  <IconDownload />
-                                </Link>
-                                <RowActionsMenu
-                                  open={menuOpenId === r.id}
-                                  onClose={() => setMenuOpenId(null)}
-                                  trigger={(
-                                    <button
-                                      type="button"
-                                      className="org2-menu-btn"
-                                      aria-label="More actions"
-                                      onClick={() => setMenuOpenId((id) => (id === r.id ? null : r.id))}
-                                    >
-                                      <IconMoreVertical />
-                                    </button>
-                                  )}
-                                >
-                                  <Link href={`/reports/${r.id}`} onClick={() => setMenuOpenId(null)}>Open report</Link>
-                                  {r.assessment?.id && (
-                                    <Link href={`/assessments/${r.assessment.id}/review`} onClick={() => setMenuOpenId(null)}>Open review</Link>
-                                  )}
-                                  {r.assessment?.organisation?.id && (
-                                    <Link href={`/organisations/${r.assessment.organisation.id}`} onClick={() => setMenuOpenId(null)}>View organisation</Link>
-                                  )}
+                            ) : <span className="muted">—</span>}
+                          </td>
+                          <td className="muted small">{formatDate(r.generatedAt || r.createdAt)}</td>
+                          <td className="muted small">{formatDate(r.issuedAt)}</td>
+                          <td className="muted small">{r.fileSizeLabel || 'PDF'}</td>
+                          <td>
+                            <div className="reports2-actions">
+                              <Link href={detailHref} className="reports2-icon-btn" title="View" aria-label="View report">
+                                <IconEye />
+                              </Link>
+                              <Link href={detailHref} className="reports2-icon-btn" title="Download" aria-label="Download report">
+                                <IconDownload />
+                              </Link>
+                              <RowActionsMenu
+                                open={menuOpenId === r.id}
+                                onClose={() => setMenuOpenId(null)}
+                                trigger={(
                                   <button
                                     type="button"
-                                    className="danger"
-                                    disabled={deletingId === r.id}
-                                    onClick={() => void deleteReport(r)}
+                                    className="org2-menu-btn"
+                                    aria-label="More actions"
+                                    onClick={() => setMenuOpenId((id) => (id === r.id ? null : r.id))}
                                   >
-                                    {deletingId === r.id ? 'Deleting…' : 'Delete report'}
+                                    <IconMoreVertical />
                                   </button>
-                                </RowActionsMenu>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!loading && !pageItems.length && (
-                        <tr><td colSpan={11} className="muted">No reports match the current filters.</td></tr>
-                      )}
-                      {loading && (
-                        <tr><td colSpan={11} className="muted">Loading reports…</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                                )}
+                              >
+                                <Link href={detailHref} onClick={() => setMenuOpenId(null)}>Open report</Link>
+                                {r.assessment?.id && (
+                                  <Link href={`/assessments/${r.assessment.id}/review`} onClick={() => setMenuOpenId(null)}>Open review</Link>
+                                )}
+                                {r.assessment?.organisation?.id && (
+                                  <Link href={`/organisations/${r.assessment.organisation.id}`} onClick={() => setMenuOpenId(null)}>View organisation</Link>
+                                )}
+                                <button
+                                  type="button"
+                                  className="danger"
+                                  disabled={deletingId === r.id}
+                                  onClick={() => void deleteReport(r)}
+                                >
+                                  {deletingId === r.id ? 'Deleting…' : 'Delete report'}
+                                </button>
+                              </RowActionsMenu>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!loading && !pageItems.length && (
+                      <tr><td colSpan={11} className="muted">No reports match the current filters.</td></tr>
+                    )}
+                    {loading && (
+                      <tr><td colSpan={11} className="muted">Loading reports…</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-                <div className="org2-pagination">
-                  <span>
-                    Showing {showingFrom} to {showingTo} of {filtered.length} reports
-                  </span>
-                  <div className="org2-pagination-controls">
-                    <button type="button" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹</button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter((n) => n === 1 || n === totalPages || Math.abs(n - currentPage) <= 2)
-                      .reduce<number[]>((acc, n, idx, arr) => {
-                        if (idx > 0 && n - arr[idx - 1] > 1) acc.push(-1);
-                        acc.push(n);
-                        return acc;
-                      }, [])
-                      .map((n, idx) => (
-                        n === -1 ? (
-                          <span key={`gap-${idx}`} className="org2-page-gap">…</span>
-                        ) : (
-                          <button
-                            key={n}
-                            type="button"
-                            className={n === currentPage ? 'active' : ''}
-                            onClick={() => setPage(n)}
-                          >
-                            {n}
-                          </button>
-                        )
-                      ))}
-                    <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>›</button>
-                    <select
-                      value={pageSize}
-                      onChange={(e) => setPageSize(Number(e.target.value))}
-                      aria-label="Rows per page"
-                    >
-                      {PAGE_SIZE_OPTIONS.map((size) => (
-                        <option key={size} value={size}>{size} / page</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
-
-              <aside className="queue2-side">
-                <section className="dash2-card">
-                  <div className="dash2-card-head">
-                    <div>
-                      <h2>Report Status Breakdown</h2>
-                      <p>Portfolio distribution</p>
-                    </div>
-                  </div>
-                  <div className="dash2-donut-wrap compact">
-                    <ResponsiveContainer width="100%" height={190}>
-                      <PieChart>
-                        <Pie
-                          data={statusDonut.length ? statusDonut : [{ name: 'Empty', value: 1, color: '#e5e7eb' }]}
-                          dataKey="value"
-                          nameKey="name"
-                          innerRadius={55}
-                          outerRadius={78}
-                          paddingAngle={2}
-                          stroke="none"
+              <div className="org2-pagination">
+                <span>
+                  Showing {showingFrom} to {showingTo} of {filtered.length} reports
+                </span>
+                <div className="org2-pagination-controls">
+                  <button type="button" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹</button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((n) => n === 1 || n === totalPages || Math.abs(n - currentPage) <= 2)
+                    .reduce<number[]>((acc, n, idx, arr) => {
+                      if (idx > 0 && n - arr[idx - 1] > 1) acc.push(-1);
+                      acc.push(n);
+                      return acc;
+                    }, [])
+                    .map((n, idx) => (
+                      n === -1 ? (
+                        <span key={`gap-${idx}`} className="org2-page-gap">…</span>
+                      ) : (
+                        <button
+                          key={n}
+                          type="button"
+                          className={n === currentPage ? 'active' : ''}
+                          onClick={() => setPage(n)}
                         >
-                          {(statusDonut.length ? statusDonut : [{ name: 'Empty', value: 1, color: '#e5e7eb' }]).map((entry) => (
-                            <Cell key={entry.name} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="dash2-donut-center">
-                      <span>REPORTS</span>
-                      <strong>{summary.total}</strong>
-                      <em>Total</em>
-                    </div>
-                  </div>
-                  <ul className="dash2-legend">
-                    {statusDonut.map((entry) => (
-                      <li key={entry.key}>
-                        <i style={{ background: entry.color }} />
-                        <span>{entry.name}</span>
-                        <strong>{entry.value}</strong>
-                        <em>{Math.round((entry.value / statusTotal) * 100)}%</em>
-                      </li>
+                          {n}
+                        </button>
+                      )
                     ))}
-                    {!statusDonut.length && <li className="muted dash2-legend-empty">No reports yet.</li>}
-                  </ul>
-                </section>
-
-                <section className="dash2-card">
-                  <div className="dash2-card-head">
-                    <div>
-                      <h2>Recent Activity</h2>
-                      <p>Latest report events</p>
-                    </div>
-                    <Link href="/admin/audit-logs" className="queue2-view-all">View all</Link>
-                  </div>
-                  <ul className="reports2-activity">
-                    {recentActivity.map((item) => (
-                      <li key={item.id}>
-                        <span className={`reports2-activity-icon tone-${item.tone}`}>
-                          {item.tone === 'ok' ? <IconCheckCircle /> : item.tone === 'danger' ? <IconAlertTriangle /> : <IconFileText />}
-                        </span>
-                        <div>
-                          <strong>{item.title}</strong>
-                          <Link href={`/reports/${item.reportId}`}>{item.reference}</Link>
-                          <em>{relativeTime(item.at)}</em>
-                        </div>
-                      </li>
+                  <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>›</button>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    aria-label="Rows per page"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>{size} / page</option>
                     ))}
-                    {!recentActivity.length && <li className="muted">No recent report activity.</li>}
-                  </ul>
-                </section>
-
-                <section className="dash2-card">
-                  <div className="dash2-card-head">
-                    <div>
-                      <h2>Delivery Health</h2>
-                      <p>Report email outcomes</p>
-                    </div>
-                    <Link href="/admin/emails" className="queue2-view-all">View all</Link>
-                  </div>
-                  <ul className="reports2-delivery">
-                    <li>
-                      <span className="reports2-delivery-icon ok"><IconCheckCircle /></span>
-                      <div>
-                        <strong>Email Success</strong>
-                        <em>{delivery.sent} ({delivery.sentPct}%)</em>
-                      </div>
-                    </li>
-                    <li>
-                      <span className="reports2-delivery-icon danger"><IconAlertTriangle /></span>
-                      <div>
-                        <strong>Failed Deliveries</strong>
-                        <em>{delivery.failed} ({delivery.failedPct}%)</em>
-                      </div>
-                    </li>
-                    <li>
-                      <span className="reports2-delivery-icon warn"><IconClock /></span>
-                      <div>
-                        <strong>Pending Issues</strong>
-                        <em>{delivery.pending} ({delivery.pendingPct}%)</em>
-                      </div>
-                    </li>
-                  </ul>
-                </section>
-              </aside>
-            </div>
+                  </select>
+                </div>
+              </div>
+            </section>
           </>
         )}
       </Shell>
