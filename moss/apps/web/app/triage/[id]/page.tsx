@@ -2,34 +2,45 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES } from '@moss/shared';
 import {
   AlertCircle,
   ArrowRight,
+  Bell,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   Loader2,
 } from 'lucide-react';
+import { RowActionsMenu } from '@/components/RowActionsMenu';
+import { IconMoreVertical } from '@/components/NavIcons';
 import { AuthGate } from '@/components/AuthGate';
 import { Shell } from '@/components/Shell';
+import { TriageNotesPanel, type TriageNoteItem } from '@/components/triage/TriageNotesPanel';
+import { TriageCommercialPanel } from '@/components/triage/TriageCommercialPanel';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { stripUnintendedLeadingDash } from '@/lib/scl-option-label';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-type TabId = 'overview' | 'scores' | 'responses' | 'commercial' | 'journey';
+const TAB_IDS = ['overview', 'scores', 'responses', 'commercial', 'journey', 'notes'] as const;
+type TabId = (typeof TAB_IDS)[number];
+
+function parseTabId(value: string | null): TabId {
+  if (value && TAB_IDS.includes(value as TabId)) return value as TabId;
+  return 'overview';
+}
 
 const TOTAL_TRIAGE_QUESTIONS = SCL_ACTIVE_TRIAGE_QUESTION_CODES.length;
 
@@ -204,18 +215,50 @@ export default function TriageSubmissionDetailPage() {
   const confirm = useConfirm();
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
   const id = String(params?.id || '');
+  const tab = parseTabId(searchParams.get('tab'));
   const [item, setItem] = useState<any>(null);
-  const [notes, setNotes] = useState('');
-  const [proposalNotes, setProposalNotes] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<TabId>('overview');
   const [responseQuery, setResponseQuery] = useState('');
   const [analysts, setAnalysts] = useState<any[]>([]);
-  const [assignOpen, setAssignOpen] = useState(false);
+  const [commercialOwners, setCommercialOwners] = useState<any[]>([]);
+  const [leadMenuOpen, setLeadMenuOpen] = useState(false);
+
+  const commercialFocus = (() => {
+    const focus = searchParams.get('focus');
+    return focus === 'proposal' || focus === 'contact' ? focus : null;
+  })();
+
+  const setTab = useCallback(
+    (next: TabId, opts?: { focus?: 'proposal' | 'contact' }) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === 'overview') {
+        params.delete('tab');
+      } else {
+        params.set('tab', next);
+      }
+      if (opts?.focus) {
+        params.set('focus', opts.focus);
+      } else {
+        params.delete('focus');
+      }
+      const qs = params.toString();
+      router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
+    },
+    [id, router, searchParams],
+  );
+
+  const clearCommercialFocus = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (!params.has('focus')) return;
+    params.delete('focus');
+    const qs = params.toString();
+    router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
+  }, [id, router, searchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -223,18 +266,17 @@ export default function TriageSubmissionDetailPage() {
     try {
       const data = await apiFetch<any>(`/triage/submissions/${id}`);
       setItem(data);
-      setNotes(data?.adminNotes || '');
-      setProposalNotes(data?.proposalAdminNotes || '');
       // Reports link with assessment id; canonical URL uses the lead/submission id.
       if (data?.id && data.id !== id) {
-        router.replace(`/triage/${data.id}`);
+        const qs = searchParams.toString();
+        router.replace(qs ? `/triage/${data.id}?${qs}` : `/triage/${data.id}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load submission.');
     } finally {
       setLoading(false);
     }
-  }, [id, router]);
+  }, [id, router, searchParams]);
 
   useEffect(() => {
     if (id) void load();
@@ -242,6 +284,7 @@ export default function TriageSubmissionDetailPage() {
 
   useEffect(() => {
     apiFetch<any[]>('/admin/users/analysts').then(setAnalysts).catch(() => []);
+    apiFetch<any[]>('/triage/commercial-owners').then(setCommercialOwners).catch(() => []);
   }, []);
 
   async function run(fn: () => Promise<void>, success?: { title: string; description: string }) {
@@ -278,15 +321,6 @@ export default function TriageSubmissionDetailPage() {
     }, success);
   }
 
-  async function proposalAction(action: string) {
-    await run(async () => {
-      await apiFetch(`/triage/submissions/${id}/proposal`, {
-        method: 'POST',
-        body: JSON.stringify({ action, proposalAdminNotes: proposalNotes }),
-      });
-    }, { title: 'Proposal updated', description: 'Commercial proposal status has been updated.' });
-  }
-
   async function assignAnalyst(analystId: string) {
     await run(
       async () => {
@@ -294,7 +328,7 @@ export default function TriageSubmissionDetailPage() {
           method: 'PATCH',
           body: JSON.stringify({ assignedAnalystId: analystId || '' }),
         });
-        setAssignOpen(false);
+        setLeadMenuOpen(false);
       },
       analystId
         ? {
@@ -309,12 +343,18 @@ export default function TriageSubmissionDetailPage() {
     );
   }
 
-  async function convert() {
+  async function convert(force = false) {
     if (!item) return;
+    if (item.convertedEngagement?.id || item.convertedAt) {
+      window.location.href = `/advisory/${item.convertedEngagement?.id || item.convertedAssessmentId}`;
+      return;
+    }
     const ok = await confirm({
-      title: 'Convert to Level 2',
-      description: `Create the paid Executive Advisory Diagnostic for “${item.organisationName}”?`,
-      confirmLabel: 'Convert',
+      title: 'Create Level 2 Diagnostic',
+      description: force
+        ? `Override commercial gate and create the paid Executive Advisory Diagnostic for “${item.organisationName}”?`
+        : `Create the paid Executive Advisory Diagnostic for “${item.organisationName}”?`,
+      confirmLabel: 'Create diagnostic',
       variant: 'destructive',
     });
     if (!ok) return;
@@ -323,6 +363,7 @@ export default function TriageSubmissionDetailPage() {
     try {
       const data = await apiFetch<{ engagement: { id: string } }>(`/triage/submissions/${id}/convert`, {
         method: 'POST',
+        body: JSON.stringify(force ? { force: true } : {}),
       });
       if (data?.engagement?.id) window.location.href = `/advisory/${data.engagement.id}`;
       else await load();
@@ -332,6 +373,31 @@ export default function TriageSubmissionDetailPage() {
       toast({ variant: 'error', title: 'Conversion failed', description: message });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handlePrimaryCta() {
+    if (!item?.primaryCta) return;
+    const cta = item.primaryCta;
+    switch (cta.kind) {
+      case 'mark_reviewed':
+        await patch({ status: 'REVIEWED' }, { title: 'Reviewed', description: 'Lead marked as reviewed.' });
+        break;
+      case 'contact_client':
+        setTab('commercial', { focus: 'contact' });
+        break;
+      case 'prepare_proposal':
+      case 'open_proposal':
+        setTab('commercial', { focus: 'proposal' });
+        break;
+      case 'create_level2':
+        await convert(false);
+        break;
+      case 'open_level2':
+        if (cta.engagementId) window.location.href = `/advisory/${cta.engagementId}`;
+        break;
+      default:
+        break;
     }
   }
 
@@ -401,123 +467,71 @@ export default function TriageSubmissionDetailPage() {
     return { label: 'Not started', tone: 'neutral' as const };
   })();
 
-  const nextAction = (() => {
+  const recommendedAction = (() => {
     if (!item) return null;
     if (item.closedAt && !isConverted) {
       return {
         title: 'Lead closed',
         body: 'This triage lead is closed. Reopen is not available from this screen.',
-        action: null as ReactNode,
+        badge: { label: 'Closed', variant: 'secondary' as const },
       };
     }
     if (isConverted && item.convertedEngagement?.id) {
       if (!analystName) {
         return {
-          title: 'Assign a Level 2 analyst',
-          body: 'An analyst must be assigned before continuing the diagnostic.',
-          action: (
-            <Button
-              className="h-10 shrink-0 whitespace-nowrap px-4"
-              disabled={busy}
-              onClick={() => setAssignOpen(true)}
-            >
-              Assign analyst
-            </Button>
-          ),
+          title: 'Executive Advisory Diagnostic',
+          body: 'Level 2 has been created. Assign a consultant before continuing the diagnostic.',
+          badge: { label: 'Assign consultant', variant: 'warning' as const },
         };
       }
       return {
-        title: 'Continue Level 2 diagnostic',
-        body: `${analystName} is assigned.`,
-        action: (
-          <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
-            <Link href={`/advisory/${item.convertedEngagement.id}`}>
-              Open Level 2
-              <ArrowRight className="size-4" />
-            </Link>
-          </Button>
-        ),
+        title: 'Executive Advisory Diagnostic',
+        body: `${analystName} is assigned. Continue the Level 2 diagnostic from the header action.`,
+        badge: { label: l2Status.label, variant: l2Status.tone },
       };
     }
-    if (level1Complete && !item.contactedAt) {
+    if (level1Complete && !item.contactedAt && !item.closedAt) {
       return {
-        title: 'Mark as contacted',
-        body: 'Confirm outreach so commercial follow-up can continue.',
-        action: (
-          <Button
-            className="h-10 shrink-0 whitespace-nowrap px-4"
-            disabled={busy}
-            onClick={() =>
-              void patch(
-                { status: 'CONTACTED' },
-                { title: 'Contact status updated', description: 'Marked as contacted.' },
-              )
-            }
-          >
-            Mark contacted
-          </Button>
-        ),
+        title: 'Initial outreach',
+        body: 'Confirm contact with the organisation before Level 2 preparation.',
+        badge: { label: 'Contact pending', variant: 'warning' as const },
       };
     }
-    if (level1Complete && !item.reviewedAt) {
+    if (level1Complete && !item.reviewedAt && !item.closedAt) {
       return {
-        title: 'Mark as reviewed',
-        body: 'Confirm the Level 1 indication has been reviewed.',
-        action: (
-          <Button
-            className="h-10 shrink-0 whitespace-nowrap px-4"
-            disabled={busy}
-            onClick={() =>
-              void patch(
-                { status: 'REVIEWED' },
-                { title: 'Status updated', description: 'Marked as reviewed.' },
-              )
-            }
-          >
-            Mark reviewed
-          </Button>
-        ),
+        title: 'Review triage indication',
+        body: 'Confirm the Level 1 indication has been reviewed before Level 2 preparation.',
+        badge: { label: 'Review pending', variant: 'warning' as const },
       };
     }
-    if (level1Complete && !isConverted) {
+    if (level1Complete && !isConverted && !item.closedAt) {
       return {
-        title: 'Convert to Level 2',
-        body: 'Create the Executive Advisory Diagnostic for this organisation.',
-        action: (
-          <Button className="h-10 shrink-0 whitespace-nowrap px-4" disabled={busy} onClick={() => void convert()}>
-            Convert to Level 2
-          </Button>
-        ),
+        title: 'Executive Advisory Diagnostic',
+        body: 'This triage has been reviewed and is ready for Level 2 preparation.',
+        badge: { label: 'Ready for Level 2', variant: 'success' as const },
       };
     }
     if (!level1Complete) {
       return {
         title: 'Awaiting questionnaire completion',
         body: 'Level 1 triage is still in progress.',
-        action: null,
+        badge: { label: 'In progress', variant: 'warning' as const },
       };
     }
     return null;
   })();
 
-  const workflowSteps: Array<{ state: 'done' | 'current' | 'pending' | 'warning'; label: string }> = useMemo(() => {
-    if (!item) return [];
-    const steps: Array<{ done: boolean; label: string; current?: boolean }> = [
-      { done: Boolean(item.completedAt), label: 'Questionnaire completed' },
-      { done: score != null, label: 'Indication scored' },
-      { done: Boolean(item.reviewedAt), label: 'Reviewed' },
-      { done: Boolean(item.contactedAt), label: 'Contacted' },
-      {
-        done: Boolean(item.convertedAt || item.closedAt),
-        label: item.closedAt && !item.convertedAt ? 'Closed' : 'Level 2 preparation',
-        current: Boolean(item.completedAt && !item.convertedAt && !item.closedAt),
-      },
-    ];
-    return steps.map((s) => ({
-      label: s.label,
-      state: s.done ? 'done' : s.current ? 'current' : 'pending',
-    }));
-  }, [item, score]);
+  const workflowSteps: Array<{ state: 'done' | 'current' | 'pending' | 'warning'; label: string }> =
+    useMemo(() => {
+      if (item?.commercialWorkflow?.length) return item.commercialWorkflow;
+      if (!item) return [];
+      return [
+        { state: item.completedAt ? 'done' : 'pending', label: 'Questionnaire completed' },
+        { state: score != null ? 'done' : 'pending', label: 'Indication scored' },
+        { state: item.reviewedAt ? 'done' : 'pending', label: 'Reviewed' },
+        { state: item.contactedAt ? 'done' : 'pending', label: 'Contacted' },
+      ] as Array<{ state: 'done' | 'current' | 'pending' | 'warning'; label: string }>;
+    }, [item, score]);
 
   if (loading || !item) {
     return (
@@ -558,12 +572,23 @@ export default function TriageSubmissionDetailPage() {
           <Card className="rounded-xl border-slate-200 shadow-sm">
             <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
               <div className="min-w-0 flex-1 space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Executive Governance Triage
-                </p>
-                <p className="text-sm font-semibold tracking-wide text-slate-500">
-                  {assessment?.reference || '—'}
-                </p>
+                <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm">
+                  <Link
+                    href="/triage"
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                    aria-label="Back to triage list"
+                  >
+                    <ChevronLeft className="size-4" aria-hidden="true" />
+                  </Link>
+                  <Link
+                    href="/triage"
+                    className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+                  >
+                    Executive Triage
+                  </Link>
+                  <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+                  <span className="font-medium text-slate-900">{assessment?.reference || '—'}</span>
+                </nav>
                 <h1 className="text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
                   {item.organisationName}
                 </h1>
@@ -596,103 +621,124 @@ export default function TriageSubmissionDetailPage() {
                 </p>
               </div>
 
-              <div className="flex w-full min-w-[220px] max-w-sm flex-col items-stretch gap-3 sm:w-auto">
-                <div className="flex flex-wrap gap-2 sm:justify-end">
-                  <Button variant="outline" asChild className="h-11 shrink-0 whitespace-nowrap px-4">
-                    <Link href="/triage">Back to triage</Link>
-                  </Button>
-                  {item.convertedEngagement?.id ? (
-                    <Button asChild className="h-11 shrink-0 whitespace-nowrap px-4">
-                      <Link href={`/advisory/${item.convertedEngagement.id}`}>
-                        Open Level 2
-                        <ArrowRight className="size-4" />
-                      </Link>
-                    </Button>
-                  ) : level1Complete && !item.convertedAt && !item.closedAt ? (
-                    <Button
-                      className="h-11 shrink-0 whitespace-nowrap px-4"
+              <div className="flex shrink-0 items-center gap-2 sm:items-start">
+                {item.primaryCta?.kind === 'awaiting_decision' || item.primaryCta?.kind === 'closed' ? (
+                  <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-3 py-1.5 text-sm">
+                    {item.primaryCta.label}
+                  </Badge>
+                ) : null}
+                <RowActionsMenu
+                  open={leadMenuOpen}
+                  onClose={() => setLeadMenuOpen(false)}
+                  align="end"
+                  trigger={
+                    <button
+                      type="button"
+                      className="org2-menu-btn"
+                      aria-label="Lead actions"
                       disabled={busy}
-                      onClick={() => void convert()}
+                      onClick={() => setLeadMenuOpen((open) => !open)}
                     >
-                      Convert to Level 2
-                    </Button>
+                      <IconMoreVertical />
+                    </button>
+                  }
+                >
+                  {item.primaryCta
+                  && item.primaryCta.kind !== 'none'
+                  && item.primaryCta.kind !== 'awaiting_decision'
+                  && item.primaryCta.kind !== 'closed' ? (
+                    item.primaryCta.kind === 'open_level2' && item.primaryCta.engagementId ? (
+                      <Link
+                        href={`/advisory/${item.primaryCta.engagementId}`}
+                        onClick={() => setLeadMenuOpen(false)}
+                      >
+                        {item.primaryCta.label}
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setLeadMenuOpen(false);
+                          void handlePrimaryCta();
+                        }}
+                      >
+                        {item.primaryCta.label}
+                      </button>
+                    )
                   ) : null}
-                </div>
-
-                <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Primary analyst
-                  </p>
-                  {assignOpen ? (
-                    <div className="mt-2 space-y-2">
-                      <FilterSelect
-                        value={item.assignedAnalystId || ''}
-                        onChange={(next) => void assignAnalyst(next)}
-                        disabled={busy}
-                        placeholder="Select analyst"
-                        triggerClassName="h-10 w-full"
-                        options={analysts.map((a) => ({
-                          value: a.id,
-                          label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
-                        }))}
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        {item.assignedAnalystId ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 shrink-0 whitespace-nowrap px-3"
-                            disabled={busy}
-                            onClick={() => void assignAnalyst('')}
-                          >
-                            Unassign
-                          </Button>
-                        ) : null}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 shrink-0 whitespace-nowrap px-3"
-                          onClick={() => setAssignOpen(false)}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : analystName ? (
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="m-0 truncate text-sm font-semibold text-slate-900">{analystName}</p>
-                        <p className="m-0 truncate text-xs text-slate-500">
-                          {item.assignedAnalyst?.email || 'Assigned'}
+                  {analysts.length ? (
+                    <>
+                      {item.assignedAnalystId && analystName ? (
+                        <p className="m-0 px-3 py-1 text-xs text-slate-600">
+                          Assigned to <strong className="font-semibold text-slate-900">{analystName}</strong>
                         </p>
+                      ) : null}
+                      {item.assignedAnalystId ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void assignAnalyst('')}
+                        >
+                          Unassign analyst
+                        </button>
+                      ) : null}
+                      <div
+                        className="px-2 py-1"
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <select
+                          aria-label={analystName ? 'Change analyst' : 'Assign analyst'}
+                          className="org2-menu-select"
+                          defaultValue=""
+                          disabled={busy}
+                          onChange={(e) => {
+                            const next = e.target.value;
+                            if (next) void assignAnalyst(next);
+                            e.currentTarget.value = '';
+                          }}
+                        >
+                          <option value="" disabled hidden>
+                            {analystName ? 'Change analyst' : 'Assign analyst'}
+                          </option>
+                          {analysts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {`${a.firstName} ${a.lastName} — ${a.systemRole}`}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 shrink-0 whitespace-nowrap px-2 text-xs"
-                        disabled={busy}
-                        onClick={() => setAssignOpen(true)}
-                      >
-                        Change
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                      <p className="m-0 text-sm text-slate-700">Not assigned</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 shrink-0 whitespace-nowrap px-2.5"
-                        disabled={busy}
-                        onClick={() => setAssignOpen(true)}
-                      >
-                        Assign analyst
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setLeadMenuOpen(false);
+                      setTab('notes');
+                    }}
+                  >
+                    Add internal note
+                  </button>
+                  {!item.closedAt && !item.convertedAt ? (
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={busy}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        void patch(
+                          { status: 'CLOSED' },
+                          { title: 'Lead closed', description: 'This triage lead was closed.' },
+                        );
+                      }}
+                    >
+                      Close lead
+                    </button>
+                  ) : null}
+                </RowActionsMenu>
               </div>
             </CardContent>
           </Card>
@@ -700,7 +746,7 @@ export default function TriageSubmissionDetailPage() {
           {/* Tabs directly below information card */}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="min-w-0">
-              <Tabs value={tab} onValueChange={(v) => setTab(v as TabId)}>
+              <Tabs value={tab} onValueChange={(v) => setTab(parseTabId(v))}>
                 <TabsList className="mb-4 h-auto w-full flex-wrap justify-start gap-1 overflow-x-auto bg-slate-100 p-1">
                   <TabsTrigger value="overview" className="shrink-0 whitespace-nowrap">
                     Overview
@@ -717,9 +763,12 @@ export default function TriageSubmissionDetailPage() {
                   <TabsTrigger value="commercial" className="shrink-0 gap-2 whitespace-nowrap">
                     Commercial
                     {commercialNeedsAction ? (
-                      <Badge variant="warning" className="h-5 whitespace-nowrap px-1.5" title="Action required">
-                        Action required
-                      </Badge>
+                      <span className="inline-flex shrink-0" title="Needs attention">
+                        <Bell
+                          className="size-3.5 text-amber-600"
+                          aria-label="Needs attention"
+                        />
+                      </span>
                     ) : proposalStatus !== 'NOT_REQUESTED' ? (
                       <Badge variant="info" className="h-5 whitespace-nowrap px-1.5">
                         Active
@@ -728,6 +777,9 @@ export default function TriageSubmissionDetailPage() {
                   </TabsTrigger>
                   <TabsTrigger value="journey" className="shrink-0 whitespace-nowrap">
                     Journey & audit
+                  </TabsTrigger>
+                  <TabsTrigger value="notes" className="shrink-0 whitespace-nowrap">
+                    Notes
                   </TabsTrigger>
                 </TabsList>
 
@@ -757,17 +809,34 @@ export default function TriageSubmissionDetailPage() {
                     </CardContent>
                   </Card>
 
-                  {nextAction ? (
+                  {recommendedAction ? (
                     <Card className="rounded-xl border-moss-info/30 bg-moss-info/[0.04] shadow-sm">
-                      <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
-                        <div className="min-w-0 space-y-1">
-                          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-info">
-                            Next action
-                          </p>
-                          <p className="m-0 text-sm font-semibold text-slate-900">{nextAction.title}</p>
-                          <p className="m-0 text-sm text-slate-600">{nextAction.body}</p>
+                      <CardContent className="space-y-2 p-4 sm:p-5">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-info">
+                          Next recommended action
+                        </p>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <p className="m-0 text-sm font-semibold text-slate-900">{recommendedAction.title}</p>
+                            <p className="m-0 text-sm text-slate-600">{recommendedAction.body}</p>
+                          </div>
+                          {recommendedAction.badge ? (
+                            <Badge
+                              variant={
+                                recommendedAction.badge.variant === 'success'
+                                  ? 'success'
+                                  : recommendedAction.badge.variant === 'warning'
+                                    ? 'warning'
+                                    : recommendedAction.badge.variant === 'info'
+                                      ? 'info'
+                                      : 'secondary'
+                              }
+                              className="shrink-0 whitespace-nowrap"
+                            >
+                              {recommendedAction.badge.label}
+                            </Badge>
+                          ) : null}
                         </div>
-                        {nextAction.action}
                       </CardContent>
                     </Card>
                   ) : null}
@@ -858,19 +927,9 @@ export default function TriageSubmissionDetailPage() {
                   </div>
 
                   <Card className="rounded-xl border-slate-200 shadow-sm">
-                    <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
-                      <div>
-                        <CardTitle className="text-base">Analyst</CardTitle>
-                        <CardDescription>Primary Level 2 consultant for this lead</CardDescription>
-                      </div>
-                      <Button
-                        variant="outline"
-                        className="h-9 shrink-0 whitespace-nowrap px-3"
-                        disabled={busy}
-                        onClick={() => setAssignOpen(true)}
-                      >
-                        {analystName ? 'Change' : 'Assign analyst'}
-                      </Button>
+                    <CardHeader>
+                      <CardTitle className="text-base">Analyst</CardTitle>
+                      <CardDescription>Primary Level 2 consultant for this lead</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {analystName ? (
@@ -881,7 +940,9 @@ export default function TriageSubmissionDetailPage() {
                           </p>
                         </div>
                       ) : (
-                        <p className="m-0 text-sm text-amber-800">Not assigned</p>
+                        <p className="m-0 text-sm text-amber-800">
+                          Not assigned — use the ⋮ menu to assign a consultant.
+                        </p>
                       )}
                     </CardContent>
                   </Card>
@@ -1029,101 +1090,15 @@ export default function TriageSubmissionDetailPage() {
                 </TabsContent>
 
                 <TabsContent value="commercial" className="mt-0">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">Commercial Intent</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <dl>
-                          <Kv label="Status">{humanizeStatus(proposalStatus)}</Kv>
-                          <Kv label="Proposal reference">{item.proposalReference || '—'}</Kv>
-                          <Kv label="Requested">{fmt(item.proposalRequestedAt)}</Kv>
-                          <Kv label="Sent">{fmt(item.proposalSentAt)}</Kv>
-                          <Kv label="Accepted / Declined">
-                            {item.proposalAcceptedAt
-                              ? `Accepted ${fmt(item.proposalAcceptedAt)}`
-                              : item.proposalDeclinedAt
-                                ? `Declined ${fmt(item.proposalDeclinedAt)}`
-                                : '—'}
-                          </Kv>
-                          <Kv label="Recommended product">Executive Advisory Diagnostic</Kv>
-                        </dl>
-                        {proposalStatus !== 'NOT_REQUESTED' && !item.convertedAt && !item.closedAt ? (
-                          <div className="flex flex-wrap gap-2">
-                            {proposalStatus === 'REQUESTED' ? (
-                              <Button
-                                className="h-10 shrink-0 whitespace-nowrap px-4"
-                                disabled={busy}
-                                onClick={() => void proposalAction('PREPARE')}
-                              >
-                                Start Preparing Proposal
-                              </Button>
-                            ) : null}
-                            {['REQUESTED', 'IN_PREPARATION'].includes(proposalStatus) ? (
-                              <Button
-                                variant="outline"
-                                className="h-10 shrink-0 whitespace-nowrap px-4"
-                                disabled={busy}
-                                onClick={() => void proposalAction('SENT')}
-                              >
-                                Mark Proposal Sent
-                              </Button>
-                            ) : null}
-                            {['SENT', 'IN_PREPARATION'].includes(proposalStatus) ? (
-                              <Button
-                                className="h-10 shrink-0 whitespace-nowrap px-4"
-                                disabled={busy}
-                                onClick={() => void proposalAction('ACCEPTED')}
-                              >
-                                Mark Accepted
-                              </Button>
-                            ) : null}
-                            {['REQUESTED', 'IN_PREPARATION', 'SENT'].includes(proposalStatus) ? (
-                              <Button
-                                variant="outline"
-                                className="h-10 shrink-0 whitespace-nowrap px-4"
-                                disabled={busy}
-                                onClick={() => void proposalAction('DECLINED')}
-                              >
-                                Mark Declined
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">Proposal admin notes</CardTitle>
-                        <CardDescription>
-                          Internal proposal preparation notes. Pricing must follow commercial rules.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <Textarea
-                          rows={8}
-                          className="min-h-[160px] resize-y"
-                          value={proposalNotes}
-                          onChange={(e) => setProposalNotes(e.target.value)}
-                          placeholder="Proposal preparation notes…"
-                        />
-                        <Button
-                          variant="outline"
-                          className="h-10 shrink-0 whitespace-nowrap px-4"
-                          disabled={busy || proposalNotes === (item.proposalAdminNotes || '')}
-                          onClick={() =>
-                            void patch(
-                              { proposalAdminNotes: proposalNotes },
-                              { title: 'Notes saved', description: 'Proposal notes have been updated.' },
-                            )
-                          }
-                        >
-                          Save proposal notes
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  </div>
+                  <TriageCommercialPanel
+                    submissionId={item.id}
+                    item={item}
+                    commercialOwners={commercialOwners}
+                    busy={busy}
+                    onReload={load}
+                    focusSection={commercialFocus}
+                    onFocusHandled={clearCommercialFocus}
+                  />
                 </TabsContent>
 
                 <TabsContent value="journey" className="mt-0 space-y-4">
@@ -1168,6 +1143,14 @@ export default function TriageSubmissionDetailPage() {
                     </CardContent>
                   </Card>
                 </TabsContent>
+
+                <TabsContent value="notes" className="mt-0">
+                  <TriageNotesPanel
+                    submissionId={item.id}
+                    initialNotes={(item.notes || []) as TriageNoteItem[]}
+                    onNotesChange={(next) => setItem((prev: any) => (prev ? { ...prev, notes: next } : prev))}
+                  />
+                </TabsContent>
               </Tabs>
             </div>
 
@@ -1185,103 +1168,6 @@ export default function TriageSubmissionDetailPage() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-xl border-slate-200 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Follow-up actions</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  {item.completedAt && !item.reviewedAt && !item.closedAt ? (
-                    <Button
-                      className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4"
-                      disabled={busy}
-                      onClick={() =>
-                        void patch(
-                          { status: 'REVIEWED' },
-                          { title: 'Status updated', description: 'Marked as reviewed.' },
-                        )
-                      }
-                    >
-                      Mark reviewed
-                    </Button>
-                  ) : null}
-                  {item.completedAt && !item.contactedAt && !item.closedAt ? (
-                    <Button
-                      variant="outline"
-                      className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4"
-                      disabled={busy}
-                      onClick={() =>
-                        void patch(
-                          { status: 'CONTACTED' },
-                          { title: 'Contact status updated', description: 'Marked as contacted.' },
-                        )
-                      }
-                    >
-                      Mark contacted
-                    </Button>
-                  ) : null}
-                  {item.completedAt && !item.convertedAt && !item.closedAt ? (
-                    <Button
-                      className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4"
-                      disabled={busy}
-                      onClick={() => void convert()}
-                    >
-                      Convert to Level 2
-                    </Button>
-                  ) : null}
-                  {item.convertedEngagement?.id ? (
-                    <Button variant="outline" asChild className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4">
-                      <Link href={`/advisory/${item.convertedEngagement.id}`}>Open Level 2 Diagnostic</Link>
-                    </Button>
-                  ) : null}
-                  {!item.closedAt && !item.convertedAt ? (
-                    <Button
-                      variant="outline"
-                      className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4"
-                      disabled={busy}
-                      onClick={() =>
-                        void patch({ status: 'CLOSED' }, { title: 'Lead closed', description: 'This triage lead was closed.' })
-                      }
-                    >
-                      Close lead
-                    </Button>
-                  ) : null}
-                  {busy ? (
-                    <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                      Updating…
-                    </p>
-                  ) : null}
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-xl border-slate-200 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Internal notes</CardTitle>
-                  <CardDescription>Call outcomes and general follow-up. Not shown to the client.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Textarea
-                    rows={5}
-                    className="min-h-[120px] resize-y"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Capture follow-up observations…"
-                  />
-                  <Button
-                    variant="outline"
-                    className="h-10 w-full shrink-0 justify-center whitespace-nowrap px-4"
-                    disabled={busy || notes === (item.adminNotes || '')}
-                    onClick={() =>
-                      void patch(
-                        { adminNotes: notes },
-                        { title: 'Notes saved', description: 'Internal notes have been updated.' },
-                      )
-                    }
-                  >
-                    Save notes
-                  </Button>
-                </CardContent>
-              </Card>
             </aside>
           </div>
         </div>

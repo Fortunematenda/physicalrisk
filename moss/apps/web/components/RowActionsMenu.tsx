@@ -88,6 +88,14 @@ export function RowActionsMenu({
       const target = e.target as Node;
       if (wrapRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-select-viewport], [role="listbox"]',
+        )
+      ) {
+        return;
+      }
       onClose();
     };
 

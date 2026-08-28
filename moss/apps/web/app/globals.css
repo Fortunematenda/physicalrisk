@@ -1971,7 +1971,7 @@ textarea { min-height:90px; resize:none; }
 .org2-score-pill.risk-low, .org2-score-pill.risk-none { background:#ecfdf5; color:#047857; }
 .org2-risk-badge {
   display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px;
-  font-size:12px; font-weight:700;
+  font-size:12px; font-weight:700; white-space:nowrap;
 }
 .org2-risk-badge.risk-high, .org2-risk-badge.risk-critical { background:#fdecee; color:#9e0e26; }
 .org2-risk-badge.risk-moderate { background:#fff7ed; color:#c2410c; }
@@ -1984,6 +1984,17 @@ textarea { min-height:90px; resize:none; }
 .org2-status-badge.inactive { background:#f1f5f9; color:#64748b; }
 .org2-actions-cell { width:48px; text-align:right; position:relative; z-index:2; }
 .org2-menu-wrap { position:relative; display:inline-block; }
+.triage-notes-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.triage-notes-scroll::-webkit-scrollbar { width: 8px; }
+.triage-notes-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+.triage-notes-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 .org2-menu-btn {
   width:32px; height:32px; border:0; background:transparent; border-radius:8px;
   display:grid; place-items:center; cursor:pointer; color:var(--muted);
@@ -2024,6 +2035,32 @@ textarea { min-height:90px; resize:none; }
 }
 .org2-menu button.danger,
 .org2-menu button.danger:hover { color:#b91c1c; }
+.org2-menu select {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  height: auto;
+  margin: 0;
+  padding: 9px 32px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.org2-menu select:focus {
+  outline: 2px solid rgba(196, 18, 48, 0.12);
+  border-color: var(--pr-red);
+}
+.org2-menu-select { min-width: 200px; }
 .org2-pagination {
   position:relative; z-index:1;
   display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
@@ -2111,6 +2148,12 @@ textarea { min-height:90px; resize:none; }
 .assess2-status-badge.status-approved { background:#ecfdf5; color:#047857; }
 .assess2-status-badge.status-report_issued { background:#ecfeff; color:#0e7490; }
 .assess2-scores { display:flex; gap:10px; align-items:center; }
+.assess2-scores-stack {
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  min-width:56px;
+}
 .assess2-ring { display:flex; flex-direction:column; align-items:center; gap:2px; }
 .assess2-ring span { font-size:10px; color:var(--muted); font-weight:650; }
 .assess2-ring-text { font-size:11px; font-weight:800; fill:#111827; }

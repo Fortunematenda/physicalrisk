@@ -211,6 +211,64 @@ enum ProposalStatus {
   CANCELLED
 }
 
+/// Pre-Level-2 commercial pipeline stage (derived + stored override).
+enum CommercialStage {
+  TRIAGE_COMPLETED
+  UNDER_REVIEW
+  CONTACTED
+  COMMERCIAL_DISCUSSION
+  PROPOSAL_DRAFT
+  PROPOSAL_SENT
+  PROPOSAL_ACCEPTED
+  LEVEL_2_READY
+  LEVEL_2_CREATED
+  CLOSED
+}
+
+enum ClientInterest {
+  UNKNOWN
+  INTERESTED
+  NEEDS_FOLLOW_UP
+  NOT_INTERESTED
+  DEFERRED
+}
+
+enum TriageContactMethod {
+  CALL
+  EMAIL
+  MEETING
+  WHATSAPP
+  OTHER
+}
+
+enum TriageContactOutcome {
+  NO_RESPONSE
+  FOLLOW_UP_REQUIRED
+  INTERESTED
+  NOT_INTERESTED
+  WANTS_PROPOSAL
+  NEEDS_MORE_INFORMATION
+  DEFERRED
+  CLOSED
+}
+
+enum TriageProposalStatus {
+  DRAFT
+  INTERNAL_REVIEW
+  APPROVED
+  SENT
+  VIEWED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum TriageProposalSource {
+  PLATFORM
+  UPLOAD
+}
+
 enum AdvisoryRoutePriority {
   HIGH
   RECOMMENDED
@@ -323,6 +381,11 @@ model User {
   somodAssessmentsCreated SomodAssessment[] @relation("SomodAssessmentCreator")
   somodFinancialApprovals SomodAssessment[] @relation("SomodFinancialApprover")
   assignedTriageLeads PublicLead[] @relation("TriageAssignedAnalyst")
+  commercialOwnedTriageLeads PublicLead[] @relation("TriageCommercialOwner")
+  triageFollowUpLeads PublicLead[] @relation("TriageFollowUpOwner")
+  triageContactActivities TriageContactActivity[] @relation("TriageContactAuthor")
+  triageProposalsCreated TriageProposal[] @relation("TriageProposalCreator")
+  triageNotesAuthored TriageNote[] @relation("TriageNoteAuthor")
   advisoryOutcomesConfirmed AdvisoryDiagnosticOutcome[] @relation("AdvisoryOutcomeConfirmer")
   auditEvents  AuditEvent[]
 }
@@ -344,6 +407,7 @@ model Organisation {
   somodAssessments SomodAssessment[]
   crmSyncRecords   CrmSyncRecord[]
   actionItems      ActionItem[]
+  triageProposals  TriageProposal[]
 }
 
 /// Shared site master data in the diagnostic platform DB (not Repository).
@@ -1170,9 +1234,25 @@ model PublicLead {
   proposalAdminNotes    String?
   proposalPreparedById  String?
   assignedAnalystId     String?
+  commercialOwnerId     String?
+  commercialOwnerAssignedAt DateTime?
+  commercialStage       CommercialStage?
+  clientInterest        ClientInterest @default(UNKNOWN)
+  scopeClientObjectives String?
+  scopeSitesOrBusinessUnits String?
+  scopeIndicativeScope  String?
+  scopeExpectedTimeline String?
+  scopeCommercialNotes  String?
+  nextFollowUpAt        DateTime?
+  followUpOwnerId       String?
+  followUpReason        String?
+  acceptedProposalId    String?   @unique
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   assignedAnalyst       User?     @relation("TriageAssignedAnalyst", fields: [assignedAnalystId], references: [id], onDelete: SetNull)
+  commercialOwner       User?     @relation("TriageCommercialOwner", fields: [commercialOwnerId], references: [id], onDelete: SetNull)
+  followUpOwner         User?     @relation("TriageFollowUpOwner", fields: [followUpOwnerId], references: [id], onDelete: SetNull)
+  acceptedProposal      TriageProposal? @relation("AcceptedTriageProposal", fields: [acceptedProposalId], references: [id], onDelete: SetNull)
   @@index([email])
   @@index([status])
   @@index([assessmentId])
@@ -1181,6 +1261,94 @@ model PublicLead {
   @@index([proposalStatus])
   @@index([proposalRequestedAt])
   @@index([assignedAnalystId])
+  @@index([commercialOwnerId])
+  @@index([commercialStage])
+  triageNotes           TriageNote[]
+  contactActivities     TriageContactActivity[]
+  proposals             TriageProposal[] @relation("TriageLeadProposals")
+}
+
+model TriageContactActivity {
+  id             String               @id @default(cuid())
+  publicLeadId   String
+  contactMethod  TriageContactMethod
+  contactedById  String
+  contactedAt    DateTime             @default(now())
+  outcome        TriageContactOutcome
+  notes          String?
+  nextFollowUpAt DateTime?
+  createdAt      DateTime             @default(now())
+  publicLead     PublicLead           @relation(fields: [publicLeadId], references: [id], onDelete: Cascade)
+  contactedBy    User                 @relation("TriageContactAuthor", fields: [contactedById], references: [id], onDelete: Restrict)
+
+  @@index([publicLeadId, contactedAt])
+  @@index([contactedById])
+}
+
+model TriageProposal {
+  id                   String               @id @default(cuid())
+  proposalNumber       String               @unique
+  publicLeadId         String
+  organisationId       String?
+  productCode          String               @default("EXECUTIVE_ADVISORY_DIAGNOSTIC")
+  title                String
+  scopeSummary         String?
+  objectives           String?
+  sitesOrBusinessUnits String?
+  deliverables         String?
+  evidenceRequirements String?
+  timeline             String?
+  fee                  Decimal?             @db.Decimal(12, 2)
+  currency             String               @default("ZAR")
+  validUntil           DateTime?
+  terms                String?
+  status               TriageProposalStatus @default(DRAFT)
+  source               TriageProposalSource @default(PLATFORM)
+  documentStorageKey   String?
+  documentFileName     String?
+  documentMimeType     String?
+  documentSizeBytes    Int?
+  version              Int                  @default(1)
+  createdById          String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  sentAt               DateTime?
+  acceptedAt           DateTime?
+  declinedAt           DateTime?
+  publicLead           PublicLead           @relation("TriageLeadProposals", fields: [publicLeadId], references: [id], onDelete: Cascade)
+  organisation         Organisation?        @relation(fields: [organisationId], references: [id], onDelete: SetNull)
+  createdBy            User                 @relation("TriageProposalCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  acceptedForLead      PublicLead?          @relation("AcceptedTriageProposal")
+
+  @@index([publicLeadId, createdAt])
+  @@index([organisationId])
+  @@index([status])
+}
+
+enum TriageNoteCategory {
+  GENERAL
+  CALL_OUTCOME
+  FOLLOW_UP
+  COMMERCIAL
+  CONSULTANT_OBSERVATION
+  CLIENT_REQUEST
+  INTERNAL_DECISION
+}
+
+model TriageNote {
+  id           String              @id @default(cuid())
+  publicLeadId String
+  authorId     String?
+  body         String
+  category     TriageNoteCategory  @default(GENERAL)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+  publicLead   PublicLead            @relation(fields: [publicLeadId], references: [id], onDelete: Cascade)
+  author       User?                 @relation("TriageNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([publicLeadId, createdAt])
+  @@index([authorId])
 }
 
 model ContactSubmission {

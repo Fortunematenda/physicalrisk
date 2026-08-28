@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   BadgeCheck,
   ClipboardList,
@@ -30,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 
@@ -249,6 +251,8 @@ function analystName(user?: AnalystOption | TriageRow['assignedAnalyst'] | null)
 
 export default function TriageSubmissionsPage() {
   const confirm = useConfirm();
+  const router = useRouter();
+  const { toast } = useToast();
   const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
   const [items, setItems] = useState<TriageRow[]>([]);
   const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
@@ -270,6 +274,10 @@ export default function TriageSubmissionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [createAnalystOpen, setCreateAnalystOpen] = useState(false);
+
+  function openSubmission(id: string) {
+    router.push(`/triage/${id}`);
+  }
 
   async function loadAnalysts() {
     const [rows, caps] = await Promise.all([
@@ -321,7 +329,7 @@ export default function TriageSubmissionsPage() {
 
   const filtered = useMemo(() => {
     const needle = (query || headerSearch).trim().toLowerCase();
-    return items.filter((row) => {
+    const rows = items.filter((row) => {
       if (status && row.displayStatus !== status) return false;
       if (orgFilter) {
         const key = row.organisationId || row.organisationName;
@@ -357,6 +365,9 @@ export default function TriageSubmissionsPage() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
     });
+    return rows.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }, [items, query, headerSearch, status, orgFilter, analystFilter, dateFrom, dateTo]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -402,33 +413,8 @@ export default function TriageSubmissionsPage() {
     }
   }
 
-  async function convert(row: TriageRow) {
-    const ok = await confirm({
-      title: 'Convert to Level 2',
-      description: `Create the paid Executive Advisory Diagnostic for “${row.organisationName}”?`,
-      confirmLabel: 'Convert',
-      variant: 'destructive',
-    });
-    if (!ok) return;
-    setBusy(row.id);
-    setMenuOpenId(null);
-    setError('');
-    try {
-      const data = await apiFetch<{ engagement: { id: string } }>(`/triage/submissions/${row.id}/convert`, {
-        method: 'POST',
-      });
-      await load();
-      if (data?.engagement?.id) window.location.href = `/advisory/${data.engagement.id}`;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to convert this triage submission.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function assignAnalyst(row: TriageRow, analystId: string) {
     setBusy(row.id);
-    setMenuOpenId(null);
     setError('');
     try {
       await apiFetch(`/triage/submissions/${row.id}`, {
@@ -436,8 +422,26 @@ export default function TriageSubmissionsPage() {
         body: JSON.stringify({ assignedAnalystId: analystId || '' }),
       });
       await load();
+      setMenuOpenId(null);
+      const assigned = analysts.find((a) => a.id === analystId);
+      const person = analystName(assigned) || analystName(row.assignedAnalyst) || 'Analyst';
+      toast({
+        id: `triage-assign-${row.id}`,
+        variant: 'success',
+        title: analystId ? 'Analyst assigned' : 'Analyst unassigned',
+        description: analystId
+          ? `${person} is now assigned to ${row.organisationName}.`
+          : `${row.organisationName} no longer has an assigned analyst.`,
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to assign analyst.');
+      const message = e instanceof Error ? e.message : 'Unable to assign analyst.';
+      setError(message);
+      toast({
+        id: 'triage-assign-error',
+        variant: 'error',
+        title: 'Assignment failed',
+        description: message,
+      });
     } finally {
       setBusy(null);
     }
@@ -682,6 +686,7 @@ export default function TriageSubmissionsPage() {
                   <th>Questionnaire</th>
                   <th>Indication</th>
                   <th>Stage</th>
+                  <th>Analyst</th>
                   <th>Commercial Intent</th>
                   <th>Last activity</th>
                   <th />
@@ -702,8 +707,23 @@ export default function TriageSubmissionsPage() {
 
                   return (
                     <Fragment key={row.id}>
-                      <tr>
-                        <td>
+                      <tr
+                        className="cursor-pointer transition-colors hover:bg-slate-50"
+                        onClick={() => openSubmission(row.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openSubmission(row.id);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Open triage submission for ${row.organisationName}`}
+                      >
+                        <td
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
                           <button
                             type="button"
                             className={`assess2-expand-btn${expanded ? ' open' : ''}`}
@@ -715,9 +735,7 @@ export default function TriageSubmissionsPage() {
                         </td>
                         <td>
                           <div className="assess2-org-cell">
-                            <Link href={`/triage/${row.id}`}>
-                              <strong>{row.organisationName}</strong>
-                            </Link>
+                            <strong>{row.organisationName}</strong>
                             <span className="muted small">
                               {contactName} · {row.email}
                             </span>
@@ -733,14 +751,14 @@ export default function TriageSubmissionsPage() {
                           </div>
                         </td>
                         <td>
-                          <div className="assess2-scores">
+                          <div className="assess2-scores assess2-scores-stack">
                             <ScoreRing value={score} label="EGT" />
                             {band ? (
                               <span className={`org2-risk-badge risk-${riskTone(band)}`}>
                                 {band === 'Controlled' ? 'Low' : band}
                               </span>
                             ) : (
-                              <span className="muted">{row.completedAt ? 'Recorded' : 'Pending'}</span>
+                              <span className="muted small">{row.completedAt ? 'Recorded' : 'Pending'}</span>
                             )}
                           </div>
                         </td>
@@ -748,6 +766,16 @@ export default function TriageSubmissionsPage() {
                           <span className={`assess2-status-badge ${statusClass(row.displayStatus)}`}>
                             {statusLabel(row.displayStatus)}
                           </span>
+                        </td>
+                        <td>
+                          {row.assignedAnalyst ? (
+                            <div className="assess2-ref-cell">
+                              <strong>{analystName(row.assignedAnalyst)}</strong>
+                              <span className="muted small">{row.assignedAnalyst.email || 'Assigned'}</span>
+                            </div>
+                          ) : (
+                            <span className="muted">Unassigned</span>
+                          )}
                         </td>
                         <td>
                           <div className="assess2-ref-cell">
@@ -760,7 +788,11 @@ export default function TriageSubmissionsPage() {
                           </div>
                         </td>
                         <td className="muted">{relativeTime(row.updatedAt)}</td>
-                        <td className="org2-actions-cell">
+                        <td
+                          className="org2-actions-cell"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
                           <RowActionsMenu
                             open={menuOpenId === row.id}
                             onClose={() => setMenuOpenId(null)}
@@ -788,23 +820,50 @@ export default function TriageSubmissionsPage() {
                             ) : null}
                             {analysts.length ? (
                               <>
-                                <button
-                                  type="button"
-                                  disabled={busy === row.id}
-                                  onClick={() => void assignAnalyst(row, '')}
-                                >
-                                  Unassign analyst
-                                </button>
-                                {analysts.slice(0, 8).map((a) => (
+                                {row.assignedAnalyst ? (
+                                  <p className="m-0 px-3 py-1 text-xs text-slate-600">
+                                    Assigned to{' '}
+                                    <strong className="font-semibold text-slate-900">
+                                      {analystName(row.assignedAnalyst)}
+                                    </strong>
+                                  </p>
+                                ) : null}
+                                {row.assignedAnalystId ? (
                                   <button
-                                    key={a.id}
                                     type="button"
-                                    disabled={busy === row.id || row.assignedAnalystId === a.id}
-                                    onClick={() => void assignAnalyst(row, a.id)}
+                                    disabled={busy === row.id}
+                                    onClick={() => void assignAnalyst(row, '')}
                                   >
-                                    Assign {analystName(a)}
+                                    Unassign analyst
                                   </button>
-                                ))}
+                                ) : null}
+                                <div
+                                  className="px-2 py-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => e.stopPropagation()}
+                                >
+                                  <select
+                                    aria-label={row.assignedAnalyst ? 'Reassign analyst' : 'Assign analyst'}
+                                    className="org2-menu-select"
+                                    defaultValue=""
+                                    disabled={busy === row.id}
+                                    onChange={(e) => {
+                                      const next = e.target.value;
+                                      if (next) void assignAnalyst(row, next);
+                                      e.currentTarget.value = '';
+                                    }}
+                                  >
+                                    <option value="" disabled hidden>
+                                      {row.assignedAnalyst ? 'Reassign' : 'Assign'}
+                                    </option>
+                                    {analysts.map((a) => (
+                                      <option key={a.id} value={a.id}>
+                                        {analystName(a)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
                               </>
                             ) : null}
                             {row.completedAt && !row.reviewedAt && !row.closedAt ? (
@@ -825,15 +884,6 @@ export default function TriageSubmissionsPage() {
                                 Mark contacted
                               </button>
                             ) : null}
-                            {row.completedAt && !row.convertedAt && !row.closedAt ? (
-                              <button
-                                type="button"
-                                disabled={busy === row.id}
-                                onClick={() => void convert(row)}
-                              >
-                                Convert to Level 2
-                              </button>
-                            ) : null}
                             {row.completedAt && !row.closedAt ? (
                               <button
                                 type="button"
@@ -849,7 +899,7 @@ export default function TriageSubmissionsPage() {
                       </tr>
                       {expanded && (
                         <tr className="assess2-detail-row">
-                          <td colSpan={8}>
+                          <td colSpan={9}>
                             <div className="assess2-detail">
                               <div>
                                 <em>Progress</em>

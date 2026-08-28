@@ -75,7 +75,9 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
     (req.method === 'POST' && subPath === 'public/leads') ||
     (req.method === 'POST' && subPath === 'public/resume') ||
     (req.method === 'PATCH' && /^public\/leads\/[^/]+\/progress$/.test(subPath)) ||
-    (req.method === 'POST' && subPath === 'public/complete-assessment');
+    (req.method === 'POST' && subPath === 'public/complete-assessment') ||
+    (req.method === 'GET' && subPath === 'public/triage/proposal') ||
+    (req.method === 'POST' && subPath === 'public/triage/proposal');
 
   const bearer = isPublicAssessmentRoute ? null : await resolveBearer(req);
 
@@ -100,6 +102,9 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   const accept = req.headers.get('accept');
   if (accept) headers.set('Accept', accept);
 
+  const isMultipartUpload = contentType?.includes('multipart/form-data');
+  const maxBodyBytes = isMultipartUpload ? 25 * 1024 * 1024 : 102_400;
+
   const init: RequestInit = {
     method: req.method,
     headers,
@@ -108,9 +113,14 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const body = await req.arrayBuffer();
-    if (body.byteLength > 102_400) {
+    if (body.byteLength > maxBodyBytes) {
       return NextResponse.json(
-        { statusCode: 413, message: 'Request body too large' },
+        {
+          statusCode: 413,
+          message: isMultipartUpload
+            ? 'Upload exceeds 25 MB limit.'
+            : 'Request body too large',
+        },
         { status: 413 },
       );
     }

@@ -1,10 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProductCode, ProposalStatus } from '@prisma/client';
+import { ProductCode, ProposalStatus, TriageNoteCategory, CommercialStage } from '@prisma/client';
 import type { AuthUser } from '../common/current-user.decorator';
 import { INTERNAL_ROLES } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AdvisoryService } from '../advisory/advisory.service';
+import { TriageCommercialService } from './triage-commercial.service';
+import { resolveCommercialStage } from '../common/triage-commercial';
 
 type LeadQuery = {
   q?: string;
@@ -23,12 +25,16 @@ const PROPOSAL_ACTIONS = new Set([
   'EXPIRE',
 ]);
 
+const TRIAGE_NOTE_CATEGORIES = new Set<string>(Object.values(TriageNoteCategory));
+const NOTE_ADMIN_ROLES = new Set(['SUPER_ADMIN', 'METHODOLOGY_ADMIN']);
+
 @Injectable()
 export class TriageService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly advisory: AdvisoryService,
+    private readonly commercial: TriageCommercialService,
   ) {}
 
   private assertInternal(user: AuthUser) {
@@ -41,6 +47,12 @@ export class TriageService {
   private async resolveLead(idOrKey: string) {
     const include = {
       assignedAnalyst: {
+        select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+      },
+      commercialOwner: {
+        select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+      },
+      followUpOwner: {
         select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
       },
     } as const;
@@ -146,28 +158,6 @@ export class TriageService {
     return 'IN_PROGRESS';
   }
 
-  private commercialSortKey(lead: {
-    proposalStatus: ProposalStatus;
-    proposalRequestedAt: Date | null;
-    diagnosticRequestedAt: Date | null;
-    convertedAt: Date | null;
-    closedAt: Date | null;
-    completedAt: Date | null;
-    contactedAt: Date | null;
-    updatedAt: Date;
-  }) {
-    // Lower = higher priority in admin list
-    if (lead.proposalStatus === ProposalStatus.REQUESTED) return 1;
-    if (lead.proposalStatus === ProposalStatus.ACCEPTED) return 2;
-    if (lead.proposalStatus === ProposalStatus.IN_PREPARATION) return 3;
-    if (lead.proposalStatus === ProposalStatus.SENT) return 4;
-    if (lead.diagnosticRequestedAt && !lead.convertedAt && !lead.closedAt) return 5;
-    if (lead.completedAt && !lead.contactedAt && !lead.convertedAt && !lead.closedAt) return 6;
-    if (!lead.completedAt && !lead.closedAt) return 7;
-    if (lead.convertedAt || lead.closedAt) return 9;
-    return 8;
-  }
-
   async list(user: AuthUser, query: LeadQuery = {}) {
     this.assertInternal(user);
     const q = String(query.q || '').trim();
@@ -204,21 +194,20 @@ export class TriageService {
         assignedAnalyst: {
           select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
         },
+        commercialOwner: {
+          select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+        },
+        followUpOwner: {
+          select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+        },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
       take: 1000,
     });
 
     const filtered = status
       ? leads.filter((lead) => this.displayStatus(lead) === status)
-      : [...leads].sort((a, b) => {
-          const pa = this.commercialSortKey(a);
-          const pb = this.commercialSortKey(b);
-          if (pa !== pb) return pa - pb;
-          const ta = a.proposalRequestedAt?.getTime() || a.updatedAt.getTime();
-          const tb = b.proposalRequestedAt?.getTime() || b.updatedAt.getTime();
-          return tb - ta;
-        });
+      : leads;
 
     const assessmentIds = filtered.map((lead) => lead.assessmentId).filter(Boolean) as string[];
     const convertedIds = filtered.map((lead) => lead.convertedAssessmentId).filter(Boolean) as string[];
@@ -306,6 +295,19 @@ export class TriageService {
     return { items, summary };
   }
 
+  async listCommercialOwners(user: AuthUser) {
+    this.assertInternal(user);
+    const owners = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        systemRole: { in: ['SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ANALYST', 'REVIEWER', 'SALES'] },
+      },
+      select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+    return owners;
+  }
+
   async get(id: string, user: AuthUser) {
     this.assertInternal(user);
     const lead = await this.resolveLead(id);
@@ -322,6 +324,10 @@ export class TriageService {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
+
+    const notes = await this.listNotesForLead(lead.id, user);
+    const commercialBundle = await this.commercial.loadCommercialBundle(lead.id);
+    const commercialView = this.commercial.buildCommercialView(lead, commercialBundle);
 
     let responses: Array<{
       id: string;
@@ -385,13 +391,197 @@ export class TriageService {
       ...item,
       assignedAnalyst: lead.assignedAnalyst,
       assignedAnalystId: lead.assignedAnalystId,
-      commercialJourney: this.commercialJourney(lead),
+      commercialOwner: lead.commercialOwner,
+      commercialOwnerId: lead.commercialOwnerId,
+      commercialOwnerAssignedAt: lead.commercialOwnerAssignedAt,
+      followUpOwner: lead.followUpOwner,
+      followUpOwnerId: lead.followUpOwnerId,
+      nextFollowUpAt: lead.nextFollowUpAt,
+      followUpReason: lead.followUpReason,
+      clientInterest: lead.clientInterest,
+      commercialStage: commercialView.commercialStage,
+      commercialStageLabel: commercialView.commercialStageLabel,
+      primaryCta: commercialView.primaryCta,
+      convertGate: commercialView.convertGate,
+      commercialWorkflow: commercialView.commercialWorkflow,
+      scopeDiscussion: commercialView.scopeDiscussion,
+      followUp: commercialView.followUp,
+      contactActivities: commercialView.contactActivities,
+      proposals: commercialView.proposals,
+      activeProposal: commercialView.activeProposal,
+      commercialJourney: this.commercialJourney(lead, commercialView.commercialStage),
       responses,
       audit,
+      notes,
     };
   }
 
-  private commercialJourney(lead: {
+  private noteAuthorSelect = {
+    id: true,
+    firstName: true,
+    lastName: true,
+    email: true,
+    systemRole: true,
+  } as const;
+
+  private canManageNote(note: { authorId: string | null }, user: AuthUser) {
+    if (NOTE_ADMIN_ROLES.has(user.role)) return true;
+    return Boolean(note.authorId && note.authorId === user.id);
+  }
+
+  private serializeNote(
+    note: {
+      id: string;
+      body: string;
+      category: TriageNoteCategory;
+      createdAt: Date;
+      updatedAt: Date;
+      authorId: string | null;
+      author: {
+        id: string;
+        firstName: string;
+        lastName: string;
+        email: string;
+        systemRole: string;
+      } | null;
+    },
+    user: AuthUser,
+  ) {
+    const canManage = this.canManageNote(note, user);
+    return {
+      id: note.id,
+      body: note.body,
+      category: note.category,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+      author: note.author,
+      canEdit: canManage,
+      canDelete: canManage,
+    };
+  }
+
+  async listNotesForLead(leadId: string, user: AuthUser) {
+    const rows = await this.prisma.triageNote.findMany({
+      where: { publicLeadId: leadId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: { author: { select: this.noteAuthorSelect } },
+    });
+    return rows.map((note) => this.serializeNote(note, user));
+  }
+
+  async createNote(
+    id: string,
+    input: { body: string; category?: string },
+    user: AuthUser,
+  ) {
+    this.assertInternal(user);
+    const lead = await this.resolveLead(id);
+    const body = input.body?.trim();
+    if (!body) throw new BadRequestException('Note text is required.');
+    if (body.length > 4000) throw new BadRequestException('Note text is too long (max 4000 characters).');
+
+    const category = String(input.category || 'GENERAL').trim().toUpperCase();
+    if (!TRIAGE_NOTE_CATEGORIES.has(category)) {
+      throw new BadRequestException('Unsupported note category.');
+    }
+
+    const note = await this.prisma.triageNote.create({
+      data: {
+        publicLeadId: lead.id,
+        authorId: user.id,
+        body,
+        category: category as TriageNoteCategory,
+      },
+      include: { author: { select: this.noteAuthorSelect } },
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'TRIAGE_NOTE_CREATED',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: { noteId: note.id, category: note.category },
+    });
+
+    return this.serializeNote(note, user);
+  }
+
+  async updateNote(
+    id: string,
+    noteId: string,
+    input: { body?: string; category?: string },
+    user: AuthUser,
+  ) {
+    this.assertInternal(user);
+    const lead = await this.resolveLead(id);
+    const existing = await this.prisma.triageNote.findFirst({
+      where: { id: noteId, publicLeadId: lead.id, deletedAt: null },
+      include: { author: { select: this.noteAuthorSelect } },
+    });
+    if (!existing) throw new NotFoundException('Note not found.');
+    if (!this.canManageNote(existing, user)) {
+      throw new ForbiddenException('You cannot edit this note.');
+    }
+
+    const body = input.body !== undefined ? input.body.trim() : existing.body;
+    if (!body) throw new BadRequestException('Note text is required.');
+    if (body.length > 4000) throw new BadRequestException('Note text is too long (max 4000 characters).');
+
+    let category = existing.category;
+    if (input.category !== undefined) {
+      const next = String(input.category).trim().toUpperCase();
+      if (!TRIAGE_NOTE_CATEGORIES.has(next)) {
+        throw new BadRequestException('Unsupported note category.');
+      }
+      category = next as TriageNoteCategory;
+    }
+
+    const note = await this.prisma.triageNote.update({
+      where: { id: noteId },
+      data: { body, category },
+      include: { author: { select: this.noteAuthorSelect } },
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'TRIAGE_NOTE_UPDATED',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: { noteId: note.id, category: note.category },
+    });
+
+    return this.serializeNote(note, user);
+  }
+
+  async deleteNote(id: string, noteId: string, user: AuthUser) {
+    this.assertInternal(user);
+    const lead = await this.resolveLead(id);
+    const existing = await this.prisma.triageNote.findFirst({
+      where: { id: noteId, publicLeadId: lead.id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Note not found.');
+    if (!this.canManageNote(existing, user)) {
+      throw new ForbiddenException('You cannot delete this note.');
+    }
+
+    await this.prisma.triageNote.update({
+      where: { id: noteId },
+      data: { deletedAt: new Date() },
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'TRIAGE_NOTE_DELETED',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: { noteId, category: existing.category },
+    });
+
+    return { deleted: true, noteId };
+  }
+
+  private commercialJourney(
+    lead: {
     createdAt: Date;
     completedAt: Date | null;
     diagnosticRequestedAt: Date | null;
@@ -405,19 +595,28 @@ export class TriageService {
     reviewedAt: Date | null;
     contactedAt: Date | null;
     convertedAt: Date | null;
-  }) {
+    closedAt: Date | null;
+  },
+    stage: import('@prisma/client').CommercialStage,
+  ) {
     return [
       { key: 'STARTED', label: 'Questionnaire Started', at: lead.createdAt },
       { key: 'COMPLETED', label: 'Questionnaire Completed', at: lead.completedAt },
-      { key: 'DIAGNOSTIC', label: 'Executive Discussion Requested', at: lead.diagnosticRequestedAt },
-      { key: 'PROPOSAL_REQUESTED', label: 'Proposal Requested', at: lead.proposalRequestedAt },
       { key: 'REVIEWED', label: 'Reviewed', at: lead.reviewedAt },
       { key: 'CONTACTED', label: 'Contacted', at: lead.contactedAt },
+      {
+        key: 'COMMERCIAL_DISCUSSION',
+        label: 'Commercial Discussion',
+        at: null,
+        active: stage === 'COMMERCIAL_DISCUSSION',
+      },
+      { key: 'DIAGNOSTIC', label: 'Executive Discussion Requested', at: lead.diagnosticRequestedAt },
+      { key: 'PROPOSAL_REQUESTED', label: 'Proposal Requested', at: lead.proposalRequestedAt },
       {
         key: 'PROPOSAL_PREP',
         label: 'Proposal In Preparation',
         at: lead.proposalStatus === ProposalStatus.IN_PREPARATION ? lead.proposalRequestedAt : null,
-        active: lead.proposalStatus === ProposalStatus.IN_PREPARATION,
+        active: stage === 'PROPOSAL_DRAFT',
       },
       { key: 'PROPOSAL_SENT', label: 'Proposal Sent', at: lead.proposalSentAt },
       {
@@ -429,8 +628,10 @@ export class TriageService {
               ? 'Proposal Expired'
               : 'Proposal Accepted',
         at: lead.proposalAcceptedAt || lead.proposalDeclinedAt || lead.proposalExpiredAt,
+        active: stage === 'LEVEL_2_READY',
       },
       { key: 'CONVERTED', label: 'Converted to Level 2', at: lead.convertedAt },
+      { key: 'CLOSED', label: 'Lead Closed', at: lead.closedAt },
     ];
   }
 
@@ -441,6 +642,11 @@ export class TriageService {
       adminNotes?: string;
       proposalAdminNotes?: string;
       assignedAnalystId?: string | null;
+      commercialOwnerId?: string | null;
+      clientInterest?: string;
+      nextFollowUpAt?: string | null;
+      followUpOwnerId?: string | null;
+      followUpReason?: string | null;
     },
     user: AuthUser,
   ) {
@@ -467,6 +673,31 @@ export class TriageService {
       if (!analyst) throw new BadRequestException('Select an active analyst or reviewer.');
     }
 
+    if (input.commercialOwnerId !== undefined) {
+      await this.commercial.assignCommercialOwner(leadId, input.commercialOwnerId || null, user);
+      return this.get(leadId, user);
+    }
+    if (input.clientInterest !== undefined) {
+      await this.commercial.updateClientInterest(leadId, input.clientInterest, user);
+      return this.get(leadId, user);
+    }
+    if (
+      input.nextFollowUpAt !== undefined
+      || input.followUpOwnerId !== undefined
+      || input.followUpReason !== undefined
+    ) {
+      await this.commercial.updateFollowUp(
+        leadId,
+        {
+          nextFollowUpAt: input.nextFollowUpAt,
+          followUpOwnerId: input.followUpOwnerId,
+          followUpReason: input.followUpReason,
+        },
+        user,
+      );
+      return this.get(leadId, user);
+    }
+
     const now = new Date();
     const data: Record<string, unknown> = {};
     if (input.adminNotes !== undefined) data.adminNotes = input.adminNotes.trim() || null;
@@ -491,13 +722,15 @@ export class TriageService {
     }
 
     const updated = await this.prisma.publicLead.update({ where: { id: leadId }, data });
+    let auditAction = 'TRIAGE_NOTES_UPDATED';
+    if (requestedStage === 'REVIEWED') auditAction = 'LEAD_MARKED_REVIEWED';
+    else if (requestedStage === 'CONTACTED') auditAction = 'CLIENT_CONTACT_RECORDED';
+    else if (requestedStage === 'CLOSED') auditAction = 'LEAD_CLOSED';
+    else if (input.assignedAnalystId !== undefined) auditAction = 'TRIAGE_ANALYST_ASSIGNED';
+
     await this.audit.record({
       userId: user.id,
-      action: requestedStage
-        ? `TRIAGE_${requestedStage}`
-        : input.assignedAnalystId !== undefined
-          ? 'TRIAGE_ANALYST_ASSIGNED'
-          : 'TRIAGE_NOTES_UPDATED',
+      action: auditAction,
       entityType: 'PublicLead',
       entityId: leadId,
       metadata: {
@@ -506,6 +739,16 @@ export class TriageService {
         proposalStatus: updated.proposalStatus,
         assignedAnalystId: updated.assignedAnalystId,
       },
+    });
+
+    const bundle = await this.commercial.loadCommercialBundle(leadId);
+    const stage = resolveCommercialStage(updated, {
+      contactCount: bundle.contactCount,
+      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+    });
+    await this.prisma.publicLead.update({
+      where: { id: leadId },
+      data: { commercialStage: stage },
     });
     return this.get(leadId, user);
   }
@@ -611,10 +854,20 @@ export class TriageService {
         newStatus: next,
       },
     });
+    const refreshed = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
+    const bundle = await this.commercial.loadCommercialBundle(leadId);
+    const stage = resolveCommercialStage(refreshed!, {
+      contactCount: bundle.contactCount,
+      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+    });
+    await this.prisma.publicLead.update({
+      where: { id: leadId },
+      data: { commercialStage: stage },
+    });
     return this.get(leadId, user);
   }
 
-  async convert(id: string, user: AuthUser) {
+  async convert(id: string, user: AuthUser, opts: { force?: boolean } = {}) {
     this.assertInternal(user);
     const lead = await this.resolveLead(id);
     const leadId = lead.id;
@@ -630,6 +883,13 @@ export class TriageService {
       });
       if (existing) return { created: false, engagement: existing };
     }
+
+    const bundle = await this.commercial.loadCommercialBundle(leadId);
+    const stage = resolveCommercialStage(lead, {
+      contactCount: bundle.contactCount,
+      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+    });
+    this.commercial.assertConvertAllowed(lead, stage, user, opts.force);
 
     const engagement = await this.advisory.create(
       {
@@ -648,11 +908,12 @@ export class TriageService {
         convertedAt: new Date(),
         convertedAssessmentId: engagement.id,
         reviewedAt: lead.reviewedAt || new Date(),
+        commercialStage: CommercialStage.LEVEL_2_CREATED,
       },
     });
     await this.audit.record({
       userId: user.id,
-      action: 'TRIAGE_CONVERTED_TO_LEVEL2',
+      action: 'LEVEL_2_CREATED',
       entityType: 'PublicLead',
       entityId: leadId,
       metadata: {
@@ -661,6 +922,9 @@ export class TriageService {
         diagnosticReference: engagement.reference,
         proposalReference: lead.proposalReference,
         proposalStatus: lead.proposalStatus,
+        acceptedProposalId: lead.acceptedProposalId,
+        commercialOwnerId: lead.commercialOwnerId,
+        forced: Boolean(opts.force),
       },
     });
     return { created: true, engagement };
