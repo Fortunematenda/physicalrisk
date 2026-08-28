@@ -66,6 +66,24 @@ export class McpToolsService {
     return { id };
   }
 
+  /** Latest resumable workspace for the authenticated MCP/OAuth user — never from tool args. */
+  async getLatestRepositoryWorkspace(integration: McpIntegration) {
+    const result = await this.workspaces.latestPending(this.mcpActor(integration));
+    if (!result.match && !result.choices?.length) {
+      return {
+        found: false,
+        workspace: null,
+        match: null,
+        choices: [],
+        message: 'No pending or in-progress workspace for this user.',
+      };
+    }
+    return {
+      found: Boolean(result.match),
+      ...result,
+    };
+  }
+
   listToolDefinitions() {
     return MCP_TOOL_NAMES.map((name) => ({
       name,
@@ -516,7 +534,8 @@ export class McpToolsService {
           mine: true,
         }, this.mcpActor(integration));
       case 'get_latest_pending_workspace':
-        return this.workspaces.latestPending(this.mcpActor(integration));
+      case 'get_latest_repository_workspace':
+        return this.getLatestRepositoryWorkspace(integration);
       case 'resume_workspace':
         return this.workspaces.resume(
           String(args.workspaceCode ?? ''),
@@ -2310,6 +2329,8 @@ export class McpToolsService {
       get_workspace: 'Get a workspace by workspaceCode',
       find_workspaces: 'Find workspaces for the current user',
       get_latest_pending_workspace: 'Latest pending workspace for the authenticated MCP key owner',
+      get_latest_repository_workspace:
+        'Latest pending/in-progress workspace for the authenticated user. Identity comes from OAuth only — never pass userId.',
       resume_workspace: 'Resume a paused or in-progress workspace',
       list_workspace_documents: 'List documents in a workspace',
       get_workspace_summary: 'Workspace summary with progress and documents',
@@ -2745,6 +2766,12 @@ export class McpToolsService {
       },
       get_latest_pending_workspace: {
         type: 'object',
+        properties: { unused: { type: 'boolean' } },
+        additionalProperties: false,
+      },
+      get_latest_repository_workspace: {
+        type: 'object',
+        description: 'No parameters. User identity is taken from the Bearer token only.',
         properties: { unused: { type: 'boolean' } },
         additionalProperties: false,
       },

@@ -50,6 +50,7 @@ export const MCP_TOOL_NAMES = [
   'get_workspace',
   'find_workspaces',
   'get_latest_pending_workspace',
+  'get_latest_repository_workspace',
   'resume_workspace',
   'list_workspace_documents',
   'get_workspace_summary',
