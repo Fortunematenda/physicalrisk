@@ -13,6 +13,7 @@ import { AddRepositoryWorkspaces1721700000000 } from './migrations/1721700000000
 import { AddConnectorSessionsAndImportJobs1721800000000 } from './migrations/1721800000000-AddConnectorSessionsAndImportJobs';
 import { AddDocumentRecycleBin1721900000000 } from './migrations/1721900000000-AddDocumentRecycleBin';
 import { AddMcpBinaryImportSessions1722000000000 } from './migrations/1722000000000-AddMcpBinaryImportSessions';
+import { AddUserSessionTracking1722100000000 } from './migrations/1722100000000-AddUserSessionTracking';
 
 @Global()
 @Module({
@@ -35,6 +36,7 @@ import { AddMcpBinaryImportSessions1722000000000 } from './migrations/1722000000
             AddConnectorSessionsAndImportJobs1721800000000,
             AddDocumentRecycleBin1721900000000,
             AddMcpBinaryImportSessions1722000000000,
+            AddUserSessionTracking1722100000000,
           ],
           migrationsRun: !synchronize,
           synchronize,

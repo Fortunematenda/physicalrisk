@@ -20,6 +20,7 @@ type UiAction =
   | 'exported'
   | 'deleted'
   | 'login'
+  | 'logout'
   | 'failed_login'
   | 'system_update';
 
@@ -194,6 +195,7 @@ export class AuditService {
     const a = action.toUpperCase();
     if (a.includes('FAIL') && a.includes('LOGIN')) return 'failed_login';
     if (a === 'LOGIN' || a.endsWith('_LOGIN') || a === 'AUTH_LOGIN') return 'login';
+    if (a === 'SSO_LOGOUT' || a === 'APP_LOGOUT' || a.endsWith('_LOGOUT')) return 'logout';
     if (a.includes('DELETE') || a.includes('DEACTIVATE') || a.includes('REMOVE')) return 'deleted';
     if (a.includes('EXPORT') || a.includes('ISSUE_REPORT') || a.includes('DOWNLOAD')) return 'exported';
     if (a.includes('VIEW') || a.includes('OPEN') || a.includes('READ')) return 'viewed';
@@ -224,6 +226,8 @@ export class AuditService {
         return 'Deleted';
       case 'login':
         return 'Login';
+      case 'logout':
+        return 'Logout';
       case 'failed_login':
         return 'Failed Login';
       case 'system_update':

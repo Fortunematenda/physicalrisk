@@ -51,11 +51,19 @@ export class JwtAuthGuard implements CanActivate {
           [payload.given_name, payload.family_name].filter(Boolean).join(' ').trim() ||
           (typeof payload.preferred_username === 'string' && payload.preferred_username.trim()) ||
           undefined;
-        const local = await this.ssoUsers.sync({
-          email: payload.email,
-          name,
-          role: repoRole,
-        });
+        const local = await this.ssoUsers.sync(
+          {
+            email: payload.email,
+            name,
+            role: repoRole,
+          },
+          {
+            ipAddress:
+              request.ip
+              || (request.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim(),
+            app: 'repo',
+          },
+        );
         request.user = {
           id: local?.id ?? payload.sub,
           email: local?.email ?? payload.email,

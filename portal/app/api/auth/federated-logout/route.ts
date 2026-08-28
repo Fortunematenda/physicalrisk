@@ -6,6 +6,25 @@ export const dynamic = 'force-dynamic';
 
 const SESSION_COOKIE = 'portal.next-auth.session-token';
 
+async function notifySignOut(email?: string | null) {
+  if (!email) return;
+  const secret = process.env.AUTH_EVENT_SECRET || process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+  if (!secret) return;
+
+  const body = JSON.stringify({ event: 'SIGN_OUT', email, app: 'portal' });
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Auth-Event-Secret': secret,
+  };
+  const mossApi = (process.env.MOSS_INTERNAL_API_URL || 'http://moss-api:4000').replace(/\/$/, '');
+  const repoApi = (process.env.REPO_INTERNAL_API_URL || 'http://repo-api:4000').replace(/\/$/, '');
+
+  await Promise.allSettled([
+    fetch(`${mossApi}/api/auth/session-event`, { method: 'POST', headers, body }),
+    fetch(`${repoApi}/api/auth/session-event`, { method: 'POST', headers, body }),
+  ]);
+}
+
 /**
  * RP-initiated Keycloak logout with id_token_hint so Keycloak skips the
  * "Do you want to log out?" confirmation screen.
@@ -58,6 +77,14 @@ export async function GET(req: NextRequest) {
   }
 
   const logoutUrl = `${issuer}/protocol/openid-connect/logout?${params}`;
+
+  await notifySignOut(
+    typeof token?.email === 'string'
+      ? token.email
+      : typeof (token as { email?: string } | null)?.email === 'string'
+        ? (token as { email: string }).email
+        : null,
+  );
 
   // Clear NextAuth session cookies, then send the browser to Keycloak logout.
   const res = NextResponse.redirect(logoutUrl);

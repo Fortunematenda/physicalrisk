@@ -52,12 +52,21 @@ export class JwtAuthGuard implements CanActivate {
             ? payload.name.trim().split(/\s+/).slice(1).join(' ')
             : '') ||
           undefined;
-        const local = await this.ssoUsers.sync({
-          email: payload.email,
-          firstName,
-          lastName,
-          role,
-        });
+        const local = await this.ssoUsers.sync(
+          {
+            email: payload.email,
+            firstName,
+            lastName,
+            role,
+          },
+          {
+            ipAddress:
+              request.ip
+              || (request.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim(),
+            userAgent: request.headers['user-agent'] as string | undefined,
+            app: 'moss',
+          },
+        );
         request.user = {
           id: local?.id ?? payload.sub,
           email: local?.email ?? payload.email,

@@ -8,7 +8,7 @@
  * OAuthCallback "state mismatch". Use a single in-flight promise and a logout guard.
  */
 
-import { signIn, signOut } from 'next-auth/react';
+import { signIn, signOut, getSession } from 'next-auth/react';
 import { clearCachedAccessToken } from './token-cache';
 
 export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || 'https://apps.physicalrisk.com';
@@ -29,6 +29,21 @@ export function clearLogoutGuard() {
   if (typeof window === 'undefined') return;
   try {
     window.sessionStorage.removeItem(LOGOUT_FLAG);
+  } catch {
+    // ignore
+  }
+}
+
+async function recordSessionEvent(event: 'APP_LOGOUT' | 'SIGN_OUT') {
+  try {
+    const session = await getSession();
+    const email = session?.user?.email;
+    await fetch('/api/auth/session-event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, app: 'repo', email }),
+      keepalive: true,
+    });
   } catch {
     // ignore
   }
@@ -148,6 +163,7 @@ export async function ssoLogout() {
   clearCachedAccessToken();
 
   if (await isSsoEnabled()) {
+    await recordSessionEvent('APP_LOGOUT');
     await signOut({ redirect: false });
     clearLogoutGuard();
     window.location.replace(PORTAL_URL.replace(/\/$/, '') + '/');
@@ -169,6 +185,7 @@ export async function idleLogout() {
   clearCachedAccessToken();
 
   if (await isSsoEnabled()) {
+    await recordSessionEvent('SIGN_OUT');
     await signOut({ redirect: false });
     clearLogoutGuard();
     window.location.replace(`${PORTAL_URL.replace(/\/$/, '')}/api/auth/federated-logout`);

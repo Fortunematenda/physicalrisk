@@ -112,6 +112,8 @@ export class User {
   @Column({ name: 'password_hash' }) passwordHash!: string;
   @Column({ type: 'enum', enum: UserRole, default: UserRole.VIEWER }) role!: UserRole;
   @Column({ default: true }) active!: boolean;
+  @Column({ name: 'last_login_at', type: 'timestamptz', nullable: true }) lastLoginAt!: Date | null;
+  @Column({ name: 'last_seen_at', type: 'timestamptz', nullable: true }) lastSeenAt!: Date | null;
   @CreateDateColumn({ name: 'created_at' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at' }) updatedAt!: Date;
   @OneToMany(() => DocumentVersion, (version) => version.createdBy) versions!: DocumentVersion[];

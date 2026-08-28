@@ -122,6 +122,9 @@
       NEXT_PUBLIC_PORTAL_URL: ${PORTAL_URL:-http://apps.localhost}
       NEXT_PUBLIC_KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       SSO_DEBUG: ${SSO_DEBUG:-false}
+      MOSS_INTERNAL_API_URL: http://moss-api:4000
+      REPO_INTERNAL_API_URL: http://repo-api:4000
+      AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${PORTAL_AUTH_SECRET:-change-this-long-random-auth-secret}}
     depends_on:
       keycloak:
         condition: service_healthy
@@ -228,6 +231,7 @@
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
       ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
+      AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}}
     depends_on:
       moss-db:
         condition: service_healthy
@@ -265,6 +269,7 @@
       ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
       NEXT_PUBLIC_ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
       SSO_DEBUG: ${SSO_DEBUG:-false}
+      AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}}
     depends_on:
       - moss-api
     ports:
@@ -322,6 +327,7 @@
       MCP_UPLOAD_TEMP_STORAGE_PATH: /app/storage/mcp-binary-import
       MCP_ATTACHMENT_REFERENCE_TIMEOUT: ${MCP_ATTACHMENT_REFERENCE_TIMEOUT:-30000}
       MCP_OOXML_MAX_ENTRY_COUNT: ${MCP_OOXML_MAX_ENTRY_COUNT:-10000}
+      AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}}
     volumes:
       - repo_storage:/app/storage
     depends_on:
@@ -358,6 +364,7 @@
       ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
       NEXT_PUBLIC_ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
       SSO_DEBUG: ${SSO_DEBUG:-false}
+      AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${REPO_AUTH_SECRET:-repo-local-nextauth-secret-change-me}}
     depends_on:
       - repo-api
     ports:
