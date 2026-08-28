@@ -23,7 +23,16 @@ export type CommercialLeadSnapshot = {
 
 export type CommercialProposalSnapshot = {
   status: TriageProposalStatus;
+  hasDocument?: boolean;
 } | null;
+
+export function toProposalSnapshot(
+  proposal: { status: TriageProposalStatus; documentStorageKey?: string | null } | null | undefined,
+): CommercialProposalSnapshot {
+  return proposal
+    ? { status: proposal.status, hasDocument: Boolean(proposal.documentStorageKey) }
+    : null;
+}
 
 export const COMMERCIAL_OWNER_ROLES = new Set([
   'SUPER_ADMIN',
@@ -79,9 +88,10 @@ export function resolveCommercialStage(
   if (
     lead.proposalStatus === ProposalStatus.IN_PREPARATION
     || lead.proposalStatus === ProposalStatus.REQUESTED
-    || proposal?.status === TriageProposalStatus.DRAFT
-    || proposal?.status === TriageProposalStatus.INTERNAL_REVIEW
-    || proposal?.status === TriageProposalStatus.APPROVED
+    || (proposal?.hasDocument === true
+      && (proposal?.status === TriageProposalStatus.DRAFT
+        || proposal?.status === TriageProposalStatus.INTERNAL_REVIEW
+        || proposal?.status === TriageProposalStatus.APPROVED))
   ) {
     return CommercialStage.PROPOSAL_DRAFT;
   }
@@ -120,8 +130,7 @@ export type PrimaryCta =
   | { kind: 'none' }
   | { kind: 'mark_reviewed'; label: string }
   | { kind: 'contact_client'; label: string }
-  | { kind: 'prepare_proposal'; label: string }
-  | { kind: 'open_proposal'; label: string; proposalId?: string }
+  | { kind: 'upload_proposal'; label: string }
   | { kind: 'awaiting_decision'; label: string; disabled: true }
   | { kind: 'create_level2'; label: string }
   | { kind: 'open_level2'; label: string; engagementId: string }
@@ -130,7 +139,7 @@ export type PrimaryCta =
 export function resolvePrimaryCta(
   lead: CommercialLeadSnapshot & { convertedEngagementId?: string | null },
   stage: CommercialStage,
-  latestProposalId?: string | null,
+  latestProposal?: CommercialProposalSnapshot | null,
 ): PrimaryCta {
   if (lead.closedAt && !lead.convertedAt) {
     return { kind: 'closed', label: 'Lead closed', disabled: true };
@@ -151,13 +160,11 @@ export function resolvePrimaryCta(
       return { kind: 'contact_client', label: 'Contact client' };
     case CommercialStage.CONTACTED:
     case CommercialStage.COMMERCIAL_DISCUSSION:
-      return { kind: 'prepare_proposal', label: 'Prepare proposal' };
     case CommercialStage.PROPOSAL_DRAFT:
-      return {
-        kind: 'open_proposal',
-        label: latestProposalId ? 'Open proposal' : 'Create proposal',
-        proposalId: latestProposalId || undefined,
-      };
+      if (latestProposal?.hasDocument) {
+        return { kind: 'none' };
+      }
+      return { kind: 'upload_proposal', label: 'Upload proposal' };
     case CommercialStage.PROPOSAL_SENT:
       return { kind: 'awaiting_decision', label: 'Awaiting client decision', disabled: true };
     case CommercialStage.PROPOSAL_ACCEPTED:

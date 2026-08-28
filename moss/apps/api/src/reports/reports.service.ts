@@ -472,6 +472,30 @@ export class ReportsService {
     return updated;
   }
 
+  async update(id: string, data: { title?: string }, user: AuthUser) {
+    requireRole(user, ADMIN_ROLES, 'Admin permission required to update reports.');
+    const report = await this.prisma.report.findUnique({
+      where: { id },
+      include: { assessment: { select: { id: true, productCode: true } } },
+    });
+    if (!report) throw new NotFoundException('Report not found.');
+    await this.checkReportAccess(report.assessmentId, user);
+    const title = data.title?.trim();
+    if (!title || title.length < 2) throw new BadRequestException('Report title is required.');
+    const updated = await this.prisma.report.update({
+      where: { id },
+      data: { title },
+    });
+    await this.audit.record({
+      userId: user.id,
+      action: 'UPDATE_REPORT',
+      entityType: 'Report',
+      entityId: id,
+      metadata: { title, assessmentId: report.assessmentId },
+    });
+    return updated;
+  }
+
   async remove(id: string, user: AuthUser) {
     requireRole(user, ANALYST_ROLES, 'Analyst permission required to delete reports.');
     const report = await this.prisma.report.findUnique({
@@ -479,10 +503,20 @@ export class ReportsService {
       include: { assessment: { select: { id: true, productCode: true } } },
     });
     if (!report) throw new NotFoundException('Report not found.');
-    if (report.assessment.productCode !== 'SCLI_COST_LEAKAGE') {
-      throw new BadRequestException('This endpoint deletes Cost Leakage reports only.');
+    const productCode = report.assessment.productCode;
+    const isScl = productCode === ProductCode.SCLI_COST_LEAKAGE;
+    const isSupported =
+      isScl
+      || ADVISORY_REPORT_PRODUCTS.has(productCode)
+      || productCode === ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE;
+    if (!isSupported) {
+      throw new BadRequestException('Unsupported report type.');
     }
-    await this.assessments.checkAccess(report.assessmentId, user);
+    if (isScl) {
+      await this.assessments.checkAccess(report.assessmentId, user);
+    } else {
+      await this.checkReportAccess(report.assessmentId, user);
+    }
 
     if (report.storageKey) {
       await this.storage.delete(report.storageKey);
@@ -504,15 +538,42 @@ export class ReportsService {
   }
 
   async listAll(user: AuthUser) {
-    const executiveAdvisoryProducts = [
-      ...ADVISORY_REPORT_PRODUCTS,
-      ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE,
-    ];
-
     const sclSection = await this.listReportSection(user, { productCode: ProductCode.SCLI_COST_LEAKAGE });
     const executiveAdvisorySection = await this.listReportSection(user, {
-      productCode: { in: executiveAdvisoryProducts },
+      productCode: { in: [...ADVISORY_REPORT_PRODUCTS] },
     });
+    const executiveTriageSection = await this.listReportSection(user, {
+      productCode: ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE,
+    });
+
+    const advisoryItems = executiveAdvisorySection.items.filter(
+      (row) => row.assessment?.productCode !== ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE,
+    );
+    const leakedTriage = executiveAdvisorySection.items.filter(
+      (row) => row.assessment?.productCode === ProductCode.EXECUTIVE_GOVERNANCE_TRIAGE,
+    );
+    const triageById = new Map<string, (typeof executiveTriageSection.items)[number]>();
+    for (const row of [...executiveTriageSection.items, ...leakedTriage]) triageById.set(row.id, row);
+    const triageItems = [...triageById.values()];
+
+    const advisorySection = {
+      items: advisoryItems,
+      summary: {
+        total: advisoryItems.length,
+        issued: advisoryItems.filter((r) => r.status === 'ISSUED').length,
+        generated: advisoryItems.filter((r) => r.status === 'GENERATED').length,
+        draft: advisoryItems.filter((r) => r.status === 'DRAFT' || r.status === 'SUPERSEDED').length,
+      },
+    };
+    const triageSection = {
+      items: triageItems,
+      summary: {
+        total: triageItems.length,
+        issued: triageItems.filter((r) => r.status === 'ISSUED').length,
+        generated: triageItems.filter((r) => r.status === 'GENERATED').length,
+        draft: triageItems.filter((r) => r.status === 'DRAFT' || r.status === 'SUPERSEDED').length,
+      },
+    };
 
     const items = sclSection.items;
     const reportIds = items.map((r) => r.id);
@@ -577,7 +638,8 @@ export class ReportsService {
     return {
       items,
       scl: sclSection,
-      executiveAdvisory: executiveAdvisorySection,
+      executiveAdvisory: advisorySection,
+      executiveTriage: triageSection,
       summary: {
         total: items.length,
         preliminary,

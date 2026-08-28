@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AdvisoryService } from '../advisory/advisory.service';
 import { TriageCommercialService } from './triage-commercial.service';
-import { resolveCommercialStage } from '../common/triage-commercial';
+import { resolveCommercialStage, toProposalSnapshot } from '../common/triage-commercial';
 
 type LeadQuery = {
   q?: string;
@@ -662,6 +662,15 @@ export class TriageService {
       throw new BadRequestException('Complete the questionnaire before changing the follow-up stage.');
     }
 
+    if (input.assignedAnalystId !== undefined && lead.convertedAssessmentId) {
+      if (!input.assignedAnalystId) {
+        throw new BadRequestException('Cannot unassign the analyst after Level 2 has been created.');
+      }
+      if (input.assignedAnalystId !== lead.assignedAnalystId) {
+        throw new BadRequestException('Analyst assignment is locked after conversion to Level 2.');
+      }
+    }
+
     if (input.assignedAnalystId !== undefined && input.assignedAnalystId) {
       const analyst = await this.prisma.user.findFirst({
         where: {
@@ -744,7 +753,7 @@ export class TriageService {
     const bundle = await this.commercial.loadCommercialBundle(leadId);
     const stage = resolveCommercialStage(updated, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: toProposalSnapshot(bundle.proposals[0]),
     });
     await this.prisma.publicLead.update({
       where: { id: leadId },
@@ -858,7 +867,7 @@ export class TriageService {
     const bundle = await this.commercial.loadCommercialBundle(leadId);
     const stage = resolveCommercialStage(refreshed!, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: toProposalSnapshot(bundle.proposals[0]),
     });
     await this.prisma.publicLead.update({
       where: { id: leadId },
@@ -881,13 +890,18 @@ export class TriageService {
         where: { id: lead.convertedAssessmentId },
         select: { id: true, reference: true, title: true, status: true, productCode: true },
       });
-      if (existing) return { created: false, engagement: existing };
+      if (existing) {
+        if (lead.assignedAnalystId) {
+          await this.advisory.ensureInheritedPrimaryAnalyst(existing.id, lead.assignedAnalystId, user);
+        }
+        return { created: false, engagement: existing };
+      }
     }
 
     const bundle = await this.commercial.loadCommercialBundle(leadId);
     const stage = resolveCommercialStage(lead, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: toProposalSnapshot(bundle.proposals[0]),
     });
     this.commercial.assertConvertAllowed(lead, stage, user, opts.force);
 
@@ -897,6 +911,7 @@ export class TriageService {
         productCode: ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
         parentAssessmentId: lead.assessmentId,
         title: `${lead.organisationName} Executive Advisory Diagnostic`,
+        primaryAnalystId: lead.assignedAnalystId || undefined,
       },
       user,
     );

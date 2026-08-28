@@ -193,15 +193,6 @@ export class TriageController {
     return this.commercial.updateScopeDiscussion(id, body, user).then(() => this.service.get(id, user));
   }
 
-  @Post('submissions/:id/proposals')
-  createProposal(
-    @Param('id') id: string,
-    @Body() body: CreateProposalDto,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.commercial.createProposal(id, body, user).then(() => this.service.get(id, user));
-  }
-
   @Post('submissions/:id/proposals/upload')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }))
   uploadProposal(

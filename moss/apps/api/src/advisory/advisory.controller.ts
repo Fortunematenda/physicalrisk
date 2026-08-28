@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsEnum, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { IsArray, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdvisoryRoutePriority, AssignmentRole, ProductCode } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/roles.guard';
+import { Roles } from '../common/roles';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { AdvisoryService } from './advisory.service';
 
@@ -38,6 +39,10 @@ class CommercialProposalDto {
   @IsOptional() @IsString() commercialAdminNotes?: string;
 }
 
+class UpdateAdvisoryDto {
+  @IsString() @MinLength(2) title!: string;
+}
+
 @Controller('advisory')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AdvisoryController {
@@ -65,6 +70,18 @@ export class AdvisoryController {
   @Get(':id')
   get(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.get(id, user);
+  }
+
+  @Patch(':id')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  update(@Param('id') id: string, @Body() body: UpdateAdvisoryDto, @CurrentUser() user: AuthUser) {
+    return this.service.update(id, body, user);
+  }
+
+  @Delete(':id')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 
   @Get(':id/outcome')

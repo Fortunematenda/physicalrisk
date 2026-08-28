@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES } from '@moss/shared';
@@ -32,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { stripUnintendedLeadingDash } from '@/lib/scl-option-label';
 import { apiFetch } from '@/lib/api';
+import { uploadTriageProposal } from '@/lib/triage-proposal-upload';
 import { cn } from '@/lib/utils';
 
 const TAB_IDS = ['overview', 'scores', 'responses', 'commercial', 'journey', 'notes'] as const;
@@ -109,6 +110,18 @@ function proposalBadgeVariant(
   if (['DECLINED', 'EXPIRED', 'CANCELLED'].includes(status)) return 'danger';
   if (['IN_PREPARATION', 'REQUESTED', 'SENT'].includes(status)) return 'warning';
   return 'secondary';
+}
+
+function normalizePrimaryCta(
+  cta: { kind: string; label: string; engagementId?: string; disabled?: boolean } | null | undefined,
+  activeProposal?: { documentStorageKey?: string | null } | null,
+) {
+  if (!cta || cta.kind === 'none') return null;
+  if (cta.kind === 'open_proposal' || cta.kind === 'prepare_proposal') {
+    if (activeProposal?.documentStorageKey) return null;
+    return { kind: 'upload_proposal', label: 'Upload proposal' };
+  }
+  return cta;
 }
 
 function CategoryBars({ items }: { items: Array<{ category: string; score: number }> }) {
@@ -227,6 +240,7 @@ export default function TriageSubmissionDetailPage() {
   const [analysts, setAnalysts] = useState<any[]>([]);
   const [commercialOwners, setCommercialOwners] = useState<any[]>([]);
   const [leadMenuOpen, setLeadMenuOpen] = useState(false);
+  const proposalFileRef = useRef<HTMLInputElement>(null);
 
   const commercialFocus = (() => {
     const focus = searchParams.get('focus');
@@ -259,6 +273,33 @@ export default function TriageSubmissionDetailPage() {
     const qs = params.toString();
     router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
   }, [id, router, searchParams]);
+
+  useEffect(() => {
+    if (tab !== 'commercial' || !commercialFocus) return;
+    const targetId =
+      commercialFocus === 'proposal' ? 'triage-proposal-section' : 'triage-contact-section';
+    const scrollToTarget = () => {
+      const el = document.getElementById(targetId);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'rounded-xl');
+      window.setTimeout(() => {
+        el.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'rounded-xl');
+      }, 2500);
+      return true;
+    };
+    const timer = window.setTimeout(() => {
+      if (scrollToTarget()) {
+        clearCommercialFocus();
+        return;
+      }
+      window.setTimeout(() => {
+        scrollToTarget();
+        clearCommercialFocus();
+      }, 350);
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [tab, commercialFocus, clearCommercialFocus]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -343,6 +384,31 @@ export default function TriageSubmissionDetailPage() {
     );
   }
 
+  async function handleProposalUpload(file: File) {
+    if (!item) return;
+    setBusy(true);
+    try {
+      await uploadTriageProposal(
+        id,
+        file,
+        `${item.organisationName} — Executive Advisory Diagnostic`,
+      );
+      await load();
+      toast({
+        title: 'Proposal uploaded',
+        description: `${file.name} was uploaded successfully.`,
+      });
+    } catch (e) {
+      toast({
+        variant: 'error',
+        title: 'Upload failed',
+        description: e instanceof Error ? e.message : 'Please try again.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function convert(force = false) {
     if (!item) return;
     if (item.convertedEngagement?.id || item.convertedAt) {
@@ -376,9 +442,16 @@ export default function TriageSubmissionDetailPage() {
     }
   }
 
+  function goToProposalSection(opts?: { offerUpload?: boolean }) {
+    setTab('commercial', { focus: 'proposal' });
+    if (opts?.offerUpload) {
+      window.setTimeout(() => proposalFileRef.current?.click(), 450);
+    }
+  }
+
   async function handlePrimaryCta() {
-    if (!item?.primaryCta) return;
-    const cta = item.primaryCta;
+    const cta = normalizePrimaryCta(item?.primaryCta, item?.activeProposal);
+    if (!cta) return;
     switch (cta.kind) {
       case 'mark_reviewed':
         await patch({ status: 'REVIEWED' }, { title: 'Reviewed', description: 'Lead marked as reviewed.' });
@@ -386,9 +459,8 @@ export default function TriageSubmissionDetailPage() {
       case 'contact_client':
         setTab('commercial', { focus: 'contact' });
         break;
-      case 'prepare_proposal':
-      case 'open_proposal':
-        setTab('commercial', { focus: 'proposal' });
+      case 'upload_proposal':
+        goToProposalSection({ offerUpload: true });
         break;
       case 'create_level2':
         await convert(false);
@@ -557,9 +629,29 @@ export default function TriageSubmissionDetailPage() {
   const commercialNeedsAction =
     ['REQUESTED', 'IN_PREPARATION', 'SENT'].includes(proposalStatus) && !item.convertedAt && !item.closedAt;
 
+  const canUploadProposal =
+    Boolean(item.completedAt)
+    && !item.closedAt
+    && !item.convertedAt
+    && !item.activeProposal?.documentStorageKey;
+
+  const displayCta = normalizePrimaryCta(item.primaryCta, item.activeProposal);
+  const analystAssignmentLocked = Boolean(item.convertedAt || item.convertedAssessmentId);
+
   return (
     <AuthGate>
       <Shell title={`Triage · ${assessment?.reference || item.organisationName}`} hideSearch>
+        <input
+          ref={proposalFileRef}
+          type="file"
+          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleProposalUpload(file);
+            e.target.value = '';
+          }}
+        />
         <div className="triage-detail-workspace space-y-4 pb-8">
           {error ? (
             <Alert variant="destructive">
@@ -622,10 +714,25 @@ export default function TriageSubmissionDetailPage() {
               </div>
 
               <div className="flex shrink-0 items-center gap-2 sm:items-start">
-                {item.primaryCta?.kind === 'awaiting_decision' || item.primaryCta?.kind === 'closed' ? (
+                {displayCta?.kind === 'awaiting_decision' || displayCta?.kind === 'closed' ? (
                   <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-3 py-1.5 text-sm">
-                    {item.primaryCta.label}
+                    {displayCta.label}
                   </Badge>
+                ) : displayCta && displayCta.kind !== 'upload_proposal' ? (
+                  displayCta.kind === 'open_level2' && displayCta.engagementId ? (
+                    <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
+                      <Link href={`/advisory/${displayCta.engagementId}`}>{displayCta.label}</Link>
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      className="h-10 shrink-0 whitespace-nowrap px-4"
+                      disabled={busy}
+                      onClick={() => void handlePrimaryCta()}
+                    >
+                      {displayCta.label}
+                    </Button>
+                  )
                 ) : null}
                 <RowActionsMenu
                   open={leadMenuOpen}
@@ -643,31 +750,19 @@ export default function TriageSubmissionDetailPage() {
                     </button>
                   }
                 >
-                  {item.primaryCta
-                  && item.primaryCta.kind !== 'none'
-                  && item.primaryCta.kind !== 'awaiting_decision'
-                  && item.primaryCta.kind !== 'closed' ? (
-                    item.primaryCta.kind === 'open_level2' && item.primaryCta.engagementId ? (
-                      <Link
-                        href={`/advisory/${item.primaryCta.engagementId}`}
-                        onClick={() => setLeadMenuOpen(false)}
-                      >
-                        {item.primaryCta.label}
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setLeadMenuOpen(false);
-                          void handlePrimaryCta();
-                        }}
-                      >
-                        {item.primaryCta.label}
-                      </button>
-                    )
+                  {canUploadProposal ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        proposalFileRef.current?.click();
+                      }}
+                    >
+                      Upload proposal
+                    </button>
                   ) : null}
-                  {analysts.length ? (
+                  {analysts.length && !analystAssignmentLocked ? (
                     <>
                       {item.assignedAnalystId && analystName ? (
                         <p className="m-0 px-3 py-1 text-xs text-slate-600">
@@ -711,6 +806,11 @@ export default function TriageSubmissionDetailPage() {
                         </select>
                       </div>
                     </>
+                  ) : analystAssignmentLocked && analystName ? (
+                    <p className="m-0 px-3 py-1 text-xs text-slate-600">
+                      Assigned to <strong className="font-semibold text-slate-900">{analystName}</strong>
+                      <span className="block text-slate-500">Locked for Level 2+</span>
+                    </p>
                   ) : null}
                   <button
                     type="button"

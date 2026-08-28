@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ADVISORY_ROUTE_PRIORITIES,
-  ADVISORY_ROUTE_PRIORITY_LABELS,
   PHYSICAL_RISK_PRODUCTS,
   getRiskBand,
 } from '@moss/shared';
@@ -31,6 +29,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -49,6 +48,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
+import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 import { cn } from '@/lib/utils';
 
 const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
@@ -139,10 +139,6 @@ function getModuleStatus(
   return 'in_progress';
 }
 
-function emptyRoute(): ConfirmedRoute {
-  return { productCode: '', priority: 'RECOMMENDED', rationale: '' };
-}
-
 function exposureBandLabel(value: number | null | undefined) {
   if (value == null || !Number.isFinite(Number(value))) return null;
   return getRiskBand(Number(value));
@@ -208,7 +204,6 @@ export default function AdvisoryDetail() {
   const router = useRouter();
   const { toast } = useToast();
   const confirm = useConfirm();
-  const completionRef = useRef<HTMLDivElement | null>(null);
   const [x, setX] = useState<any>(null);
   const [modules, setModules] = useState<ModuleReview[]>([]);
   const [confirmedRoutes, setConfirmedRoutes] = useState<ConfirmedRoute[]>([]);
@@ -222,6 +217,9 @@ export default function AdvisoryDetail() {
   const [navOpen, setNavOpen] = useState(false);
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [assignDraftUserId, setAssignDraftUserId] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [completionOpen, setCompletionOpen] = useState(false);
   /** Modules that failed validation after Save & next / explicit check. */
   const [attentionCodes, setAttentionCodes] = useState<Set<string>>(() => new Set());
   /** After Review / Complete attempt — show needs-attention for incomplete modules. */
@@ -268,6 +266,14 @@ export default function AdvisoryDetail() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!assignOpen || !x) return;
+    const currentPrimary = x.assignments?.find(
+      (a: any) => a.role === 'PRIMARY_ANALYST' && a.status !== 'CANCELLED',
+    );
+    setAssignDraftUserId(currentPrimary?.userId || x.lockedTriageAnalystId || '');
+  }, [assignOpen, x]);
+
   const primary = useMemo(
     () => x?.assignments?.find((a: any) => a.role === 'PRIMARY_ANALYST' && a.status !== 'CANCELLED'),
     [x],
@@ -275,6 +281,7 @@ export default function AdvisoryDetail() {
 
   const missing = useMemo(() => incompleteModules(modules), [modules]);
   const locked = Boolean(x?.diagnosticOutcome);
+  const primaryAnalystLocked = Boolean(x?.primaryAnalystLocked);
   const hasDiagnosticReport = Boolean(x?.reports?.length);
   const isDiagnostic = x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
   const canCompleteDiagnostic = useMemo(() => {
@@ -286,17 +293,13 @@ export default function AdvisoryDetail() {
     );
   }, [x?.productCode, missing.length, confirmedRoutes, hasDiagnosticReport]);
 
-  const canOfferComplete =
-    !locked &&
-    missing.length === 0 &&
-    (x?.productCode !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC' || canCompleteDiagnostic);
-
   const completeCount = modules.filter((m) => isModuleComplete(m)).length;
   const progressPct = modules.length ? Math.round((completeCount / modules.length) * 100) : 0;
   const anyStarted = modules.some((m) => moduleHasAnyContent(m) || isModuleComplete(m));
   const activeModule = modules.find((m) => m.moduleCode === activeCode) || modules[0] || null;
   const activeIndex = modules.findIndex((m) => m.moduleCode === (activeModule?.moduleCode || ''));
   const isLastModule = activeIndex >= 0 && activeIndex === modules.length - 1;
+  const showCompletionActions = locked || (missing.length === 0 && isLastModule);
 
   const attentionModules = useMemo(
     () =>
@@ -384,18 +387,6 @@ export default function AdvisoryDetail() {
     scheduleAutosave(moduleCode);
   }
 
-  function patchRoute(index: number, patch: Partial<ConfirmedRoute>) {
-    setConfirmedRoutes((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
-  }
-
-  function addRoute() {
-    setConfirmedRoutes((prev) => [...prev, emptyRoute()]);
-  }
-
-  function removeRoute(index: number) {
-    setConfirmedRoutes((prev) => prev.filter((_, i) => i !== index));
-  }
-
   async function persistModules(list: ModuleReview[] = modulesRef.current) {
     for (const m of list) {
       await apiFetch(`/advisory/${id}/modules/${m.moduleCode}`, {
@@ -453,6 +444,14 @@ export default function AdvisoryDetail() {
     }
   }
 
+  function maybeOpenCompletionDialog(rows: ModuleReview[], targetModuleCode: string, hasOutcome: boolean) {
+    if (hasOutcome || !rows.length) return;
+    const lastCode = rows[rows.length - 1]?.moduleCode;
+    if (!lastCode || targetModuleCode !== lastCode) return;
+    if (incompleteModules(rows).length > 0) return;
+    setCompletionOpen(true);
+  }
+
   async function saveModule(moduleCode: string) {
     setError('');
     try {
@@ -463,7 +462,9 @@ export default function AdvisoryDetail() {
         title: 'Module saved',
         description: 'Your changes are up to date.',
       });
-      await load();
+      const data = await load();
+      const rows = (data.advisoryModuleReviews || []) as ModuleReview[];
+      maybeOpenCompletionDialog(rows, moduleCode, Boolean(data.diagnosticOutcome));
     } catch {
       /* toast + footer */
     }
@@ -517,7 +518,11 @@ export default function AdvisoryDetail() {
           : 'Your changes are up to date.',
       });
       if (next) setActiveCode(next.moduleCode);
-      await load();
+      const data = await load();
+      if (next) {
+        const rows = (data.advisoryModuleReviews || []) as ModuleReview[];
+        maybeOpenCompletionDialog(rows, next.moduleCode, Boolean(data.diagnosticOutcome));
+      }
     } catch {
       /* toast + footer */
     }
@@ -591,6 +596,7 @@ export default function AdvisoryDetail() {
   async function assign(userId: string) {
     if (!userId) return;
     setError('');
+    setAssigning(true);
     try {
       await apiFetch(`/advisory/${id}/assign`, {
         method: 'POST',
@@ -612,6 +618,8 @@ export default function AdvisoryDetail() {
         title: 'Assignment failed',
         description: e.message || 'Unable to update the primary consultant.',
       });
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -639,7 +647,9 @@ export default function AdvisoryDetail() {
           ? { routes: confirmedRoutes.filter((r) => r.productCode) }
           : {};
       if (x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && !body.routes?.length) {
-        throw new Error('Confirm at least one Level 3 focused assurance product before completing.');
+        throw new Error(
+          'Select a recommended next product on at least one module before completing.',
+        );
       }
       if (x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && !x?.reports?.length) {
         throw new Error('Generate the Executive Advisory Brief PDF before completing the diagnostic.');
@@ -690,7 +700,7 @@ export default function AdvisoryDetail() {
     const ok = await confirm({
       title: 'Complete this assessment?',
       description:
-        'Once completed, the final assessment state will be recorded. Confirmed diagnostic routing cannot be changed afterwards.',
+        'Once completed, the final assessment state will be recorded and cannot be changed afterwards.',
       confirmLabel: 'Complete assessment',
       cancelLabel: 'Cancel',
       variant: 'default',
@@ -742,7 +752,7 @@ export default function AdvisoryDetail() {
       setIssuesOpen(true);
       return;
     }
-    completionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setCompletionOpen(true);
   }
 
   if (!x) {
@@ -778,6 +788,41 @@ export default function AdvisoryDetail() {
       primary.user?.email ||
       'Assigned'
     : null;
+  const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
+  const canChangePrimary = Boolean(primaryName) && (isAdmin || (!locked && !primaryAnalystLocked));
+  const canAssignPrimary = !primaryName && (isAdmin || (!locked && !primaryAnalystLocked));
+  const canManagePrimary = canAssignPrimary || canChangePrimary;
+
+  const completionActions = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        className="h-10 shrink-0 whitespace-nowrap px-4"
+        disabled={busy || (isDiagnostic && !canCompleteDiagnostic && !locked)}
+        onClick={() => void requestComplete()}
+      >
+        {locked && isDiagnostic
+          ? 'Open diagnostic outcome'
+          : isDiagnostic
+            ? 'Complete diagnostic'
+            : 'Complete assessment'}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-10 shrink-0 whitespace-nowrap px-4"
+        disabled={busy}
+        onClick={() => void generateReport()}
+      >
+        {locked ? 'Regenerate PDF report' : 'Generate PDF report'}
+      </Button>
+      {x.reports?.[0]?.id ? (
+        <Button variant="outline" asChild className="h-10 shrink-0 whitespace-nowrap px-4">
+          <a href={`/reports/${x.reports[0].id}?view=advisory`}>Open latest report</a>
+        </Button>
+      ) : null}
+    </div>
+  );
 
   const moduleNav = (
     <nav className="space-y-1" aria-label="Assessment modules">
@@ -862,9 +907,13 @@ export default function AdvisoryDetail() {
                     <div className="mt-1 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="m-0 truncate text-sm font-medium text-slate-900">{primaryName}</p>
-                        <p className="m-0 text-xs text-slate-500">Primary analyst</p>
+                        <p className="m-0 text-xs text-slate-500">
+                          Primary analyst
+                          {primaryAnalystLocked && !isAdmin ? ' · Locked from Level 1 triage' : ''}
+                          {isAdmin && locked ? ' · Admin can reassign' : ''}
+                        </p>
                       </div>
-                      {!locked ? (
+                      {canChangePrimary ? (
                         <Button
                           type="button"
                           variant="ghost"
@@ -882,7 +931,7 @@ export default function AdvisoryDetail() {
                         Not assigned
                         <span className="text-amber-700"> · Required</span>
                       </p>
-                      {!locked ? (
+                      {canAssignPrimary ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -968,30 +1017,17 @@ export default function AdvisoryDetail() {
               {/* Compact validation summary — only after genuine attention signals */}
               {missing.length === 0 && anyStarted ? (
                 <Card className="mb-4 rounded-xl border-moss-success/30 bg-moss-success/[0.04] shadow-sm">
-                  <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
-                    <div className="flex min-w-0 gap-3">
-                      <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-moss-success" aria-hidden="true" />
-                      <div className="min-w-0">
-                        <p className="m-0 text-sm font-semibold text-moss-success">Ready for completion</p>
-                        <p className="m-0 mt-0.5 text-sm text-slate-700">
-                          All required findings, business consequences and executive decisions are complete.
-                        </p>
-                      </div>
-                    </div>
-                    {canOfferComplete ? (
-                      <Button
-                        type="button"
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void requestComplete()}
-                      >
-                        Complete assessment
-                      </Button>
-                    ) : isDiagnostic && !locked ? (
-                      <p className="m-0 text-xs text-slate-500">
-                        Confirm Level 3 routing and generate the advisory brief before completing.
+                  <CardContent className="flex flex-wrap items-start gap-3 p-4 sm:p-5">
+                    <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-moss-success" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="m-0 text-sm font-semibold text-moss-success">Ready for completion</p>
+                      <p className="m-0 mt-0.5 text-sm text-slate-700">
+                        All required findings, business consequences and executive decisions are complete.
+                        {isDiagnostic && !locked && !isLastModule
+                          ? ' Open the last module to generate the brief and complete the diagnostic.'
+                          : null}
                       </p>
-                    ) : null}
+                    </div>
                   </CardContent>
                 </Card>
               ) : attentionModules.length > 0 ? (
@@ -1265,158 +1301,6 @@ export default function AdvisoryDetail() {
                       </CardContent>
                     </Card>
                   ) : null}
-
-                  {isDiagnostic ? (
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">Confirm Level 3 routing</CardTitle>
-                        <CardDescription>
-                          Review suggested routes from module working papers. Adjust product, priority and rationale
-                          before completing.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {locked ? (
-                          <Button variant="outline" asChild className="h-10 shrink-0 whitespace-nowrap">
-                            <Link href={`/advisory/${id}/outcome`}>Open diagnostic outcome</Link>
-                          </Button>
-                        ) : null}
-                        {!confirmedRoutes.length ? (
-                          <p className="text-sm text-muted-foreground">
-                            {locked
-                              ? 'No Level 3 products were confirmed for this diagnostic.'
-                              : 'Select a recommended next product on at least one module, or add a route row below.'}
-                          </p>
-                        ) : (
-                          confirmedRoutes.map((route, index) => (
-                            <div
-                              key={`${route.productCode || 'new'}-${index}`}
-                              className="space-y-3 rounded-xl border border-slate-200 p-4"
-                            >
-                              {route.sourceModuleName ? (
-                                <p className="text-xs text-muted-foreground">
-                                  Suggested from {route.sourceModuleName}
-                                </p>
-                              ) : null}
-                              <div className="grid gap-3 md:grid-cols-2">
-                                <div className="space-y-1.5">
-                                  <Label>Level 3 product</Label>
-                                  <FilterSelect
-                                    value={route.productCode || ''}
-                                    disabled={locked || busy}
-                                    onChange={(next) => patchRoute(index, { productCode: next })}
-                                    placeholder="No focused product selected"
-                                    options={ROUTES.filter(([k]) => k).map(([k, v]) => ({
-                                      value: k,
-                                      label: v,
-                                    }))}
-                                  />
-                                </div>
-                                <div className="space-y-1.5">
-                                  <Label>Priority</Label>
-                                  <FilterSelect
-                                    value={route.priority}
-                                    disabled={locked || busy}
-                                    includeAll={false}
-                                    onChange={(next) => patchRoute(index, { priority: next })}
-                                    placeholder="Priority"
-                                    options={ADVISORY_ROUTE_PRIORITIES.map((p) => ({
-                                      value: p,
-                                      label: ADVISORY_ROUTE_PRIORITY_LABELS[p],
-                                    }))}
-                                  />
-                                </div>
-                                <div className="space-y-1.5 md:col-span-2">
-                                  <Label>Rationale</Label>
-                                  <Textarea
-                                    rows={3}
-                                    className="min-h-[100px] resize-y"
-                                    disabled={locked || busy}
-                                    value={route.rationale || ''}
-                                    onChange={(e) => patchRoute(index, { rationale: e.target.value })}
-                                  />
-                                </div>
-                              </div>
-                              {!locked ? (
-                                <Button
-                                  variant="outline"
-                                  type="button"
-                                  className="h-10 shrink-0 whitespace-nowrap"
-                                  disabled={busy}
-                                  onClick={() => removeRoute(index)}
-                                >
-                                  Remove route
-                                </Button>
-                              ) : null}
-                            </div>
-                          ))
-                        )}
-                        {!locked ? (
-                          <Button
-                            variant="outline"
-                            type="button"
-                            className="h-10 shrink-0 whitespace-nowrap"
-                            disabled={busy}
-                            onClick={addRoute}
-                          >
-                            Add route
-                          </Button>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  ) : null}
-
-                  <div ref={completionRef}>
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">
-                          {isDiagnostic ? 'Executive Advisory Brief readiness' : 'Focused assurance completion'}
-                        </CardTitle>
-                        <CardDescription>
-                          {isDiagnostic
-                            ? locked
-                              ? 'Diagnostic routing is confirmed. Open the outcome page for commercial handoff and Level 3 engagement creation.'
-                              : 'Complete all modules, generate the Executive Advisory Brief, confirm Level 3 routing, then submit.'
-                            : 'Complete every product module with evidence-led findings and required decisions before marking the engagement complete.'}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          size="lg"
-                          className="h-11 shrink-0 whitespace-nowrap px-5"
-                          disabled={busy || (isDiagnostic && !canCompleteDiagnostic && !locked)}
-                          onClick={() => void requestComplete()}
-                        >
-                          {locked && isDiagnostic
-                            ? 'Open diagnostic outcome'
-                            : isDiagnostic
-                              ? 'Complete diagnostic & confirm routing'
-                              : 'Complete assessment'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="lg"
-                          className="h-11 shrink-0 whitespace-nowrap px-5"
-                          disabled={busy}
-                          onClick={() => void generateReport()}
-                        >
-                          {locked ? 'Regenerate PDF report' : 'Generate PDF report'}
-                        </Button>
-                        {x.reports?.[0]?.id ? (
-                          <Button
-                            variant="outline"
-                            size="lg"
-                            asChild
-                            className="h-11 shrink-0 whitespace-nowrap px-5"
-                          >
-                            <a href={`/reports/${x.reports[0].id}?view=advisory`}>Open latest report</a>
-                          </Button>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  </div>
                 </div>
               </div>
 
@@ -1484,26 +1368,26 @@ export default function AdvisoryDetail() {
                         Save module
                       </Button>
                       {isLastModule ? (
-                        canOfferComplete ? (
+                        missing.length > 0 && !showCompletionActions ? (
                           <Button
                             type="button"
-                            className="h-11 shrink-0 whitespace-nowrap px-4"
-                            disabled={savingModule || busy}
-                            onClick={() => void requestComplete()}
-                          >
-                            Complete assessment
-                          </Button>
-                        ) : (
-                          <Button
-                            type="button"
+                            variant="outline"
                             className="h-11 shrink-0 whitespace-nowrap px-4"
                             disabled={savingModule || busy}
                             onClick={scrollToCompletion}
                           >
-                            Review assessment
-                            <ChevronRight className="size-4" />
+                            Review issues
                           </Button>
-                        )
+                        ) : showCompletionActions ? (
+                          <Button
+                            type="button"
+                            className="h-11 shrink-0 whitespace-nowrap px-4"
+                            disabled={savingModule || busy}
+                            onClick={() => setCompletionOpen(true)}
+                          >
+                            {isDiagnostic ? 'Finish diagnostic' : 'Finish assessment'}
+                          </Button>
+                        ) : null
                       ) : (
                         <Button
                           type="button"
@@ -1523,18 +1407,38 @@ export default function AdvisoryDetail() {
           )}
         </div>
 
+        <Dialog open={completionOpen} onOpenChange={setCompletionOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>
+                {isDiagnostic ? 'Executive Advisory Brief readiness' : 'Focused assurance completion'}
+              </DialogTitle>
+              <DialogDescription>
+                {isDiagnostic
+                  ? locked
+                    ? 'Diagnostic is complete. Open the outcome page for commercial handoff and Level 3 engagement creation.'
+                    : 'Generate the Executive Advisory Brief, then complete the diagnostic.'
+                  : 'Mark the engagement complete once every module is finished.'}
+              </DialogDescription>
+            </DialogHeader>
+            {completionActions}
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Assign primary consultant</DialogTitle>
               <DialogDescription>
-                Select the analyst responsible for this Executive Advisory Diagnostic.
+                Select the analyst responsible for this Executive Advisory Diagnostic, then confirm
+                the assignment.
               </DialogDescription>
             </DialogHeader>
             <FilterSelect
-              value={primary?.userId || ''}
-              onChange={(next) => void assign(next)}
-              disabled={locked}
+              value={assignDraftUserId}
+              onChange={setAssignDraftUserId}
+              disabled={!canManagePrimary || assigning}
+              includeAll
               placeholder="Select consultant"
               triggerClassName="h-11 w-full"
               options={analysts.map((a) => ({
@@ -1542,6 +1446,23 @@ export default function AdvisoryDetail() {
                 label: `${a.firstName} ${a.lastName} — ${a.systemRole}`,
               }))}
             />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={assigning}
+                onClick={() => setAssignOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!assignDraftUserId || assigning || !canManagePrimary}
+                onClick={() => void assign(assignDraftUserId)}
+              >
+                {assigning ? 'Assigning…' : 'Assign consultant'}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 

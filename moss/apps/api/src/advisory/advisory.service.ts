@@ -51,6 +51,20 @@ const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
   Object.entries(PHYSICAL_RISK_PRODUCTS).map(([code, value]) => [code, value.name]),
 );
 
+const ENGAGEMENT_FINISHED_STATUSES = new Set<AssessmentStatus>([
+  AssessmentStatus.SUBMITTED,
+  AssessmentStatus.REVIEWED,
+  AssessmentStatus.APPROVED,
+  AssessmentStatus.REPORT_GENERATED,
+  AssessmentStatus.REPORT_ISSUED,
+  AssessmentStatus.AUTOMATED_EVALUATION_COMPLETE,
+  AssessmentStatus.EVIDENCE_REVIEW,
+  AssessmentStatus.ANALYST_REVIEW,
+  AssessmentStatus.QUALITY_ASSURANCE,
+  AssessmentStatus.REMEDIATION_IN_PROGRESS,
+  AssessmentStatus.REASSESSMENT_DUE,
+]);
+
 export type ConfirmedRouteInput = {
   productCode: string;
   priority?: AdvisoryRoutePriority;
@@ -194,7 +208,13 @@ export class AdvisoryService {
   }
 
   async create(
-    input: { organisationId: string; productCode: ProductCode; title?: string; parentAssessmentId?: string },
+    input: {
+      organisationId: string;
+      productCode: ProductCode;
+      title?: string;
+      parentAssessmentId?: string;
+      primaryAnalystId?: string;
+    },
     user: AuthUser,
   ) {
     if (!ADVISORY_PRODUCTS.has(input.productCode)) throw new BadRequestException('Unsupported advisory product.');
@@ -252,7 +272,75 @@ export class AdvisoryService {
       entityId: created.id,
       metadata: { productCode: input.productCode, reference: created.reference, parentAssessmentId: input.parentAssessmentId || null },
     });
+
+    const inheritedAnalystId =
+      input.primaryAnalystId || (await this.resolveLockedTriageAnalystId(created.id, created.parentAssessmentId));
+    if (inheritedAnalystId) {
+      await this.seedPrimaryAnalystIfMissing(created.id, inheritedAnalystId, user);
+    }
+
     return created;
+  }
+
+  private isEngagementActive(status: AssessmentStatus) {
+    return !ENGAGEMENT_FINISHED_STATUSES.has(status);
+  }
+
+  /** Level 1 triage analyst locked for this engagement and descendants. */
+  private async resolveLockedTriageAnalystId(
+    assessmentId: string,
+    parentAssessmentId?: string | null,
+  ): Promise<string | null> {
+    const lead = await this.prisma.publicLead.findFirst({
+      where: { convertedAssessmentId: assessmentId },
+      select: { assignedAnalystId: true },
+    });
+    if (lead?.assignedAnalystId) return lead.assignedAnalystId;
+
+    const parentId = parentAssessmentId
+      ?? (await this.prisma.assessmentSession.findUnique({
+        where: { id: assessmentId },
+        select: { parentAssessmentId: true },
+      }))?.parentAssessmentId;
+    if (!parentId) return null;
+    return this.resolveLockedTriageAnalystId(parentId);
+  }
+
+  private async seedPrimaryAnalystIfMissing(assessmentId: string, userId: string, actor: AuthUser) {
+    const existing = await this.prisma.assessmentAssignment.findFirst({
+      where: {
+        assessmentId,
+        role: AssignmentRole.PRIMARY_ANALYST,
+        status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+      },
+    });
+    if (existing) return existing;
+
+    const assignee = await this.prisma.user.findUnique({ where: { id: userId } });
+    const assignableRoles: SystemRole[] = [SystemRole.ANALYST, SystemRole.REVIEWER, SystemRole.SUPER_ADMIN];
+    if (!assignee || !assignee.isActive || !assignableRoles.includes(assignee.systemRole)) return null;
+
+    const assignment = await this.prisma.assessmentAssignment.create({
+      data: {
+        assessmentId,
+        userId,
+        role: AssignmentRole.PRIMARY_ANALYST,
+        assignedById: actor.id,
+        notes: 'Inherited from Level 1 triage',
+      },
+    });
+    await this.audit.record({
+      userId: actor.id,
+      action: 'ADVISORY_ASSIGNED',
+      entityType: 'AssessmentAssignment',
+      entityId: assignment.id,
+      metadata: { assessmentId, assigneeId: userId, role: AssignmentRole.PRIMARY_ANALYST, inheritedFromTriage: true },
+    });
+    return assignment;
+  }
+
+  async ensureInheritedPrimaryAnalyst(assessmentId: string, userId: string, actor: AuthUser) {
+    return this.seedPrimaryAnalystIfMissing(assessmentId, userId, actor);
   }
 
   async get(id: string, user: AuthUser) {
@@ -296,6 +384,10 @@ export class AdvisoryService {
       });
       parentTriageSubmissionId = parentLead?.id || null;
     }
+    const lockedTriageAnalystId = await this.resolveLockedTriageAnalystId(engagement.id, engagement.parentAssessmentId);
+    const primaryAnalystLocked = Boolean(
+      lockedTriageAnalystId && this.isEngagementActive(engagement.status),
+    );
     const suggestedRoutes =
       engagement.productCode === ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC && !engagement.diagnosticOutcome
         ? this.suggestRoutesFromModules(engagement.advisoryModuleReviews)
@@ -310,6 +402,8 @@ export class AdvisoryService {
         : null,
       productLabel: PRODUCT_LABELS[engagement.productCode] || engagement.productCode,
       suggestedRoutes,
+      lockedTriageAnalystId,
+      primaryAnalystLocked,
     };
   }
 
@@ -378,12 +472,41 @@ export class AdvisoryService {
   async assign(id: string, input: { userId: string; role?: AssignmentRole; notes?: string }, actor: AuthUser) {
     await this.assertAccess(id, actor);
     this.assertConsultant(actor);
+    const engagement = await this.prisma.assessmentSession.findUnique({
+      where: { id },
+      select: { status: true, parentAssessmentId: true },
+    });
+    if (!engagement) throw new NotFoundException('Advisory engagement not found.');
+
+    const role = input.role || AssignmentRole.PRIMARY_ANALYST;
+    const lockedTriageAnalystId = await this.resolveLockedTriageAnalystId(id, engagement.parentAssessmentId);
+    const existingPrimary = await this.prisma.assessmentAssignment.findFirst({
+      where: {
+        assessmentId: id,
+        role: AssignmentRole.PRIMARY_ANALYST,
+        status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+      },
+    });
+    const isAdmin = actor.role === SystemRole.SUPER_ADMIN || actor.role === SystemRole.METHODOLOGY_ADMIN;
+    if (
+      role === AssignmentRole.PRIMARY_ANALYST
+      && lockedTriageAnalystId
+      && this.isEngagementActive(engagement.status)
+      && input.userId !== lockedTriageAnalystId
+      && !isAdmin
+    ) {
+      throw new BadRequestException(
+        existingPrimary
+          ? 'The primary consultant was assigned at Level 1 triage and cannot be changed until this engagement is completed.'
+          : 'Assign the Level 1 triage analyst as the primary consultant.',
+      );
+    }
+
     const assignee = await this.prisma.user.findUnique({ where: { id: input.userId } });
     const assignableRoles: SystemRole[] = [SystemRole.ANALYST, SystemRole.REVIEWER, SystemRole.SUPER_ADMIN];
     if (!assignee || !assignee.isActive || !assignableRoles.includes(assignee.systemRole)) {
       throw new BadRequestException('Select an active analyst or reviewer.');
     }
-    const role = input.role || AssignmentRole.PRIMARY_ANALYST;
     if (role === AssignmentRole.PRIMARY_ANALYST) {
       await this.prisma.assessmentAssignment.updateMany({
         where: { assessmentId: id, role, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
@@ -763,6 +886,10 @@ export class AdvisoryService {
     const route = engagement.diagnosticOutcome.routes.find((r) => r.id === routeId);
     if (!route) throw new NotFoundException('Confirmed route not found.');
     if (route.createdAssessmentId && route.createdAssessment) {
+      const inheritedId = await this.resolveLockedTriageAnalystId(route.createdAssessment.id, id);
+      if (inheritedId) {
+        await this.ensureInheritedPrimaryAnalyst(route.createdAssessment.id, inheritedId, user);
+      }
       return { created: false, engagement: route.createdAssessment };
     }
 
@@ -805,6 +932,10 @@ export class AdvisoryService {
         entityId: created.id,
         metadata: { productCode, reference: created.reference, sourceEadId: id, routeId },
       });
+      const inheritedId = await this.resolveLockedTriageAnalystId(created.id, id);
+      if (inheritedId) {
+        await this.ensureInheritedPrimaryAnalyst(created.id, inheritedId, user);
+      }
     } else if (ADVISORY_PRODUCTS.has(productCode) && productCode !== ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC) {
       const row = await this.create(
         { organisationId: orgId, productCode, title, parentAssessmentId: id },
@@ -827,5 +958,90 @@ export class AdvisoryService {
     }
 
     return { created: true, engagement: created };
+  }
+
+  async update(id: string, data: { title?: string }, user: AuthUser) {
+    if (!['SUPER_ADMIN', 'METHODOLOGY_ADMIN'].includes(user.role)) {
+      throw new ForbiddenException('Admin permission required.');
+    }
+    await this.assertAccess(id, user);
+    const title = data.title?.trim();
+    if (!title || title.length < 2) throw new BadRequestException('Engagement title is required.');
+    const engagement = await this.prisma.assessmentSession.update({
+      where: { id },
+      data: { title },
+    });
+    await this.audit.record({
+      userId: user.id,
+      action: 'UPDATE',
+      entityType: 'AssessmentSession',
+      entityId: id,
+      metadata: { title, productCode: engagement.productCode },
+    });
+    return engagement;
+  }
+
+  async remove(id: string, user: AuthUser) {
+    if (!['SUPER_ADMIN', 'METHODOLOGY_ADMIN'].includes(user.role)) {
+      throw new ForbiddenException('Admin permission required.');
+    }
+    await this.assertAccess(id, user);
+    const existing = await this.prisma.assessmentSession.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        reference: true,
+        productCode: true,
+        diagnosticOutcome: {
+          select: {
+            routes: {
+              where: { createdAssessmentId: { not: null } },
+              select: { createdAssessmentId: true },
+            },
+          },
+        },
+        reassessments: { select: { id: true } },
+      },
+    });
+    if (!existing || !ADVISORY_PRODUCTS.has(existing.productCode)) {
+      throw new NotFoundException('Advisory engagement not found.');
+    }
+    if (existing.reassessments.length > 0) {
+      throw new BadRequestException('Cannot delete an engagement that has linked follow-on work.');
+    }
+    const spawned = existing.diagnosticOutcome?.routes?.length || 0;
+    if (spawned > 0) {
+      throw new BadRequestException('Cannot delete an engagement after Level 3 work has been created from it.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.assessmentSession.updateMany({
+        where: { parentAssessmentId: id },
+        data: { parentAssessmentId: null },
+      });
+      await tx.publicLead.updateMany({
+        where: { convertedAssessmentId: id },
+        data: { convertedAssessmentId: null, convertedAt: null },
+      });
+      await tx.publicLead.updateMany({
+        where: { assessmentId: id },
+        data: { assessmentId: null },
+      });
+      await tx.assessmentSession.delete({ where: { id } });
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'AssessmentSession',
+      entityId: id,
+      metadata: { reference: existing.reference, productCode: existing.productCode },
+    });
+
+    return {
+      id,
+      deleted: true,
+      message: 'Advisory engagement deleted.',
+    };
   }
 }

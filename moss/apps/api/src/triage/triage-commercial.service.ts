@@ -28,6 +28,7 @@ import {
   mapTriageProposalToLeadStatus,
   resolveCommercialStage,
   resolvePrimaryCta,
+  toProposalSnapshot,
 } from '../common/triage-commercial';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -101,6 +102,12 @@ export class TriageCommercialService {
     return { contactActivities, proposals, contactCount };
   }
 
+  private proposalSnapshot(
+    proposal: { status: TriageProposalStatus; documentStorageKey?: string | null } | null | undefined,
+  ) {
+    return toProposalSnapshot(proposal);
+  }
+
   buildCommercialView(
     lead: any,
     bundle: Awaited<ReturnType<TriageCommercialService['loadCommercialBundle']>>,
@@ -108,7 +115,7 @@ export class TriageCommercialService {
     const latestProposal = bundle.proposals[0] || null;
     const stage = resolveCommercialStage(lead, {
       contactCount: bundle.contactCount,
-      latestProposal: latestProposal ? { status: latestProposal.status } : null,
+      latestProposal: this.proposalSnapshot(latestProposal),
     });
     const primaryCta = resolvePrimaryCta(
       {
@@ -116,7 +123,7 @@ export class TriageCommercialService {
         convertedEngagementId: lead.convertedAssessmentId,
       },
       stage,
-      latestProposal?.id,
+      this.proposalSnapshot(latestProposal),
     );
     const convertGate = canCreateLevel2(lead, stage);
     return {
@@ -179,7 +186,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(updated, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: this.proposalSnapshot(bundle.proposals[0]),
     });
     await this.persistStage(publicLeadId, stage);
     return updated;
@@ -265,7 +272,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(refreshed!, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: this.proposalSnapshot(bundle.proposals[0]),
     });
     await this.persistStage(publicLeadId, stage);
     return activity;
@@ -306,7 +313,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(updated, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: this.proposalSnapshot(bundle.proposals[0]),
     });
     await this.persistStage(publicLeadId, stage);
     return updated;
@@ -325,7 +332,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(updated, {
       contactCount: bundle.contactCount,
-      latestProposal: bundle.proposals[0] ? { status: bundle.proposals[0].status } : null,
+      latestProposal: this.proposalSnapshot(bundle.proposals[0]),
     });
     await this.persistStage(publicLeadId, stage);
     return updated;
@@ -355,89 +362,6 @@ export class TriageCommercialService {
       },
     });
     return updated;
-  }
-
-  async createProposal(
-    publicLeadId: string,
-    input: {
-      title?: string;
-      scopeSummary?: string;
-      objectives?: string;
-      sitesOrBusinessUnits?: string;
-      deliverables?: string;
-      timeline?: string;
-      fee?: number;
-      currency?: string;
-      validUntil?: string;
-      terms?: string;
-    },
-    user: AuthUser,
-  ) {
-    this.assertCommercialWrite(user);
-    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
-    if (!lead) throw new NotFoundException('Triage submission not found.');
-    if (!lead.completedAt) {
-      throw new BadRequestException('Complete the questionnaire before creating a proposal.');
-    }
-
-    const proposal = await this.prisma.$transaction(async (tx) => {
-      const proposalNumber = await generateEadProposalNumber(tx);
-      let proposalReference = lead.proposalReference;
-      if (!proposalReference) {
-        proposalReference = await generateProposalReference(tx);
-      }
-      const created = await tx.triageProposal.create({
-        data: {
-          proposalNumber,
-          publicLeadId,
-          organisationId: lead.organisationId,
-          title: input.title?.trim() || `${lead.organisationName} — Executive Advisory Diagnostic`,
-          scopeSummary: input.scopeSummary?.trim() || lead.scopeIndicativeScope || null,
-          objectives: input.objectives?.trim() || lead.scopeClientObjectives || null,
-          sitesOrBusinessUnits: input.sitesOrBusinessUnits?.trim() || lead.scopeSitesOrBusinessUnits || null,
-          deliverables: input.deliverables?.trim() || null,
-          timeline: input.timeline?.trim() || lead.scopeExpectedTimeline || null,
-          fee: input.fee != null ? input.fee : null,
-          currency: input.currency?.trim() || 'ZAR',
-          validUntil: input.validUntil ? new Date(input.validUntil) : null,
-          terms: input.terms?.trim() || null,
-          status: TriageProposalStatus.DRAFT,
-          source: TriageProposalSource.PLATFORM,
-          createdById: user.id,
-        },
-        include: { createdBy: { select: userSelect } },
-      });
-      await tx.publicLead.update({
-        where: { id: publicLeadId },
-        data: {
-          proposalReference,
-          proposalStatus:
-            lead.proposalStatus === ProposalStatus.NOT_REQUESTED
-              ? ProposalStatus.IN_PREPARATION
-              : lead.proposalStatus,
-          proposalPreparedById: user.id,
-          reviewedAt: lead.reviewedAt || new Date(),
-        },
-      });
-      return created;
-    });
-
-    await this.audit.record({
-      userId: user.id,
-      action: 'PROPOSAL_CREATED',
-      entityType: 'PublicLead',
-      entityId: publicLeadId,
-      metadata: { proposalId: proposal.id, proposalNumber: proposal.proposalNumber },
-    });
-
-    const refreshed = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
-    const bundle = await this.loadCommercialBundle(publicLeadId);
-    const stage = resolveCommercialStage(refreshed!, {
-      contactCount: bundle.contactCount,
-      latestProposal: { status: proposal.status },
-    });
-    await this.persistStage(publicLeadId, stage);
-    return proposal;
   }
 
   async uploadProposal(
@@ -475,36 +399,61 @@ export class TriageCommercialService {
       ? (requestedStatus as TriageProposalStatus)
       : TriageProposalStatus.DRAFT;
 
+    const existing = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'desc' },
+    });
+
     const proposal = await this.prisma.$transaction(async (tx) => {
-      const proposalNumber =
-        input.proposalNumber?.trim()
-        || (await generateEadProposalNumber(tx));
       let proposalReference = lead.proposalReference;
       if (!proposalReference) {
         proposalReference = await generateProposalReference(tx);
       }
-      const created = await tx.triageProposal.create({
-        data: {
-          proposalNumber,
-          publicLeadId,
-          organisationId: lead.organisationId,
-          title: input.title?.trim() || `${lead.organisationName} — Executive Advisory Diagnostic`,
-          timeline: input.timeline?.trim() || null,
-          fee: input.fee != null ? input.fee : null,
-          status,
-          source: TriageProposalSource.UPLOAD,
-          documentStorageKey: storageKey,
-          documentFileName: file.originalname,
-          documentMimeType: file.mimetype,
-          documentSizeBytes: file.size,
-          createdById: user.id,
-          sentAt: status === TriageProposalStatus.SENT ? new Date() : null,
-          acceptedAt: status === TriageProposalStatus.ACCEPTED ? new Date() : null,
-        },
-        include: { createdBy: { select: userSelect } },
-      });
 
-      const mapped = mapTriageProposalToLeadStatus(status);
+      const documentData = {
+        documentStorageKey: storageKey,
+        documentFileName: file.originalname,
+        documentMimeType: file.mimetype,
+        documentSizeBytes: file.size,
+        source: TriageProposalSource.UPLOAD,
+      };
+
+      const saved = existing
+        ? await tx.triageProposal.update({
+            where: { id: existing.id },
+            data: {
+              ...documentData,
+              title: input.title?.trim() || existing.title,
+              timeline: input.timeline?.trim() || existing.timeline,
+              fee: input.fee != null ? input.fee : existing.fee,
+              status: existing.documentStorageKey ? existing.status : status,
+            },
+            include: { createdBy: { select: userSelect } },
+          })
+        : await tx.triageProposal.create({
+            data: {
+              proposalNumber:
+                input.proposalNumber?.trim()
+                || (await generateEadProposalNumber(tx)),
+              publicLeadId,
+              organisationId: lead.organisationId,
+              title: input.title?.trim() || `${lead.organisationName} — Executive Advisory Diagnostic`,
+              scopeSummary: lead.scopeIndicativeScope || null,
+              objectives: lead.scopeClientObjectives || null,
+              sitesOrBusinessUnits: lead.scopeSitesOrBusinessUnits || null,
+              timeline: input.timeline?.trim() || lead.scopeExpectedTimeline || null,
+              fee: input.fee != null ? input.fee : null,
+              status,
+              ...documentData,
+              createdById: user.id,
+              sentAt: status === TriageProposalStatus.SENT ? new Date() : null,
+              acceptedAt: status === TriageProposalStatus.ACCEPTED ? new Date() : null,
+            },
+            include: { createdBy: { select: userSelect } },
+          });
+
+      const effectiveStatus = saved.status;
+      const mapped = mapTriageProposalToLeadStatus(effectiveStatus);
       const leadData: Record<string, unknown> = {
         proposalReference,
         proposalPreparedById: user.id,
@@ -515,14 +464,14 @@ export class TriageCommercialService {
         if (mapped === ProposalStatus.SENT) leadData.proposalSentAt = new Date();
         if (mapped === ProposalStatus.ACCEPTED) {
           leadData.proposalAcceptedAt = new Date();
-          leadData.acceptedProposalId = created.id;
+          leadData.acceptedProposalId = saved.id;
         }
       } else if (lead.proposalStatus === ProposalStatus.NOT_REQUESTED) {
         leadData.proposalStatus = ProposalStatus.IN_PREPARATION;
       }
 
       await tx.publicLead.update({ where: { id: publicLeadId }, data: leadData });
-      return created;
+      return saved;
     });
 
     await this.audit.record({
@@ -541,7 +490,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(refreshed!, {
       contactCount: bundle.contactCount,
-      latestProposal: { status: proposal.status },
+      latestProposal: this.proposalSnapshot(proposal),
     });
     await this.persistStage(publicLeadId, stage);
     return proposal;
@@ -614,6 +563,9 @@ export class TriageCommercialService {
       where: { id: proposalId, publicLeadId },
     });
     if (!proposal) throw new NotFoundException('Proposal not found.');
+    if (!proposal.documentStorageKey && normalized !== 'WITHDRAW') {
+      throw new BadRequestException('Upload the external proposal document before updating its status.');
+    }
 
     const now = new Date();
     let next = proposal.status;
@@ -681,7 +633,7 @@ export class TriageCommercialService {
     const bundle = await this.loadCommercialBundle(publicLeadId);
     const stage = resolveCommercialStage(refreshed!, {
       contactCount: bundle.contactCount,
-      latestProposal: { status: updated.status },
+      latestProposal: this.proposalSnapshot(updated),
     });
     await this.persistStage(publicLeadId, stage);
     return updated;

@@ -61,6 +61,7 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     collapsible: true,
     items: [
       { id: 'triage-submissions', label: 'Triage submissions', href: '/triage', icon: IconClipboardList, roles: ['ADMIN', 'ANALYST'] },
+      { id: 'triage-reports', label: 'Triage reports', href: '/reports#executive-triage-reports', icon: IconFileText, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
     ],
   },
   {
@@ -73,7 +74,6 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     items: [
       { id: 'advisory-engagements', label: 'Diagnostics & assurance', href: '/advisory', icon: IconShieldCheck, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
       { id: 'advisory-reports', label: 'Advisory reports', href: '/reports#executive-advisory-reports', icon: IconFileText, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
-      { id: 'advisory-new', label: 'New paid engagement', href: '/advisory/new', icon: IconClipboardList, roles: ['ADMIN', 'ANALYST'] },
     ],
   },
   {
@@ -317,8 +317,20 @@ export function applyNavHash(href: string) {
   scrollToNavHash(hashId);
 }
 
+/** True when the user is in the Executive Triage reports surface (list hash or report detail). */
+export function isReportsTriageContext(hash = '', search = ''): boolean {
+  if (hash.includes('executive-triage')) return true;
+  const raw = search.startsWith('?') ? search.slice(1) : search;
+  try {
+    return new URLSearchParams(raw).get('view') === 'triage';
+  } catch {
+    return false;
+  }
+}
+
 /** True when the user is in the Executive & Advisory reports surface (list hash or report detail). */
 export function isReportsAdvisoryContext(hash = '', search = ''): boolean {
+  if (hash.includes('executive-triage')) return false;
   if (hash.includes('executive-advisory')) return true;
   const raw = search.startsWith('?') ? search.slice(1) : search;
   try {
@@ -336,6 +348,12 @@ export function isNavItemActive(pathname: string, href: string, hash = '', searc
     if (itemHash === 'executive-advisory-reports') {
       if (pathname.startsWith('/reports/')) {
         return isReportsAdvisoryContext(hash, search);
+      }
+      return hash === `#${itemHash}` || hash === itemHash;
+    }
+    if (itemHash === 'executive-triage-reports') {
+      if (pathname.startsWith('/reports/')) {
+        return isReportsTriageContext(hash, search);
       }
       return hash === `#${itemHash}` || hash === itemHash;
     }

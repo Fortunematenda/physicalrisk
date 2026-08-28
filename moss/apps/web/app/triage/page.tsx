@@ -818,7 +818,7 @@ export default function TriageSubmissionsPage() {
                                 Open Level 2 engagement
                               </Link>
                             ) : null}
-                            {analysts.length ? (
+                            {analysts.length && !row.convertedEngagement?.id && !row.convertedAt ? (
                               <>
                                 {row.assignedAnalyst ? (
                                   <p className="m-0 px-3 py-1 text-xs text-slate-600">

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
+import { uploadTriageProposal } from '@/lib/triage-proposal-upload';
 
 const CONTACT_METHODS = [
   { value: 'CALL', label: 'Call' },
@@ -134,42 +135,8 @@ export function TriageCommercialPanel({
 
   useEffect(() => {
     if (!focusSection) return;
-
-    const scrollToTarget = () => {
-      const targetId =
-        focusSection === 'proposal' ? 'triage-proposal-section' : 'triage-contact-section';
-      const el = document.getElementById(targetId);
-      if (!el) return false;
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      el.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'rounded-xl');
-      window.setTimeout(() => {
-        el.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'rounded-xl');
-      }, 2500);
-      if (focusSection === 'contact') setContactOpen(true);
-      return true;
-    };
-
-    let cleared = false;
-    const clearFocus = () => {
-      if (cleared) return;
-      cleared = true;
-      onFocusHandled?.();
-    };
-
-    const timer = window.setTimeout(() => {
-      if (scrollToTarget()) {
-        clearFocus();
-        return;
-      }
-      // Tab content may still be mounting — retry once.
-      window.setTimeout(() => {
-        scrollToTarget();
-        clearFocus();
-      }, 350);
-    }, 200);
-
-    return () => window.clearTimeout(timer);
-  }, [focusSection, onFocusHandled]);
+    if (focusSection === 'contact') setContactOpen(true);
+  }, [focusSection]);
 
   async function assignOwner(ownerId: string) {
     await run(async () => {
@@ -229,23 +196,6 @@ export function TriageCommercialPanel({
     });
   }
 
-  async function createProposal() {
-    await run(
-      async () => {
-        await apiFetch(`/triage/submissions/${submissionId}/proposals`, {
-          method: 'POST',
-          body: JSON.stringify({
-            objectives: scopeDraft.clientObjectives,
-            sitesOrBusinessUnits: scopeDraft.sitesOrBusinessUnits,
-            scopeSummary: scopeDraft.indicativeScope,
-            timeline: scopeDraft.expectedTimeline,
-          }),
-        });
-      },
-      { title: 'Proposal created', description: 'Draft proposal is ready to edit or send.' },
-    );
-  }
-
   async function proposalAction(action: string) {
     if (!activeProposal?.id) return;
     await run(async () => {
@@ -257,26 +207,13 @@ export function TriageCommercialPanel({
   }
 
   async function uploadProposal(file: File) {
-    const form = new FormData();
-    form.append('file', file);
-    form.append('title', `${item.organisationName} — Executive Advisory Diagnostic`);
     setLocalBusy(true);
     try {
-      const res = await fetch(`/api/gw/triage/submissions/${submissionId}/proposals/upload`, {
-        method: 'POST',
-        body: form,
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const message =
-          typeof err.message === 'string'
-            ? err.message
-            : Array.isArray(err.message)
-              ? err.message.join(', ')
-              : 'Upload failed.';
-        throw new Error(message);
-      }
+      await uploadTriageProposal(
+        submissionId,
+        file,
+        `${item.organisationName} — Executive Advisory Diagnostic`,
+      );
       await onReload();
       toast({
         title: 'Proposal uploaded',
@@ -535,6 +472,17 @@ export function TriageCommercialPanel({
           <CardTitle className="text-base">Proposal</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadProposal(file);
+              e.target.value = '';
+            }}
+          />
           {activeProposal ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -550,17 +498,28 @@ export function TriageCommercialPanel({
                 <p className="m-0 text-xs text-slate-500">Sent: {fmt(activeProposal.sentAt)}</p>
               ) : null}
               <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isBusy}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Upload className="size-4" />
+                  {activeProposal.documentStorageKey ? 'Replace document' : 'Upload proposal'}
+                </Button>
                 {activeProposal.documentStorageKey ? (
                   <Button type="button" variant="outline" size="sm" onClick={() => void downloadProposal()}>
                     Download
                   </Button>
                 ) : null}
-                {['DRAFT', 'INTERNAL_REVIEW', 'APPROVED'].includes(activeProposal.status) ? (
+                {activeProposal.documentStorageKey
+                && ['DRAFT', 'INTERNAL_REVIEW', 'APPROVED'].includes(activeProposal.status) ? (
                   <Button type="button" size="sm" disabled={isBusy} onClick={() => void proposalAction('SENT')}>
                     Mark sent
                   </Button>
                 ) : null}
-                {['SENT', 'VIEWED'].includes(activeProposal.status) ? (
+                {activeProposal.documentStorageKey && ['SENT', 'VIEWED'].includes(activeProposal.status) ? (
                   <>
                     <Button type="button" size="sm" disabled={isBusy} onClick={() => void proposalAction('ACCEPTED')}>
                       Mark accepted
@@ -577,36 +536,28 @@ export function TriageCommercialPanel({
                   </>
                 ) : null}
               </div>
+              {!activeProposal.documentStorageKey ? (
+                <p className="m-0 text-sm text-amber-700">
+                  Upload the externally prepared proposal document before marking it sent.
+                </p>
+              ) : null}
             </div>
           ) : (
-            <>
-              <p className="text-sm text-muted-foreground">No proposal yet.</p>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Proposals are prepared externally. Upload the PDF or Word document to create the proposal record.
+              </p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" disabled={isBusy} onClick={() => void createProposal()}>
-                  Create proposal
-                </Button>
                 <Button
                   type="button"
-                  variant="outline"
                   disabled={isBusy}
                   onClick={() => fileRef.current?.click()}
                 >
                   <Upload className="size-4" />
                   Upload proposal
                 </Button>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void uploadProposal(file);
-                    e.target.value = '';
-                  }}
-                />
               </div>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>

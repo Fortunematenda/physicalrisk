@@ -40,11 +40,14 @@ export default function ReportPage() {
   const [busy, setBusy] = useState(false);
 
   const productCode = String(report?.assessment?.productCode || '');
+  const isTriageReport = productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
   const isAdvisoryReport = useMemo(() => {
+    if (viewParam === 'triage') return false;
     if (viewParam === 'advisory') return true;
     if (viewParam === 'scl') return false;
+    if (isTriageReport) return false;
     return ADVISORY_PRODUCTS.has(productCode);
-  }, [viewParam, productCode]);
+  }, [viewParam, productCode, isTriageReport]);
 
   useEffect(() => {
     apiFetch(`/reports/${id}`)
@@ -58,7 +61,11 @@ export default function ReportPage() {
         if (suggested) setEmail(suggested);
 
         const code = String(data.assessment?.productCode || '');
-        if (ADVISORY_PRODUCTS.has(code) && viewParam !== 'advisory') {
+        if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE' && viewParam !== 'triage') {
+          router.replace(`/reports/${id}?view=triage`);
+          return;
+        }
+        if (ADVISORY_PRODUCTS.has(code) && code !== 'EXECUTIVE_GOVERNANCE_TRIAGE' && viewParam !== 'advisory') {
           router.replace(`/reports/${id}?view=advisory`);
         }
       })
@@ -82,8 +89,16 @@ export default function ReportPage() {
     }
   }
 
-  const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
-  const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
+  const backHref = isTriageReport || viewParam === 'triage'
+    ? '/reports#executive-triage-reports'
+    : isAdvisoryReport
+      ? '/reports#executive-advisory-reports'
+      : '/reports';
+  const backLabel = isTriageReport || viewParam === 'triage'
+    ? 'Back to triage reports'
+    : isAdvisoryReport
+      ? 'Back to advisory reports'
+      : 'Back to Cost Leakage reports';
   const workHref = engagementHref(productCode, report?.assessment?.id, report?.triageSubmissionId);
 
   return (
