@@ -1,5 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProductCode, ProposalStatus, TriageNoteCategory, CommercialStage } from '@prisma/client';
+import {
+  AssignmentRole,
+  ProductCode,
+  ProposalStatus,
+  TriageNoteCategory,
+  CommercialStage,
+} from '@prisma/client';
 import {
   operationalSitesLabelFromStored,
   securityExpenditureLabelFromStored,
@@ -47,6 +53,47 @@ export class TriageService {
     if (!INTERNAL_ROLES.has(user.role)) {
       throw new ForbiddenException('Internal Physical Risk access is required.');
     }
+  }
+
+  /**
+   * If Level 2 already has a primary consultant but the lead does not, copy it onto
+   * PublicLead.assignedAnalystId (single source of truth for all levels).
+   */
+  private async healLeadAnalystFromEngagement<
+    T extends {
+      id: string;
+      assignedAnalystId?: string | null;
+      assignedAnalyst?: {
+        id: string;
+        firstName: string | null;
+        lastName: string | null;
+        email: string | null;
+        systemRole: string;
+      } | null;
+      convertedAssessmentId?: string | null;
+    },
+  >(lead: T): Promise<T> {
+    if (lead.assignedAnalystId || !lead.convertedAssessmentId) return lead;
+    const primary = await this.prisma.assessmentAssignment.findFirst({
+      where: {
+        assessmentId: lead.convertedAssessmentId,
+        role: AssignmentRole.PRIMARY_ANALYST,
+        status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+      },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, email: true, systemRole: true } },
+      },
+    });
+    if (!primary?.userId) return lead;
+    await this.prisma.publicLead.update({
+      where: { id: lead.id },
+      data: { assignedAnalystId: primary.userId },
+    });
+    return {
+      ...lead,
+      assignedAnalystId: primary.userId,
+      assignedAnalyst: primary.user,
+    };
   }
 
   /** Resolve by publicLead id, triage assessment id, converted EAD id, or report id. */
@@ -245,6 +292,34 @@ export class TriageService {
     const sessionById = new Map(sessions.map((row) => [row.id, row]));
     const convertedById = new Map(converted.map((row) => [row.id, row]));
 
+    const needsHeal = filtered.filter((lead) => lead.convertedAssessmentId && !lead.assignedAnalystId);
+    if (needsHeal.length) {
+      const engagementIds = needsHeal.map((l) => l.convertedAssessmentId!).filter(Boolean);
+      const primaries = await this.prisma.assessmentAssignment.findMany({
+        where: {
+          assessmentId: { in: engagementIds },
+          role: AssignmentRole.PRIMARY_ANALYST,
+          status: { in: ['ASSIGNED', 'IN_PROGRESS'] },
+        },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true, systemRole: true } },
+        },
+      });
+      const primaryByEngagement = new Map(primaries.map((row) => [row.assessmentId, row]));
+      await Promise.all(
+        needsHeal.map(async (lead) => {
+          const primary = primaryByEngagement.get(lead.convertedAssessmentId!);
+          if (!primary?.userId) return;
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { assignedAnalystId: primary.userId },
+          });
+          (lead as { assignedAnalystId: string | null }).assignedAnalystId = primary.userId;
+          (lead as { assignedAnalyst: typeof primary.user }).assignedAnalyst = primary.user;
+        }),
+      );
+    }
+
     const items = filtered.map((lead) => {
       const session = lead.assessmentId ? sessionById.get(lead.assessmentId) : null;
       const conversion = lead.convertedAssessmentId ? convertedById.get(lead.convertedAssessmentId) : null;
@@ -316,7 +391,8 @@ export class TriageService {
 
   async get(id: string, user: AuthUser) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    let lead = await this.resolveLead(id);
+    lead = await this.healLeadAnalystFromEngagement(lead);
     const list = await this.list(user, { q: lead.email });
     const item = list.items.find((row) => row.id === lead.id) || {
       ...lead,
@@ -721,13 +797,8 @@ export class TriageService {
       throw new BadRequestException('Complete the questionnaire before changing the follow-up stage.');
     }
 
-    if (input.assignedAnalystId !== undefined && lead.convertedAssessmentId) {
-      if (!input.assignedAnalystId) {
-        throw new BadRequestException('Cannot unassign the analyst after Level 2 has been created.');
-      }
-      if (input.assignedAnalystId !== lead.assignedAnalystId) {
-        throw new BadRequestException('Analyst assignment is locked after conversion to Level 2.');
-      }
+    if (input.assignedAnalystId !== undefined && lead.convertedAssessmentId && !input.assignedAnalystId) {
+      throw new BadRequestException('Cannot unassign the analyst after Level 2 has been created.');
     }
 
     if (input.assignedAnalystId !== undefined && input.assignedAnalystId) {
@@ -808,6 +879,19 @@ export class TriageService {
         assignedAnalystId: updated.assignedAnalystId,
       },
     });
+
+    // Keep Level 2(+) primary consultant aligned with the triage lead (single source of truth).
+    if (input.assignedAnalystId && lead.convertedAssessmentId) {
+      await this.advisory.assign(
+        lead.convertedAssessmentId,
+        {
+          userId: input.assignedAnalystId,
+          role: AssignmentRole.PRIMARY_ANALYST,
+          notes: 'Synced from Level 1 triage',
+        },
+        user,
+      );
+    }
 
     const bundle = await this.commercial.loadCommercialBundle(leadId);
     const stage = resolveCommercialStage(updated, {

@@ -654,7 +654,7 @@ export default function TriageSubmissionDetailPage() {
     && !item.activeProposal?.documentStorageKey;
 
   const displayCta = normalizePrimaryCta(item.primaryCta, item.activeProposal);
-  const analystAssignmentLocked = Boolean(item.convertedAt || item.convertedAssessmentId);
+  const convertedToLevel2 = Boolean(item.convertedAt || item.convertedAssessmentId);
 
   return (
     <AuthGate>
@@ -782,14 +782,14 @@ export default function TriageSubmissionDetailPage() {
                       Continue preparation
                     </button>
                   ) : null}
-                  {analysts.length && !analystAssignmentLocked ? (
+                  {analysts.length ? (
                     <>
                       {item.assignedAnalystId && analystName ? (
                         <p className="m-0 px-3 py-1 text-xs text-slate-600">
                           Assigned to <strong className="font-semibold text-slate-900">{analystName}</strong>
                         </p>
                       ) : null}
-                      {item.assignedAnalystId ? (
+                      {item.assignedAnalystId && !convertedToLevel2 ? (
                         <button
                           type="button"
                           disabled={busy}
@@ -826,11 +826,6 @@ export default function TriageSubmissionDetailPage() {
                         </select>
                       </div>
                     </>
-                  ) : analystAssignmentLocked && analystName ? (
-                    <p className="m-0 px-3 py-1 text-xs text-slate-600">
-                      Assigned to <strong className="font-semibold text-slate-900">{analystName}</strong>
-                      <span className="block text-slate-500">Locked for Level 2+</span>
-                    </p>
                   ) : null}
                   <button
                     type="button"
@@ -1060,7 +1055,7 @@ export default function TriageSubmissionDetailPage() {
                   <Card className="rounded-xl border-slate-200 shadow-sm">
                     <CardHeader>
                       <CardTitle className="text-base">Analyst</CardTitle>
-                      <CardDescription>Primary Level 2 consultant for this lead</CardDescription>
+                      <CardDescription>Primary consultant shared across Level 1 and Level 2</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {analystName ? (

@@ -516,6 +516,9 @@ export class AdvisoryService {
     const assignment = await this.prisma.assessmentAssignment.create({
       data: { assessmentId: id, userId: input.userId, role, assignedById: actor.id, notes: input.notes || null },
     });
+    if (role === AssignmentRole.PRIMARY_ANALYST) {
+      await this.syncConvertedLeadAnalyst(id, input.userId);
+    }
     await this.audit.record({
       userId: actor.id,
       action: 'ADVISORY_ASSIGNED',
@@ -524,6 +527,35 @@ export class AdvisoryService {
       metadata: { assessmentId: id, assigneeId: input.userId, role },
     });
     return assignment;
+  }
+
+  /**
+   * PublicLead.assignedAnalystId is the single source of truth for the triage → Level 2(+)/3 chain.
+   * Keep the converted lead in sync whenever a primary consultant is set on an engagement.
+   */
+  private async syncConvertedLeadAnalyst(assessmentId: string, analystId: string) {
+    let currentId: string | null = assessmentId;
+    while (currentId) {
+      const lead = await this.prisma.publicLead.findFirst({
+        where: { convertedAssessmentId: currentId },
+        select: { id: true, assignedAnalystId: true },
+      });
+      if (lead) {
+        if (lead.assignedAnalystId !== analystId) {
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { assignedAnalystId: analystId },
+          });
+        }
+        return;
+      }
+      const parentRow: { parentAssessmentId: string | null } | null =
+        await this.prisma.assessmentSession.findUnique({
+          where: { id: currentId },
+          select: { parentAssessmentId: true },
+        });
+      currentId = parentRow?.parentAssessmentId ?? null;
+    }
   }
 
   async generateReport(id: string, user: AuthUser) {

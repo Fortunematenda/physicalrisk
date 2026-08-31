@@ -876,7 +876,7 @@ export default function TriageSubmissionsPage() {
                                 Open Level 2 engagement
                               </Link>
                             ) : null}
-                            {analysts.length && !row.convertedEngagement?.id && !row.convertedAt ? (
+                            {analysts.length ? (
                               <>
                                 {row.assignedAnalyst ? (
                                   <p className="m-0 px-3 py-1 text-xs text-slate-600">
@@ -886,7 +886,7 @@ export default function TriageSubmissionsPage() {
                                     </strong>
                                   </p>
                                 ) : null}
-                                {row.assignedAnalystId ? (
+                                {row.assignedAnalystId && !row.convertedEngagement?.id && !row.convertedAt ? (
                                   <button
                                     type="button"
                                     disabled={busy === row.id}
