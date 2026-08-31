@@ -8,12 +8,18 @@ import { EmailService } from '../email/email.service';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { ReportsService } from '../reports/reports.service';
 import { generateAssessmentReference } from '../common/assessment-reference';
-import { generateProposalReference } from '../common/proposal-reference';
 import { ProposalTokenService } from '../common/proposal-token.service';
+import { TriageProposalRequestService } from '../triage/triage-proposal-request.service';
 import {
   buildPriorityActionText,
-  resolveSclClassificationVisual,
 } from '../reports/scl-report-visual';
+import {
+  assuranceCategoryInterpretation,
+  assuranceDimensionTierLabel,
+  deriveEgtAssurancePresentation,
+  rankEgtWarningIndicators,
+  resolveEgtAssuranceVisual,
+} from '@moss/shared';
 
 type LeadAttribution = {
   source?: string;
@@ -56,6 +62,7 @@ export class PublicService {
     private readonly crm: EspoCrmService,
     private readonly reports: ReportsService,
     private readonly proposalTokens: ProposalTokenService,
+    private readonly proposalRequests: TriageProposalRequestService,
   ) {}
 
   async getPublishedQuestionnaire(code = 'SCLI') {
@@ -427,19 +434,20 @@ export class PublicService {
       },
     });
     const snapshot = assessment?.scoreSnapshots?.[0];
-    const visual = snapshot
-      ? resolveSclClassificationVisual(Number(snapshot.overallRiskScore))
+    const assurancePresentation = snapshot
+      ? deriveEgtAssurancePresentation({
+          overallRiskScore: snapshot.overallRiskScore != null ? Number(snapshot.overallRiskScore) : null,
+          maturityScore: snapshot.maturityScore != null ? Number(snapshot.maturityScore) : null,
+          categoryScores: (
+            (snapshot.categoryScores as Array<{ category?: string; score?: number }>) || []
+          ).map((c) => ({
+            category: String(c.category || ''),
+            score: Number(c.score) || 0,
+          })),
+        })
       : null;
-    const diagnosis =
-      visual?.band === 'Controlled'
-        ? 'Lower apparent assurance exposure'
-        : visual?.band === 'Moderate'
-          ? 'Moderate apparent assurance exposure'
-          : visual?.band === 'High'
-            ? 'Elevated apparent assurance exposure'
-            : visual?.band === 'Critical'
-              ? 'Priority apparent assurance exposure'
-              : 'Preliminary indication complete';
+    const visual = assurancePresentation?.visual || null;
+    const diagnosis = assurancePresentation?.diagnosis || 'Preliminary indication complete';
     const recommendedAction = buildPriorityActionText({
       recommendations: assessment?.recommendations || [],
       shortName: 'Physical Risk',
@@ -489,17 +497,19 @@ export class PublicService {
           dateStyle: 'medium',
           timeStyle: 'short',
         }),
-        riskBand: visual?.band || snapshot?.riskBand || '—',
-        accessibleLabel: visual?.accessibleLabel || String(snapshot?.riskBand || 'Result recorded'),
+        riskBand: assurancePresentation?.assuranceBand.displayLabel || '—',
+        assuranceBand: assurancePresentation?.assuranceBand.code || null,
+        accessibleLabel: visual?.accessibleLabel || 'Result recorded',
         colourName: visual?.colourName || '',
-        bandIndex: visual?.bandIndex ?? 2,
-        overallRiskScore: snapshot ? Number(snapshot.overallRiskScore) : null,
-        categoryScores: ((snapshot?.categoryScores as Array<{ category?: string; score?: number }>) || []).map(
-          (c) => ({
-            category: String(c.category || ''),
-            score: Number(c.score || 0),
-          }),
-        ),
+        bandIndex: visual?.bandIndex ?? 0,
+        assuranceScore: assurancePresentation?.assuranceScore ?? null,
+        exposureIndicator: assurancePresentation?.exposureIndicator ?? null,
+        overallRiskScore: assurancePresentation?.assuranceScore ?? null,
+        categoryScores: (assurancePresentation?.categoryScores || []).map((c) => ({
+          category: c.category,
+          score: c.assuranceScore,
+          exposureIndicator: c.exposureIndicator,
+        })),
         diagnosis,
         recommendedAction,
         campaignSummary,
@@ -589,18 +599,43 @@ export class PublicService {
 
   async getProposalRequestPreview(token: string) {
     const { leadId } = this.proposalTokens.verify(token);
-    const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
+    const lead = await this.prisma.publicLead.findUnique({
+      where: { id: leadId },
+      include: {
+        proposals: { orderBy: { createdAt: 'asc' }, take: 1 },
+      },
+    });
     if (!lead || lead.closedAt) {
       throw new BadRequestException('This proposal link is invalid or has expired.');
     }
     const already =
       lead.proposalStatus !== ProposalStatus.NOT_REQUESTED && Boolean(lead.proposalRequestedAt);
+    const assessmentRef = lead.assessmentId
+      ? (
+          await this.prisma.assessmentSession.findUnique({
+            where: { id: lead.assessmentId },
+            select: { reference: true },
+          })
+        )?.reference
+      : null;
+    const sourceTriageReference =
+      assessmentRef
+      || (lead.proposals[0]?.sourceAssessmentId
+        ? (
+            await this.prisma.assessmentSession.findUnique({
+              where: { id: lead.proposals[0].sourceAssessmentId! },
+              select: { reference: true },
+            })
+          )?.reference
+        : null)
+      || null;
     return {
       organisationName: lead.organisationName,
       recommendedProduct: 'Executive Advisory Diagnostic',
       alreadyRequested: already,
       proposalReference: lead.proposalReference,
       proposalStatus: lead.proposalStatus,
+      sourceTriageReference,
       message: already
         ? 'Your proposal request has already been received.'
         : 'Based on your Executive Governance Triage, the recommended next step is an Executive Advisory Diagnostic.',
@@ -619,44 +654,23 @@ export class PublicService {
       );
     }
 
-    if (lead.proposalStatus !== ProposalStatus.NOT_REQUESTED && lead.proposalRequestedAt) {
+    const systemUser = await this.getSystemUser();
+    const workspace = await this.proposalRequests.ensureProposalRequestFromPublicLead(
+      lead.id,
+      systemUser.id,
+    );
+
+    if (workspace.alreadyRequested) {
       return {
         ok: true,
         alreadyRequested: true,
-        proposalReference: lead.proposalReference,
-        proposalStatus: lead.proposalStatus,
-        requestedAt: lead.proposalRequestedAt,
+        proposalReference: workspace.proposalReference,
+        proposalStatus: workspace.proposalStatus,
+        sourceTriageReference: workspace.sourceTriageReference,
+        requestedAt: workspace.requestedAt,
         message: 'Your proposal request has already been received.',
       };
     }
-
-    const now = new Date();
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const proposalReference = lead.proposalReference || (await generateProposalReference(tx));
-      return tx.publicLead.update({
-        where: { id: lead.id },
-        data: {
-          proposalStatus: ProposalStatus.REQUESTED,
-          proposalRequestedAt: now,
-          proposalReference,
-          lastProgressAt: now,
-        },
-      });
-    });
-
-    const systemUser = await this.getSystemUser();
-    await this.audit.record({
-      userId: systemUser.id,
-      action: 'PROPOSAL_REQUESTED',
-      entityType: 'PublicLead',
-      entityId: lead.id,
-      metadata: {
-        proposalReference: updated.proposalReference,
-        previousStatus: lead.proposalStatus,
-        newStatus: ProposalStatus.REQUESTED,
-        organisationName: lead.organisationName,
-      },
-    });
 
     const adminUrlBase = (
       this.config.get<string>('PUBLIC_URL') ||
@@ -684,9 +698,9 @@ export class PublicService {
             phone: lead.phone || '',
             industry: lead.industry || '',
             completedAt: lead.completedAt?.toISOString() || '',
-            proposalReference: updated.proposalReference,
+            proposalReference: workspace.proposalReference,
             recommendedProduct: 'Executive Advisory Diagnostic',
-            requestedAt: now.toISOString(),
+            requestedAt: workspace.requestedAt.toISOString(),
             adminLink,
           },
         })
@@ -704,7 +718,7 @@ export class PublicService {
         payload: {
           firstName: lead.firstName,
           organisationName: lead.organisationName,
-          proposalReference: updated.proposalReference,
+          proposalReference: workspace.proposalReference,
           recommendedProduct: 'Executive Advisory Diagnostic',
         },
       })
@@ -719,9 +733,10 @@ export class PublicService {
     return {
       ok: true,
       alreadyRequested: false,
-      proposalReference: updated.proposalReference,
-      proposalStatus: updated.proposalStatus,
-      requestedAt: updated.proposalRequestedAt,
+      proposalReference: workspace.proposalReference,
+      proposalStatus: workspace.proposalStatus,
+      sourceTriageReference: workspace.sourceTriageReference,
+      requestedAt: workspace.requestedAt,
       message:
         'The Physical Risk advisory team has received your request and will contact you regarding the Executive Advisory Diagnostic.',
     };

@@ -604,6 +604,7 @@ model AssessmentSession {
   qaChecklist            QaChecklistItem[]
   actionItems            ActionItem[]
   somodLinkedAssessments SomodAssessment[] @relation("SomodMossLink")
+  triageProposalsFromSource TriageProposal[] @relation("TriageProposalSourceAssessment")
   @@index([status])
   @@index([organisationId])
   @@index([organisationId, status])
@@ -1290,6 +1291,8 @@ model TriageProposal {
   proposalNumber       String               @unique
   publicLeadId         String
   organisationId       String?
+  /// Source Executive Governance Triage assessment (EGT reference).
+  sourceAssessmentId   String?
   productCode          String               @default("EXECUTIVE_ADVISORY_DIAGNOSTIC")
   title                String
   scopeSummary         String?
@@ -1302,6 +1305,8 @@ model TriageProposal {
   currency             String               @default("ZAR")
   validUntil           DateTime?
   terms                String?
+  /// Frozen triage indication at proposal request time (assurance score, bands, indicators).
+  contextSnapshot      Json?
   status               TriageProposalStatus @default(DRAFT)
   source               TriageProposalSource @default(PLATFORM)
   documentStorageKey   String?
@@ -1317,11 +1322,13 @@ model TriageProposal {
   declinedAt           DateTime?
   publicLead           PublicLead           @relation("TriageLeadProposals", fields: [publicLeadId], references: [id], onDelete: Cascade)
   organisation         Organisation?        @relation(fields: [organisationId], references: [id], onDelete: SetNull)
+  sourceAssessment     AssessmentSession?   @relation("TriageProposalSourceAssessment", fields: [sourceAssessmentId], references: [id], onDelete: SetNull)
   createdBy            User                 @relation("TriageProposalCreator", fields: [createdById], references: [id], onDelete: Restrict)
   acceptedForLead      PublicLead?          @relation("AcceptedTriageProposal")
 
   @@index([publicLeadId, createdAt])
   @@index([organisationId])
+  @@index([sourceAssessmentId])
   @@index([status])
 }
 

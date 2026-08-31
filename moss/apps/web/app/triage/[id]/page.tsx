@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES } from '@moss/shared';
+import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES, deriveEgtAssurancePresentation } from '@moss/shared';
 import {
   AlertCircle,
   ArrowRight,
@@ -20,6 +20,7 @@ import { AuthGate } from '@/components/AuthGate';
 import { Shell } from '@/components/Shell';
 import { TriageNotesPanel, type TriageNoteItem } from '@/components/triage/TriageNotesPanel';
 import { TriageCommercialPanel } from '@/components/triage/TriageCommercialPanel';
+import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -50,19 +51,21 @@ function fmt(value?: string | null) {
   return new Date(value).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-/** Assurance position = 100 − exposure (existing indication display). */
-function assuranceFromAssessment(assessment: {
+/** Prospect-facing assurance presentation from stored exposure snapshot. */
+function assurancePresentationFromAssessment(assessment: {
   overallRiskScore?: number | null;
   maturityScore?: number | null;
-} | null): number | null {
+  categoryScores?: Array<{ category?: string; name?: string; score?: number }> | null;
+} | null) {
   if (!assessment) return null;
-  if (assessment.maturityScore != null && Number.isFinite(Number(assessment.maturityScore))) {
-    return Math.round(Number(assessment.maturityScore) * 10) / 10;
-  }
-  if (assessment.overallRiskScore != null && Number.isFinite(Number(assessment.overallRiskScore))) {
-    return Math.round((100 - Number(assessment.overallRiskScore)) * 10) / 10;
-  }
-  return null;
+  return deriveEgtAssurancePresentation({
+    overallRiskScore: assessment.overallRiskScore,
+    maturityScore: assessment.maturityScore,
+    categoryScores: (assessment.categoryScores || []).map((c) => ({
+      category: String(c.category || c.name || 'Category'),
+      score: Number(c.score) || 0,
+    })),
+  });
 }
 
 function humanizeStatus(value?: string | null) {
@@ -96,13 +99,6 @@ function humanizeStatus(value?: string | null) {
   return map[value] || value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function bandBadgeVariant(band?: string | null): 'success' | 'warning' | 'danger' | 'secondary' {
-  if (band === 'Critical' || band === 'High') return 'danger';
-  if (band === 'Moderate') return 'warning';
-  if (band === 'Controlled') return 'success';
-  return 'secondary';
-}
-
 function proposalBadgeVariant(
   status: string,
 ): 'success' | 'warning' | 'info' | 'danger' | 'secondary' {
@@ -117,9 +113,13 @@ function normalizePrimaryCta(
   activeProposal?: { documentStorageKey?: string | null } | null,
 ) {
   if (!cta || cta.kind === 'none') return null;
-  if (cta.kind === 'open_proposal' || cta.kind === 'prepare_proposal') {
+  if (cta.kind === 'open_proposal' || cta.kind === 'prepare_proposal' || cta.kind === 'upload_proposal') {
     if (activeProposal?.documentStorageKey) return null;
-    return { kind: 'upload_proposal', label: 'Upload proposal' };
+    return { kind: 'complete_proposal', label: 'Continue preparation' };
+  }
+  // Legacy API: never surface Mark sent as the primary red header CTA.
+  if (cta.kind === 'mark_sent') {
+    return { kind: 'complete_proposal', label: 'Send proposal' };
   }
   return cta;
 }
@@ -172,10 +172,10 @@ function WorkflowStep({
         <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-moss-success" aria-hidden="true" />
       ) : state === 'current' ? (
         <span
-          className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2 border-moss-info bg-moss-info/15"
+          className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2 border-moss-red bg-moss-red/15"
           aria-hidden="true"
         >
-          <span className="size-1.5 rounded-full bg-moss-info" />
+          <span className="size-1.5 rounded-full bg-moss-red" />
         </span>
       ) : state === 'warning' ? (
         <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
@@ -460,7 +460,12 @@ export default function TriageSubmissionDetailPage() {
         setTab('commercial', { focus: 'contact' });
         break;
       case 'upload_proposal':
-        goToProposalSection({ offerUpload: true });
+      case 'complete_proposal':
+        setTab('commercial', { focus: 'proposal' });
+        break;
+      case 'mark_sent':
+        // Secondary path only — primary CTA is remapped to complete_proposal.
+        setTab('commercial', { focus: 'proposal' });
         break;
       case 'create_level2':
         await convert(false);
@@ -474,14 +479,13 @@ export default function TriageSubmissionDetailPage() {
   }
 
   const assessment = item?.assessment;
-  const score = assuranceFromAssessment(assessment);
-  const band = assessment?.riskBand || null;
-  const categories = Array.isArray(assessment?.categoryScores)
-    ? assessment.categoryScores.map((c: any) => ({
-        category: String(c.category || c.name || 'Category'),
-        score: Number(c.score) || 0,
-      }))
-    : [];
+  const assurancePresentation = assurancePresentationFromAssessment(assessment);
+  const score = assurancePresentation?.assuranceScore ?? null;
+  const band = assurancePresentation?.assuranceBand.displayLabel || null;
+  const categories = assurancePresentation?.categoryScores.map((c) => ({
+    category: c.category,
+    score: c.assuranceScore,
+  })) || [];
   const proposalStatus = String(item?.proposalStatus || 'NOT_REQUESTED');
   const hasCommercial =
     Boolean(item) && (proposalStatus !== 'NOT_REQUESTED' || Boolean(item?.diagnosticRequestedAt));
@@ -597,13 +601,27 @@ export default function TriageSubmissionDetailPage() {
     useMemo(() => {
       if (item?.commercialWorkflow?.length) return item.commercialWorkflow;
       if (!item) return [];
+      const proposalRequested = proposalStatus !== 'NOT_REQUESTED';
+      const hasDoc = Boolean(item.activeProposal?.documentStorageKey);
+      const sent = ['SENT', 'ACCEPTED', 'DECLINED'].includes(proposalStatus);
+      const accepted = proposalStatus === 'ACCEPTED' || Boolean(item.convertedAt);
       return [
         { state: item.completedAt ? 'done' : 'pending', label: 'Questionnaire completed' },
         { state: score != null ? 'done' : 'pending', label: 'Indication scored' },
-        { state: item.reviewedAt ? 'done' : 'pending', label: 'Reviewed' },
-        { state: item.contactedAt ? 'done' : 'pending', label: 'Contacted' },
+        {
+          state: item.contactedAt || proposalRequested ? 'done' : 'pending',
+          label: 'Client contacted',
+        },
+        { state: proposalRequested ? 'done' : 'pending', label: 'Proposal requested' },
+        {
+          state: hasDoc || sent ? 'done' : proposalRequested ? 'current' : 'pending',
+          label: 'Proposal preparation',
+        },
+        { state: sent || accepted ? 'done' : 'pending', label: 'Proposal sent' },
+        { state: accepted ? 'done' : 'pending', label: 'Proposal accepted' },
+        { state: item.convertedAt ? 'done' : 'pending', label: 'Level 2 created' },
       ] as Array<{ state: 'done' | 'current' | 'pending' | 'warning'; label: string }>;
-    }, [item, score]);
+    }, [item, score, proposalStatus]);
 
   if (loading || !item) {
     return (
@@ -701,9 +719,11 @@ export default function TriageSubmissionDetailPage() {
                     </Badge>
                   ) : null}
                   {band ? (
-                    <Badge variant={bandBadgeVariant(band)} className="shrink-0 whitespace-nowrap">
-                      {band}
-                    </Badge>
+                    <EgtAssuranceBandBadge
+                      label={band}
+                      visual={assurancePresentation?.visual}
+                      className="shrink-0"
+                    />
                   ) : null}
                 </div>
                 <p className="text-sm text-slate-600">
@@ -756,10 +776,10 @@ export default function TriageSubmissionDetailPage() {
                       disabled={busy}
                       onClick={() => {
                         setLeadMenuOpen(false);
-                        proposalFileRef.current?.click();
+                        setTab('commercial', { focus: 'proposal' });
                       }}
                     >
-                      Upload proposal
+                      Continue preparation
                     </button>
                   ) : null}
                   {analysts.length && !analystAssignmentLocked ? (
@@ -991,6 +1011,17 @@ export default function TriageSubmissionDetailPage() {
                         <dl>
                           <Kv label="Organisation">{item.organisationName}</Kv>
                           <Kv label="Industry">{item.industry || '—'}</Kv>
+                          <Kv label="Job title">{item.qualification?.jobTitle || '—'}</Kv>
+                          <Kv label="Country / region">{item.qualification?.country || '—'}</Kv>
+                          <Kv label="Operational sites">
+                            {item.qualification?.operationalSitesLabel || '—'}
+                          </Kv>
+                          <Kv label="Annual security expenditure">
+                            {item.qualification?.securityExpenditureLabel || '—'}
+                          </Kv>
+                          <Kv label="Primary concern">
+                            {item.qualification?.primaryConcern || '—'}
+                          </Kv>
                           <Kv label="Contact">
                             {item.firstName} {item.lastName}
                           </Kv>
@@ -1008,7 +1039,7 @@ export default function TriageSubmissionDetailPage() {
                         <dl>
                           <Kv label="Reference">{assessment?.reference || '—'}</Kv>
                           <Kv label="Stage">{humanizeStatus(item.displayStatus)}</Kv>
-                          <Kv label="EGT indication">
+                          <Kv label="Assurance score">
                             {score != null ? `${score} / 100` : '—'}
                             {band ? ` · ${band}` : ''}
                           </Kv>
@@ -1060,11 +1091,18 @@ export default function TriageSubmissionDetailPage() {
                     </Card>
                   ) : (
                     <>
-                      <Card className="rounded-xl border-slate-200 shadow-sm">
+                      <Card
+                        className="egt-assurance-score-card rounded-xl border-slate-200 shadow-sm"
+                        style={
+                          assurancePresentation?.visual
+                            ? { borderLeftColor: assurancePresentation.visual.colourHex }
+                            : undefined
+                        }
+                      >
                         <CardContent className="flex flex-wrap items-end justify-between gap-4 p-5">
                           <div>
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                              EGT indication
+                              Assurance score
                             </p>
                             <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
                               {score != null ? `${score} / 100` : '—'}
@@ -1075,9 +1113,11 @@ export default function TriageSubmissionDetailPage() {
                             </p>
                           </div>
                           {band ? (
-                            <Badge variant={bandBadgeVariant(band)} className="px-2.5 py-1 text-sm">
-                              {band}
-                            </Badge>
+                            <EgtAssuranceBandBadge
+                              label={band}
+                              visual={assurancePresentation?.visual}
+                              className="egt-assurance-band--lg"
+                            />
                           ) : null}
                         </CardContent>
                       </Card>
@@ -1112,7 +1152,7 @@ export default function TriageSubmissionDetailPage() {
                       </div>
                       <Card className="rounded-xl border-slate-200 shadow-sm">
                         <CardHeader>
-                          <CardTitle className="text-base">Warning-indicator dimensions</CardTitle>
+                          <CardTitle className="text-base">Assurance dimensions</CardTitle>
                         </CardHeader>
                         <CardContent>
                           <CategoryBars items={categories} />
@@ -1257,7 +1297,7 @@ export default function TriageSubmissionDetailPage() {
             <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
               <Card className="rounded-xl border-slate-200 shadow-sm">
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Triage workflow</CardTitle>
+                  <CardTitle className="text-base">Executive Triage</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ol className="m-0 list-none space-y-0 p-0">

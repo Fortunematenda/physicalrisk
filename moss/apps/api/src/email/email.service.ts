@@ -472,6 +472,24 @@ export class EmailService {
         lines.push(`<p><strong>Requested service:</strong> ${escapeHtml(payload.recommendedProduct || 'Executive Advisory Diagnostic')}</p>`);
         lines.push('<p>A member of the advisory team will contact you.</p>');
         break;
+      case 'triage_proposal_sent':
+        lines.push('<h2>Your Executive Advisory Proposal</h2>');
+        lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
+        lines.push(
+          `<p>Please find attached the Executive Advisory Diagnostic proposal for <strong>${escapeHtml(
+            payload.organisationName || 'your organisation',
+          )}</strong>.</p>`,
+        );
+        lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        lines.push(
+          `<p><strong>Recommended service:</strong> ${escapeHtml(
+            payload.recommendedProduct || 'Executive Advisory Diagnostic',
+          )}</p>`,
+        );
+        lines.push(
+          '<p>This proposal is confidential and prepared for executive consideration. A member of the Physical Risk advisory team remains available to discuss scope, timing, or commercial terms.</p>',
+        );
+        break;
       case 'website_contact_enquiry':
         lines.push('<h2>Website contact enquiry – Book a MOSS Assessment</h2>');
         lines.push(`<p><strong>Full name:</strong> ${escapeHtml(payload.fullName)}</p>`);

@@ -147,7 +147,7 @@ export function AssessmentContactForm({ details, industryOptions, onChange }: Pr
         >
           <option value="">Select range</option>
           {SCL_SITE_COUNT_OPTIONS.map((o) => (
-            <option key={o.label} value={o.label}>
+            <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}
@@ -165,7 +165,7 @@ export function AssessmentContactForm({ details, industryOptions, onChange }: Pr
         >
           <option value="">Select range</option>
           {SCL_SECURITY_EXPENDITURE_OPTIONS.map((o) => (
-            <option key={o.label} value={o.label}>
+            <option key={o.value} value={o.value}>
               {o.label}
             </option>
           ))}

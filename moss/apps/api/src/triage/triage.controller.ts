@@ -7,12 +7,15 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/roles.guard';
 import { Roles } from '../common/roles';
@@ -97,6 +100,9 @@ class ScopeDiscussionDto {
   @IsOptional() @IsString() @MaxLength(4000) indicativeScope?: string;
   @IsOptional() @IsString() @MaxLength(500) expectedTimeline?: string;
   @IsOptional() @IsString() @MaxLength(4000) commercialNotes?: string;
+  @IsOptional() fee?: number;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() @MaxLength(4000) terms?: string;
 }
 
 class CreateProposalDto {
@@ -115,6 +121,23 @@ class CreateProposalDto {
 class ProposalRecordActionDto {
   @IsIn(['INTERNAL_REVIEW', 'APPROVE', 'SENT', 'VIEWED', 'ACCEPTED', 'DECLINED', 'EXPIRE', 'WITHDRAW'])
   action!: string;
+}
+
+class ProposalTemplateDto {
+  @IsOptional() @IsString() @MaxLength(8000) introduction?: string;
+  @IsOptional() @IsString() @MaxLength(8000) deliverables?: string;
+  @IsOptional() @IsString() @MaxLength(8000) terms?: string;
+  @IsOptional() @IsString() @MaxLength(4000) clientObjective?: string;
+  @IsOptional() @IsString() @MaxLength(2000) sitesOrBusinessUnits?: string;
+  @IsOptional() @IsString() @MaxLength(4000) indicativeScope?: string;
+  @IsOptional() @IsString() @MaxLength(500) timeline?: string;
+  @IsOptional() fee?: number | null;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() @MaxLength(300) organisationName?: string;
+  @IsOptional() @IsString() @MaxLength(200) addressedTo?: string;
+  @IsOptional() @IsString() @MaxLength(200) jobTitle?: string;
+  @IsOptional() @IsString() @MaxLength(200) email?: string;
+  @IsOptional() @IsString() @MaxLength(50) phone?: string;
 }
 
 class UploadProposalDto {
@@ -237,6 +260,45 @@ export class TriageController {
     return this.commercial.downloadProposal(id, proposalId, user);
   }
 
+  @Get('submissions/:id/proposal-template')
+  getProposalTemplate(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.commercial.getProposalTemplate(id, user);
+  }
+
+  @Patch('submissions/:id/proposal-template')
+  saveProposalTemplate(
+    @Param('id') id: string,
+    @Body() body: ProposalTemplateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commercial.saveProposalTemplate(id, body, user).then(() => this.service.get(id, user));
+  }
+
+  @Get('submissions/:id/proposal-preview')
+  async previewProposal(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { buffer, fileName, contentType } = await this.commercial.previewProposalPdf(id, user);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${fileName}"`,
+      'Cache-Control': 'no-store',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post('submissions/:id/proposal-generate')
+  generateProposal(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.commercial.generateProposalPdf(id, user).then(() => this.service.get(id, user));
+  }
+
+  @Post('submissions/:id/proposal-send')
+  sendProposal(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.commercial.sendProposalToClient(id, user).then(() => this.service.get(id, user));
+  }
+
   @Post('submissions/:id/notes')
   createNote(@Param('id') id: string, @Body() body: CreateTriageNoteDto, @CurrentUser() user: AuthUser) {
     return this.service.createNote(id, body, user);
@@ -259,5 +321,11 @@ export class TriageController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.deleteNote(id, noteId, user);
+  }
+
+  @Delete('submissions/:id')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 }

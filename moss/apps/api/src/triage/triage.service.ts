@@ -1,10 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProductCode, ProposalStatus, TriageNoteCategory, CommercialStage } from '@prisma/client';
+import {
+  operationalSitesLabelFromStored,
+  securityExpenditureLabelFromStored,
+} from '@moss/shared';
 import type { AuthUser } from '../common/current-user.decorator';
 import { INTERNAL_ROLES } from '../common/roles';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AdvisoryService } from '../advisory/advisory.service';
+import { StorageService } from '../evidence/storage.service';
 import { TriageCommercialService } from './triage-commercial.service';
 import { resolveCommercialStage, toProposalSnapshot } from '../common/triage-commercial';
 
@@ -35,6 +40,7 @@ export class TriageService {
     private readonly audit: AuditService,
     private readonly advisory: AdvisoryService,
     private readonly commercial: TriageCommercialService,
+    private readonly storage: StorageService,
   ) {}
 
   private assertInternal(user: AuthUser) {
@@ -327,13 +333,20 @@ export class TriageService {
 
     const notes = await this.listNotesForLead(lead.id, user);
     const commercialBundle = await this.commercial.loadCommercialBundle(lead.id);
-    const commercialView = this.commercial.buildCommercialView(lead, commercialBundle);
 
     let responses: Array<{
       id: string;
       question?: { code: string; text: string } | null;
       responseOption?: { label: string } | null;
     }> = [];
+    let qualification: {
+      jobTitle?: string | null;
+      country?: string | null;
+      primaryConcern?: string | null;
+      operationalSitesLabel?: string | null;
+      securityExpenditureLabel?: string | null;
+      campaign?: Record<string, unknown> | null;
+    } | null = null;
     if (lead.assessmentId) {
       const session = await this.prisma.assessmentSession.findUnique({
         where: { id: lead.assessmentId },
@@ -344,6 +357,12 @@ export class TriageService {
           status: true,
           productCode: true,
           updatedAt: true,
+          inputValues: {
+            select: {
+              value: true,
+              inputDefinition: { select: { code: true } },
+            },
+          },
           responses: {
             orderBy: { question: { sortOrder: 'asc' } },
             select: {
@@ -369,6 +388,38 @@ export class TriageService {
       });
       if (session) {
         responses = session.responses;
+        const inputMap = Object.fromEntries(
+          session.inputValues.map((row) => [row.inputDefinition.code, row.value]),
+        );
+        const attributionEvent = audit.find((event) => {
+          const meta = (event.metadata || {}) as Record<string, unknown>;
+          return meta.attribution || meta.jobTitle;
+        });
+        const attributionMeta = (attributionEvent?.metadata || {}) as Record<string, unknown>;
+        const attr = (attributionMeta.attribution || {}) as Record<string, unknown>;
+        qualification = {
+          jobTitle:
+            (typeof attr.jobTitle === 'string' && attr.jobTitle) ||
+            (typeof attributionMeta.jobTitle === 'string' ? attributionMeta.jobTitle : null),
+          country: typeof attr.country === 'string' ? attr.country : null,
+          primaryConcern: typeof attr.primaryConcern === 'string' ? attr.primaryConcern : null,
+          operationalSitesLabel: operationalSitesLabelFromStored(
+            inputMap.C3 ?? attr.totalSites,
+          ) || null,
+          securityExpenditureLabel: securityExpenditureLabelFromStored(
+            inputMap.C5 ?? attr.securityExpenditure,
+          ) || null,
+          campaign: {
+            source: attr.source,
+            medium: attr.medium,
+            campaign: attr.campaign,
+            content: attr.content,
+            term: attr.term,
+            series: attr.series,
+            article: attr.article,
+            cta: attr.cta,
+          },
+        };
         const snapshot = session.scoreSnapshots[0];
         (item as any).assessment = {
           id: session.id,
@@ -387,6 +438,11 @@ export class TriageService {
       }
     }
 
+    const commercialView = this.commercial.buildCommercialView(lead, commercialBundle, {
+      assessmentReference: (item as any).assessment?.reference || null,
+      qualification,
+    });
+
     return {
       ...item,
       assignedAnalyst: lead.assignedAnalyst,
@@ -404,6 +460,8 @@ export class TriageService {
       primaryCta: commercialView.primaryCta,
       convertGate: commercialView.convertGate,
       commercialWorkflow: commercialView.commercialWorkflow,
+      commercialWorkspace: commercialView.commercialWorkspace,
+      proposalTemplate: commercialView.proposalTemplate,
       scopeDiscussion: commercialView.scopeDiscussion,
       followUp: commercialView.followUp,
       contactActivities: commercialView.contactActivities,
@@ -411,6 +469,7 @@ export class TriageService {
       activeProposal: commercialView.activeProposal,
       commercialJourney: this.commercialJourney(lead, commercialView.commercialStage),
       responses,
+      qualification,
       audit,
       notes,
     };
@@ -926,9 +985,16 @@ export class TriageService {
         commercialStage: CommercialStage.LEVEL_2_CREATED,
       },
     });
+    const acceptedProposal = bundle.proposals.find((p) => p.id === lead.acceptedProposalId)
+      || bundle.proposals.find((p) => p.status === 'ACCEPTED')
+      || bundle.proposals[0];
+
     await this.audit.record({
       userId: user.id,
-      action: 'LEVEL_2_CREATED',
+      action:
+        lead.proposalStatus === ProposalStatus.ACCEPTED && acceptedProposal
+          ? 'LEVEL_2_CREATED_FROM_PROPOSAL'
+          : 'LEVEL_2_CREATED',
       entityType: 'PublicLead',
       entityId: leadId,
       metadata: {
@@ -936,6 +1002,8 @@ export class TriageService {
         diagnosticAssessmentId: engagement.id,
         diagnosticReference: engagement.reference,
         proposalReference: lead.proposalReference,
+        proposalId: acceptedProposal?.id || null,
+        proposalNumber: acceptedProposal?.proposalNumber || null,
         proposalStatus: lead.proposalStatus,
         acceptedProposalId: lead.acceptedProposalId,
         commercialOwnerId: lead.commercialOwnerId,
@@ -943,5 +1011,90 @@ export class TriageService {
       },
     });
     return { created: true, engagement };
+  }
+
+  async remove(id: string, user: AuthUser) {
+    if (!NOTE_ADMIN_ROLES.has(user.role)) {
+      throw new ForbiddenException('Admin permission required to delete triage submissions.');
+    }
+    this.assertInternal(user);
+    const lead = await this.resolveLead(id);
+
+    if (lead.convertedAssessmentId) {
+      const converted = await this.prisma.assessmentSession.findUnique({
+        where: { id: lead.convertedAssessmentId },
+        select: { id: true, reference: true },
+      });
+      if (converted) {
+        throw new BadRequestException(
+          'Cannot delete a triage submission that has been converted to a Level 2 engagement.',
+        );
+      }
+    }
+
+    if (lead.assessmentId) {
+      const childCount = await this.prisma.assessmentSession.count({
+        where: { parentAssessmentId: lead.assessmentId },
+      });
+      if (childCount > 0) {
+        throw new BadRequestException(
+          'Cannot delete a triage submission linked to follow-on advisory work.',
+        );
+      }
+    }
+
+    const bundle = await this.commercial.loadCommercialBundle(lead.id);
+    const storageKeys = new Set<string>();
+    for (const proposal of bundle.proposals) {
+      if (proposal.documentStorageKey) storageKeys.add(proposal.documentStorageKey);
+    }
+    if (lead.assessmentId) {
+      const reports = await this.prisma.report.findMany({
+        where: { assessmentId: lead.assessmentId },
+        select: { storageKey: true },
+      });
+      for (const report of reports) {
+        if (report.storageKey) storageKeys.add(report.storageKey);
+      }
+    }
+
+    const assessmentId = lead.assessmentId;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.publicLead.update({
+        where: { id: lead.id },
+        data: { acceptedProposalId: null },
+      });
+      if (assessmentId) {
+        await tx.publicLead.updateMany({
+          where: { assessmentId },
+          data: { assessmentId: null },
+        });
+        await tx.assessmentSession.delete({ where: { id: assessmentId } });
+      }
+      await tx.publicLead.delete({ where: { id: lead.id } });
+    });
+
+    for (const key of storageKeys) {
+      await this.storage.delete(key).catch(() => undefined);
+    }
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'DELETE',
+      entityType: 'PublicLead',
+      entityId: lead.id,
+      metadata: {
+        organisationName: lead.organisationName,
+        email: lead.email,
+        assessmentId,
+        proposalReference: lead.proposalReference,
+      },
+    });
+
+    return {
+      id: lead.id,
+      deleted: true,
+      message: 'Triage submission deleted.',
+    };
   }
 }

@@ -15,6 +15,7 @@ import { AuthGate } from '@/components/AuthGate';
 import { Shell } from '@/components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
+import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import {
   IconCalendar,
   IconChevronRight,
@@ -33,6 +34,7 @@ import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
+import { deriveEgtAssurancePresentation } from '@moss/shared';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 
 type Summary = {
@@ -85,6 +87,7 @@ type TriageRow = {
     reference: string;
     overallRiskScore?: number | null;
     riskBand?: string | null;
+    categoryScores?: Array<{ category?: string; name?: string; score?: number }> | null;
   } | null;
   convertedEngagement?: {
     id: string;
@@ -195,18 +198,11 @@ function commercialLabel(intent: string) {
   return labels[intent] || intent.replaceAll('_', ' ');
 }
 
-function riskTone(band?: string | null) {
-  const value = (band || '').toLowerCase();
-  if (value === 'critical' || value === 'high') return 'high';
-  if (value === 'moderate') return 'moderate';
-  if (value === 'low' || value === 'controlled') return 'low';
-  return 'none';
-}
-
 function scoreColor(score: number) {
-  if (score >= 70) return '#c41230';
-  if (score >= 45) return '#d97706';
-  return '#059669';
+  if (score >= 80) return '#059669';
+  if (score >= 60) return '#ca8a04';
+  if (score >= 40) return '#d97706';
+  return '#c41230';
 }
 
 function ScoreRing({ value, label }: { value: number | null; label: string }) {
@@ -269,6 +265,7 @@ export default function TriageSubmissionsPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -447,6 +444,43 @@ export default function TriageSubmissionsPage() {
     }
   }
 
+  async function deleteSubmission(row: TriageRow) {
+    const label = row.organisationName || `${row.firstName} ${row.lastName}`.trim() || row.email;
+    const ok = await confirm({
+      title: 'Delete triage submission',
+      description: `Delete the triage submission for “${label}”? This removes the submission, questionnaire responses, proposals, and related reports. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    setMenuOpenId(null);
+    setDeletingId(row.id);
+    setError('');
+    try {
+      await apiFetch(`/triage/submissions/${row.id}`, { method: 'DELETE' });
+      setItems((prev) => prev.filter((item) => item.id !== row.id));
+      setSummary((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      if (expandedId === row.id) setExpandedId(null);
+      toast({
+        id: `triage-delete-${row.id}`,
+        variant: 'success',
+        title: 'Submission deleted',
+        description: `${label} was removed from triage.`,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Unable to delete submission.';
+      setError(message);
+      toast({
+        id: 'triage-delete-error',
+        variant: 'error',
+        title: 'Delete failed',
+        description: message,
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function exportCsv() {
     const rows = [
       [
@@ -457,26 +491,40 @@ export default function TriageSubmissionsPage() {
         'Reference',
         'Stage',
         'Commercial Intent',
-        'Risk Band',
-        'Score',
+        'Assurance Band',
+        'Assurance Score',
         'Proposal Reference',
         'Completed',
         'Updated',
       ],
-      ...filtered.map((row) => [
-        row.organisationName,
-        `${row.firstName} ${row.lastName}`.trim(),
-        row.email,
-        row.industry || '',
-        row.assessment?.reference || '',
-        statusLabel(row.displayStatus),
-        commercialLabel(row.intent),
-        row.assessment?.riskBand || '',
-        row.assessment?.overallRiskScore != null ? String(Math.round(row.assessment.overallRiskScore)) : '',
-        row.proposalReference || '',
-        row.completedAt || '',
-        row.updatedAt,
-      ]),
+      ...filtered.map((row) => {
+        const presentation = row.assessment
+          ? deriveEgtAssurancePresentation({
+              overallRiskScore: row.assessment.overallRiskScore,
+              categoryScores: (row.assessment.categoryScores || []).map((c: any) => ({
+                category: String(c.category || c.name || 'Category'),
+                score: Number(c.score) || 0,
+              })),
+            })
+          : null;
+        const assuranceScore =
+          presentation?.assuranceScore != null ? Math.round(presentation.assuranceScore) : null;
+        const assuranceBand = presentation?.assuranceBand.displayLabel || '';
+        return [
+          row.organisationName,
+          `${row.firstName} ${row.lastName}`.trim(),
+          row.email,
+          row.industry || '',
+          row.assessment?.reference || '',
+          statusLabel(row.displayStatus),
+          commercialLabel(row.intent),
+          assuranceBand,
+          assuranceScore != null ? String(assuranceScore) : '',
+          row.proposalReference || '',
+          row.completedAt || '',
+          row.updatedAt,
+        ];
+      }),
     ];
     const csv = rows.map((r) => r.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -684,7 +732,7 @@ export default function TriageSubmissionsPage() {
                   <th className="assess2-expand-col" />
                   <th>Organisation / contact</th>
                   <th>Questionnaire</th>
-                  <th>Indication</th>
+                  <th>Assurance</th>
                   <th>Stage</th>
                   <th>Analyst</th>
                   <th>Commercial Intent</th>
@@ -694,11 +742,20 @@ export default function TriageSubmissionsPage() {
               </thead>
               <tbody>
                 {pageItems.map((row) => {
+                  const assurancePresentation = row.assessment
+                    ? deriveEgtAssurancePresentation({
+                        overallRiskScore: row.assessment.overallRiskScore,
+                        categoryScores: (row.assessment.categoryScores || []).map((c: any) => ({
+                          category: String(c.category || c.name || 'Category'),
+                          score: Number(c.score) || 0,
+                        })),
+                      })
+                    : null;
                   const score =
-                    row.assessment?.overallRiskScore != null
-                      ? Math.round(Number(row.assessment.overallRiskScore))
+                    assurancePresentation?.assuranceScore != null
+                      ? Math.round(assurancePresentation.assuranceScore)
                       : null;
-                  const band = row.assessment?.riskBand;
+                  const band = assurancePresentation?.assuranceBand.displayLabel || null;
                   const contactName = `${row.firstName} ${row.lastName}`.trim();
                   const expanded = expandedId === row.id;
                   const progress = row.completedAt
@@ -754,9 +811,10 @@ export default function TriageSubmissionsPage() {
                           <div className="assess2-scores assess2-scores-stack">
                             <ScoreRing value={score} label="EGT" />
                             {band ? (
-                              <span className={`org2-risk-badge risk-${riskTone(band)}`}>
-                                {band === 'Controlled' ? 'Low' : band}
-                              </span>
+                              <EgtAssuranceBandBadge
+                                label={band}
+                                visual={assurancePresentation?.visual}
+                              />
                             ) : (
                               <span className="muted small">{row.completedAt ? 'Recorded' : 'Pending'}</span>
                             )}
@@ -892,6 +950,16 @@ export default function TriageSubmissionsPage() {
                                 onClick={() => void mark(row, 'CLOSED')}
                               >
                                 Close
+                              </button>
+                            ) : null}
+                            {isAdmin ? (
+                              <button
+                                type="button"
+                                className="danger"
+                                disabled={deletingId === row.id || busy === row.id}
+                                onClick={() => void deleteSubmission(row)}
+                              >
+                                {deletingId === row.id ? 'Deleting…' : 'Delete'}
                               </button>
                             ) : null}
                           </RowActionsMenu>

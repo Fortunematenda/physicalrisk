@@ -11,6 +11,9 @@ import {
   isPercentRangeValue,
   isSclActiveTriageQuestionCode,
   isSclMoneyLossCode,
+  isEgtQualificationBandCode,
+  isOperationalSitesBandCode,
+  isSecurityExpenditureBandCode,
   resolveMoneyForScoring,
   resolvePercentForScoring,
   type MoneyRangeValue,
@@ -267,11 +270,15 @@ export class AssessmentsService {
 
     let persisted: unknown = value;
     if (['C3', 'C4', 'C5'].includes(code)) {
-      const cleaned = String(value ?? '').replace(/[Rr$€£,\s]/g, '');
-      const n = Number(cleaned);
-      if (!Number.isFinite(n) || n < 0) throw new BadRequestException(`${code} must be a non-negative number.`);
-      if (code === 'C3' || code === 'C4') persisted = Math.round(n);
-      if (code === 'C5') persisted = Math.round(n);
+      if (isEgtQualificationBandCode(code, value)) {
+        persisted = String(value).trim();
+      } else {
+        const cleaned = String(value ?? '').replace(/[Rr$€£,\s]/g, '');
+        const n = Number(cleaned);
+        if (!Number.isFinite(n) || n < 0) throw new BadRequestException(`${code} must be a non-negative number.`);
+        if (code === 'C3' || code === 'C4') persisted = Math.round(n);
+        if (code === 'C5') persisted = Math.round(n);
+      }
     }
 
     if (definition.valueType === 'CURRENCY' && isSclMoneyLossCode(code) && isMoneyRangeValue(value)) {
@@ -283,7 +290,10 @@ export class AssessmentsService {
         label: value.label,
         unit: 'ZAR' as const,
       };
-    } else if (definition.valueType === 'CURRENCY' || definition.valueType === 'NUMBER') {
+    } else if (
+      (definition.valueType === 'CURRENCY' || definition.valueType === 'NUMBER')
+      && !isEgtQualificationBandCode(code, persisted)
+    ) {
       // Persist numeric JSON — never store "R1,200,000" in currency fields.
       const n = asFiniteNumber(value, Number.NaN);
       if (!Number.isFinite(n) && value !== null && value !== undefined && value !== '') {
@@ -417,10 +427,13 @@ export class AssessmentsService {
     const values = Object.fromEntries(assessment.inputValues.map(item => [item.inputDefinition.code, item.value]));
     const lossesLow = resolveMoneyLossEcho(values.C6);
     const lossesHigh = resolveMoneyLossEcho(values.C7);
+    const isEgt = assessment.productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
     const calibration: ScliCalibrationInput = {
-      protectedPremises: asNumber(values.C3),
+      protectedPremises:
+        isEgt && isOperationalSitesBandCode(values.C3) ? 0 : asNumber(values.C3),
       guardForce: asNumber(values.C4),
-      annualSecurityContractValue: asNumber(values.C5),
+      annualSecurityContractValue:
+        isEgt && isSecurityExpenditureBandCode(values.C5) ? 0 : asNumber(values.C5),
       estimatedLossesLow: lossesLow.amount,
       estimatedLossesHigh: lossesHigh.amount,
       internalSecurityTeamSize: asNumber(values.C8),

@@ -3166,13 +3166,13 @@ textarea { min-height:90px; resize:none; }
 .scl-triage-report-frame{border:1px solid #ccc;margin-top:20px;padding:70px;background:#fff}
 .scl-triage-report-brand{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid var(--scl-red);padding-bottom:25px;gap:20px}
 .scl-triage-report-logo{height:48px;width:auto}
-.scl-triage-report-brand-right{text-align:right;font-size:12px;color:#555;line-height:1.45}
+.scl-triage-report-brand-right{text-align:right;font-size:12px;color:#333;line-height:1.45}
 .scl-triage-report-brand-right b{display:block;color:#111;font-size:13px;margin-bottom:4px}
 .scl-triage-report-eyebrow{margin-top:50px}
 .scl-triage-report-title{font-size:clamp(42px,6vw,58px);line-height:.95;letter-spacing:-.04em;margin:18px 0 35px;font-weight:800;color:#111}
 .scl-triage-report-title-single{font-size:clamp(28px,4.2vw,36px);line-height:1.05;margin:14px 0 28px}
 .scl-triage-report-meta{border-top:1px solid #ddd;padding-top:25px;display:grid;grid-template-columns:repeat(4,1fr);gap:20px;font-size:13px}
-.scl-triage-report-meta b{display:block;font-size:9px;letter-spacing:.12em;color:#888;margin-bottom:10px}
+.scl-triage-report-meta b{display:block;font-size:9px;letter-spacing:.12em;color:#444;margin-bottom:10px}
 .scl-triage-report-meta span{color:#111}
 .scl-triage-result-panel{margin-top:35px;background:#242424;color:#fff;display:grid;grid-template-columns:210px 1fr;border-left:9px solid var(--scl-red)}
 .scl-triage-result-panel--green{border-left-color:#15803d}
@@ -3183,6 +3183,13 @@ textarea { min-height:90px; resize:none; }
 .scl-triage-result-panel--yellow .scl-triage-score{background:#ca8a04}
 .scl-triage-result-panel--amber .scl-triage-score{background:#d97706}
 .scl-triage-result-panel--red .scl-triage-score{background:#d20a11}
+.egt-assurance-band{display:inline-flex;align-items:center;border-radius:9999px;border:1px solid transparent;padding:.125rem .625rem;font-size:.75rem;font-weight:600;line-height:1.25;white-space:nowrap}
+.egt-assurance-band--red{background:#fef2f2;color:#7f1d1d;border-color:#d20a11}
+.egt-assurance-band--amber{background:#fff7ed;color:#9a3412;border-color:#d97706}
+.egt-assurance-band--yellow{background:#fefce8;color:#854d0e;border-color:#ca8a04}
+.egt-assurance-band--green{background:#ecfdf5;color:#14532d;border-color:#15803d}
+.egt-assurance-band--lg{padding:.375rem .75rem;font-size:.875rem}
+.egt-assurance-score-card{border-left-width:4px;border-left-style:solid}
 .scl-triage-score{padding:28px;background:#3a3a3a}
 .scl-triage-score small{display:block;font-size:11px;letter-spacing:.04em;color:#cfcfcf;line-height:1.35}
 .scl-triage-score-big{font-size:60px;font-weight:800;margin:14px 0 0;letter-spacing:-.03em;line-height:1;display:flex;align-items:flex-end;gap:2px;white-space:nowrap}
@@ -3206,7 +3213,7 @@ textarea { min-height:90px; resize:none; }
 .scl-egt-priority-card{background:#f2f2f2;border-top:4px solid var(--scl-red);padding:18px 16px 22px;min-height:140px;overflow:visible}
 .scl-egt-priority-num{display:block;color:var(--scl-red);font-weight:800;font-size:16px;margin-bottom:10px;line-height:1}
 .scl-egt-priority-card h5{margin:0 0 12px;font-size:14px;line-height:1.35;color:#111;font-weight:700}
-.scl-egt-priority-card p{margin:0;font-size:12px;line-height:1.5;color:#666}
+.scl-egt-priority-card p{margin:0;font-size:12px;line-height:1.5;color:#333}
 .scl-egt-next{margin-top:28px;background:#f2f2f2;padding:22px 24px 26px}
 .scl-egt-next .scl-exec-eyebrow{margin-bottom:8px}
 .scl-egt-next h4{font-size:22px;margin:0 0 10px}
@@ -3215,7 +3222,7 @@ textarea { min-height:90px; resize:none; }
 .scl-egt-route{font-size:14px!important;color:#111!important}
 .scl-egt-basis{margin-top:28px;padding-left:12px;border-left:2px solid #ccc}
 .scl-egt-basis h4{font-size:15px;margin-bottom:8px}
-.scl-egt-basis p{margin:0;font-size:12px;line-height:1.5;color:#777}
+.scl-egt-basis p{margin:0;font-size:12px;line-height:1.5;color:#333}
 .scl-egt-footer{margin-top:28px;padding-top:14px;border-top:1px solid #ddd;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:10px;letter-spacing:.06em;color:#999;text-transform:uppercase}
 .scl-exec-result-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
 
@@ -3246,6 +3253,7 @@ textarea { min-height:90px; resize:none; }
 .scl-triage-conversion-card{margin-top:28px;padding:24px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;text-align:left}
 .scl-triage-conversion-card h2{margin:5px 0 10px;font-size:24px;color:#111827}
 .scl-triage-conversion-card p{color:#5b6474;line-height:1.6;max-width:760px}
+.scl-proposal-received-note{margin-top:18px;font-size:18px;line-height:1.55;color:#111;font-weight:600;max-width:760px}
 .scl-triage-request-success{margin-top:16px;padding:14px 16px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46}
 
 /* Executive Governance Triage — authenticated admin funnel */

@@ -9,6 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma, SyncStatus } from '@prisma/client';
+import {
+  operationalSitesLabelFromStored,
+  securityExpenditureLabelFromStored,
+} from '@moss/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
@@ -862,9 +866,13 @@ export class EspoCrmService {
     const attr = (attribution || {}) as Record<string, unknown>;
     const country = typeof attr.country === 'string' ? attr.country.trim() : '';
     const primaryConcern = typeof attr.primaryConcern === 'string' ? attr.primaryConcern.trim() : '';
-    const totalSites = typeof attr.totalSites === 'string' ? attr.totalSites.trim() : '';
-    const securityExpenditure =
+    const totalSitesRaw = typeof attr.totalSites === 'string' ? attr.totalSites.trim() : '';
+    const securityExpenditureRaw =
       typeof attr.securityExpenditure === 'string' ? attr.securityExpenditure.trim() : '';
+    const totalSites = totalSitesRaw ? operationalSitesLabelFromStored(totalSitesRaw) : '';
+    const securityExpenditure = securityExpenditureRaw
+      ? securityExpenditureLabelFromStored(securityExpenditureRaw)
+      : '';
     const orgFromAttr =
       typeof attr.organisationName === 'string' ? attr.organisationName.trim() : '';
     const industryFromAttr = typeof attr.industry === 'string' ? attr.industry.trim() : '';

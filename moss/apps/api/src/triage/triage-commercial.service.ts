@@ -15,12 +15,12 @@ import {
   TriageProposalStatus,
 } from '@prisma/client';
 import type { AuthUser } from '../common/current-user.decorator';
-import { generateEadProposalNumber } from '../common/ead-proposal-reference';
 import { generateProposalReference } from '../common/proposal-reference';
 import {
   COMMERCIAL_OWNER_ROLES,
   COMMERCIAL_OVERRIDE_ROLES,
   COMMERCIAL_WRITE_ROLES,
+  buildCommercialWorkspace,
   canCreateLevel2,
   clientInterestFromContact,
   commercialStageLabel,
@@ -33,6 +33,14 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../evidence/storage.service';
+import { EmailService } from '../email/email.service';
+import { readProposalContextSnapshot } from '../common/triage-proposal-context';
+import { TriageProposalRequestService } from './triage-proposal-request.service';
+import {
+  buildProposalPdfDefaults,
+  renderExecutiveAdvisoryProposalPdf,
+  type ProposalPdfInput,
+} from './triage-proposal-pdf';
 
 const PROPOSAL_MIME = new Set([
   'application/pdf',
@@ -65,6 +73,8 @@ export class TriageCommercialService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    private readonly email: EmailService,
+    private readonly proposalRequests: TriageProposalRequestService,
   ) {}
 
   assertCommercialWrite(user: AuthUser) {
@@ -111,11 +121,16 @@ export class TriageCommercialService {
   buildCommercialView(
     lead: any,
     bundle: Awaited<ReturnType<TriageCommercialService['loadCommercialBundle']>>,
+    extras: {
+      assessmentReference?: string | null;
+      qualification?: Record<string, unknown> | null;
+    } = {},
   ) {
     const latestProposal = bundle.proposals[0] || null;
+    const proposalSnap = this.proposalSnapshot(latestProposal);
     const stage = resolveCommercialStage(lead, {
       contactCount: bundle.contactCount,
-      latestProposal: this.proposalSnapshot(latestProposal),
+      latestProposal: proposalSnap,
     });
     const primaryCta = resolvePrimaryCta(
       {
@@ -123,15 +138,22 @@ export class TriageCommercialService {
         convertedEngagementId: lead.convertedAssessmentId,
       },
       stage,
-      this.proposalSnapshot(latestProposal),
+      proposalSnap,
     );
     const convertGate = canCreateLevel2(lead, stage);
+    const commercialWorkspace = buildCommercialWorkspace({
+      lead,
+      activeProposal: latestProposal,
+      assessmentReference: extras.assessmentReference,
+      qualification: extras.qualification as any,
+    });
     return {
       commercialStage: stage,
       commercialStageLabel: commercialStageLabel(stage),
       primaryCta,
       convertGate,
-      commercialWorkflow: commercialWorkflowSteps(lead, stage),
+      commercialWorkflow: commercialWorkflowSteps(lead, stage, { latestProposal: proposalSnap }),
+      commercialWorkspace,
       commercialOwner: lead.commercialOwner || null,
       followUpOwner: lead.followUpOwner || null,
       clientInterest: lead.clientInterest,
@@ -143,6 +165,7 @@ export class TriageCommercialService {
         expectedTimeline: lead.scopeExpectedTimeline,
         commercialNotes: lead.scopeCommercialNotes,
       },
+      proposalTemplate: this.buildProposalTemplateView(lead, latestProposal, extras),
       followUp: {
         nextFollowUpAt: lead.nextFollowUpAt,
         followUpOwner: lead.followUpOwner || null,
@@ -286,6 +309,9 @@ export class TriageCommercialService {
       indicativeScope?: string;
       expectedTimeline?: string;
       commercialNotes?: string;
+      fee?: number;
+      currency?: string;
+      terms?: string;
     },
     user: AuthUser,
   ) {
@@ -304,6 +330,26 @@ export class TriageCommercialService {
         followUpOwner: { select: userSelect },
       },
     });
+
+    const activeProposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (activeProposal) {
+      await this.prisma.triageProposal.update({
+        where: { id: activeProposal.id },
+        data: {
+          objectives: input.clientObjectives?.trim() || activeProposal.objectives,
+          sitesOrBusinessUnits:
+            input.sitesOrBusinessUnits?.trim() || activeProposal.sitesOrBusinessUnits,
+          scopeSummary: input.indicativeScope?.trim() || activeProposal.scopeSummary,
+          timeline: input.expectedTimeline?.trim() || activeProposal.timeline,
+          fee: input.fee !== undefined ? input.fee : activeProposal.fee,
+          currency: input.currency?.trim() || activeProposal.currency,
+          terms: input.terms?.trim() || activeProposal.terms,
+        },
+      });
+    }
     await this.audit.record({
       userId: user.id,
       action: 'COMMERCIAL_DISCUSSION_RECORDED',
@@ -401,8 +447,10 @@ export class TriageCommercialService {
 
     const existing = await this.prisma.triageProposal.findFirst({
       where: { publicLeadId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
     });
+
+    const hadDocument = Boolean(existing?.documentStorageKey);
 
     const proposal = await this.prisma.$transaction(async (tx) => {
       let proposalReference = lead.proposalReference;
@@ -423,6 +471,7 @@ export class TriageCommercialService {
             where: { id: existing.id },
             data: {
               ...documentData,
+              proposalNumber: existing.proposalNumber || proposalReference,
               title: input.title?.trim() || existing.title,
               timeline: input.timeline?.trim() || existing.timeline,
               fee: input.fee != null ? input.fee : existing.fee,
@@ -432,11 +481,11 @@ export class TriageCommercialService {
           })
         : await tx.triageProposal.create({
             data: {
-              proposalNumber:
-                input.proposalNumber?.trim()
-                || (await generateEadProposalNumber(tx)),
+              proposalNumber: input.proposalNumber?.trim() || proposalReference,
               publicLeadId,
               organisationId: lead.organisationId,
+              sourceAssessmentId: lead.assessmentId,
+              productCode: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
               title: input.title?.trim() || `${lead.organisationName} — Executive Advisory Diagnostic`,
               scopeSummary: lead.scopeIndicativeScope || null,
               objectives: lead.scopeClientObjectives || null,
@@ -476,11 +525,11 @@ export class TriageCommercialService {
 
     await this.audit.record({
       userId: user.id,
-      action: 'PROPOSAL_UPLOADED',
-      entityType: 'PublicLead',
-      entityId: publicLeadId,
+      action: hadDocument ? 'PROPOSAL_DOCUMENT_REPLACED' : 'PROPOSAL_DOCUMENT_UPLOADED',
+      entityType: 'TriageProposal',
+      entityId: proposal.id,
       metadata: {
-        proposalId: proposal.id,
+        publicLeadId,
         proposalNumber: proposal.proposalNumber,
         fileName: file.originalname,
       },
@@ -653,6 +702,564 @@ export class TriageCommercialService {
       proposal.documentFileName || 'proposal.pdf',
     );
     return { url, fileName: proposal.documentFileName, mimeType: proposal.documentMimeType };
+  }
+
+  private buildProposalTemplateView(
+    lead: any,
+    proposal: any,
+    extras: {
+      assessmentReference?: string | null;
+      qualification?: Record<string, unknown> | null;
+    } = {},
+  ) {
+    const pdfInput = this.toProposalPdfInput(lead, proposal, extras);
+    const defaults = buildProposalPdfDefaults(pdfInput);
+    const snapshot = readProposalContextSnapshot(proposal?.contextSnapshot);
+    const addressee = ((snapshot as any)?.proposalAddressee || {}) as Record<string, string | null>;
+    const storedIntro =
+      snapshot && typeof (snapshot as any).proposalIntroduction === 'string'
+        ? String((snapshot as any).proposalIntroduction)
+        : null;
+    return {
+      organisationName: addressee.organisationName || pdfInput.organisationName,
+      addressedTo: addressee.addressedTo || pdfInput.prospectName,
+      jobTitle: addressee.jobTitle || pdfInput.prospectJobTitle || null,
+      email: addressee.email || pdfInput.prospectEmail || null,
+      phone: addressee.phone || snapshot?.prospect?.phone || lead.phone || null,
+      triageReference: pdfInput.sourceTriageReference,
+      assuranceScore: pdfInput.assuranceScore,
+      assuranceBandLabel: pdfInput.assuranceBandLabel,
+      strongestIndicators: pdfInput.strongestIndicators || [],
+      primaryConcern: pdfInput.primaryConcern,
+      introduction: storedIntro || defaults.introduction,
+      deliverables: proposal?.deliverables || defaults.deliverables,
+      terms: proposal?.terms || defaults.terms,
+      clientObjective:
+        proposal?.objectives || lead.scopeClientObjectives || pdfInput.clientObjective,
+      sitesOrBusinessUnits:
+        proposal?.sitesOrBusinessUnits
+        || lead.scopeSitesOrBusinessUnits
+        || pdfInput.sitesOrBusinessUnits,
+      indicativeScope:
+        proposal?.scopeSummary || lead.scopeIndicativeScope || pdfInput.indicativeScope,
+      timeline: proposal?.timeline || lead.scopeExpectedTimeline || pdfInput.timeline,
+      fee: proposal?.fee != null ? Number(proposal.fee) : null,
+      currency: proposal?.currency || 'ZAR',
+      hasGeneratedDocument: Boolean(proposal?.documentStorageKey),
+      documentFileName: proposal?.documentFileName || null,
+      source: proposal?.source || null,
+    };
+  }
+
+  private toProposalPdfInput(
+    lead: any,
+    proposal: any,
+    extras: {
+      assessmentReference?: string | null;
+      qualification?: Record<string, unknown> | null;
+    } = {},
+    overrides: Record<string, unknown> = {},
+  ): ProposalPdfInput {
+    const snapshot = readProposalContextSnapshot(proposal?.contextSnapshot);
+    const addressee = ((snapshot as any)?.proposalAddressee || {}) as Record<string, string | null>;
+    const storedIntro =
+      snapshot && typeof (snapshot as any).proposalIntroduction === 'string'
+        ? String((snapshot as any).proposalIntroduction)
+        : null;
+    const prospectName = [
+      snapshot?.prospect?.firstName || lead.firstName,
+      snapshot?.prospect?.lastName || lead.lastName,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const issued = new Date();
+    return {
+      proposalNumber:
+        proposal?.proposalNumber || lead.proposalReference || 'DRAFT',
+      organisationName:
+        (overrides.organisationName as string | undefined)
+        || addressee.organisationName
+        || snapshot?.organisation?.name
+        || lead.organisationName,
+      prospectName:
+        (overrides.addressedTo as string | undefined)
+        || addressee.addressedTo
+        || prospectName,
+      prospectJobTitle:
+        (overrides.jobTitle as string | undefined)
+        || addressee.jobTitle
+        || snapshot?.prospect?.jobTitle
+        || (extras.qualification?.jobTitle as string | undefined)
+        || null,
+      prospectEmail:
+        (overrides.email as string | undefined)
+        || addressee.email
+        || snapshot?.prospect?.email
+        || lead.email,
+      prospectPhone:
+        (overrides.phone as string | undefined)
+        || addressee.phone
+        || snapshot?.prospect?.phone
+        || lead.phone
+        || null,
+      industry: snapshot?.organisation?.industry || lead.industry,
+      country:
+        snapshot?.organisation?.country
+        || (extras.qualification?.country as string | undefined)
+        || null,
+      sourceTriageReference:
+        snapshot?.triageReference || extras.assessmentReference || null,
+      assuranceScore: snapshot?.assuranceScore ?? null,
+      assuranceBandLabel: snapshot?.assuranceBandLabel ?? null,
+      strongestIndicators: (snapshot?.strongestIndicators || []).map(
+        (row) => row.category,
+      ),
+      primaryConcern:
+        snapshot?.primaryConcern
+        || (extras.qualification?.primaryConcern as string | undefined)
+        || null,
+      clientObjective:
+        (overrides.clientObjective as string | undefined)
+        || proposal?.objectives
+        || lead.scopeClientObjectives
+        || null,
+      sitesOrBusinessUnits:
+        (overrides.sitesOrBusinessUnits as string | undefined)
+        || proposal?.sitesOrBusinessUnits
+        || lead.scopeSitesOrBusinessUnits
+        || snapshot?.organisation?.operationalSitesLabel
+        || null,
+      indicativeScope:
+        (overrides.indicativeScope as string | undefined)
+        || proposal?.scopeSummary
+        || lead.scopeIndicativeScope
+        || null,
+      timeline:
+        (overrides.timeline as string | undefined)
+        || proposal?.timeline
+        || lead.scopeExpectedTimeline
+        || null,
+      fee:
+        overrides.fee !== undefined
+          ? (overrides.fee as number | null)
+          : proposal?.fee != null
+            ? Number(proposal.fee)
+            : null,
+      currency:
+        (overrides.currency as string | undefined) || proposal?.currency || 'ZAR',
+      deliverables:
+        (overrides.deliverables as string | undefined) || proposal?.deliverables || null,
+      terms: (overrides.terms as string | undefined) || proposal?.terms || null,
+      introduction:
+        (overrides.introduction as string | undefined) || storedIntro || null,
+      preparedByName: null,
+      preparedByEmail: null,
+      validUntilLabel: proposal?.validUntil
+        ? new Date(proposal.validUntil).toLocaleDateString('en-ZA', { dateStyle: 'long' })
+        : null,
+      issuedDateLabel: issued.toLocaleDateString('en-ZA', { dateStyle: 'long' }),
+    };
+  }
+
+  private async ensureAdminProposalDraft(publicLeadId: string, user: AuthUser) {
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+    if (!lead.completedAt) {
+      throw new BadRequestException('Complete the triage questionnaire before preparing a proposal.');
+    }
+
+    if (lead.assessmentId) {
+      await this.proposalRequests.ensureProposalRequestFromPublicLead(publicLeadId, user.id);
+      const existing = await this.prisma.triageProposal.findFirst({
+        where: { publicLeadId },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (existing) return existing;
+    }
+
+    const proposalReference =
+      lead.proposalReference
+      || (await this.prisma.$transaction((tx) => generateProposalReference(tx)));
+
+    if (!lead.proposalReference) {
+      await this.prisma.publicLead.update({
+        where: { id: publicLeadId },
+        data: {
+          proposalReference,
+          proposalStatus:
+            lead.proposalStatus === ProposalStatus.NOT_REQUESTED
+              ? ProposalStatus.IN_PREPARATION
+              : lead.proposalStatus,
+          proposalRequestedAt: lead.proposalRequestedAt || new Date(),
+        },
+      });
+    }
+
+    return this.prisma.triageProposal.create({
+      data: {
+        proposalNumber: proposalReference,
+        publicLeadId,
+        organisationId: lead.organisationId,
+        sourceAssessmentId: lead.assessmentId,
+        productCode: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
+        title: `${lead.organisationName} — Executive Advisory Diagnostic`,
+        status: TriageProposalStatus.DRAFT,
+        source: TriageProposalSource.PLATFORM,
+        createdById: user.id,
+      },
+    });
+  }
+
+  async getProposalTemplate(publicLeadId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const lead = await this.prisma.publicLead.findUnique({
+      where: { id: publicLeadId },
+      include: {
+        commercialOwner: { select: userSelect },
+      },
+    });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    let assessmentReference: string | null = null;
+    if (lead.assessmentId) {
+      assessmentReference =
+        (
+          await this.prisma.assessmentSession.findUnique({
+            where: { id: lead.assessmentId },
+            select: { reference: true },
+          })
+        )?.reference || null;
+    }
+    return this.buildProposalTemplateView(lead, proposal, { assessmentReference });
+  }
+
+  async saveProposalTemplate(
+    publicLeadId: string,
+    input: {
+      introduction?: string;
+      deliverables?: string;
+      terms?: string;
+      clientObjective?: string;
+      sitesOrBusinessUnits?: string;
+      indicativeScope?: string;
+      timeline?: string;
+      fee?: number | null;
+      currency?: string;
+      organisationName?: string;
+      addressedTo?: string;
+      jobTitle?: string;
+      email?: string;
+      phone?: string;
+    },
+    user: AuthUser,
+  ) {
+    this.assertCommercialWrite(user);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+
+    let proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!proposal) {
+      proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
+    }
+
+    const existingSnap = (proposal.contextSnapshot as Record<string, unknown>) || {};
+    const existingAddressee =
+      (existingSnap.proposalAddressee as Record<string, unknown> | undefined) || {};
+    const snapshot = {
+      ...existingSnap,
+      proposalIntroduction: input.introduction?.trim() || null,
+      proposalAddressee: {
+        organisationName:
+          input.organisationName !== undefined
+            ? input.organisationName.trim() || null
+            : existingAddressee.organisationName ?? null,
+        addressedTo:
+          input.addressedTo !== undefined
+            ? input.addressedTo.trim() || null
+            : existingAddressee.addressedTo ?? null,
+        jobTitle:
+          input.jobTitle !== undefined
+            ? input.jobTitle.trim() || null
+            : existingAddressee.jobTitle ?? null,
+        email:
+          input.email !== undefined
+            ? input.email.trim() || null
+            : existingAddressee.email ?? null,
+        phone:
+          input.phone !== undefined
+            ? input.phone.trim() || null
+            : existingAddressee.phone ?? null,
+      },
+    };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.publicLead.update({
+        where: { id: publicLeadId },
+        data: {
+          scopeClientObjectives:
+            input.clientObjective !== undefined
+              ? input.clientObjective.trim() || null
+              : lead.scopeClientObjectives,
+          scopeSitesOrBusinessUnits:
+            input.sitesOrBusinessUnits !== undefined
+              ? input.sitesOrBusinessUnits.trim() || null
+              : lead.scopeSitesOrBusinessUnits,
+          scopeIndicativeScope:
+            input.indicativeScope !== undefined
+              ? input.indicativeScope.trim() || null
+              : lead.scopeIndicativeScope,
+          scopeExpectedTimeline:
+            input.timeline !== undefined ? input.timeline.trim() || null : lead.scopeExpectedTimeline,
+        },
+      });
+
+      proposal = await tx.triageProposal.update({
+        where: { id: proposal!.id },
+        data: {
+          objectives:
+            input.clientObjective !== undefined
+              ? input.clientObjective.trim() || null
+              : proposal!.objectives,
+          sitesOrBusinessUnits:
+            input.sitesOrBusinessUnits !== undefined
+              ? input.sitesOrBusinessUnits.trim() || null
+              : proposal!.sitesOrBusinessUnits,
+          scopeSummary:
+            input.indicativeScope !== undefined
+              ? input.indicativeScope.trim() || null
+              : proposal!.scopeSummary,
+          timeline:
+            input.timeline !== undefined ? input.timeline.trim() || null : proposal!.timeline,
+          fee: input.fee !== undefined ? input.fee : proposal!.fee,
+          currency: input.currency?.trim() || proposal!.currency,
+          deliverables:
+            input.deliverables !== undefined
+              ? input.deliverables.trim() || null
+              : proposal!.deliverables,
+          terms: input.terms !== undefined ? input.terms.trim() || null : proposal!.terms,
+          contextSnapshot: snapshot as object,
+        },
+      });
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_TEMPLATE_UPDATED',
+      entityType: 'TriageProposal',
+      entityId: proposal.id,
+      metadata: { proposalNumber: proposal.proposalNumber, publicLeadId },
+    });
+
+    return this.getProposalTemplate(publicLeadId, user);
+  }
+
+  async previewProposalPdf(publicLeadId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user);
+    return { buffer, fileName, contentType: 'application/pdf' };
+  }
+
+  async generateProposalPdf(publicLeadId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+
+    let proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!proposal) {
+      proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
+    }
+
+    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user);
+    const storageKey = `triage/${publicLeadId}/proposals/${Date.now()}-${fileName}`;
+    await this.storage.put(storageKey, buffer, 'application/pdf');
+
+    const hadDocument = Boolean(proposal.documentStorageKey);
+    const updated = await this.prisma.triageProposal.update({
+      where: { id: proposal.id },
+      data: {
+        documentStorageKey: storageKey,
+        documentFileName: fileName,
+        documentMimeType: 'application/pdf',
+        documentSizeBytes: buffer.length,
+        source: TriageProposalSource.PLATFORM,
+        version: (proposal.version || 1) + (hadDocument ? 1 : 0),
+      },
+      include: { createdBy: { select: userSelect } },
+    });
+
+    await this.prisma.publicLead.update({
+      where: { id: publicLeadId },
+      data: {
+        ...(lead.proposalStatus === ProposalStatus.NOT_REQUESTED
+          || lead.proposalStatus === ProposalStatus.REQUESTED
+          ? {
+              proposalStatus: ProposalStatus.IN_PREPARATION,
+              proposalReference: lead.proposalReference || updated.proposalNumber,
+            }
+          : {}),
+        proposalPreparedById: user.id,
+      },
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: hadDocument ? 'PROPOSAL_DOCUMENT_REPLACED' : 'PROPOSAL_DOCUMENT_UPLOADED',
+      entityType: 'TriageProposal',
+      entityId: updated.id,
+      metadata: {
+        publicLeadId,
+        proposalNumber: updated.proposalNumber,
+        fileName,
+        generated: true,
+      },
+    });
+
+    const refreshed = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    const bundle = await this.loadCommercialBundle(publicLeadId);
+    const stage = resolveCommercialStage(refreshed!, {
+      contactCount: bundle.contactCount,
+      latestProposal: this.proposalSnapshot(updated),
+    });
+    await this.persistStage(publicLeadId, stage);
+    return updated;
+  }
+
+  async sendProposalToClient(publicLeadId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+
+    let proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!proposal) throw new BadRequestException('No proposal workspace exists yet.');
+
+    // Always regenerate so the signature block matches the logged-in sender
+    // (Analyst / Administrator / etc.), not whoever last generated the PDF.
+    proposal = await this.generateProposalPdf(publicLeadId, user);
+
+    await this.prisma.publicLead.update({
+      where: { id: publicLeadId },
+      data: { proposalPreparedById: user.id },
+    });
+
+    await this.email.enqueue({
+      recipient: lead.email,
+      subject: `Executive Advisory Proposal — ${lead.organisationName}`,
+      template: 'triage_proposal_sent',
+      relatedType: 'TriageProposal',
+      relatedId: proposal.id,
+      organisationId: lead.organisationId || undefined,
+      payload: {
+        firstName: lead.firstName,
+        organisationName: lead.organisationName,
+        proposalReference: proposal.proposalNumber,
+        recommendedProduct: 'Executive Advisory Diagnostic',
+        attachmentStorageKey: proposal.documentStorageKey,
+        attachmentFileName:
+          proposal.documentFileName
+          || `Physical_Risk_Executive_Advisory_Proposal_${lead.organisationName.replace(/\s+/g, '_')}.pdf`,
+        attachmentContentType: proposal.documentMimeType || 'application/pdf',
+      },
+    });
+
+    const updated = await this.proposalRecordAction(publicLeadId, proposal.id, 'SENT', user);
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_SENT_TO_CLIENT',
+      entityType: 'TriageProposal',
+      entityId: proposal.id,
+      metadata: {
+        publicLeadId,
+        proposalNumber: proposal.proposalNumber,
+        recipient: lead.email,
+      },
+    });
+
+    return updated;
+  }
+
+  private async renderProposalBuffer(publicLeadId: string, user: AuthUser) {
+    const lead = await this.prisma.publicLead.findUnique({
+      where: { id: publicLeadId },
+    });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+    let proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!proposal) {
+      proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
+    }
+
+    let assessmentReference: string | null = null;
+    if (lead.assessmentId) {
+      assessmentReference =
+        (
+          await this.prisma.assessmentSession.findUnique({
+            where: { id: lead.assessmentId },
+            select: { reference: true },
+          })
+        )?.reference || null;
+    }
+
+    const prepared = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { firstName: true, lastName: true, email: true, systemRole: true },
+    });
+    const sender = this.resolveProposalSenderSignature(prepared);
+    const pdfInput = this.toProposalPdfInput(lead, proposal, { assessmentReference });
+    pdfInput.preparedByName = sender.name;
+    pdfInput.preparedByEmail = sender.email;
+
+    const buffer = await renderExecutiveAdvisoryProposalPdf(pdfInput);
+    const orgSlug = lead.organisationName.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const fileName = `Physical_Risk_Executive_Advisory_Proposal_${orgSlug || 'Client'}_v${
+      proposal.version || 1
+    }.pdf`;
+    return { buffer, fileName };
+  }
+
+  private resolveProposalSenderSignature(
+    prepared: {
+      firstName?: string | null;
+      lastName?: string | null;
+      email?: string | null;
+      systemRole?: string | null;
+    } | null,
+  ): { name: string | null; email: string | null } {
+    const fullName = [prepared?.firstName, prepared?.lastName].filter(Boolean).join(' ').trim();
+    const roleLabel = this.proposalSenderRoleLabel(prepared?.systemRole);
+    return {
+      // Prefer the logged-in user's name; fall back to role title (Analyst / Administrator).
+      name: fullName || roleLabel || prepared?.email || null,
+      email: prepared?.email?.trim() || null,
+    };
+  }
+
+  private proposalSenderRoleLabel(systemRole?: string | null): string | null {
+    if (!systemRole) return null;
+    const labels: Record<string, string> = {
+      SUPER_ADMIN: 'Platform Administrator',
+      METHODOLOGY_ADMIN: 'Methodology Administrator',
+      ANALYST: 'Analyst',
+      REVIEWER: 'Senior Reviewer',
+      SALES: 'Sales',
+      AUDITOR: 'Auditor',
+    };
+    return labels[systemRole] || systemRole.replaceAll('_', ' ');
   }
 
   assertConvertAllowed(

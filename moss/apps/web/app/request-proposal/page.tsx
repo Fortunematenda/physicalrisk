@@ -11,6 +11,7 @@ type Preview = {
   alreadyRequested: boolean;
   proposalReference?: string | null;
   proposalStatus?: string;
+  sourceTriageReference?: string | null;
   message: string;
 };
 
@@ -18,6 +19,7 @@ type ConfirmResult = {
   ok: boolean;
   alreadyRequested: boolean;
   proposalReference?: string | null;
+  sourceTriageReference?: string | null;
   message: string;
 };
 
@@ -108,6 +110,9 @@ function RequestProposalInner() {
                       {preview.proposalReference ? (
                         <p style={{ marginTop: 8 }}>Reference: {preview.proposalReference}</p>
                       ) : null}
+                      {preview.sourceTriageReference ? (
+                        <p style={{ marginTop: 8 }}>Source triage: {preview.sourceTriageReference}</p>
+                      ) : null}
                     </div>
                   ) : (
                     <button
@@ -133,7 +138,12 @@ function RequestProposalInner() {
                     Reference: <strong>{result.proposalReference}</strong>
                   </p>
                 ) : null}
-                <p className="scl-triage-micro" style={{ marginTop: 16 }}>
+                {result.sourceTriageReference ? (
+                  <p className="scl-exec-submitted-ref" style={{ marginTop: 8 }}>
+                    Source triage: <strong>{result.sourceTriageReference}</strong>
+                  </p>
+                ) : null}
+                <p className="scl-proposal-received-note">
                   The Physical Risk advisory team will contact you regarding the Executive Advisory Diagnostic.
                 </p>
               </div>

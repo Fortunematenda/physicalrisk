@@ -1,10 +1,19 @@
 import PDFDocument from 'pdfkit';
-import { getRiskBand, type RiskBand } from '@moss/shared';
+import {
+  assuranceCategoryInterpretation,
+  assuranceDimensionTierLabel,
+  deriveEgtAssurancePresentation,
+  getRiskBand,
+  rankEgtWarningIndicators,
+  resolveEgtAssuranceVisual,
+  type RiskBand,
+} from '@moss/shared';
 import type { SclReportBrandConfig } from './scl-report-branding';
 import { resolveSclClassificationVisual } from './scl-report-visual';
 
 const INK = '#111111';
-const MUTED = '#666666';
+/** Secondary copy on white — darker charcoal for print legibility (was #666666). */
+const MUTED = '#333333';
 const CHAR = '#1f1f1f';
 const PAGE_MARGIN = 48;
 const TOP_BAR_H = 10;
@@ -87,6 +96,110 @@ function diagnosisLabel(band: RiskBand | string): string {
   }
 }
 
+type PdfScoreContext = {
+  displayScore: number;
+  displayBand: string;
+  displayCategories: Array<{ category: string; score: number }>;
+  accentHex: string;
+  bandIndex: 0 | 1 | 2 | 3;
+  diagnosis: string;
+  scoreHeading: string;
+  dimensionsTitle: string;
+  prioritiesTitle: string;
+  lampLabels: string[];
+  lampColours: string[];
+  categoryInterpretation: (category: string, score: number) => string;
+  dimensionValueLabel: (score: number) => string;
+  barColourForScore: (score: number) => string;
+  priorityCategories: Array<{ category: string; score: number }>;
+};
+
+function buildPdfScoreContext(input: SclPdfRenderInput): PdfScoreContext {
+  if (!input.isPreliminary) {
+    const visual = resolveSclClassificationVisual(input.riskBand || input.overallRiskScore);
+    const rows = (input.categoryScores || []).length
+      ? input.categoryScores
+      : [{ category: 'Overall', score: Number(input.overallRiskScore) || 0 }];
+    return {
+      displayScore: Number(input.overallRiskScore) || 0,
+      displayBand: String(input.riskBand || visual.band),
+      displayCategories: rows.map((row) => ({
+        category: String(row.category || ''),
+        score: Number(row.score) || 0,
+      })),
+      accentHex: visual.colourHex,
+      bandIndex: visual.bandIndex,
+      diagnosis: diagnosisLabel(input.riskBand || visual.band),
+      scoreHeading: 'SECURITY COST LEAKAGE EXPOSURE',
+      dimensionsTitle: 'Exposure dimensions',
+      prioritiesTitle: 'Priority exposure indicators',
+      lampLabels: ['CONTROLLED', 'MODERATE', 'HIGH', 'CRITICAL'],
+      lampColours: [
+        resolveSclClassificationVisual('Controlled').colourHex,
+        resolveSclClassificationVisual('Moderate').colourHex,
+        resolveSclClassificationVisual('High').colourHex,
+        resolveSclClassificationVisual('Critical').colourHex,
+      ],
+      categoryInterpretation,
+      dimensionValueLabel: (score) => {
+        const band = getRiskBand(score);
+        if (band === 'Critical') return 'Priority';
+        if (band === 'High') return 'Elevated';
+        if (band === 'Moderate') return 'Watch';
+        return 'Lower';
+      },
+      barColourForScore: (score) => resolveSclClassificationVisual(score).colourHex,
+      priorityCategories: [...rows].sort((a, b) => Number(b.score) - Number(a.score)),
+    };
+  }
+
+  const presentation =
+    deriveEgtAssurancePresentation({
+      overallRiskScore: input.overallRiskScore,
+      maturityScore: input.maturityScore,
+      categoryScores: input.categoryScores || [],
+    }) ||
+    deriveEgtAssurancePresentation({
+      overallRiskScore: input.overallRiskScore,
+      categoryScores: input.categoryScores || [],
+    });
+
+  const visual = presentation?.visual || resolveEgtAssuranceVisual(0);
+  const displayCategories = (presentation?.categoryScores || []).map((row) => ({
+    category: row.category,
+    score: row.assuranceScore,
+  }));
+  const warningRows = presentation
+    ? rankEgtWarningIndicators(presentation.categoryScores).map((row) => ({
+        category: row.category,
+        score: row.assuranceScore,
+      }))
+    : displayCategories;
+
+  return {
+    displayScore: presentation?.assuranceScore ?? Number(input.maturityScore) ?? 0,
+    displayBand: presentation?.assuranceBand.displayLabel || '—',
+    displayCategories,
+    accentHex: visual.colourHex,
+    bandIndex: visual.bandIndex,
+    diagnosis: presentation?.diagnosis || 'Preliminary indication complete',
+    scoreHeading: 'ASSURANCE SCORE',
+    dimensionsTitle: 'Assurance dimensions',
+    prioritiesTitle: 'Strongest warning indicators',
+    lampLabels: ['PRIORITY', 'IMPROVE', 'MODERATE', 'STRONG'],
+    lampColours: [
+      resolveEgtAssuranceVisual(10).colourHex,
+      resolveEgtAssuranceVisual(45).colourHex,
+      resolveEgtAssuranceVisual(65).colourHex,
+      resolveEgtAssuranceVisual(90).colourHex,
+    ],
+    categoryInterpretation: assuranceCategoryInterpretation,
+    dimensionValueLabel: assuranceDimensionTierLabel,
+    barColourForScore: (score) => resolveEgtAssuranceVisual(score).colourHex,
+    priorityCategories: warningRows,
+  };
+}
+
 /** Short executive copy for priority cards — presentation only; no scoring changes. */
 export function categoryInterpretation(category: string, score: number): string {
   const band = getRiskBand(Number(score) || 0);
@@ -99,7 +212,7 @@ export function categoryInterpretation(category: string, score: number): string 
   if (band === 'High') {
     return 'Elevated leakage or underperformance indicators warrant focused independent validation.';
   }
-  return 'Critical exposure indicators suggest priority independent review.';
+  return 'Critical exposure indicators require priority independent review.';
 }
 
 export function maturityToneForRiskScore(riskScore: number): keyof typeof MATURITY_ROW {
@@ -228,15 +341,14 @@ function drawPageHeader(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): numb
 function drawPageOneBody(
   doc: PDFKit.PDFDocument,
   input: SclPdfRenderInput,
-  visual: ReturnType<typeof resolveSclClassificationVisual>,
-  diagnosis: string,
+  scoreContext: PdfScoreContext,
   y: number,
 ): void {
   const pageW = doc.page.width;
   const contentW = pageW - PAGE_MARGIN * 2;
   const x = PAGE_MARGIN;
   const RED = brandRed(input.brand);
-  const accent = visual.colourHex || RED;
+  const accent = scoreContext.accentHex || RED;
 
   doc.fillColor(RED).font('Helvetica-Bold').fontSize(9)
     .text('COMPLIMENTARY PRELIMINARY INDICATION', x, y, {
@@ -280,12 +392,12 @@ function drawPageOneBody(
   doc.rect(x + leftW, y, contentW - leftW, panelH).fill(CHAR);
 
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(7)
-    .text(input.isPreliminary ? 'INDICATIVE ASSURANCE POSITION' : 'SECURITY COST LEAKAGE EXPOSURE', x + 16, y + 18, {
+    .text(input.isPreliminary ? scoreContext.scoreHeading : 'SECURITY COST LEAKAGE EXPOSURE', x + 16, y + 18, {
       width: leftW - 28,
       characterSpacing: 0.5,
     });
 
-  const scoreValue = Number(input.overallRiskScore);
+  const scoreValue = Number(scoreContext.displayScore);
   const scoreLabel = Number.isFinite(scoreValue) ? Math.round(scoreValue).toString() : '—';
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(46)
     .text(scoreLabel, x + 16, y + 42, { width: leftW - 70, lineBreak: false });
@@ -294,7 +406,7 @@ function drawPageOneBody(
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
       .text('/100', x + 16 + scoreWidth + 3, y + 68, { lineBreak: false });
   }
-  const bandLabel = String(input.riskBand || '').trim();
+  const bandLabel = String(scoreContext.displayBand || '').trim();
   if (bandLabel) {
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(9)
       .text(bandLabel.toUpperCase(), x + 16, y + 92, { width: leftW - 28, lineBreak: false });
@@ -302,12 +414,12 @@ function drawPageOneBody(
 
   const posX = x + leftW + 20;
   const posW = contentW - leftW - 36;
-  doc.fillColor('#bdbdbd').font('Helvetica-Bold').fontSize(8)
+  doc.fillColor('#d8d8d8').font('Helvetica-Bold').fontSize(8)
     .text('PRELIMINARY POSITION', posX, y + 18, { width: posW, characterSpacing: 0.8 });
   doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(16)
-    .text(diagnosis, posX, y + 36, { width: posW, lineGap: 2 });
+    .text(scoreContext.diagnosis, posX, y + 36, { width: posW, lineGap: 2 });
   const afterTitle = doc.y + 8;
-  doc.fillColor('#d0d0d0').font('Helvetica').fontSize(9)
+  doc.fillColor('#ececec').font('Helvetica').fontSize(9)
     .text(
       input.isPreliminary
         ? 'This Level 1 questionnaire indicates where governance, assurance or expenditure concerns may warrant a paid Executive Advisory Diagnostic. It is not an assessment or audit conclusion.'
@@ -322,25 +434,19 @@ function drawPageOneBody(
   const lampGap = 8;
   const lampH = 12;
   const lampW = (contentW - lampGap * 3) / 4;
-  const lampColours = [
-    resolveSclClassificationVisual('Controlled').colourHex,
-    resolveSclClassificationVisual('Moderate').colourHex,
-    resolveSclClassificationVisual('High').colourHex,
-    resolveSclClassificationVisual('Critical').colourHex,
-  ];
-  const lampLabels = ['CONTROLLED', 'MODERATE', 'HIGH', 'CRITICAL'];
+  const lampColours = scoreContext.lampColours;
+  const lampLabels = scoreContext.lampLabels;
   lampColours.forEach((c, i) => {
     const lx = x + i * (lampW + lampGap);
-    const active = i === visual.bandIndex;
+    const active = i === scoreContext.bandIndex;
     doc.rect(lx, y, lampW, lampH).fill(active ? c : '#e8e8e8');
     doc.fillColor(active ? INK : MUTED).font(active ? 'Helvetica-Bold' : 'Helvetica').fontSize(7)
       .text(lampLabels[i], lx, y + lampH + 6, { width: lampW, align: 'center', lineBreak: false });
   });
   y += lampH + 28;
 
-  // Dimension indications — single-row layout: label | gap | bar | value
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
-    .text(input.isPreliminary ? 'Warning-indicator dimensions' : 'Exposure dimensions', x, y);
+    .text(scoreContext.dimensionsTitle, x, y);
   y = doc.y + 14;
 
   const labelW = 172;
@@ -351,14 +457,14 @@ function drawPageOneBody(
   const rowH = 22;
   const barH = 10;
   const fontSize = 10;
-  const rows = (input.categoryScores || []).length
-    ? input.categoryScores
-    : [{ category: 'Overall', score: Number(input.overallRiskScore) || 0 }];
+  const rows = scoreContext.displayCategories.length
+    ? scoreContext.displayCategories
+    : [{ category: 'Overall', score: Number(scoreContext.displayScore) || 0 }];
 
   rows.forEach((row) => {
     const score = Math.max(0, Math.min(100, Math.round(Number(row.score) || 0)));
     const fillW = (barW * score) / 100;
-    const barColour = resolveSclClassificationVisual(score).colourHex;
+    const barColour = scoreContext.barColourForScore(score);
     const barX = x + labelW + labelGap;
     const barY = y + (rowH - barH) / 2;
     // PDFKit y is text baseline — nudge so label/value sit on the same visual row as the bar.
@@ -384,11 +490,9 @@ function drawPageOneBody(
   });
   y += 18;
 
-  // Priority exposure indicators
-  const sorted = [...rows].sort((a, b) => Number(b.score) - Number(a.score));
-  const priorities = sorted.slice(0, 3).map((c) => ({
+  const priorities = scoreContext.priorityCategories.slice(0, 3).map((c) => ({
     title: c.category,
-    description: categoryInterpretation(c.category, Number(c.score)),
+    description: scoreContext.categoryInterpretation(c.category, Number(c.score)),
   }));
   while (priorities.length < 3) {
     priorities.push({
@@ -398,7 +502,7 @@ function drawPageOneBody(
   }
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
-    .text(input.isPreliminary ? 'Strongest warning indicators' : 'Priority exposure indicators', x, y);
+    .text(scoreContext.prioritiesTitle, x, y);
   y = doc.y + 14;
 
   const gap = 18;
@@ -412,7 +516,7 @@ function drawPageOneBody(
     doc.fillColor(INK).font('Helvetica-Bold').fontSize(11)
       .text(card.title, cx, y + 34, { width: cardW, lineGap: 1 });
     const titleBottom = doc.y + 8;
-    doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+    doc.fillColor(CHAR).font('Helvetica').fontSize(9)
       .text(card.description, cx, titleBottom, { width: cardW, lineGap: 2 });
   });
 }
@@ -436,7 +540,7 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
     .text('Convert the indication into defensible evidence.', x, y, { width: contentW });
   y = doc.y + 14;
 
-  doc.fillColor(MUTED).font('Helvetica').fontSize(11)
+  doc.fillColor(CHAR).font('Helvetica').fontSize(11)
     .text(
       'Commission a paid Executive Advisory Diagnostic to validate the highest-priority findings against contracts, ' +
         'expenditure, performance records and executive reporting.',
@@ -461,7 +565,7 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(12)
     .text('What we propose next', x + 20, y + panelPad, { width: contentW - 40 });
-  doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+  doc.fillColor(CHAR).font('Helvetica').fontSize(10)
     .text(
       'Request a proposal for a paid Executive Advisory Diagnostic to validate the highest-priority findings.',
       x + 20,
@@ -485,7 +589,7 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(14)
     .text('Important basis of interpretation', x, y);
   y = doc.y + 10;
-  doc.fillColor(MUTED).font('Helvetica').fontSize(10)
+  doc.fillColor(CHAR).font('Helvetica').fontSize(10)
     .text(
       input.isPreliminary
         ? 'This complimentary Level 1 output is generated from questionnaire responses supplied by the participant. It is triage and decision-support only: not an assessment, Security Cost Leakage Assessment™, diagnostic, audit, certification, legal opinion or independent assurance conclusion. Physical Risk has not tested supporting evidence at this stage.'
@@ -519,13 +623,12 @@ export function renderSclExecutivePdf(input: SclPdfRenderInput): Promise<Buffer>
 
     doc.fillOpacity(1).strokeOpacity(1).opacity(1).font('Helvetica');
 
-    const visual = resolveSclClassificationVisual(input.riskBand || input.overallRiskScore);
-    const diagnosis = diagnosisLabel(input.riskBand || visual.band);
+    const scoreContext = buildPdfScoreContext(input);
 
     // Page 1
     drawTopBar(doc, input.brand);
     let y = drawPageHeader(doc, input);
-    drawPageOneBody(doc, input, visual, diagnosis, y);
+    drawPageOneBody(doc, input, scoreContext, y);
 
     // Page 2
     doc.addPage();

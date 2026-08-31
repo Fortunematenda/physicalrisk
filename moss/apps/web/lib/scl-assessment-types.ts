@@ -1,10 +1,20 @@
 /** Shared types for the public SCL continuous assessment UI. */
 
 import {
+  EGT_OPERATIONAL_SITES_OPTIONS,
+  EGT_SECURITY_EXPENDITURE_OPTIONS,
   SCL_ACTIVE_TRIAGE_QUESTION_CODES,
   SCL_RETIRED_TRIAGE_QUESTION_CODES,
   filterSclActiveTriageQuestions,
+  isOperationalSitesSelectionComplete,
   isSclActiveTriageQuestionCode,
+  isSecurityExpenditureSelectionComplete,
+  operationalSitesLabelFromStored,
+  operationalSitesValueFromStored,
+  resolveOperationalSitesBandValue,
+  resolveSecurityExpenditureBandValue,
+  securityExpenditureLabelFromStored,
+  securityExpenditureValueFromStored,
 } from '@moss/shared';
 
 export {
@@ -46,7 +56,7 @@ export type Question = {
 export type ContactDetails = {
   organisationName: string;
   industry: string;
-  /** C3 — site-count band label from contact dropdown (mapped to a count on submit). */
+  /** C3 — operational sites band code from contact dropdown. */
   totalSites: string;
   firstName: string;
   lastName: string;
@@ -55,7 +65,7 @@ export type ContactDetails = {
   /** Job title / role (CRM jobTitle). */
   role: string;
   country: string;
-  /** C5 — estimated annual security expenditure band label. */
+  /** C5 — estimated annual security expenditure band code. */
   securityExpenditure: string;
   primaryConcern: string;
 };
@@ -90,90 +100,37 @@ export const SCL_COUNTRY_OPTIONS = [
   'Other',
 ] as const;
 
-/**
- * Operational sites bands matching the approved contact-form reference.
- * Count is the provisional scoring value for C3.
- */
-export const SCL_SITE_COUNT_OPTIONS = [
-  { label: '1 site', count: 1 },
-  { label: '2–5 sites', count: 3 },
-  { label: '6–20 sites', count: 12 },
-  { label: '21–50 sites', count: 35 },
-  { label: 'More than 50 sites', count: 75 },
-] as const;
+/** Enterprise operational-site bands for new Level 1 submissions. */
+export const SCL_SITE_COUNT_OPTIONS = EGT_OPERATIONAL_SITES_OPTIONS;
 
-/**
- * Estimated annual security expenditure bands for contact capture → C5.
- * Non-disclosure options removed (Wayne): sliding bands already avoid precise disclosure.
- */
-export const SCL_SECURITY_EXPENDITURE_OPTIONS = [
-  { label: 'Below R2 million', amount: 1_000_000 },
-  { label: 'R2–R10 million', amount: 6_000_000 },
-  { label: 'R10–R50 million', amount: 30_000_000 },
-  { label: 'R50–R100 million', amount: 75_000_000 },
-  { label: 'Above R100 million', amount: 150_000_000 },
-] as const;
+/** Enterprise annual security expenditure bands for new Level 1 submissions. */
+export const SCL_SECURITY_EXPENDITURE_OPTIONS = EGT_SECURITY_EXPENDITURE_OPTIONS;
 
+export {
+  operationalSitesLabelFromStored as siteCountLabelFromStored,
+  operationalSitesValueFromStored,
+  securityExpenditureLabelFromStored,
+  securityExpenditureValueFromStored,
+  resolveOperationalSitesBandValue,
+  resolveSecurityExpenditureBandValue,
+  isOperationalSitesSelectionComplete,
+  isSecurityExpenditureSelectionComplete,
+};
+
+/** @deprecated Use resolveOperationalSitesBandValue — band codes are stored, not counts. */
 export function resolveSiteCountForScoring(selection: string | undefined | null): number | undefined {
-  const label = String(selection || '').trim();
-  if (!label) return undefined;
-  const match = SCL_SITE_COUNT_OPTIONS.find((o) => o.label === label);
-  if (match) return match.count;
-  const n = Number(label.replace(/[,\s]/g, ''));
-  return Number.isFinite(n) ? n : undefined;
+  return resolveOperationalSitesBandValue(selection) ? 1 : undefined;
 }
 
+/** @deprecated Expenditure bands are indicative only; no amount is derived at Level 1. */
 export function resolveSecurityExpenditureForScoring(
   selection: string | undefined | null,
 ): number | undefined {
-  const label = String(selection || '').trim();
-  if (!label) return undefined;
-  const match = SCL_SECURITY_EXPENDITURE_OPTIONS.find((o) => o.label === label);
-  if (!match) return undefined;
-  return match.amount;
+  return resolveSecurityExpenditureBandValue(selection) ? undefined : undefined;
 }
 
 export function isSecurityExpenditureComplete(selection: string | undefined | null): boolean {
-  return resolveSecurityExpenditureForScoring(selection) != null;
-}
-
-/** Map a stored C3 number back to the nearest dropdown label for resume/display. */
-export function siteCountLabelFromStored(value: unknown): string {
-  if (value === undefined || value === null || value === '') return '';
-  const asLabel = String(value).trim();
-  if (SCL_SITE_COUNT_OPTIONS.some((o) => o.label === asLabel)) return asLabel;
-  const n = Number(asLabel.replace(/[,\s]/g, ''));
-  if (!Number.isFinite(n)) return '';
-  let bestLabel: string = SCL_SITE_COUNT_OPTIONS[0].label;
-  let bestDist = Math.abs(n - SCL_SITE_COUNT_OPTIONS[0].count);
-  for (const opt of SCL_SITE_COUNT_OPTIONS) {
-    const dist = Math.abs(n - opt.count);
-    if (dist < bestDist) {
-      bestLabel = opt.label;
-      bestDist = dist;
-    }
-  }
-  return bestLabel;
-}
-
-export function securityExpenditureLabelFromStored(value: unknown): string {
-  if (value === undefined || value === null || value === '') return '';
-  const asLabel = String(value).trim();
-  if (SCL_SECURITY_EXPENDITURE_OPTIONS.some((o) => o.label === asLabel)) return asLabel;
-  // Legacy non-disclosure labels from older drafts
-  if (/^prefer not to say$/i.test(asLabel) || /^not known$/i.test(asLabel)) return '';
-  const n = Number(asLabel.replace(/[,\s]/g, ''));
-  if (!Number.isFinite(n)) return '';
-  let best: (typeof SCL_SECURITY_EXPENDITURE_OPTIONS)[number] = SCL_SECURITY_EXPENDITURE_OPTIONS[0];
-  let bestDist = Math.abs(n - best.amount);
-  for (const opt of SCL_SECURITY_EXPENDITURE_OPTIONS) {
-    const dist = Math.abs(n - opt.amount);
-    if (dist < bestDist) {
-      best = opt;
-      bestDist = dist;
-    }
-  }
-  return best.label;
+  return isSecurityExpenditureSelectionComplete(selection);
 }
 
 export type SclPublicResult = {
@@ -182,14 +139,20 @@ export type SclPublicResult = {
   organisationName: string;
   prospectName: string;
   assessmentDateLabel: string;
+  /** Prospect-facing assurance band label. */
   riskBand: string;
+  assuranceBand?: string | null;
   accessibleLabel: string;
   colourName: string;
   bandIndex: 0 | 1 | 2 | 3;
-  /** Governed overall risk score 0–100 (higher = more leakage exposure). */
+  /** Prospect-facing assurance score 0–100 (higher = stronger assurance). */
+  assuranceScore?: number | null;
+  /** Internal exposure mirror 0–100 (higher = greater concern). */
+  exposureIndicator?: number | null;
+  /** Alias of assuranceScore for legacy call sites. */
   overallRiskScore?: number | null;
-  /** Governed category scores for dimension / priority panels. */
-  categoryScores?: Array<{ category: string; score: number }>;
+  /** Assurance-oriented category scores for dimension / priority panels. */
+  categoryScores?: Array<{ category: string; score: number; exposureIndicator?: number }>;
   diagnosis: string;
   recommendedAction: string;
   campaignSummary: string;

@@ -25,15 +25,16 @@ import { SclAssessmentShell } from '@/components/scl/SclAssessmentShell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { readSclAttribution, type SclAttribution } from '@/lib/scl-attribution';
 import {
-  resolveSecurityExpenditureForScoring,
-  resolveSiteCountForScoring,
-  securityExpenditureLabelFromStored,
-  siteCountLabelFromStored,
+  isOperationalSitesSelectionComplete,
+  isSecurityExpenditureComplete,
+  operationalSitesValueFromStored,
+  resolveOperationalSitesBandValue,
+  resolveSecurityExpenditureBandValue,
+  securityExpenditureValueFromStored,
   type ContactDetails,
   type InputDef,
   type Question,
   isJobTitleValueComplete,
-  isSecurityExpenditureComplete,
   SCL_PUBLIC_TRIAGE_QUESTION_CODES,
   filterSclActiveTriageQuestions,
 } from '@/lib/scl-assessment-types';
@@ -78,7 +79,7 @@ function isContactStepComplete(
     !isJobTitleValueComplete(details.role) ||
     !details.country.trim() ||
     !isValidWorkEmail(details.email) ||
-    !resolveSiteCountForScoring(details.totalSites) ||
+    !isOperationalSitesSelectionComplete(details.totalSites) ||
     !isSecurityExpenditureComplete(details.securityExpenditure)
   ) {
     return false;
@@ -185,7 +186,7 @@ export default function StartAssessmentClient() {
               industry: resume.details?.industry || d.industry,
               totalSites:
                 resume.inputs?.C3 != null && resume.inputs.C3 !== ''
-                  ? siteCountLabelFromStored(resume.inputs.C3)
+                  ? operationalSitesValueFromStored(resume.inputs.C3)
                   : d.totalSites,
               firstName: resume.details?.firstName || d.firstName,
               lastName: resume.details?.lastName || d.lastName,
@@ -194,7 +195,7 @@ export default function StartAssessmentClient() {
               role: resume.details?.jobTitle || resume.details?.role || d.role,
               securityExpenditure:
                 resume.inputs?.C5 != null && resume.inputs.C5 !== ''
-                  ? securityExpenditureLabelFromStored(resume.inputs.C5)
+                  ? securityExpenditureValueFromStored(resume.inputs.C5)
                   : d.securityExpenditure,
             }));
             setInputs(resume.inputs || {});
@@ -465,15 +466,15 @@ export default function StartAssessmentClient() {
             ...inputs,
             C1: details.organisationName.trim() || inputs.C1,
             C2: details.industry || inputs.C2,
-            C3: resolveSiteCountForScoring(details.totalSites) ?? inputs.C3,
-            C5: resolveSecurityExpenditureForScoring(details.securityExpenditure) ?? inputs.C5,
+            C3: resolveOperationalSitesBandValue(details.totalSites) ?? inputs.C3,
+            C5: resolveSecurityExpenditureBandValue(details.securityExpenditure) ?? inputs.C5,
             ...deriveDuplicateCalibrationInputs(questionnaire?.questions || [], responses, {
               ...calibrationDefaultsFromDefinitions(questionnaire?.inputDefinitions),
               ...inputs,
               C1: details.organisationName.trim() || inputs.C1,
               C2: details.industry || inputs.C2,
-              C3: resolveSiteCountForScoring(details.totalSites) ?? inputs.C3,
-              C5: resolveSecurityExpenditureForScoring(details.securityExpenditure) ?? inputs.C5,
+              C3: resolveOperationalSitesBandValue(details.totalSites) ?? inputs.C3,
+              C5: resolveSecurityExpenditureBandValue(details.securityExpenditure) ?? inputs.C5,
             }),
           }),
           responses: Object.entries(responses)
@@ -573,11 +574,11 @@ export default function StartAssessmentClient() {
                         industry: details.industry || String(inputs.C2 || ''),
                         totalSites:
                           details.totalSites ||
-                          (inputs.C3 != null ? siteCountLabelFromStored(inputs.C3) : ''),
+                          (inputs.C3 != null ? operationalSitesValueFromStored(inputs.C3) : ''),
                         securityExpenditure:
                           details.securityExpenditure ||
                           (inputs.C5 != null
-                            ? securityExpenditureLabelFromStored(inputs.C5)
+                            ? securityExpenditureValueFromStored(inputs.C5)
                             : ''),
                       }}
                       industryOptions={industryOptions}

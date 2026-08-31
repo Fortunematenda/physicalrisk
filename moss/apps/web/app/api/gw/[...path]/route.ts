@@ -155,7 +155,8 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
     Boolean(upstreamType?.includes('octet-stream')) ||
     Boolean(disposition?.includes('attachment')) ||
     /\/file(?:\?|$)/.test(subPath) ||
-    /\/download(?:\?|$)/.test(subPath);
+    /\/download(?:\?|$)/.test(subPath) ||
+    /\/proposal-preview(?:\?|$)/.test(subPath);
 
   if (isBinary) {
     const buf = await upstream.arrayBuffer();

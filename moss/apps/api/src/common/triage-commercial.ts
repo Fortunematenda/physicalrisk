@@ -5,6 +5,7 @@ import {
   TriageContactOutcome,
   TriageProposalStatus,
 } from '@prisma/client';
+import { readProposalContextSnapshot } from './triage-proposal-context';
 
 export type CommercialLeadSnapshot = {
   completedAt: Date | null;
@@ -14,6 +15,7 @@ export type CommercialLeadSnapshot = {
   convertedAt: Date | null;
   convertedAssessmentId?: string | null;
   proposalStatus: ProposalStatus;
+  proposalRequestedAt?: Date | null;
   clientInterest: ClientInterest;
   commercialStage?: CommercialStage | null;
   scopeClientObjectives?: string | null;
@@ -32,6 +34,18 @@ export function toProposalSnapshot(
   return proposal
     ? { status: proposal.status, hasDocument: Boolean(proposal.documentStorageKey) }
     : null;
+}
+
+export function isProposalPrepared(
+  lead: CommercialLeadSnapshot,
+  proposal: CommercialProposalSnapshot,
+) {
+  if (!proposal) return false;
+  return (
+    proposal.hasDocument === true
+    || hasScopeDiscussion(lead)
+    || proposal.status !== TriageProposalStatus.DRAFT
+  );
 }
 
 export const COMMERCIAL_OWNER_ROLES = new Set([
@@ -131,6 +145,8 @@ export type PrimaryCta =
   | { kind: 'mark_reviewed'; label: string }
   | { kind: 'contact_client'; label: string }
   | { kind: 'upload_proposal'; label: string }
+  | { kind: 'complete_proposal'; label: string }
+  | { kind: 'mark_sent'; label: string }
   | { kind: 'awaiting_decision'; label: string; disabled: true }
   | { kind: 'create_level2'; label: string }
   | { kind: 'open_level2'; label: string; engagementId: string }
@@ -161,15 +177,23 @@ export function resolvePrimaryCta(
     case CommercialStage.CONTACTED:
     case CommercialStage.COMMERCIAL_DISCUSSION:
     case CommercialStage.PROPOSAL_DRAFT:
-      if (latestProposal?.hasDocument) {
-        return { kind: 'none' };
+      if (!latestProposal?.hasDocument) {
+        return { kind: 'complete_proposal', label: 'Continue preparation' };
       }
-      return { kind: 'upload_proposal', label: 'Upload proposal' };
+      if (
+        latestProposal.status === TriageProposalStatus.DRAFT
+        || latestProposal.status === TriageProposalStatus.INTERNAL_REVIEW
+        || latestProposal.status === TriageProposalStatus.APPROVED
+      ) {
+        // Primary header action opens Commercial send flow — not status-only Mark sent.
+        return { kind: 'complete_proposal', label: 'Send proposal' };
+      }
+      return { kind: 'none' };
     case CommercialStage.PROPOSAL_SENT:
-      return { kind: 'awaiting_decision', label: 'Awaiting client decision', disabled: true };
+      return { kind: 'awaiting_decision', label: 'Awaiting response', disabled: true };
     case CommercialStage.PROPOSAL_ACCEPTED:
     case CommercialStage.LEVEL_2_READY:
-      return { kind: 'create_level2', label: 'Create Level 2 Diagnostic' };
+      return { kind: 'create_level2', label: 'Create Level 2' };
     case CommercialStage.CLOSED:
       return { kind: 'closed', label: 'Lead closed', disabled: true };
     default:
@@ -228,9 +252,25 @@ function stageIndex(stage: CommercialStage) {
 export function commercialWorkflowSteps(
   lead: CommercialLeadSnapshot,
   stage: CommercialStage,
+  opts: { latestProposal?: CommercialProposalSnapshot } = {},
 ) {
   const idx = stageIndex(stage);
   const atLeast = (target: CommercialStage) => idx >= stageIndex(target);
+  const proposal = opts.latestProposal;
+  const proposalRequested = Boolean(
+    lead.proposalRequestedAt || lead.proposalStatus !== ProposalStatus.NOT_REQUESTED,
+  );
+  const proposalPrepared = isProposalPrepared(lead, proposal || null);
+  const proposalSent =
+    lead.proposalStatus === ProposalStatus.SENT
+    || proposal?.status === TriageProposalStatus.SENT
+    || proposal?.status === TriageProposalStatus.VIEWED
+    || atLeast(CommercialStage.PROPOSAL_SENT);
+  const proposalAccepted =
+    lead.proposalStatus === ProposalStatus.ACCEPTED
+    || proposal?.status === TriageProposalStatus.ACCEPTED
+    || atLeast(CommercialStage.LEVEL_2_READY);
+  const level2Created = stage === CommercialStage.LEVEL_2_CREATED || Boolean(lead.convertedAt);
 
   const steps: Array<{ key: string; label: string; done: boolean; current: boolean }> = [
     {
@@ -246,46 +286,50 @@ export function commercialWorkflowSteps(
       current: false,
     },
     {
-      key: 'reviewed',
-      label: 'Reviewed',
-      done: Boolean(lead.reviewedAt),
-      current: stage === CommercialStage.UNDER_REVIEW,
-    },
-    {
       key: 'contacted',
-      label: 'Contacted',
-      done: Boolean(lead.contactedAt) || atLeast(CommercialStage.CONTACTED),
-      current: stage === CommercialStage.CONTACTED,
+      label: 'Client contacted',
+      // Once commercial work is underway, treat contact as satisfied for presentation.
+      done:
+        Boolean(lead.contactedAt)
+        || atLeast(CommercialStage.CONTACTED)
+        || proposalRequested
+        || proposalPrepared
+        || proposalSent,
+      current: stage === CommercialStage.CONTACTED && !proposalRequested,
     },
     {
-      key: 'discussion',
-      label: 'Commercial discussion',
-      done: atLeast(CommercialStage.COMMERCIAL_DISCUSSION),
-      current: stage === CommercialStage.COMMERCIAL_DISCUSSION,
+      key: 'proposal_requested',
+      label: 'Proposal requested',
+      done: proposalRequested,
+      current:
+        proposalRequested
+        && !proposalPrepared
+        && !proposalSent
+        && stage !== CommercialStage.LEVEL_2_CREATED,
     },
     {
       key: 'proposal_prepared',
-      label: 'Proposal prepared',
-      done: atLeast(CommercialStage.PROPOSAL_DRAFT),
-      current: stage === CommercialStage.PROPOSAL_DRAFT,
+      label: 'Proposal preparation',
+      done: proposalPrepared || proposalSent || proposalAccepted || level2Created,
+      current: stage === CommercialStage.PROPOSAL_DRAFT && proposalPrepared && !proposalSent,
     },
     {
       key: 'proposal_sent',
       label: 'Proposal sent',
-      done: atLeast(CommercialStage.PROPOSAL_SENT),
+      done: proposalSent || proposalAccepted || level2Created,
       current: stage === CommercialStage.PROPOSAL_SENT,
     },
     {
       key: 'proposal_accepted',
       label: 'Proposal accepted',
-      done: atLeast(CommercialStage.LEVEL_2_READY),
+      done: proposalAccepted || level2Created,
       current:
         stage === CommercialStage.PROPOSAL_ACCEPTED || stage === CommercialStage.LEVEL_2_READY,
     },
     {
       key: 'level2_created',
       label: 'Level 2 created',
-      done: stage === CommercialStage.LEVEL_2_CREATED,
+      done: level2Created,
       current: false,
     },
   ];
@@ -362,3 +406,124 @@ export const CLIENT_INTEREST_LABELS: Record<string, string> = {
   NOT_INTERESTED: 'Not interested',
   DEFERRED: 'Deferred',
 };
+
+export function buildCommercialWorkspace(input: {
+  lead: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string | null;
+    organisationName: string;
+    industry: string | null;
+    proposalReference: string | null;
+    proposalRequestedAt: Date | null;
+    proposalStatus: ProposalStatus;
+    scopeClientObjectives?: string | null;
+    scopeSitesOrBusinessUnits?: string | null;
+    scopeIndicativeScope?: string | null;
+    scopeExpectedTimeline?: string | null;
+    scopeCommercialNotes?: string | null;
+  };
+  activeProposal: {
+    id: string;
+    proposalNumber: string;
+    status: TriageProposalStatus;
+    contextSnapshot: unknown;
+    objectives: string | null;
+    scopeSummary: string | null;
+    sitesOrBusinessUnits: string | null;
+    timeline: string | null;
+    fee: unknown;
+    currency: string;
+    terms: string | null;
+    documentStorageKey: string | null;
+    documentFileName: string | null;
+    documentMimeType: string | null;
+    updatedAt: Date;
+    sentAt: Date | null;
+    acceptedAt: Date | null;
+  } | null;
+  assessmentReference?: string | null;
+  qualification?: {
+    jobTitle?: string | null;
+    country?: string | null;
+    primaryConcern?: string | null;
+    operationalSitesLabel?: string | null;
+    securityExpenditureLabel?: string | null;
+  } | null;
+}) {
+  const snapshot = readProposalContextSnapshot(input.activeProposal?.contextSnapshot);
+  const proposal = input.activeProposal;
+
+  return {
+    proposalRequest: input.lead.proposalReference
+      ? {
+          reference: input.lead.proposalReference,
+          requestedAt: input.lead.proposalRequestedAt,
+          status: input.lead.proposalStatus,
+          sourceTriageReference:
+            snapshot?.triageReference || input.assessmentReference || null,
+        }
+      : null,
+    prospect: {
+      firstName: snapshot?.prospect.firstName || input.lead.firstName,
+      lastName: snapshot?.prospect.lastName || input.lead.lastName,
+      email: snapshot?.prospect.email || input.lead.email,
+      phone: snapshot?.prospect.phone ?? input.lead.phone,
+      jobTitle: snapshot?.prospect.jobTitle || input.qualification?.jobTitle || null,
+    },
+    organisation: {
+      name: snapshot?.organisation.name || input.lead.organisationName,
+      country: snapshot?.organisation.country || input.qualification?.country || null,
+      industry: snapshot?.organisation.industry || input.lead.industry,
+      operationalSitesLabel:
+        snapshot?.organisation.operationalSitesLabel
+        || input.qualification?.operationalSitesLabel
+        || null,
+      securityExpenditureLabel:
+        snapshot?.organisation.securityExpenditureLabel
+        || input.qualification?.securityExpenditureLabel
+        || null,
+    },
+    triageIndication: snapshot
+      ? {
+          reference: snapshot.triageReference,
+          assuranceScore: snapshot.assuranceScore,
+          assuranceBand: snapshot.assuranceBand,
+          assuranceBandLabel: snapshot.assuranceBandLabel,
+          dimensionResults: snapshot.dimensionResults,
+          strongestIndicators: snapshot.strongestIndicators,
+          primaryConcern: snapshot.primaryConcern,
+          recommendedProduct: snapshot.recommendedProduct,
+          recommendedProductCode: snapshot.recommendedProductCode,
+          capturedAt: snapshot.capturedAt,
+        }
+      : null,
+    commercialScope: {
+      clientObjective:
+        proposal?.objectives || input.lead.scopeClientObjectives || null,
+      sitesOrBusinessUnits:
+        proposal?.sitesOrBusinessUnits || input.lead.scopeSitesOrBusinessUnits || null,
+      indicativeScope: proposal?.scopeSummary || input.lead.scopeIndicativeScope || null,
+      timeline: proposal?.timeline || input.lead.scopeExpectedTimeline || null,
+      fee: proposal?.fee != null ? Number(proposal.fee) : null,
+      currency: proposal?.currency || 'ZAR',
+      terms: proposal?.terms || null,
+      commercialNotes: input.lead.scopeCommercialNotes || null,
+    },
+    proposalDocument: proposal?.documentStorageKey
+      ? {
+          proposalId: proposal.id,
+          fileName: proposal.documentFileName,
+          mimeType: proposal.documentMimeType,
+          uploadedAt: proposal.updatedAt,
+          status: proposal.status,
+          sentAt: proposal.sentAt,
+          acceptedAt: proposal.acceptedAt,
+        }
+      : null,
+    activeProposalId: proposal?.id || null,
+    activeProposalNumber: proposal?.proposalNumber || input.lead.proposalReference || null,
+    activeProposalStatus: proposal?.status || null,
+  };
+}
