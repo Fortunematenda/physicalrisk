@@ -887,6 +887,56 @@ tr:last-child td { border-bottom:0; }
 input, select, textarea { width:100%; border:1px solid #ccd4da; background:#fff; border-radius:9px; padding:10px 11px; color:var(--ink); }
 input:focus, select:focus, textarea:focus { outline:3px solid rgba(196,18,48,.12); border-color:var(--pr-red); }
 textarea { min-height:90px; resize:none; }
+
+/* Gmail-style email composer: neutralize global red focus chrome on the message editor */
+textarea.email-composer-message {
+  min-height: 280px;
+  border: 1px solid #dadce0;
+  border-radius: 11px;
+  padding: 16px 18px;
+  color: #202124;
+  background: #fff;
+  box-shadow: none;
+  outline: none;
+}
+textarea.email-composer-message.email-composer-message--inline {
+  min-height: 88px;
+  max-height: 180px;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 4px 4px;
+  box-shadow: none;
+}
+textarea.email-composer-message:hover {
+  border-color: #c0c4c8;
+  outline: none;
+  box-shadow: none;
+}
+textarea.email-composer-message.email-composer-message--inline:hover,
+textarea.email-composer-message.email-composer-message--inline:focus,
+textarea.email-composer-message.email-composer-message--inline:focus-visible {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+textarea.email-composer-message:focus,
+textarea.email-composer-message:focus-visible {
+  border-color: #bdc1c6;
+  outline: none;
+  box-shadow: none;
+}
+
+input.email-composer-subject,
+input.email-composer-subject:focus,
+input.email-composer-subject:focus-visible {
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
 .section-title { margin:28px 0 12px; font-size:17px; }
 .question { padding:18px 0; border-bottom:1px solid var(--line); }
 .question:last-child { border-bottom:0; }
@@ -3281,3 +3331,15 @@ textarea { min-height:90px; resize:none; }
 .triage-detail-timeline>div{display:flex;gap:12px;position:relative;padding:0 0 15px}.triage-detail-dot{width:9px;height:9px;border-radius:999px;background:#be123c;margin-top:5px;flex:0 0 auto}.triage-detail-timeline strong{display:block;font-size:13px;color:#334155}.triage-detail-timeline small{display:block;margin-top:3px;color:#94a3b8}
 @media(max-width:1200px){.triage-admin-stats{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.triage-admin-page{padding:16px}.triage-admin-stats{grid-template-columns:1fr 1fr}.triage-detail-grid{grid-template-columns:1fr}.triage-detail-hero,.triage-detail-intent-banner{flex-direction:column}.triage-detail-actions{justify-content:flex-start}.triage-detail-card dl>div{grid-template-columns:1fr;gap:4px}}
+
+/* Proposal rich-text editor (TipTap) */
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #94a3b8;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.ProseMirror:focus {
+  outline: none;
+}

@@ -269,6 +269,45 @@ enum TriageProposalSource {
   UPLOAD
 }
 
+enum CommunicationDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum CommunicationMessageType {
+  OUTBOUND_EMAIL
+  INBOUND_EMAIL
+  OUTBOUND_CALL
+  INBOUND_CALL
+  CALL_NOTE
+  SYSTEM
+}
+
+enum CommunicationMessageStatus {
+  DRAFT
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  RECEIVED
+  BOUNCED
+}
+
+enum CommunicationThreadStatus {
+  OPEN
+  CLOSED
+}
+
+enum CommunicationCallOutcome {
+  CLIENT_REACHED
+  NO_ANSWER
+  VOICEMAIL
+  WRONG_NUMBER
+  CALLBACK_REQUESTED
+  MEETING_ARRANGED
+  OTHER
+}
+
 enum AdvisoryRoutePriority {
   HIGH
   RECOMMENDED
@@ -385,29 +424,42 @@ model User {
   triageFollowUpLeads PublicLead[] @relation("TriageFollowUpOwner")
   triageContactActivities TriageContactActivity[] @relation("TriageContactAuthor")
   triageProposalsCreated TriageProposal[] @relation("TriageProposalCreator")
+  proposalConsultantProfiles ProposalConsultantProfile[] @relation("ProposalConsultantUser")
   triageNotesAuthored TriageNote[] @relation("TriageNoteAuthor")
+  communicationThreadsCreated CommunicationThread[] @relation("CommunicationThreadCreator")
+  communicationMessagesSent CommunicationMessage[] @relation("CommunicationMessageSender")
+  communicationMessagesDeleted CommunicationMessage[] @relation("CommunicationMessageDeletedBy")
+  communicationMessageReads CommunicationMessageRead[] @relation("CommunicationMessageReader")
   advisoryOutcomesConfirmed AdvisoryDiagnosticOutcome[] @relation("AdvisoryOutcomeConfirmer")
   auditEvents  AuditEvent[]
 }
 
 model Organisation {
-  id               String       @id @default(cuid())
-  name             String
-  industry         String?
-  registrationNo   String?
-  website          String?
-  primaryEmail     String?
-  primaryPhone     String?
-  espocrmAccountId String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  memberships      Membership[]
-  sites            Site[]
-  assessments      AssessmentSession[]
-  somodAssessments SomodAssessment[]
-  crmSyncRecords   CrmSyncRecord[]
-  actionItems      ActionItem[]
-  triageProposals  TriageProposal[]
+  id                      String       @id @default(cuid())
+  name                    String
+  legalName               String?
+  tradingName             String?
+  industry                String?
+  registrationNo          String?
+  vatNumber               String?
+  website                 String?
+  primaryEmail            String?
+  primaryPhone            String?
+  headOfficeAddress       String?
+  country                 String?
+  operationalRegions      String?
+  operationalSiteBand     String?
+  annualSecuritySpendBand String?
+  espocrmAccountId        String?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+  memberships             Membership[]
+  sites                   Site[]
+  assessments             AssessmentSession[]
+  somodAssessments        SomodAssessment[]
+  crmSyncRecords          CrmSyncRecord[]
+  actionItems             ActionItem[]
+  triageProposals         TriageProposal[]
 }
 
 /// Shared site master data in the diagnostic platform DB (not Repository).
@@ -1267,6 +1319,8 @@ model PublicLead {
   triageNotes           TriageNote[]
   contactActivities     TriageContactActivity[]
   proposals             TriageProposal[] @relation("TriageLeadProposals")
+  communicationThreads  CommunicationThread[]
+  communicationMessages CommunicationMessage[]
 }
 
 model TriageContactActivity {
@@ -1287,49 +1341,150 @@ model TriageContactActivity {
 }
 
 model TriageProposal {
-  id                   String               @id @default(cuid())
-  proposalNumber       String               @unique
-  publicLeadId         String
-  organisationId       String?
+  id                       String               @id @default(cuid())
+  proposalNumber           String               @unique
+  publicLeadId             String
+  organisationId           String?
   /// Source Executive Governance Triage assessment (EGT reference).
-  sourceAssessmentId   String?
-  productCode          String               @default("EXECUTIVE_ADVISORY_DIAGNOSTIC")
-  title                String
-  scopeSummary         String?
-  objectives           String?
-  sitesOrBusinessUnits String?
-  deliverables         String?
-  evidenceRequirements String?
-  timeline             String?
-  fee                  Decimal?             @db.Decimal(12, 2)
-  currency             String               @default("ZAR")
-  validUntil           DateTime?
-  terms                String?
+  sourceAssessmentId       String?
+  productCode              String               @default("EXECUTIVE_ADVISORY_DIAGNOSTIC")
+  templateId               String?
+  templateVersion          Int?
+  title                    String
+  subtitle                 String?
+  scopeSummary             String?
+  objectives               String?
+  sitesOrBusinessUnits     String?
+  deliverables             String?
+  evidenceRequirements     String?
+  timeline                 String?
+  fee                      Decimal?             @db.Decimal(12, 2)
+  currency                 String               @default("ZAR")
+  validUntil               DateTime?
+  terms                    String?
+  understandingOfNeeds     String?
+  methodology              String?
+  approach                 String?
+  exclusions               String?
+  assumptions              String?
+  statementOfResponsibility String?
+  termsAndConditions       String?
+  acceptanceTerms          String?
+  analystHourlyRate        Decimal?             @db.Decimal(10, 2)
+  specialistHourlyRate     Decimal?             @db.Decimal(10, 2)
+  discount                 Decimal?             @db.Decimal(12, 2)
+  vatRate                  Decimal?             @db.Decimal(5, 4)
+  expensesEstimate         Decimal?             @db.Decimal(12, 2)
+  paymentTerms             String?
+  estimatedProjectWeeks    Int?
+  timelineNarrative        String?
+  projectSponsor           String?
+  projectChampion          String?
   /// Frozen triage indication at proposal request time (assurance score, bands, indicators).
-  contextSnapshot      Json?
-  status               TriageProposalStatus @default(DRAFT)
-  source               TriageProposalSource @default(PLATFORM)
-  documentStorageKey   String?
-  documentFileName     String?
-  documentMimeType     String?
-  documentSizeBytes    Int?
-  version              Int                  @default(1)
-  createdById          String
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  sentAt               DateTime?
-  acceptedAt           DateTime?
-  declinedAt           DateTime?
-  publicLead           PublicLead           @relation("TriageLeadProposals", fields: [publicLeadId], references: [id], onDelete: Cascade)
-  organisation         Organisation?        @relation(fields: [organisationId], references: [id], onDelete: SetNull)
-  sourceAssessment     AssessmentSession?   @relation("TriageProposalSourceAssessment", fields: [sourceAssessmentId], references: [id], onDelete: SetNull)
-  createdBy            User                 @relation("TriageProposalCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  acceptedForLead      PublicLead?          @relation("AcceptedTriageProposal")
+  contextSnapshot          Json?
+  /// Engagement-specific structured content (phases, fees, team, timeline).
+  contentSnapshot          Json?
+  /// Immutable copy of content at send time.
+  sentSnapshot               Json?
+  status                   TriageProposalStatus @default(DRAFT)
+  source                   TriageProposalSource @default(PLATFORM)
+  documentStorageKey       String?
+  documentFileName         String?
+  documentMimeType         String?
+  documentSizeBytes        Int?
+  version                  Int                  @default(1)
+  createdById              String
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  sentAt                   DateTime?
+  viewedAt                 DateTime?
+  acceptedAt               DateTime?
+  declinedAt               DateTime?
+  publicLead               PublicLead           @relation("TriageLeadProposals", fields: [publicLeadId], references: [id], onDelete: Cascade)
+  organisation             Organisation?        @relation(fields: [organisationId], references: [id], onDelete: SetNull)
+  sourceAssessment         AssessmentSession?   @relation("TriageProposalSourceAssessment", fields: [sourceAssessmentId], references: [id], onDelete: SetNull)
+  template                 ProposalTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdBy                User                 @relation("TriageProposalCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  acceptedForLead          PublicLead?          @relation("AcceptedTriageProposal")
 
   @@index([publicLeadId, createdAt])
   @@index([organisationId])
   @@index([sourceAssessmentId])
   @@index([status])
+  @@index([templateId])
+}
+
+/// Approved Physical Risk proposal template configuration per product.
+model ProposalTemplate {
+  id                         String           @id @default(cuid())
+  name                       String
+  productCode                String           @unique
+  version                    Int              @default(1)
+  active                     Boolean          @default(true)
+  titleTemplate              String
+  subtitleTemplate           String?
+  understandingNeedsTemplate String?
+  objectiveTemplate          String?
+  methodologyTemplate        String?
+  scopeTemplate              String?
+  approachTemplate           String?
+  deliverablesTemplate       String?
+  exclusionsTemplate         String?
+  assumptionTemplate         String?
+  responsibilityTemplate     String?
+  termsTemplate              String?
+  acceptanceTemplate         String?
+  feeDefaults                Json?
+  defaultPhases              Json?
+  defaultMethodologyItems    Json?
+  defaultDeliverableSections Json?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  proposals                  TriageProposal[]
+
+  @@index([active])
+}
+
+/// Reusable consultant profile for proposal team sections.
+model ProposalConsultantProfile {
+  id                      String   @id @default(cuid())
+  userId                  String?
+  name                    String
+  role                    String?
+  projectPosition         String?
+  biography               String?
+  summary                 String?
+  relevantAreasOfKnowledge String?
+  qualifications          String?
+  yearsExperience         Int?
+  photoStorageKey         String?
+  displayOrder            Int      @default(0)
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  user                    User?    @relation("ProposalConsultantUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([active, displayOrder])
+  @@index([userId])
+}
+
+/// Reusable relevant experience records for proposals.
+model ProposalRelevantExperience {
+  id            String   @id @default(cuid())
+  clientName    String
+  engagementTitle String?
+  description   String
+  industry      String?
+  country       String?
+  serviceType   String?
+  startYear     Int?
+  endYear       Int?
+  displayOrder  Int      @default(0)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active, displayOrder])
 }
 
 enum TriageNoteCategory {
@@ -1356,6 +1511,101 @@ model TriageNote {
 
   @@index([publicLeadId, createdAt])
   @@index([authorId])
+}
+
+model CommunicationThread {
+  id                 String                    @id @default(cuid())
+  threadNumber       String                    @unique
+  publicLeadId       String
+  level2AssessmentId String?
+  subject            String?
+  status             CommunicationThreadStatus @default(OPEN)
+  correlationToken   String                    @unique
+  createdByUserId    String?
+  unreadInboundCount Int                       @default(0)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  lastMessageAt      DateTime?
+  publicLead         PublicLead                @relation(fields: [publicLeadId], references: [id], onDelete: Cascade)
+  createdBy          User?                     @relation("CommunicationThreadCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  messages           CommunicationMessage[]
+
+  @@index([publicLeadId, lastMessageAt])
+  @@index([level2AssessmentId])
+  @@index([lastMessageAt])
+}
+
+model CommunicationMessage {
+  id                String                     @id @default(cuid())
+  threadId          String?
+  publicLeadId      String
+  type              CommunicationMessageType
+  direction         CommunicationDirection
+  provider          String                     @default("SMTP")
+  providerMessageId String?                    @unique
+  internetMessageId String?                    @unique
+  inReplyTo         String?
+  referencesHeader  String?
+  fromAddress       String
+  toAddresses       String[]
+  ccAddresses       String[]                   @default([])
+  bccAddresses      String[]                   @default([])
+  subject           String?
+  textBody          String?
+  htmlBody          String?
+  previewText       String?
+  status            CommunicationMessageStatus @default(DRAFT)
+  sentByUserId      String?
+  errorMessage      String?
+  telephoneNumber   String?
+  contactedPerson   String?
+  callOutcome       CommunicationCallOutcome?
+  durationSeconds   Int?
+  followUpRequired  Boolean                    @default(false)
+  followUpDate      DateTime?
+  receivedAt        DateTime?
+  sentAt            DateTime?
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  thread            CommunicationThread?       @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  publicLead        PublicLead                 @relation(fields: [publicLeadId], references: [id], onDelete: Cascade)
+  sentBy            User?                      @relation("CommunicationMessageSender", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  deletedBy         User?                      @relation("CommunicationMessageDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  attachments       CommunicationAttachment[]
+  readReceipts      CommunicationMessageRead[]
+
+  @@index([publicLeadId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([inReplyTo])
+  @@index([status])
+  @@index([publicLeadId, deletedAt])
+}
+
+model CommunicationAttachment {
+  id        String               @id @default(cuid())
+  messageId String
+  filename  String
+  mimeType  String
+  sizeBytes Int
+  storageKey String
+  createdAt DateTime             @default(now())
+  message   CommunicationMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model CommunicationMessageRead {
+  id        String               @id @default(cuid())
+  messageId String
+  userId    String
+  readAt    DateTime             @default(now())
+  message   CommunicationMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                 @relation("CommunicationMessageReader", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId])
 }
 
 model ContactSubmission {

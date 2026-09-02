@@ -109,6 +109,44 @@ export function resolveSclReportBrandConfig(config?: ConfigService | null): SclR
   };
 }
 
+/** Full-width slide header banner from the Physical Risk proposal PowerPoint master. */
+export function resolveProposalSlideHeaderPath(): string | null {
+  const absoluteOverride = process.env.PROPOSAL_SLIDE_HEADER_PATH?.trim();
+  const candidates = [
+    absoluteOverride,
+    join(__dirname, 'assets', 'proposal-slide-header.png'),
+    join(process.cwd(), 'src', 'reports', 'assets', 'proposal-slide-header.png'),
+    join(process.cwd(), 'apps', 'api', 'src', 'reports', 'assets', 'proposal-slide-header.png'),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Cover-page wordmark from the Example Tender PPTX (image1.jpg). */
+export function resolveProposalCoverLogoPath(): string | null {
+  const absoluteOverride = process.env.PROPOSAL_COVER_LOGO_PATH?.trim();
+  const candidates = [
+    absoluteOverride,
+    join(__dirname, 'assets', 'proposal-cover-logo.jpg'),
+    join(process.cwd(), 'src', 'reports', 'assets', 'proposal-cover-logo.jpg'),
+    join(process.cwd(), 'apps', 'api', 'src', 'reports', 'assets', 'proposal-cover-logo.jpg'),
+    join(__dirname, 'assets', 'physical_risk_logo_article.png'),
+    join(process.cwd(), 'src', 'reports', 'assets', 'physical_risk_logo_article.png'),
+    join(process.cwd(), 'apps', 'api', 'src', 'reports', 'assets', 'physical_risk_logo_article.png'),
+    join(__dirname, 'assets', 'physical_risk_logo_main.png'),
+    join(process.cwd(), '..', 'web', 'public', 'physical_risk_logo_main.png'),
+    join(process.cwd(), 'apps', 'web', 'public', 'physical_risk_logo_main.png'),
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function resolveSclReportLogoPath(brand: SclReportBrandConfig = DEFAULT_SCL_REPORT_BRANDING): string | null {
   const absoluteOverride = process.env.SCL_REPORT_LOGO_PATH?.trim();
   const candidates = [

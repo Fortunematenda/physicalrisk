@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { generateProposalReference } from '../common/proposal-reference';
 import { buildProposalContextSnapshot } from '../common/triage-proposal-context';
+import { buildDefaultContentSnapshot, resolveTemplateConfig } from './proposal/proposal-content-builder';
 import { operationalSitesLabelFromStored, securityExpenditureLabelFromStored } from '@moss/shared';
 
 export type ProposalRequestResult = {
@@ -129,6 +130,16 @@ export class TriageProposalRequestService {
       });
 
       const draftCreated = !proposal;
+      const productCode = 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+      const template = resolveTemplateConfig(productCode);
+      const defaultContent = buildDefaultContentSnapshot(productCode, template);
+      const feeDefaults = template.feeDefaults || {
+        analystHourlyRate: 985,
+        specialistHourlyRate: 1825,
+        vatRate: 0.15,
+        currency: 'ZAR',
+        paymentTerms: '50% on acceptance, 50% on delivery',
+      };
       if (!proposal) {
         proposal = await tx.triageProposal.create({
           data: {
@@ -136,11 +147,17 @@ export class TriageProposalRequestService {
             publicLeadId: leadId,
             organisationId: freshLead.organisationId,
             sourceAssessmentId: assessment.id,
-            productCode: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
+            productCode,
             title: `${freshLead.organisationName} — Executive Advisory Diagnostic`,
             status: TriageProposalStatus.DRAFT,
             source: TriageProposalSource.PLATFORM,
             contextSnapshot: contextSnapshot as object,
+            contentSnapshot: defaultContent as object,
+            analystHourlyRate: feeDefaults.analystHourlyRate,
+            specialistHourlyRate: feeDefaults.specialistHourlyRate,
+            vatRate: feeDefaults.vatRate,
+            paymentTerms: feeDefaults.paymentTerms,
+            currency: feeDefaults.currency,
             createdById: systemUserId,
           },
         });

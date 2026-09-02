@@ -92,49 +92,66 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
 export type NavBadges = {
   reviewQueue: number;
   failedEmails: number;
+  unreadTriageEmails: number;
 };
 
 export function useNavBadges(): NavBadges {
   const [badges, setBadges] = useState<NavBadges>({
     reviewQueue: 0,
     failedEmails: 0,
+    unreadTriageEmails: 0,
   });
 
   useEffect(() => {
     const role = resolveMvpNavRole(getStoredUser()?.role || 'CLIENT_EXECUTIVE');
     if (role === 'CLIENT') return;
 
-    Promise.all([
-      role === 'ADMIN' || role === 'ANALYST'
-        ? apiFetch<{
-            awaitingReview?: unknown[];
-            summary?: { totalInQueue?: number };
-          }>('/analyst/queue').catch(() => ({
-            awaitingReview: [] as unknown[],
-            summary: undefined as { totalInQueue?: number } | undefined,
-          }))
-        : Promise.resolve({
-            awaitingReview: [] as unknown[],
-            summary: undefined as { totalInQueue?: number } | undefined,
-          }),
-      role === 'ADMIN'
-        ? apiFetch<Array<{ status: string }>>('/admin/emails').catch(() => [])
-        : Promise.resolve([]),
-    ]).then(([queue, emails]) => {
-      const queueCount =
-        typeof queue.summary?.totalInQueue === 'number'
-          ? queue.summary.totalInQueue
-          : Array.isArray(queue.awaitingReview)
-            ? queue.awaitingReview.length
-            : 0;
+    let cancelled = false;
+    const loadBadges = () => {
+      Promise.all([
+        role === 'ADMIN' || role === 'ANALYST'
+          ? apiFetch<{
+              awaitingReview?: unknown[];
+              summary?: { totalInQueue?: number };
+            }>('/analyst/queue').catch(() => ({
+              awaitingReview: [] as unknown[],
+              summary: undefined as { totalInQueue?: number } | undefined,
+            }))
+          : Promise.resolve({
+              awaitingReview: [] as unknown[],
+              summary: undefined as { totalInQueue?: number } | undefined,
+            }),
+        role === 'ADMIN'
+          ? apiFetch<Array<{ status: string }>>('/admin/emails').catch(() => [])
+          : Promise.resolve([]),
+        apiFetch<{ unreadCount?: number }>('/triage/communications/unread-summary').catch(() => ({
+          unreadCount: 0,
+        })),
+      ]).then(([queue, emails, triageUnread]) => {
+        if (cancelled) return;
+        const queueCount =
+          typeof queue.summary?.totalInQueue === 'number'
+            ? queue.summary.totalInQueue
+            : Array.isArray(queue.awaitingReview)
+              ? queue.awaitingReview.length
+              : 0;
 
-      setBadges({
-        reviewQueue: queueCount,
-        failedEmails: Array.isArray(emails)
-          ? emails.filter((e) => e.status === 'FAILED').length
-          : 0,
+        setBadges({
+          reviewQueue: queueCount,
+          failedEmails: Array.isArray(emails)
+            ? emails.filter((e) => e.status === 'FAILED').length
+            : 0,
+          unreadTriageEmails: Number(triageUnread?.unreadCount || 0),
+        });
       });
-    });
+    };
+
+    loadBadges();
+    const timer = window.setInterval(loadBadges, 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return badges;

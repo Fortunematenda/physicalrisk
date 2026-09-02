@@ -13,6 +13,8 @@ import {
   ChevronRight,
   Circle,
   Loader2,
+  Mail,
+  Phone,
 } from 'lucide-react';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
 import { IconMoreVertical } from '@/components/NavIcons';
@@ -20,12 +22,14 @@ import { AuthGate } from '@/components/AuthGate';
 import { Shell } from '@/components/Shell';
 import { TriageNotesPanel, type TriageNoteItem } from '@/components/triage/TriageNotesPanel';
 import { TriageCommercialPanel } from '@/components/triage/TriageCommercialPanel';
+import { TriageCommunicationsPanel } from '@/components/triage/TriageCommunicationsPanel';
 import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { MetricCard } from '@/components/ui/metric-card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,8 +40,9 @@ import { apiFetch } from '@/lib/api';
 import { uploadTriageProposal } from '@/lib/triage-proposal-upload';
 import { cn } from '@/lib/utils';
 
-const TAB_IDS = ['overview', 'scores', 'responses', 'commercial', 'journey', 'notes'] as const;
+const TAB_IDS = ['overview', 'scores', 'responses', 'commercial', 'communications', 'journey', 'notes'] as const;
 type TabId = (typeof TAB_IDS)[number];
+type CommunicationsAction = 'compose' | 'call' | 'log-call';
 
 function parseTabId(value: string | null): TabId {
   if (value && TAB_IDS.includes(value as TabId)) return value as TabId;
@@ -114,12 +119,22 @@ function normalizePrimaryCta(
 ) {
   if (!cta || cta.kind === 'none') return null;
   if (cta.kind === 'open_proposal' || cta.kind === 'prepare_proposal' || cta.kind === 'upload_proposal') {
-    if (activeProposal?.documentStorageKey) return null;
+    if (activeProposal?.documentStorageKey) {
+      return { kind: 'send_proposal', label: 'Send proposal' };
+    }
     return { kind: 'complete_proposal', label: 'Continue preparation' };
   }
-  // Legacy API: never surface Mark sent as the primary red header CTA.
+  // Legacy API: Mark sent becomes a real send action.
   if (cta.kind === 'mark_sent') {
-    return { kind: 'complete_proposal', label: 'Send proposal' };
+    return { kind: 'send_proposal', label: 'Send proposal' };
+  }
+  // Legacy: complete_proposal with Send label → actual send when a PDF exists.
+  if (
+    cta.kind === 'complete_proposal'
+    && /send proposal/i.test(cta.label)
+    && activeProposal?.documentStorageKey
+  ) {
+    return { kind: 'send_proposal', label: 'Send proposal' };
   }
   return cta;
 }
@@ -231,8 +246,10 @@ export default function TriageSubmissionDetailPage() {
   const searchParams = useSearchParams();
   const params = useParams<{ id: string }>();
   const id = String(params?.id || '');
-  const tab = parseTabId(searchParams.get('tab'));
+  const urlTab = parseTabId(searchParams.get('tab'));
+  const [tab, setTabState] = useState<TabId>(urlTab);
   const [item, setItem] = useState<any>(null);
+  const itemRef = useRef<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -242,13 +259,28 @@ export default function TriageSubmissionDetailPage() {
   const [leadMenuOpen, setLeadMenuOpen] = useState(false);
   const proposalFileRef = useRef<HTMLInputElement>(null);
 
+  // Keep local tab in sync when URL changes externally (back/forward, deep links).
+  useEffect(() => {
+    setTabState(urlTab);
+  }, [urlTab]);
+
   const commercialFocus = (() => {
     const focus = searchParams.get('focus');
     return focus === 'proposal' || focus === 'contact' ? focus : null;
   })();
 
+  const commAction = (() => {
+    const action = searchParams.get('action');
+    if (action === 'compose' || action === 'call' || action === 'log-call') return action as CommunicationsAction;
+    return null;
+  })();
+
+  const [unreadCommCount, setUnreadCommCount] = useState(0);
+
   const setTab = useCallback(
-    (next: TabId, opts?: { focus?: 'proposal' | 'contact' }) => {
+    (next: TabId, opts?: { focus?: 'proposal' | 'contact'; action?: CommunicationsAction | null }) => {
+      // Update UI immediately — do not wait for the router round-trip.
+      setTabState(next);
       const params = new URLSearchParams(searchParams.toString());
       if (next === 'overview') {
         params.delete('tab');
@@ -260,6 +292,13 @@ export default function TriageSubmissionDetailPage() {
       } else {
         params.delete('focus');
       }
+      if (opts?.action) {
+        params.set('action', opts.action);
+      } else if (opts?.action === null) {
+        params.delete('action');
+      } else if (next !== 'communications') {
+        params.delete('action');
+      }
       const qs = params.toString();
       router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
     },
@@ -270,6 +309,14 @@ export default function TriageSubmissionDetailPage() {
     const params = new URLSearchParams(searchParams.toString());
     if (!params.has('focus')) return;
     params.delete('focus');
+    const qs = params.toString();
+    router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
+  }, [id, router, searchParams]);
+
+  const clearCommAction = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (!params.has('action')) return;
+    params.delete('action');
     const qs = params.toString();
     router.replace(qs ? `/triage/${id}?${qs}` : `/triage/${id}`, { scroll: false });
   }, [id, router, searchParams]);
@@ -301,26 +348,33 @@ export default function TriageSubmissionDetailPage() {
     return () => window.clearTimeout(timer);
   }, [tab, commercialFocus, clearCommercialFocus]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { soft?: boolean }) => {
     setError('');
+    // Never blank the whole page when we already have data (tab changes / soft refresh).
+    const soft = Boolean(opts?.soft) || Boolean(itemRef.current);
+    if (!soft) setLoading(true);
     try {
       const data = await apiFetch<any>(`/triage/submissions/${id}`);
       setItem(data);
+      itemRef.current = data;
       // Reports link with assessment id; canonical URL uses the lead/submission id.
       if (data?.id && data.id !== id) {
-        const qs = searchParams.toString();
-        router.replace(qs ? `/triage/${data.id}?${qs}` : `/triage/${data.id}`);
+        const qs =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).toString()
+            : '';
+        router.replace(qs ? `/triage/${data.id}?${qs}` : `/triage/${data.id}`, { scroll: false });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load submission.');
     } finally {
       setLoading(false);
     }
-  }, [id, router, searchParams]);
+  }, [id, router]);
 
   useEffect(() => {
-    if (id) void load();
+    itemRef.current = null;
+    if (id) void load({ soft: false });
   }, [id, load]);
 
   useEffect(() => {
@@ -328,12 +382,19 @@ export default function TriageSubmissionDetailPage() {
     apiFetch<any[]>('/triage/commercial-owners').then(setCommercialOwners).catch(() => []);
   }, []);
 
+  useEffect(() => {
+    if (!id) return;
+    apiFetch<{ unreadCount: number }>(`/triage/submissions/${id}/communications/summary`)
+      .then((summary) => setUnreadCommCount(summary.unreadCount || 0))
+      .catch(() => setUnreadCommCount(0));
+  }, [id, tab]);
+
   async function run(fn: () => Promise<void>, success?: { title: string; description: string }) {
     setBusy(true);
     setError('');
     try {
       await fn();
-      await load();
+      await load({ soft: true });
       if (success) {
         toast({
           id: `triage-${success.title}`,
@@ -393,7 +454,7 @@ export default function TriageSubmissionDetailPage() {
         file,
         `${item.organisationName} — Executive Advisory Diagnostic`,
       );
-      await load();
+      await load({ soft: true });
       toast({
         title: 'Proposal uploaded',
         description: `${file.name} was uploaded successfully.`,
@@ -432,7 +493,7 @@ export default function TriageSubmissionDetailPage() {
         body: JSON.stringify(force ? { force: true } : {}),
       });
       if (data?.engagement?.id) window.location.href = `/advisory/${data.engagement.id}`;
-      else await load();
+      else await load({ soft: true });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unable to create the Executive Advisory Diagnostic.';
       setError(message);
@@ -463,9 +524,20 @@ export default function TriageSubmissionDetailPage() {
       case 'complete_proposal':
         setTab('commercial', { focus: 'proposal' });
         break;
+      case 'send_proposal':
       case 'mark_sent':
-        // Secondary path only — primary CTA is remapped to complete_proposal.
-        setTab('commercial', { focus: 'proposal' });
+        await run(
+          async () => {
+            await apiFetch(`/triage/submissions/${id}/proposal-send`, {
+              method: 'POST',
+              body: JSON.stringify({}),
+            });
+          },
+          {
+            title: 'Proposal sent successfully',
+            description: 'The client has been emailed and the proposal status is Sent.',
+          },
+        );
         break;
       case 'create_level2':
         await convert(false);
@@ -548,7 +620,7 @@ export default function TriageSubmissionDetailPage() {
     if (item.closedAt && !isConverted) {
       return {
         title: 'Lead closed',
-        body: 'This triage lead is closed. Reopen is not available from this screen.',
+        body: 'This triage lead is closed. Use Reopen lead in the ⋮ menu if you want to continue.',
         badge: { label: 'Closed', variant: 'secondary' as const },
       };
     }
@@ -626,17 +698,28 @@ export default function TriageSubmissionDetailPage() {
   if (loading || !item) {
     return (
       <AuthGate>
-        <Shell title="Triage submission">
+        <Shell title="Triage submission" hideSearch>
           {error ? (
             <Alert variant="destructive">
               <AlertTitle>Unable to load</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : (
-            <div className="space-y-3">
-              <Skeleton className="h-36 w-full rounded-xl" />
+            <div className="triage-detail-workspace space-y-4 pb-8">
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-8 w-72 max-w-full" />
+                <Skeleton className="h-4 w-56" />
+                <div className="flex justify-between gap-3 pt-2">
+                  <Skeleton className="h-8 w-40" />
+                  <Skeleton className="h-9 w-56" />
+                </div>
+              </div>
               <Skeleton className="h-10 w-full rounded-lg" />
-              <Skeleton className="h-64 w-full rounded-xl" />
+              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <Skeleton className="mb-4 h-5 w-40" />
+                <Skeleton className="h-48 w-full rounded-lg" />
+              </div>
             </div>
           )}
         </Shell>
@@ -647,14 +730,7 @@ export default function TriageSubmissionDetailPage() {
   const commercialNeedsAction =
     ['REQUESTED', 'IN_PREPARATION', 'SENT'].includes(proposalStatus) && !item.convertedAt && !item.closedAt;
 
-  const canUploadProposal =
-    Boolean(item.completedAt)
-    && !item.closedAt
-    && !item.convertedAt
-    && !item.activeProposal?.documentStorageKey;
-
   const displayCta = normalizePrimaryCta(item.primaryCta, item.activeProposal);
-  const convertedToLevel2 = Boolean(item.convertedAt || item.convertedAssessmentId);
 
   return (
     <AuthGate>
@@ -680,180 +756,181 @@ export default function TriageSubmissionDetailPage() {
 
           {/* Information card */}
           <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
-              <div className="min-w-0 flex-1 space-y-2">
-                <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm">
-                  <Link
-                    href="/triage"
-                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                    aria-label="Back to triage list"
-                  >
-                    <ChevronLeft className="size-4" aria-hidden="true" />
-                  </Link>
-                  <Link
-                    href="/triage"
-                    className="font-medium text-slate-500 transition-colors hover:text-slate-800"
-                  >
-                    Executive Triage
-                  </Link>
-                  <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-                  <span className="font-medium text-slate-900">{assessment?.reference || '—'}</span>
-                </nav>
-                <h1 className="text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
-                  {item.organisationName}
-                </h1>
-                <div className="flex flex-wrap items-center gap-2">
-                  {level1Complete ? (
-                    <Badge variant="success" className="shrink-0 gap-1 whitespace-nowrap">
-                      <CheckCircle2 className="size-3.5" aria-hidden="true" />
-                      Level 1 complete
-                    </Badge>
-                  ) : (
-                    <Badge variant="warning" className="shrink-0 whitespace-nowrap">
-                      Level 1 in progress
-                    </Badge>
-                  )}
-                  {isConverted ? (
-                    <Badge variant="info" className="shrink-0 whitespace-nowrap">
-                      Converted
-                    </Badge>
-                  ) : null}
-                  {band ? (
-                    <EgtAssuranceBandBadge
-                      label={band}
-                      visual={assurancePresentation?.visual}
-                      className="shrink-0"
-                    />
-                  ) : null}
+            <CardContent className="space-y-4 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm">
+                    <Link
+                      href="/triage"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                      aria-label="Back to triage list"
+                    >
+                      <ChevronLeft className="size-4" aria-hidden="true" />
+                    </Link>
+                    <Link
+                      href="/triage"
+                      className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+                    >
+                      Executive Triage
+                    </Link>
+                    <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+                    <span className="font-medium text-slate-900">{assessment?.reference || '—'}</span>
+                  </nav>
+                  <h1 className="text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
+                    {item.organisationName}
+                  </h1>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {level1Complete ? (
+                      <Badge variant="success" className="shrink-0 gap-1 whitespace-nowrap">
+                        <CheckCircle2 className="size-3.5" aria-hidden="true" />
+                        Level 1 complete
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning" className="shrink-0 whitespace-nowrap">
+                        Level 1 in progress
+                      </Badge>
+                    )}
+                    {isConverted ? (
+                      <Badge variant="info" className="shrink-0 whitespace-nowrap">
+                        Converted
+                      </Badge>
+                    ) : null}
+                    {band ? (
+                      <EgtAssuranceBandBadge
+                        label={band}
+                        visual={assurancePresentation?.visual}
+                        className="shrink-0"
+                      />
+                    ) : null}
+                  </div>
+                  <p className="text-sm text-slate-600">
+                    {[item.firstName, item.lastName].filter(Boolean).join(' ')}
+                    {item.email ? ` · ${item.email}` : ''}
+                  </p>
                 </div>
-                <p className="text-sm text-slate-600">
-                  {[item.firstName, item.lastName].filter(Boolean).join(' ')}
-                  {item.email ? ` · ${item.email}` : ''}
-                  {item.phone ? ` · ${item.phone}` : ''}
-                </p>
+
+                <div className="flex shrink-0 items-center gap-2 sm:items-start">
+                  {displayCta?.kind === 'awaiting_decision' || displayCta?.kind === 'closed' ? (
+                    <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-3 py-1.5 text-sm">
+                      {displayCta.label}
+                    </Badge>
+                  ) : displayCta && displayCta.kind !== 'upload_proposal' ? (
+                    displayCta.kind === 'open_level2' && displayCta.engagementId ? (
+                      <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
+                        <Link href={`/advisory/${displayCta.engagementId}`}>{displayCta.label}</Link>
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        className="h-10 shrink-0 whitespace-nowrap px-4"
+                        disabled={busy}
+                        onClick={() => void handlePrimaryCta()}
+                      >
+                        {displayCta.label}
+                      </Button>
+                    )
+                  ) : null}
+                  <RowActionsMenu
+                    open={leadMenuOpen}
+                    onClose={() => setLeadMenuOpen(false)}
+                    align="end"
+                    trigger={
+                      <button
+                        type="button"
+                        className="org2-menu-btn"
+                        aria-label="Lead actions"
+                        disabled={busy}
+                        onClick={() => setLeadMenuOpen((open) => !open)}
+                      >
+                        <IconMoreVertical />
+                      </button>
+                    }
+                  >
+                    {!item.closedAt && !item.convertedAt ? (
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={busy}
+                        onClick={() => {
+                          setLeadMenuOpen(false);
+                          void patch(
+                            { status: 'CLOSED' },
+                            { title: 'Lead closed', description: 'This triage lead was closed.' },
+                          );
+                        }}
+                      >
+                        Close lead
+                      </button>
+                    ) : null}
+                    {item.closedAt && !item.convertedAt ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setLeadMenuOpen(false);
+                          void patch(
+                            { status: 'REVIEWED' },
+                            {
+                              title: 'Lead reopened',
+                              description: 'This triage lead is open again.',
+                            },
+                          );
+                        }}
+                      >
+                        Reopen lead
+                      </button>
+                    ) : null}
+                  </RowActionsMenu>
+                </div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2 sm:items-start">
-                {displayCta?.kind === 'awaiting_decision' || displayCta?.kind === 'closed' ? (
-                  <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-3 py-1.5 text-sm">
-                    {displayCta.label}
-                  </Badge>
-                ) : displayCta && displayCta.kind !== 'upload_proposal' ? (
-                  displayCta.kind === 'open_level2' && displayCta.engagementId ? (
-                    <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
-                      <Link href={`/advisory/${displayCta.engagementId}`}>{displayCta.label}</Link>
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      className="h-10 shrink-0 whitespace-nowrap px-4"
-                      disabled={busy}
-                      onClick={() => void handlePrimaryCta()}
-                    >
-                      {displayCta.label}
-                    </Button>
-                  )
-                ) : null}
-                <RowActionsMenu
-                  open={leadMenuOpen}
-                  onClose={() => setLeadMenuOpen(false)}
-                  align="end"
-                  trigger={
-                    <button
-                      type="button"
-                      className="org2-menu-btn"
-                      aria-label="Lead actions"
-                      disabled={busy}
-                      onClick={() => setLeadMenuOpen((open) => !open)}
-                    >
-                      <IconMoreVertical />
-                    </button>
-                  }
-                >
-                  {canUploadProposal ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setLeadMenuOpen(false);
-                        setTab('commercial', { focus: 'proposal' });
-                      }}
-                    >
-                      Continue preparation
-                    </button>
-                  ) : null}
-                  {analysts.length ? (
-                    <>
-                      {item.assignedAnalystId && analystName ? (
-                        <p className="m-0 px-3 py-1 text-xs text-slate-600">
-                          Assigned to <strong className="font-semibold text-slate-900">{analystName}</strong>
-                        </p>
-                      ) : null}
-                      {item.assignedAnalystId && !convertedToLevel2 ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void assignAnalyst('')}
-                        >
-                          Unassign analyst
-                        </button>
-                      ) : null}
-                      <div
-                        className="px-2 py-1"
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => e.stopPropagation()}
-                      >
-                        <select
-                          aria-label={analystName ? 'Change analyst' : 'Assign analyst'}
-                          className="org2-menu-select"
-                          defaultValue=""
-                          disabled={busy}
-                          onChange={(e) => {
-                            const next = e.target.value;
-                            if (next) void assignAnalyst(next);
-                            e.currentTarget.value = '';
-                          }}
-                        >
-                          <option value="" disabled hidden>
-                            {analystName ? 'Change analyst' : 'Assign analyst'}
-                          </option>
-                          {analysts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {`${a.firstName} ${a.lastName} — ${a.systemRole}`}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
-                  ) : null}
-                  <button
+              <div className="flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
                     type="button"
-                    disabled={busy}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2 text-slate-600"
+                    disabled={!item.email?.trim()}
+                    title={item.email?.trim() ? 'Email client' : 'No email address on this submission'}
+                    onClick={() => setTab('communications', { action: 'compose' })}
+                  >
+                    <Mail className="size-3.5" aria-hidden="true" />
+                    Email client
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2 text-slate-600"
+                    disabled={!item.phone?.trim()}
+                    title={item.phone?.trim() ? `Call ${item.phone}` : 'No telephone number on this submission'}
                     onClick={() => {
-                      setLeadMenuOpen(false);
-                      setTab('notes');
+                      if (item.phone?.trim()) window.location.href = `tel:${item.phone.trim()}`;
                     }}
                   >
-                    Add internal note
-                  </button>
-                  {!item.closedAt && !item.convertedAt ? (
-                    <button
-                      type="button"
-                      className="danger"
-                      disabled={busy}
-                      onClick={() => {
-                        setLeadMenuOpen(false);
-                        void patch(
-                          { status: 'CLOSED' },
-                          { title: 'Lead closed', description: 'This triage lead was closed.' },
-                        );
-                      }}
-                    >
-                      Close lead
-                    </button>
-                  ) : null}
-                </RowActionsMenu>
+                    <Phone className="size-3.5" aria-hidden="true" />
+                    {item.phone?.trim() || 'No number'}
+                  </Button>
+                </div>
+
+                <div className="ml-auto w-full max-w-[280px] sm:w-auto">
+                  <p className="mb-1 text-xs font-medium text-slate-500">Assigned analyst</p>
+                  <FilterSelect
+                    value={item.assignedAnalystId || ''}
+                    onChange={(v) => void assignAnalyst(v)}
+                    disabled={busy || !analysts.length}
+                    placeholder="Not assigned"
+                    includeAll
+                    emptyValue=""
+                    aria-label="Assigned analyst"
+                    triggerClassName="h-9 w-full min-w-[200px]"
+                    options={analysts.map((a) => ({
+                      value: a.id,
+                      label: `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || a.id,
+                    }))}
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -887,6 +964,14 @@ export default function TriageSubmissionDetailPage() {
                     ) : proposalStatus !== 'NOT_REQUESTED' ? (
                       <Badge variant="info" className="h-5 whitespace-nowrap px-1.5">
                         Active
+                      </Badge>
+                    ) : null}
+                  </TabsTrigger>
+                  <TabsTrigger value="communications" className="shrink-0 gap-2 whitespace-nowrap">
+                    Communications
+                    {unreadCommCount > 0 ? (
+                      <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5">
+                        {unreadCommCount}
                       </Badge>
                     ) : null}
                   </TabsTrigger>
@@ -1051,27 +1136,6 @@ export default function TriageSubmissionDetailPage() {
                       </CardContent>
                     </Card>
                   </div>
-
-                  <Card className="rounded-xl border-slate-200 shadow-sm">
-                    <CardHeader>
-                      <CardTitle className="text-base">Analyst</CardTitle>
-                      <CardDescription>Primary consultant shared across Level 1 and Level 2</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {analystName ? (
-                        <div>
-                          <p className="m-0 text-base font-semibold text-slate-900">{analystName}</p>
-                          <p className="m-0 text-sm text-slate-500">
-                            {item.assignedAnalyst?.email || 'Primary analyst'}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="m-0 text-sm text-amber-800">
-                          Not assigned — use the ⋮ menu to assign a consultant.
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
                 </TabsContent>
 
                 <TabsContent value="scores" className="mt-0 space-y-4">
@@ -1230,9 +1294,19 @@ export default function TriageSubmissionDetailPage() {
                     item={item}
                     commercialOwners={commercialOwners}
                     busy={busy}
-                    onReload={load}
+                    onReload={() => load({ soft: true })}
                     focusSection={commercialFocus}
                     onFocusHandled={clearCommercialFocus}
+                  />
+                </TabsContent>
+
+                <TabsContent value="communications" className="mt-0">
+                  <TriageCommunicationsPanel
+                    submissionId={item.id}
+                    item={item}
+                    initialAction={commAction}
+                    onInitialActionHandled={clearCommAction}
+                    onSummaryChange={(summary) => setUnreadCommCount(summary.unreadCount)}
                   />
                 </TabsContent>
 

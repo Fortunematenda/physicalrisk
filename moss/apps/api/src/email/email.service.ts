@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EmailJobStatus, Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
 import nodemailer from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -22,6 +23,20 @@ type MailAttachment = {
   filename: string;
   content: Buffer;
   contentType?: string;
+};
+
+export type DirectMailInput = {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  text?: string;
+  html?: string;
+  replyTo?: string;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string;
+  attachments?: MailAttachment[];
 };
 
 export type SmtpConfig = {
@@ -191,18 +206,25 @@ export class EmailService {
     const row = await this.prisma.systemSetting.findUnique({ where: { key: SMTP_SETTING_KEY } });
     const stored = this.parseStoredSmtp(row?.value);
 
-    const hasDbHost = Boolean(stored.host);
+    // Prefer non-empty DB values; empty strings must not wipe environment SMTP.
+    const pickStr = (dbVal: string | undefined, envVal: string) =>
+      dbVal !== undefined && dbVal.trim() ? dbVal : envVal;
+
+    const hasDbHost = Boolean(stored.host?.trim());
     if (hasDbHost || row) {
       const config = normalizeSmtpConfig({
-        host: (stored.host ?? env.host) || '',
+        host: pickStr(stored.host, env.host) || '',
         port: stored.port ?? env.port ?? 587,
         secure: stored.secure ?? env.secure,
-        user: stored.user ?? env.user ?? '',
-        password: stored.password || env.password || '',
-        fromEmail: (stored.fromEmail ?? env.fromEmail) || '',
-        fromName: (stored.fromName ?? env.fromName) || 'MOSS',
+        user: pickStr(stored.user, env.user) || '',
+        password: pickStr(stored.password, env.password) || '',
+        fromEmail: pickStr(stored.fromEmail, env.fromEmail) || '',
+        fromName: pickStr(stored.fromName, env.fromName) || 'MOSS',
       });
-      return { config, source: config.host ? 'database' : (env.host ? 'environment' : 'none') };
+      return {
+        config,
+        source: hasDbHost ? 'database' : env.host ? 'environment' : 'none',
+      };
     }
 
     return {
@@ -608,5 +630,40 @@ export class EmailService {
     } catch (error: any) {
       this.logger.warn(`Email queue tick failed: ${error?.message || error}`);
     }
+  }
+
+  /** Direct transactional send with RFC threading headers (triage communications). */
+  async sendDirectMail(input: DirectMailInput) {
+    const { config } = await this.resolveSmtpConfig();
+    if (!config.host) {
+      throw new BadRequestException('SMTP is not configured.');
+    }
+    const recipients = input.to.map((v) => v.trim()).filter(Boolean);
+    if (!recipients.length) {
+      throw new BadRequestException('At least one recipient is required.');
+    }
+
+    const domain = (config.fromEmail.split('@')[1] || 'physicalrisk.com').trim();
+    const internetMessageId = input.messageId || `<${randomUUID()}@${domain}>`;
+    const transporter = this.createTransport(config);
+    const info = await transporter.sendMail({
+      from: this.formatFrom(config),
+      to: recipients.join(', '),
+      cc: input.cc?.length ? input.cc.join(', ') : undefined,
+      bcc: input.bcc?.length ? input.bcc.join(', ') : undefined,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      replyTo: input.replyTo,
+      messageId: internetMessageId,
+      inReplyTo: input.inReplyTo,
+      references: input.references,
+      attachments: input.attachments,
+    });
+
+    return {
+      internetMessageId,
+      providerMessageId: typeof info.messageId === 'string' ? info.messageId : undefined,
+    };
   }
 }

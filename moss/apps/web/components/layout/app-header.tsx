@@ -55,6 +55,8 @@ type AppHeaderProps = {
   onLogout?: () => void;
   notificationCount?: number;
   mailCount?: number;
+  notificationHref?: string;
+  notificationTitle?: string;
   className?: string;
 };
 
@@ -124,6 +126,8 @@ export function AppHeader({
   onLogout,
   notificationCount = 0,
   mailCount = 0,
+  notificationHref = '/assessments/assigned',
+  notificationTitle = 'Notifications',
   className,
 }: AppHeaderProps) {
   const router = useRouter();
@@ -508,11 +512,11 @@ export function AppHeader({
             variant="ghost"
             size="icon"
             className="relative shrink-0 text-moss-muted hover:text-moss-text"
-            aria-label="Notifications"
-            title="Notifications"
+            aria-label={notificationTitle}
+            title={notificationTitle}
             asChild
           >
-            <Link href="/assessments/assigned">
+            <Link href={notificationHref}>
               <Bell className="size-5" />
               {notificationCount > 0 && (
                 <Badge

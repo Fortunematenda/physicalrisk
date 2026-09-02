@@ -320,6 +320,18 @@ export class TriageService {
       );
     }
 
+    const leadIds = filtered.map((lead) => lead.id);
+    const unreadAgg = leadIds.length
+      ? await this.prisma.communicationThread.groupBy({
+          by: ['publicLeadId'],
+          where: { publicLeadId: { in: leadIds } },
+          _sum: { unreadInboundCount: true },
+        })
+      : [];
+    const unreadByLead = new Map(
+      unreadAgg.map((row) => [row.publicLeadId, row._sum.unreadInboundCount || 0]),
+    );
+
     const items = filtered.map((lead) => {
       const session = lead.assessmentId ? sessionById.get(lead.assessmentId) : null;
       const conversion = lead.convertedAssessmentId ? convertedById.get(lead.convertedAssessmentId) : null;
@@ -328,6 +340,7 @@ export class TriageService {
         ...lead,
         displayStatus: this.displayStatus(lead),
         intent: this.commercialIntent(lead),
+        unreadReplyCount: unreadByLead.get(lead.id) || 0,
         assessment: session
           ? {
               id: session.id,
@@ -1068,6 +1081,10 @@ export class TriageService {
         reviewedAt: lead.reviewedAt || new Date(),
         commercialStage: CommercialStage.LEVEL_2_CREATED,
       },
+    });
+    await this.prisma.communicationThread.updateMany({
+      where: { publicLeadId: leadId, level2AssessmentId: null },
+      data: { level2AssessmentId: engagement.id },
     });
     const acceptedProposal = bundle.proposals.find((p) => p.id === lead.acceptedProposalId)
       || bundle.proposals.find((p) => p.status === 'ACCEPTED')

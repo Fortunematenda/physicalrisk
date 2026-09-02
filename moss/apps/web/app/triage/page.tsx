@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FileCheck,
   MessageSquareWarning,
+  Mail,
   Send,
   UserRound,
 } from 'lucide-react';
@@ -61,6 +62,7 @@ type TriageRow = {
   status: string;
   displayStatus: string;
   intent: string;
+  unreadReplyCount?: number;
   progressPercent: number;
   progressLabel?: string | null;
   completedAt?: string | null;
@@ -797,6 +799,14 @@ export default function TriageSubmissionsPage() {
                               {contactName} · {row.email}
                             </span>
                             {row.industry ? <span className="muted small">{row.industry}</span> : null}
+                            {row.unreadReplyCount && row.unreadReplyCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
+                                <Mail className="size-3" aria-hidden="true" />
+                                {row.unreadReplyCount === 1
+                                  ? '1 unread reply'
+                                  : `${row.unreadReplyCount} unread replies`}
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                         <td>

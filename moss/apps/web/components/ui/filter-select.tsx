@@ -26,6 +26,7 @@ type Props = {
   includeAll?: boolean;
   className?: string;
   triggerClassName?: string;
+  contentClassName?: string;
   'aria-label'?: string;
   disabled?: boolean;
 };
@@ -43,6 +44,7 @@ export function FilterSelect({
   includeAll = true,
   className,
   triggerClassName,
+  contentClassName,
   'aria-label': ariaLabel,
   disabled,
 }: Props) {
@@ -61,7 +63,7 @@ export function FilterSelect({
       >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className={contentClassName}>
         {includeAll ? <SelectItem value={ALL}>{placeholder}</SelectItem> : null}
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>

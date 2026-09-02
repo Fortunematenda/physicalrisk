@@ -41,6 +41,16 @@ import {
   renderExecutiveAdvisoryProposalPdf,
   type ProposalPdfInput,
 } from './triage-proposal-pdf';
+import { buildDefaultContentSnapshot, buildPhysicalRiskProposalInput, resolveTemplateConfig } from './proposal/proposal-content-builder';
+import { calculateProposalFees, recalculateAllLineItems } from './proposal/proposal-fee-calculations';
+import {
+  proposalPdfV2Enabled,
+  renderPhysicalRiskProposalPdf,
+} from './proposal/physical-risk-proposal-pdf';
+import { mergeContentSnapshot, readContentSnapshot } from './proposal/proposal-template-registry';
+import { canMarkReadyToSend, validateProposalForSend } from './proposal/proposal-validation';
+import type { ProposalContentSnapshot } from './proposal/proposal-template-types';
+import { dedupeRepeatedNarrative } from './proposal/proposal-rich-text';
 
 const PROPOSAL_MIME = new Set([
   'application/pdf',
@@ -643,8 +653,22 @@ export class TriageCommercialService {
           next === TriageProposalStatus.SENT || next === TriageProposalStatus.VIEWED
             ? proposal.sentAt || now
             : proposal.sentAt,
+        viewedAt: next === TriageProposalStatus.VIEWED ? proposal.viewedAt || now : proposal.viewedAt,
         acceptedAt: next === TriageProposalStatus.ACCEPTED ? proposal.acceptedAt || now : proposal.acceptedAt,
         declinedAt: next === TriageProposalStatus.DECLINED ? proposal.declinedAt || now : proposal.declinedAt,
+        ...(next === TriageProposalStatus.SENT && !proposal.sentSnapshot
+          ? {
+              sentSnapshot: {
+                contentSnapshot: proposal.contentSnapshot,
+                understandingOfNeeds: proposal.understandingOfNeeds,
+                objectives: proposal.objectives,
+                scopeSummary: proposal.scopeSummary,
+                deliverables: proposal.deliverables,
+                termsAndConditions: proposal.termsAndConditions,
+                sentAt: now.toISOString(),
+              },
+            }
+          : {}),
       },
       include: { createdBy: { select: userSelect } },
     });
@@ -896,6 +920,16 @@ export class TriageCommercialService {
       });
     }
 
+    const template = resolveTemplateConfig('EXECUTIVE_ADVISORY_DIAGNOSTIC');
+    const defaultContent = buildDefaultContentSnapshot('EXECUTIVE_ADVISORY_DIAGNOSTIC', template);
+    const feeDefaults = template.feeDefaults || {
+      analystHourlyRate: 985,
+      specialistHourlyRate: 1825,
+      vatRate: 0.15,
+      currency: 'ZAR',
+      paymentTerms: '50% on acceptance, 50% on delivery',
+    };
+
     return this.prisma.triageProposal.create({
       data: {
         proposalNumber: proposalReference,
@@ -907,8 +941,150 @@ export class TriageCommercialService {
         status: TriageProposalStatus.DRAFT,
         source: TriageProposalSource.PLATFORM,
         createdById: user.id,
+        contentSnapshot: defaultContent as object,
+        analystHourlyRate: feeDefaults.analystHourlyRate,
+        specialistHourlyRate: feeDefaults.specialistHourlyRate,
+        vatRate: feeDefaults.vatRate,
+        paymentTerms: feeDefaults.paymentTerms,
+        currency: feeDefaults.currency,
       },
     });
+  }
+
+  private async loadProposalWithRelations(publicLeadId: string, user: AuthUser) {
+    let proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+      include: { template: true, organisation: true },
+    });
+    if (!proposal) {
+      await this.ensureAdminProposalDraft(publicLeadId, user);
+      proposal = await this.prisma.triageProposal.findFirst({
+        where: { publicLeadId },
+        orderBy: { createdAt: 'asc' },
+        include: { template: true, organisation: true },
+      });
+    }
+    if (!proposal) {
+      throw new NotFoundException('Proposal workspace could not be initialized.');
+    }
+    return this.hydrateProposalWorkspace(publicLeadId, proposal);
+  }
+
+  private async hydrateProposalWorkspace(publicLeadId: string, proposal: any) {
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) return proposal;
+
+    const content = readContentSnapshot(proposal.contentSnapshot);
+    const hasStructuredContent = content.phases.length > 0 || content.feeLineItems.length > 0;
+    const template = resolveTemplateConfig(
+      proposal.productCode,
+      proposal.template as Parameters<typeof resolveTemplateConfig>[1],
+    );
+    const defaultContent = buildDefaultContentSnapshot(proposal.productCode, template);
+    const pdfInput = buildPhysicalRiskProposalInput({
+      lead,
+      organisation: proposal.organisation,
+      proposal: proposal as Record<string, unknown>,
+      template,
+    });
+
+    const patch: Record<string, unknown> = {};
+    if (!hasStructuredContent) patch.contentSnapshot = defaultContent;
+    if (!proposal.understandingOfNeeds?.trim()) patch.understandingOfNeeds = pdfInput.understandingOfNeeds;
+    if (!proposal.methodology?.trim()) patch.methodology = pdfInput.methodology;
+    if (!proposal.approach?.trim()) patch.approach = pdfInput.approach;
+    if (!proposal.exclusions?.trim()) patch.exclusions = pdfInput.exclusions;
+    if (!proposal.assumptions?.trim()) patch.assumptions = pdfInput.assumptions;
+    if (!proposal.statementOfResponsibility?.trim()) {
+      patch.statementOfResponsibility = pdfInput.statementOfResponsibility;
+    }
+    if (!proposal.termsAndConditions?.trim()) patch.termsAndConditions = pdfInput.termsAndConditions;
+    if (!proposal.acceptanceTerms?.trim()) patch.acceptanceTerms = pdfInput.acceptanceTerms;
+    if (!proposal.deliverables?.trim()) patch.deliverables = pdfInput.deliverables;
+    if (!proposal.objectives?.trim()) patch.objectives = pdfInput.objectives;
+    else {
+      const cleaned = dedupeRepeatedNarrative(proposal.objectives);
+      if (cleaned !== proposal.objectives) patch.objectives = cleaned;
+    }
+    if (proposal.understandingOfNeeds?.trim()) {
+      const cleaned = dedupeRepeatedNarrative(proposal.understandingOfNeeds);
+      if (cleaned !== proposal.understandingOfNeeds) patch.understandingOfNeeds = cleaned;
+    }
+    if (!proposal.scopeSummary?.trim()) patch.scopeSummary = pdfInput.scope;
+    if (!proposal.paymentTerms?.trim()) patch.paymentTerms = pdfInput.paymentTerms;
+    if (proposal.analystHourlyRate == null) patch.analystHourlyRate = pdfInput.analystHourlyRate;
+    if (proposal.specialistHourlyRate == null) patch.specialistHourlyRate = pdfInput.specialistHourlyRate;
+    if (proposal.vatRate == null) patch.vatRate = pdfInput.vatRate;
+
+    if (!Object.keys(patch).length) return proposal;
+
+    return this.prisma.triageProposal.update({
+      where: { id: proposal.id },
+      data: patch,
+      include: { template: true, organisation: true },
+    });
+  }
+
+  async getProposalWorkspace(publicLeadId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const templateView = await this.getProposalTemplate(publicLeadId, user);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+    const proposal = await this.loadProposalWithRelations(publicLeadId, user);
+    const content = readContentSnapshot(proposal.contentSnapshot);
+    const feeLineItems = recalculateAllLineItems(content.feeLineItems);
+    const feeTotals = calculateProposalFees({
+      lineItems: feeLineItems,
+      discount: Number(proposal.discount) || 0,
+      vatRate: Number(proposal.vatRate) || 0.15,
+      expensesEstimate: Number(proposal.expensesEstimate) || 0,
+    });
+    const validation = validateProposalForSend(
+      buildPhysicalRiskProposalInput({
+        lead,
+        organisation: proposal.organisation,
+        proposal: { ...proposal, contentSnapshot: { ...content, feeLineItems } } as Record<string, unknown>,
+      }),
+    );
+    return {
+      ...templateView,
+      productCode: proposal.productCode,
+      subtitle: proposal.subtitle,
+      understandingOfNeeds: proposal.understandingOfNeeds,
+      methodology: proposal.methodology,
+      approach: proposal.approach,
+      exclusions: proposal.exclusions,
+      assumptions: proposal.assumptions,
+      statementOfResponsibility: proposal.statementOfResponsibility,
+      termsAndConditions: proposal.termsAndConditions,
+      acceptanceTerms: proposal.acceptanceTerms,
+      analystHourlyRate: proposal.analystHourlyRate != null ? Number(proposal.analystHourlyRate) : null,
+      specialistHourlyRate: proposal.specialistHourlyRate != null ? Number(proposal.specialistHourlyRate) : null,
+      discount: proposal.discount != null ? Number(proposal.discount) : 0,
+      vatRate: proposal.vatRate != null ? Number(proposal.vatRate) : 0.15,
+      expensesEstimate: proposal.expensesEstimate != null ? Number(proposal.expensesEstimate) : 0,
+      paymentTerms: proposal.paymentTerms,
+      estimatedProjectWeeks: proposal.estimatedProjectWeeks,
+      timelineNarrative: proposal.timelineNarrative,
+      projectSponsor: proposal.projectSponsor,
+      projectChampion: proposal.projectChampion,
+      currency: proposal.currency || templateView.currency || 'ZAR',
+      contentSnapshot: content,
+      feeTotals,
+      readyToSend: canMarkReadyToSend(
+        buildPhysicalRiskProposalInput({
+          lead,
+          organisation: proposal.organisation,
+          proposal: { ...proposal, contentSnapshot: { ...content, feeLineItems } } as Record<string, unknown>,
+        }),
+      ),
+      validationIssues: validation,
+      version: proposal.version,
+      status: proposal.status,
+      hasDocument: Boolean(proposal.documentStorageKey),
+      proposalId: proposal.id,
+    };
   }
 
   async getProposalTemplate(publicLeadId: string, user: AuthUser) {
@@ -954,6 +1130,29 @@ export class TriageCommercialService {
       jobTitle?: string;
       email?: string;
       phone?: string;
+      subtitle?: string;
+      understandingOfNeeds?: string;
+      methodology?: string;
+      approach?: string;
+      exclusions?: string;
+      assumptions?: string;
+      statementOfResponsibility?: string;
+      termsAndConditions?: string;
+      acceptanceTerms?: string;
+      analystHourlyRate?: number | null;
+      specialistHourlyRate?: number | null;
+      discount?: number | null;
+      vatRate?: number | null;
+      expensesEstimate?: number | null;
+      paymentTerms?: string;
+      estimatedProjectWeeks?: number | null;
+      timelineNarrative?: string;
+      projectSponsor?: string;
+      projectChampion?: string;
+      productCode?: string;
+      title?: string;
+      contentSnapshot?: ProposalContentSnapshot | Record<string, unknown>;
+      expectedGrandTotal?: number | null;
     },
     user: AuthUser,
   ) {
@@ -969,12 +1168,70 @@ export class TriageCommercialService {
       proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
     }
 
+    const existingContent = readContentSnapshot(proposal.contentSnapshot);
+    const parsedIncoming =
+      input.contentSnapshot !== undefined ? readContentSnapshot(input.contentSnapshot) : null;
+    const mergedContent =
+      parsedIncoming !== null ? mergeContentSnapshot(existingContent, parsedIncoming) : existingContent;
+    const nextContent: ProposalContentSnapshot = {
+      ...mergedContent,
+      feeLineItems: recalculateAllLineItems(mergedContent.feeLineItems),
+    };
+
+    const nextDiscount =
+      input.discount !== undefined ? Number(input.discount) || 0 : Number(proposal.discount) || 0;
+    const nextVatRate =
+      input.vatRate !== undefined ? Number(input.vatRate) || 0 : Number(proposal.vatRate) || 0.15;
+    const nextExpenses =
+      input.expensesEstimate !== undefined
+        ? Number(input.expensesEstimate) || 0
+        : Number(proposal.expensesEstimate) || 0;
+    const feeTotals = calculateProposalFees({
+      lineItems: nextContent.feeLineItems,
+      discount: nextDiscount,
+      vatRate: nextVatRate,
+      expensesEstimate: nextExpenses,
+    });
+
+    if (
+      input.expectedGrandTotal != null
+      && Math.abs(feeTotals.grandTotal - Number(input.expectedGrandTotal)) > 0.01
+    ) {
+      throw new BadRequestException(
+        `Fee total mismatch: server calculated ${feeTotals.grandTotal}, client sent ${input.expectedGrandTotal}.`,
+      );
+    }
+
+    const sentStatuses: TriageProposalStatus[] = [
+      TriageProposalStatus.SENT,
+      TriageProposalStatus.VIEWED,
+      TriageProposalStatus.ACCEPTED,
+    ];
+    const materialEdit =
+      input.contentSnapshot !== undefined
+      || input.understandingOfNeeds !== undefined
+      || input.methodology !== undefined
+      || input.approach !== undefined
+      || input.exclusions !== undefined
+      || input.assumptions !== undefined
+      || input.termsAndConditions !== undefined
+      || input.acceptanceTerms !== undefined
+      || input.fee !== undefined
+      || input.discount !== undefined
+      || input.vatRate !== undefined
+      || input.expensesEstimate !== undefined;
+    const bumpVersion =
+      sentStatuses.includes(proposal.status) && materialEdit && Boolean(proposal.documentStorageKey);
+
     const existingSnap = (proposal.contextSnapshot as Record<string, unknown>) || {};
     const existingAddressee =
       (existingSnap.proposalAddressee as Record<string, unknown> | undefined) || {};
     const snapshot = {
       ...existingSnap,
-      proposalIntroduction: input.introduction?.trim() || null,
+      proposalIntroduction:
+        input.introduction !== undefined
+          ? input.introduction.trim() || null
+          : ((existingSnap.proposalIntroduction as string | null | undefined) ?? null),
       proposalAddressee: {
         organisationName:
           input.organisationName !== undefined
@@ -1005,7 +1262,7 @@ export class TriageCommercialService {
         data: {
           scopeClientObjectives:
             input.clientObjective !== undefined
-              ? input.clientObjective.trim() || null
+              ? dedupeRepeatedNarrative(input.clientObjective).trim() || null
               : lead.scopeClientObjectives,
           scopeSitesOrBusinessUnits:
             input.sitesOrBusinessUnits !== undefined
@@ -1023,9 +1280,12 @@ export class TriageCommercialService {
       proposal = await tx.triageProposal.update({
         where: { id: proposal!.id },
         data: {
+          title: input.title?.trim() || proposal!.title,
+          productCode: input.productCode?.trim() || proposal!.productCode,
+          subtitle: input.subtitle !== undefined ? input.subtitle.trim() || null : proposal!.subtitle,
           objectives:
             input.clientObjective !== undefined
-              ? input.clientObjective.trim() || null
+              ? dedupeRepeatedNarrative(input.clientObjective).trim() || null
               : proposal!.objectives,
           sitesOrBusinessUnits:
             input.sitesOrBusinessUnits !== undefined
@@ -1037,13 +1297,72 @@ export class TriageCommercialService {
               : proposal!.scopeSummary,
           timeline:
             input.timeline !== undefined ? input.timeline.trim() || null : proposal!.timeline,
-          fee: input.fee !== undefined ? input.fee : proposal!.fee,
+          fee:
+            input.contentSnapshot !== undefined
+              || input.discount !== undefined
+              || input.vatRate !== undefined
+              || input.expensesEstimate !== undefined
+              ? feeTotals.grandTotal
+              : input.fee !== undefined
+                ? input.fee
+                : proposal!.fee,
+          version: bumpVersion ? (proposal!.version || 1) + 1 : proposal!.version,
           currency: input.currency?.trim() || proposal!.currency,
           deliverables:
             input.deliverables !== undefined
               ? input.deliverables.trim() || null
               : proposal!.deliverables,
           terms: input.terms !== undefined ? input.terms.trim() || null : proposal!.terms,
+          understandingOfNeeds:
+            input.understandingOfNeeds !== undefined
+              ? dedupeRepeatedNarrative(input.understandingOfNeeds).trim() || null
+              : proposal!.understandingOfNeeds,
+          methodology:
+            input.methodology !== undefined ? input.methodology.trim() || null : proposal!.methodology,
+          approach: input.approach !== undefined ? input.approach.trim() || null : proposal!.approach,
+          exclusions:
+            input.exclusions !== undefined ? input.exclusions.trim() || null : proposal!.exclusions,
+          assumptions:
+            input.assumptions !== undefined ? input.assumptions.trim() || null : proposal!.assumptions,
+          statementOfResponsibility:
+            input.statementOfResponsibility !== undefined
+              ? input.statementOfResponsibility.trim() || null
+              : proposal!.statementOfResponsibility,
+          termsAndConditions:
+            input.termsAndConditions !== undefined
+              ? input.termsAndConditions.trim() || null
+              : proposal!.termsAndConditions,
+          acceptanceTerms:
+            input.acceptanceTerms !== undefined
+              ? input.acceptanceTerms.trim() || null
+              : proposal!.acceptanceTerms,
+          analystHourlyRate:
+            input.analystHourlyRate !== undefined ? input.analystHourlyRate : proposal!.analystHourlyRate,
+          specialistHourlyRate:
+            input.specialistHourlyRate !== undefined
+              ? input.specialistHourlyRate
+              : proposal!.specialistHourlyRate,
+          discount: input.discount !== undefined ? input.discount : proposal!.discount,
+          vatRate: input.vatRate !== undefined ? input.vatRate : proposal!.vatRate,
+          expensesEstimate:
+            input.expensesEstimate !== undefined ? input.expensesEstimate : proposal!.expensesEstimate,
+          paymentTerms:
+            input.paymentTerms !== undefined ? input.paymentTerms.trim() || null : proposal!.paymentTerms,
+          estimatedProjectWeeks:
+            input.estimatedProjectWeeks !== undefined
+              ? input.estimatedProjectWeeks
+              : proposal!.estimatedProjectWeeks,
+          timelineNarrative:
+            input.timelineNarrative !== undefined
+              ? input.timelineNarrative.trim() || null
+              : proposal!.timelineNarrative,
+          projectSponsor:
+            input.projectSponsor !== undefined ? input.projectSponsor.trim() || null : proposal!.projectSponsor,
+          projectChampion:
+            input.projectChampion !== undefined
+              ? input.projectChampion.trim() || null
+              : proposal!.projectChampion,
+          contentSnapshot: nextContent as object,
           contextSnapshot: snapshot as object,
         },
       });
@@ -1145,6 +1464,25 @@ export class TriageCommercialService {
     });
     if (!proposal) throw new BadRequestException('No proposal workspace exists yet.');
 
+    if (proposalPdfV2Enabled()) {
+      const org = lead.organisationId
+        ? await this.prisma.organisation.findUnique({ where: { id: lead.organisationId } })
+        : null;
+      const pdfInput = buildPhysicalRiskProposalInput({
+        lead,
+        organisation: org,
+        proposal: proposal as Record<string, unknown>,
+      });
+      if (!canMarkReadyToSend(pdfInput)) {
+        const issues = validateProposalForSend(pdfInput).filter((i) => i.blocking);
+        throw new BadRequestException(
+          issues.length
+            ? `Proposal is not ready to send: ${issues.map((i) => i.message).join(' ')}`
+            : 'Proposal is not ready to send.',
+        );
+      }
+    }
+
     // Always regenerate so the signature block matches the logged-in sender
     // (Analyst / Administrator / etc.), not whoever last generated the PDF.
     proposal = await this.generateProposalPdf(publicLeadId, user);
@@ -1196,13 +1534,7 @@ export class TriageCommercialService {
       where: { id: publicLeadId },
     });
     if (!lead) throw new NotFoundException('Triage submission not found.');
-    let proposal = await this.prisma.triageProposal.findFirst({
-      where: { publicLeadId },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!proposal) {
-      proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
-    }
+    const proposal = await this.loadProposalWithRelations(publicLeadId, user);
 
     let assessmentReference: string | null = null;
     if (lead.assessmentId) {
@@ -1215,21 +1547,47 @@ export class TriageCommercialService {
         )?.reference || null;
     }
 
+    const organisation =
+      proposal.organisation
+      || (lead.organisationId
+        ? await this.prisma.organisation.findUnique({ where: { id: lead.organisationId } })
+        : null);
+
     const prepared = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: { firstName: true, lastName: true, email: true, systemRole: true },
     });
     const sender = this.resolveProposalSenderSignature(prepared);
+
+    if (proposalPdfV2Enabled()) {
+      const template = resolveTemplateConfig(
+        proposal.productCode,
+        proposal.template as Parameters<typeof resolveTemplateConfig>[1],
+      );
+      const pdfInput = buildPhysicalRiskProposalInput({
+        lead,
+        organisation,
+        proposal: proposal as Record<string, unknown>,
+        template,
+        assessmentReference,
+        preparedByName: sender.name,
+        preparedByEmail: sender.email,
+      });
+      const buffer = await renderPhysicalRiskProposalPdf(pdfInput);
+      const orgSlug = lead.organisationName.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+      const fileName = `Physical_Risk_Proposal_${orgSlug || 'Client'}_${proposal.proposalNumber}_v${proposal.version || 1}.pdf`;
+      return { buffer, fileName, pdfInput };
+    }
+
     const pdfInput = this.toProposalPdfInput(lead, proposal, { assessmentReference });
     pdfInput.preparedByName = sender.name;
     pdfInput.preparedByEmail = sender.email;
-
     const buffer = await renderExecutiveAdvisoryProposalPdf(pdfInput);
     const orgSlug = lead.organisationName.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
     const fileName = `Physical_Risk_Executive_Advisory_Proposal_${orgSlug || 'Client'}_v${
       proposal.version || 1
     }.pdf`;
-    return { buffer, fileName };
+    return { buffer, fileName, pdfInput };
   }
 
   private resolveProposalSenderSignature(

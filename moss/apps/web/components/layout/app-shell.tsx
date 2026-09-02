@@ -74,8 +74,15 @@ export function AppShellFrame({
     setCollapsed((value) => !value);
   }, []);
 
-  const resolvedNotifications = notificationCount ?? badges.reviewQueue;
+  const resolvedNotifications =
+    notificationCount ?? badges.reviewQueue + badges.unreadTriageEmails;
   const resolvedMail = mailCount ?? badges.failedEmails;
+  const notificationHref =
+    badges.unreadTriageEmails > 0 ? '/triage' : '/assessments/assigned';
+  const notificationTitle =
+    badges.unreadTriageEmails > 0
+      ? `${badges.unreadTriageEmails} unread triage email${badges.unreadTriageEmails === 1 ? '' : 's'}`
+      : 'Notifications';
 
   return (
     <div className="flex min-h-screen bg-moss-page">
@@ -105,6 +112,8 @@ export function AppShellFrame({
           onLogout={logout}
           notificationCount={resolvedNotifications}
           mailCount={resolvedMail}
+          notificationHref={notificationHref}
+          notificationTitle={notificationTitle}
         />
         <main className="min-w-0 overflow-x-hidden">
           <PageContainer>{children}</PageContainer>

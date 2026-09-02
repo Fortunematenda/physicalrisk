@@ -187,7 +187,7 @@ describe('Stage 3 workflow gating', () => {
       status: TriageProposalStatus.DRAFT,
       hasDocument: true,
     });
-    expect(cta.kind).toBe('complete_proposal');
+    expect(cta.kind).toBe('send_proposal');
     expect(cta).toMatchObject({ label: 'Send proposal' });
   });
 });

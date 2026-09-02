@@ -146,6 +146,7 @@ export type PrimaryCta =
   | { kind: 'contact_client'; label: string }
   | { kind: 'upload_proposal'; label: string }
   | { kind: 'complete_proposal'; label: string }
+  | { kind: 'send_proposal'; label: string }
   | { kind: 'mark_sent'; label: string }
   | { kind: 'awaiting_decision'; label: string; disabled: true }
   | { kind: 'create_level2'; label: string }
@@ -185,8 +186,8 @@ export function resolvePrimaryCta(
         || latestProposal.status === TriageProposalStatus.INTERNAL_REVIEW
         || latestProposal.status === TriageProposalStatus.APPROVED
       ) {
-        // Primary header action opens Commercial send flow — not status-only Mark sent.
-        return { kind: 'complete_proposal', label: 'Send proposal' };
+        // Document exists — primary CTA emails the proposal to the client.
+        return { kind: 'send_proposal', label: 'Send proposal' };
       }
       return { kind: 'none' };
     case CommercialStage.PROPOSAL_SENT:
@@ -466,22 +467,22 @@ export function buildCommercialWorkspace(input: {
         }
       : null,
     prospect: {
-      firstName: snapshot?.prospect.firstName || input.lead.firstName,
-      lastName: snapshot?.prospect.lastName || input.lead.lastName,
-      email: snapshot?.prospect.email || input.lead.email,
-      phone: snapshot?.prospect.phone ?? input.lead.phone,
-      jobTitle: snapshot?.prospect.jobTitle || input.qualification?.jobTitle || null,
+      firstName: snapshot?.prospect?.firstName || input.lead.firstName,
+      lastName: snapshot?.prospect?.lastName || input.lead.lastName,
+      email: snapshot?.prospect?.email || input.lead.email,
+      phone: snapshot?.prospect?.phone ?? input.lead.phone,
+      jobTitle: snapshot?.prospect?.jobTitle || input.qualification?.jobTitle || null,
     },
     organisation: {
-      name: snapshot?.organisation.name || input.lead.organisationName,
-      country: snapshot?.organisation.country || input.qualification?.country || null,
-      industry: snapshot?.organisation.industry || input.lead.industry,
+      name: snapshot?.organisation?.name || input.lead.organisationName,
+      country: snapshot?.organisation?.country || input.qualification?.country || null,
+      industry: snapshot?.organisation?.industry || input.lead.industry,
       operationalSitesLabel:
-        snapshot?.organisation.operationalSitesLabel
+        snapshot?.organisation?.operationalSitesLabel
         || input.qualification?.operationalSitesLabel
         || null,
       securityExpenditureLabel:
-        snapshot?.organisation.securityExpenditureLabel
+        snapshot?.organisation?.securityExpenditureLabel
         || input.qualification?.securityExpenditureLabel
         || null,
     },
