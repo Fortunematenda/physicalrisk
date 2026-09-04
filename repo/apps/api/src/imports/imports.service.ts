@@ -54,6 +54,8 @@ interface ImportMetadata {
    * Multipart may send "true"/"false" strings.
    */
   extractZip?: boolean | 'true' | 'false';
+  /** MCP ChatGPT path: allow auto NEW_VERSION even when file bytes match an existing revision. */
+  mcpAutoVersion?: boolean;
 }
 
 function wantsZipExtraction(value: unknown): boolean | null {
@@ -657,7 +659,8 @@ export class ImportsService {
 
       // Parity with MCP/external: block identical file content even for "New Document" imports.
       // Same-document duplicates are handled by the version checks below.
-      if (job.checksum && job.checksum !== 'draft') {
+      // MCP auto-version is allowed to re-store the same bytes as the next revision.
+      if (job.checksum && job.checksum !== 'draft' && !metadata.mcpAutoVersion) {
         const matchingVersion = await this.db.documentVersions.findOne({
           where: { checksum: job.checksum },
           relations: { document: { project: true, section: true } },
@@ -725,8 +728,9 @@ export class ImportsService {
       }
 
       // SCENARIO 1: same document + same checksum + different version number
+      // MCP auto-version may re-publish identical bytes as the next revision.
       const duplicateChecksum = existingVersions.find((version) => version.checksum === job.checksum);
-      if (duplicateChecksum && compareVersions(duplicateChecksum.versionNo, metadata.versionNo) !== 0) {
+      if (duplicateChecksum && !metadata.mcpAutoVersion) {
         const details = this.buildErrorDetails(document, duplicateChecksum, metadata.versionNo, section);
         await this.audit.record({
           userId, action: 'DUPLICATE_CONTENT_REJECTED', entityType: 'ImportJob', entityId: job.id,
@@ -736,23 +740,9 @@ export class ImportsService {
         });
         throw new ImportBusinessException(
           'DUPLICATE_DOCUMENT_CONTENT',
-          `This file is identical to version ${duplicateChecksum.versionNo} already stored for this document. Changing the version number does not create a new document version.`,
-          details,
-        );
-      }
-
-      // If exact same version + checksum is being re-submitted, treat it as duplicate content too
-      if (duplicateChecksum) {
-        const details = this.buildErrorDetails(document, duplicateChecksum, metadata.versionNo, section);
-        await this.audit.record({
-          userId, action: 'DUPLICATE_CONTENT_REJECTED', entityType: 'ImportJob', entityId: job.id,
-          message: `Re-submitted identical file for version ${metadata.versionNo} of ${document?.code}`,
-          before: { submittedVersion: metadata.versionNo, checksum: job.checksum },
-          after: details,
-        });
-        throw new ImportBusinessException(
-          'DUPLICATE_DOCUMENT_CONTENT',
-          `This file is identical to version ${duplicateChecksum.versionNo} already stored for this document.`,
+          compareVersions(duplicateChecksum.versionNo, metadata.versionNo) !== 0
+            ? `This file is identical to version ${duplicateChecksum.versionNo} already stored for this document. Changing the version number does not create a new document version.`
+            : `This file is identical to version ${duplicateChecksum.versionNo} already stored for this document.`,
           details,
         );
       }

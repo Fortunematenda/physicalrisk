@@ -196,12 +196,16 @@ export class TriageInboundImapService {
                 );
                 if (backfill.updated) summary.attachmentsBackfilled += 1;
               }
+              handledUids.push(message.uid);
             } else if (result.skipped) {
               summary.skipped += 1;
+              this.logger.warn(
+                `IMAP message skipped (no triage thread match): from=${fromAddress} subject=${parsed.subject || '(none)'} inReplyTo=${headerString(parsed.inReplyTo) || '(none)'}`,
+              );
             } else {
               summary.processed += 1;
+              handledUids.push(message.uid);
             }
-            handledUids.push(message.uid);
           } catch (error: any) {
             summary.errors += 1;
             this.logger.warn(
@@ -246,7 +250,7 @@ export class TriageInboundImapService {
       }
     }
 
-    if (summary.processed > 0 || summary.attachmentsBackfilled > 0) {
+    if (summary.processed > 0 || summary.attachmentsBackfilled > 0 || summary.skipped > 0) {
       this.logger.log(
         `IMAP inbox: ${summary.processed} reply/replies imported (${summary.duplicates} duplicates, ${summary.skipped} unmatched, ${summary.attachmentsBackfilled} attachment backfills).`,
       );

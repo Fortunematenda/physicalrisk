@@ -535,6 +535,7 @@ When importing an existing Office/PDF file:
    OR import_original_file with fileUrl
 NEVER convert Office originals to Markdown or PDF.
 NEW_VERSION: mode=NEW_VERSION + documentCode (e.g. MOSS-GS-003).
+If the document already exists (same code, title, or identical file), the server auto-creates the next revision in the background — never claim duplicate review blocked the import. Poll get_import_status until IMPORTED.
 Report IMPORTED only after size and SHA-256 match — not after creating a session.
 
 FIELD MAPPING (never swap)
@@ -560,6 +561,7 @@ FORBIDDEN
 - Claiming upload_original_docx / prepare_automatic_file_import are unavailable.
 - Converting DOCX/XLSX/PPTX to PDF.
 - Creating a new unrelated document code when NEW_VERSION is required.
+- Claiming replacement is blocked pending duplicate review — existing documents auto-version in the background.
 
 MOSS-GS-003 NEW_VERSION:
 1) check_document_exists with documentCode=MOSS-GS-003.

@@ -9,6 +9,7 @@ import { DatabaseService } from '../database/database.service';
 import {
   ApprovalStatus,
   ConnectorProvider,
+  Document,
   ExternalImportStatus,
   ImportJob,
   ImportStatus,
@@ -20,8 +21,10 @@ import {
   User,
 } from '../database/entities';
 import { VpsStorageService } from '../storage/vps-storage.service';
+import { IsNull } from 'typeorm';
 import { determineExternalImportStatuses } from './external-import-dedup.util';
 import { ImportsService } from './imports.service';
+import { suggestNextVersion } from './version.util';
 
 @Injectable()
 export class ExternalImportOrchestratorService {
@@ -268,19 +271,17 @@ export class ExternalImportOrchestratorService {
 
     const matchingVersion = await this.db.documentVersions.findOne({
       where: { checksum },
-      relations: { document: true },
+      relations: { document: { versions: true, project: true } },
     });
-    const sameDocumentVersions = matchingVersion
-      ? await this.db.documentVersions.find({
-          where: { document: { id: matchingVersion.document.id } },
-          relations: { document: true },
-        })
-      : [];
-    const dedup = determineExternalImportStatuses({
-      existingReferenceImported: false,
-      matchingVersionChecksum: Boolean(matchingVersion),
-      matchingVersionDifferentRevision: false,
-      sameDocumentDifferentChecksum: sameDocumentVersions.some((version) => version.checksum !== checksum),
+
+    // MCP must never stall on Duplicate/Version review: existing docs auto-bump to NEW_VERSION.
+    const autoTarget = await this.resolveMcpAutoVersionTarget({
+      projectId: project.id,
+      title: request.title.trim(),
+      documentCode: request.documentCode?.trim(),
+      existingDocumentId: request.existingDocumentId?.trim(),
+      mode: request.mode,
+      matchingVersion,
     });
 
     let resolvedSection: ProjectSection | null = null;
@@ -295,23 +296,26 @@ export class ExternalImportOrchestratorService {
     const metadata: Record<string, unknown> = {
       projectId: request.projectId.trim(),
       sourceSystemId: source.id,
-      title: request.title.trim(),
-      documentCode: request.documentCode?.trim(),
+      title: autoTarget?.title || request.title.trim(),
+      documentCode: autoTarget?.documentCode || request.documentCode?.trim(),
       documentType: request.documentType.trim(),
       description: request.description?.trim(),
       owner: request.owner?.trim(),
-      versionNo: request.versionNo.trim(),
+      versionNo: autoTarget?.versionNo || request.versionNo.trim(),
       approvalStatus: ApprovalStatus.APPROVED,
       approvedBy: request.approvedBy.trim(),
       approvalDate: approvalDate.toISOString(),
       sectionKey: sectionKey || null,
-      mode: request.mode,
-      existingDocumentId: request.existingDocumentId?.trim(),
+      mode: autoTarget ? 'NEW_VERSION' : (request.mode === 'NEW' ? 'NEW' : request.mode),
+      existingDocumentId: autoTarget?.existingDocumentId || request.existingDocumentId?.trim(),
       provider: request.provider,
       mcpIntegrationId: request.mcpIntegrationId,
       customMetadata,
       relationships,
-      dedupReason: dedup.reason,
+      dedupReason: autoTarget
+        ? `MCP auto NEW_VERSION of ${autoTarget.documentCode} → ${autoTarget.versionNo}`
+        : 'MCP new document — auto-import without human review',
+      mcpAutoVersion: Boolean(autoTarget),
       importMode,
       conversionPerformed,
       originalFilename,
@@ -334,8 +338,8 @@ export class ExternalImportOrchestratorService {
       mimeType,
       fileSize: resolved.size,
       checksum,
-      // Must match Import Queue "External Imports" filter (READY_FOR_REVIEW / DUPLICATE / VERSION).
-      status: dedup.importStatus,
+      // ChatGPT MCP always auto-processes — never DUPLICATE_REVIEW / VERSION_REVIEW.
+      status: ImportStatus.READY_FOR_REVIEW,
       metadata,
       errorMessage: null,
       routingDecision: null,
@@ -343,7 +347,7 @@ export class ExternalImportOrchestratorService {
       initiatedBy: null,
       completedAt: null,
       provider: request.provider,
-      externalImportStatus: dedup.externalImportStatus as ExternalImportStatus,
+      externalImportStatus: ExternalImportStatus.READY_FOR_REVIEW,
       sourceConnection: null,
     });
 
@@ -352,7 +356,9 @@ export class ExternalImportOrchestratorService {
       action: 'IMPORT_READY_FOR_REVIEW',
       entityType: 'ImportJob',
       entityId: saved.id,
-      message: `MCP submission received from ${request.provider}: ${fileName}`,
+      message: autoTarget
+        ? `MCP auto-version queued for ${autoTarget.documentCode} → ${autoTarget.versionNo}: ${fileName}`
+        : `MCP submission received from ${request.provider}: ${fileName}`,
       after: {
         project: project.code,
         source: source.code,
@@ -365,6 +371,10 @@ export class ExternalImportOrchestratorService {
         conversionPerformed,
         checksumVerified,
         originalFilename,
+        mcpAutoVersion: Boolean(autoTarget),
+        mode: metadata.mode,
+        documentCode: metadata.documentCode,
+        versionNo: metadata.versionNo,
       },
     });
 
@@ -380,23 +390,6 @@ export class ExternalImportOrchestratorService {
       checksumVerified,
     };
 
-    // Duplicates / version conflicts stay in Import Queue for a human.
-    if (saved.status !== ImportStatus.READY_FOR_REVIEW) {
-      return {
-        importJobId: saved.id,
-        status: saved.status,
-        externalImportStatus: saved.externalImportStatus ?? ExternalImportStatus.READY_FOR_REVIEW,
-        checksum,
-        fileName,
-        imported: false,
-        needsReview: true,
-        message:
-          'Document needs Import Queue review (duplicate or version conflict). '
-          + 'Routing rules were not auto-applied.',
-        ...integrityFields,
-      };
-    }
-
     // Async path: return immediately so ChatGPT / nginx do not time out mid-import.
     if (request.processAsync !== false) {
       return {
@@ -407,9 +400,12 @@ export class ExternalImportOrchestratorService {
         fileName,
         imported: false,
         needsReview: false,
-        message:
-          'Import accepted and queued for background processing. '
-          + 'Poll get_import_status with this importJobId; do not treat workspace creation as import completion.',
+        documentCode: typeof metadata.documentCode === 'string' ? metadata.documentCode : undefined,
+        message: autoTarget
+          ? `Accepted — creating ${autoTarget.documentCode} ${autoTarget.versionNo} in the background. `
+            + 'Poll get_import_status with this importJobId.'
+          : 'Import accepted and queued for background processing. '
+            + 'Poll get_import_status with this importJobId; do not treat workspace creation as import completion.',
         ...integrityFields,
       };
     }
@@ -462,6 +458,90 @@ export class ExternalImportOrchestratorService {
         ...integrityFields,
       };
     }
+  }
+
+  /**
+   * If the document already exists (by id, code, identical checksum, or same title),
+   * force NEW_VERSION with a bumped revision — no Import Queue duplicate review.
+   */
+  private async resolveMcpAutoVersionTarget(input: {
+    projectId: string;
+    title: string;
+    documentCode?: string;
+    existingDocumentId?: string;
+    mode?: 'NEW' | 'NEW_VERSION';
+    matchingVersion: { document?: Document | null; versionNo?: string } | null;
+  }): Promise<{
+    existingDocumentId: string;
+    documentCode: string;
+    title: string;
+    versionNo: string;
+  } | null> {
+    // Explicit mode=NEW still allocates a brand-new document ID.
+    if (input.mode === 'NEW') return null;
+
+    let document: Document | null = null;
+
+    if (input.existingDocumentId) {
+      document = await this.db.documents.findOne({
+        where: {
+          id: input.existingDocumentId,
+          project: { id: input.projectId },
+          deletedAt: IsNull(),
+        },
+        relations: { versions: true },
+      });
+    }
+
+    if (!document && input.documentCode) {
+      document = await this.db.documents.findOne({
+        where: {
+          project: { id: input.projectId },
+          code: input.documentCode.toUpperCase(),
+          deletedAt: IsNull(),
+        },
+        relations: { versions: true },
+      });
+    }
+
+    if (
+      !document
+      && input.matchingVersion?.document
+      && input.matchingVersion.document.project?.id === input.projectId
+      && !input.matchingVersion.document.deletedAt
+    ) {
+      document = await this.db.documents.findOne({
+        where: { id: input.matchingVersion.document.id, deletedAt: IsNull() },
+        relations: { versions: true },
+      });
+    }
+
+    if (!document && input.title) {
+      document = await this.db.documents
+        .createQueryBuilder('document')
+        .leftJoinAndSelect('document.versions', 'versions')
+        .innerJoin('document.project', 'project')
+        .where('project.id = :projectId', { projectId: input.projectId })
+        .andWhere('document.deletedAt IS NULL')
+        .andWhere('LOWER(document.title) = LOWER(:title)', { title: input.title })
+        .orderBy('document.updatedAt', 'DESC')
+        .getOne();
+    }
+
+    if (!document) return null;
+
+    const versionNos = (document.versions ?? []).map((version) => version.versionNo);
+    if (document.currentVersionNo && !versionNos.includes(document.currentVersionNo)) {
+      versionNos.push(document.currentVersionNo);
+    }
+    const versionNo = suggestNextVersion(versionNos.length ? versionNos : ['Rev 1.0']);
+
+    return {
+      existingDocumentId: document.id,
+      documentCode: document.code,
+      title: document.title,
+      versionNo,
+    };
   }
 
   private async resolveApprovedFileBytes(

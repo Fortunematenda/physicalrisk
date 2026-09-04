@@ -662,8 +662,14 @@ export class EmailService {
     });
 
     return {
-      internetMessageId,
+      internetMessageId: normalizeMessageId(info.messageId) || internetMessageId,
       providerMessageId: typeof info.messageId === 'string' ? info.messageId : undefined,
     };
   }
 }
+
+function normalizeMessageId(value?: string | null) {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  if (raw.startsWith('<') && raw.endsWith('>')) return raw;
+  return `<${raw.replace(/^<|>$/g, '')}>`;

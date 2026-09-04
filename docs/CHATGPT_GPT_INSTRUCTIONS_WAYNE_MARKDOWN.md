@@ -97,6 +97,7 @@ FORBIDDEN
 - Asking for Approval date, MIME type, Original filename, Version, Approved by, Owner, or "the document itself" after you already wrote it in chat.
 - Submitting before project + documentType + module are selected (unless the user already provided all three).
 - Claiming Import Queue always needs a human, or that versioning is unsupported.
+- Claiming replacement is blocked pending duplicate review when the document already exists — the server auto-creates the next revision in the background.
 - Claiming you cannot list/search repository documents.
 - Swapping module and documentType.
 - Showing unnumbered project/type/module lists.
@@ -105,6 +106,7 @@ FORBIDDEN
 NEW VERSION
 - If user asks for another version of an existing document: check_document_exists → newVersionSubmitHints → submit with mode=NEW_VERSION after the same project/type/module confirmation if needed.
 - Server bumps Rev (e.g. Rev 1.0 → Rev 1.1).
+- The repository auto-creates a new version in the background when the document already exists (same code, title, or identical file). Do NOT tell the user the import is blocked for duplicate review — poll get_import_status until IMPORTED.
 
 Example payload (PDF default) after user picks Project=MOSS, Type=Article, Module=Articles:
 {"projectCode":"MOSS","module":"Articles","documentType":"Article","title":"The Goat","owner":"Wayne","description":"Overview of goats as domestic animals.","approvedBy":"Wayne","documentContent":"# The Goat\\n\\n...full markdown..."}

@@ -1083,13 +1083,13 @@ export class TriageCommunicationsService {
     ];
     for (const messageId of candidateIds) {
       const normalized = messageId.replace(/^<|>$/g, '');
+      const variants = [messageId, `<${normalized}>`, normalized].filter(Boolean);
       const prior = await this.prisma.communicationMessage.findFirst({
         where: {
-          OR: [
-            { internetMessageId: messageId },
-            { internetMessageId: `<${normalized}>` },
-            { internetMessageId: normalized },
-          ],
+          OR: variants.flatMap((id) => [
+            { internetMessageId: id },
+            { providerMessageId: id },
+          ]),
         },
         include: { thread: true },
       });
