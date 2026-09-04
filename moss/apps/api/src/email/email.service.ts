@@ -673,3 +673,4 @@ function normalizeMessageId(value?: string | null) {
   if (!raw) return undefined;
   if (raw.startsWith('<') && raw.endsWith('>')) return raw;
   return `<${raw.replace(/^<|>$/g, '')}>`;
+}
