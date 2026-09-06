@@ -989,30 +989,24 @@ export class TriageCommercialService {
       template,
     });
 
+    // Only seed missing structured content / rates. Do not inject template narrative
+    // into blank admin fields — those stay blank until the admin fills them.
     const patch: Record<string, unknown> = {};
     if (!hasStructuredContent) patch.contentSnapshot = defaultContent;
-    if (!proposal.understandingOfNeeds?.trim()) patch.understandingOfNeeds = pdfInput.understandingOfNeeds;
-    if (!proposal.methodology?.trim()) patch.methodology = pdfInput.methodology;
-    if (!proposal.approach?.trim()) patch.approach = pdfInput.approach;
-    if (!proposal.exclusions?.trim()) patch.exclusions = pdfInput.exclusions;
-    if (!proposal.assumptions?.trim()) patch.assumptions = pdfInput.assumptions;
-    if (!proposal.statementOfResponsibility?.trim()) {
-      patch.statementOfResponsibility = pdfInput.statementOfResponsibility;
-    }
-    if (!proposal.termsAndConditions?.trim()) patch.termsAndConditions = pdfInput.termsAndConditions;
-    if (!proposal.acceptanceTerms?.trim()) patch.acceptanceTerms = pdfInput.acceptanceTerms;
-    if (!proposal.deliverables?.trim()) patch.deliverables = pdfInput.deliverables;
-    if (!proposal.objectives?.trim()) patch.objectives = pdfInput.objectives;
-    else {
+    if (proposal.objectives?.trim()) {
       const cleaned = dedupeRepeatedNarrative(proposal.objectives);
       if (cleaned !== proposal.objectives) patch.objectives = cleaned;
     }
     if (proposal.understandingOfNeeds?.trim()) {
       const cleaned = dedupeRepeatedNarrative(proposal.understandingOfNeeds);
       if (cleaned !== proposal.understandingOfNeeds) patch.understandingOfNeeds = cleaned;
+    } else if (pdfInput.understandingOfNeeds?.trim()) {
+      // Triage-derived understanding (not builtin template boilerplate)
+      patch.understandingOfNeeds = pdfInput.understandingOfNeeds;
     }
-    if (!proposal.scopeSummary?.trim()) patch.scopeSummary = pdfInput.scope;
-    if (!proposal.paymentTerms?.trim()) patch.paymentTerms = pdfInput.paymentTerms;
+    if (!proposal.paymentTerms?.trim() && pdfInput.paymentTerms?.trim()) {
+      patch.paymentTerms = pdfInput.paymentTerms;
+    }
     if (proposal.analystHourlyRate == null) patch.analystHourlyRate = pdfInput.analystHourlyRate;
     if (proposal.specialistHourlyRate == null) patch.specialistHourlyRate = pdfInput.specialistHourlyRate;
     if (proposal.vatRate == null) patch.vatRate = pdfInput.vatRate;

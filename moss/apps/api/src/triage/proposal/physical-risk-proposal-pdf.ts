@@ -31,7 +31,6 @@ import {
   startBodyPages,
   trimToTrackedContentPages,
 } from './proposal-pdf-chrome';
-import { defaultTsmRows } from './proposal-template-registry';
 import type { PhysicalRiskProposalInput } from './proposal-template-types';
 
 const CONTENT_W = PROPOSAL_PAGE_WIDTH - PROPOSAL_MARGIN * 2;
@@ -121,13 +120,25 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     beginMajorSection(doc, chrome, 'Methodology', CONTENT_W, { pageBreak: true });
     mark('Methodology');
     bodyText(doc, chrome, input.methodology, CONTENT_W);
-    doc.moveDown(0.4);
-    doc.fillColor('#111').font('Helvetica-Bold').fontSize(11).text('Total Security Management');
-    markProposalBodyContent(doc);
-    doc.moveDown(0.25);
-    drawTableHeader(doc, [{ label: 'Area', width: 180 }, { label: 'Description', width: CONTENT_W - 180 }], PROPOSAL_MARGIN);
-    for (const row of defaultTsmRows()) {
-      drawTableRow(doc, chrome, [row.area, row.description], [180, CONTENT_W - 180], PROPOSAL_MARGIN, { boldFirst: true });
+    const methodologyItems = input.content.methodologyItems.filter(
+      (row) => row.name?.trim() || row.description?.trim(),
+    );
+    if (methodologyItems.length) {
+      doc.moveDown(0.4);
+      doc.fillColor('#111').font('Helvetica-Bold').fontSize(11).text('Total Security Management');
+      markProposalBodyContent(doc);
+      doc.moveDown(0.25);
+      drawTableHeader(doc, [{ label: 'Area', width: 180 }, { label: 'Description', width: CONTENT_W - 180 }], PROPOSAL_MARGIN);
+      for (const row of methodologyItems) {
+        drawTableRow(
+          doc,
+          chrome,
+          [row.name || '—', row.description || ''],
+          [180, CONTENT_W - 180],
+          PROPOSAL_MARGIN,
+          { boldFirst: true },
+        );
+      }
     }
 
     // Approach / phases (PPT coloured matrix)
@@ -155,17 +166,17 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       PROPOSAL_MARGIN,
     );
     for (const phase of input.content.phases) {
-      const role = [
-        `Physical Risk: ${phase.physicalRiskRole || 'Advisory delivery'}`,
-        `${input.clientCompany}: ${phase.clientRole || 'Stakeholder participation'}`,
-      ].join('\n');
+      const roleParts = [
+        phase.physicalRiskRole?.trim() ? `Physical Risk: ${phase.physicalRiskRole.trim()}` : '',
+        phase.clientRole?.trim() ? `${input.clientCompany}: ${phase.clientRole.trim()}` : '',
+      ].filter(Boolean);
       drawTableRow(
         doc,
         chrome,
         [
           String(phase.sequence),
           phase.keyActivities,
-          role,
+          roleParts.join('\n') || '—',
           phase.indicativeOutput || phase.deliverables,
         ],
         detCols,
@@ -249,41 +260,44 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     mark('Proposed timelines', { indent: true });
     const timelineRows = input.content.timelineRows.length
       ? input.content.timelineRows
-      : input.content.phases.map((p) => ({
-          name: p.name,
-          startWeek: p.startWeek || p.sequence,
-          endWeek: p.endWeek || p.sequence + 2,
-          sequence: p.sequence,
-          color: p.color,
-        }));
-    const maxEndWeek = Math.max(12, ...timelineRows.map((r) => r.endWeek));
-    const minWeeks = input.estimatedProjectWeeks || maxEndWeek;
-    drawTimelineIntro(doc, chrome, minWeeks, CONTENT_W);
-    drawProposedTimelineTable(doc, chrome, timelineRows, maxEndWeek, CONTENT_W);
+      : input.content.phases
+          .filter((p) => p.name?.trim() && p.name !== '—')
+          .map((p) => ({
+            name: p.name,
+            startWeek: p.startWeek || p.sequence,
+            endWeek: p.endWeek || p.sequence + 2,
+            sequence: p.sequence,
+            color: p.color,
+          }));
+    const maxFromRows = timelineRows.length
+      ? Math.max(...timelineRows.map((r) => Number(r.endWeek) || 0))
+      : 0;
+    const maxEndWeek = Math.max(
+      1,
+      Number(input.estimatedProjectWeeks) || 0,
+      maxFromRows,
+    );
+    const minWeeks = Number(input.estimatedProjectWeeks) || maxEndWeek;
+    drawTimelineIntro(doc, chrome, minWeeks, CONTENT_W, input.timelineNarrative);
+    if (timelineRows.length) {
+      drawProposedTimelineTable(doc, chrome, timelineRows, maxEndWeek, CONTENT_W);
+    }
 
     // Team structure
     beginMajorSection(doc, chrome, 'Proposed team structure', CONTENT_W, { pageBreak: true });
     mark('Proposed team structure', { indent: true });
     drawTeamStructure(doc, chrome, {
       clientCompany: input.clientCompany,
-      leadConsultant: input.leadConsultant || input.preparedByName || 'Lead consultant',
+      leadConsultant: input.leadConsultant || input.preparedByName || '',
+      projectSponsor: input.projectSponsor,
+      projectChampion: input.projectChampion,
     }, CONTENT_W);
 
     // Team bios + client experience (PPT table layout)
     beginMajorSection(doc, chrome, 'Proposed team', CONTENT_W, { pageBreak: true });
     mark('Proposed team', { indent: true });
-    const team = input.content.teamMembers.length
-      ? input.content.teamMembers
-      : input.preparedByName
-        ? [{
-            name: input.preparedByName,
-            role: 'Lead Consultant',
-            projectPosition: 'Project Lead',
-            displayOrder: 1,
-          }]
-        : [];
     drawProposedTeamSection(doc, chrome, {
-      teamMembers: team,
+      teamMembers: input.content.teamMembers,
       experienceItems: input.content.experienceItems,
     }, CONTENT_W);
 

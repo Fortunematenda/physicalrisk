@@ -409,10 +409,6 @@ export function bodyText(
   const fontSize = opts.fontSize ?? 10;
   const blocks = parseProposalRichText(dedupeRepeatedNarrative(String(text || '')));
   if (!blocks.length) {
-    doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Oblique').fontSize(Math.max(8, fontSize - 1))
-      .text('To be confirmed during proposal finalisation.', startX, doc.y, { width, lineGap: 2 });
-    doc.moveDown(0.3);
-    markProposalBodyContent(doc);
     return;
   }
 
@@ -975,11 +971,13 @@ export function drawTimelineIntro(
   _chrome: ProposalPdfChrome,
   minWeeks: number,
   contentW: number,
+  narrative?: string | null,
 ) {
   clearPdfTextState(doc);
 
-  const paragraph =
-    `We estimate the project to run for a minimum of ${minWeeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
+  const custom = String(narrative || '').trim();
+  const paragraph = custom
+    || `We estimate the project to run for a minimum of ${minWeeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
 
   doc.font('Helvetica').fontSize(10);
   const textH = doc.heightOfString(paragraph, { width: contentW, lineGap: 2 });
@@ -1114,7 +1112,12 @@ export function drawGanttTimeline(
 export function drawTeamStructure(
   doc: PDFKit.PDFDocument,
   chrome: ProposalPdfChrome,
-  input: { clientCompany: string; leadConsultant: string },
+  input: {
+    clientCompany: string;
+    leadConsultant: string;
+    projectSponsor?: string | null;
+    projectChampion?: string | null;
+  },
   contentW: number,
 ) {
   ensureProposalSpace(doc, chrome, 240);
@@ -1172,12 +1175,16 @@ export function drawTeamStructure(
     }
   };
 
+  const leadName = String(input.leadConsultant || '').trim();
+  const leftLeadLines = leadName
+    ? ['Project management', 'Subject Expert', leadName]
+    : ['Project management', 'Subject Expert'];
+
   // Left hierarchy — Physical Risk team
-  fillBox(leftX, leftTopY, leftW, leftBoxH, GREEN, [
-    'Project management',
-    'Subject Expert',
-    input.leadConsultant || 'Lead consultant',
-  ], { boldLast: true, fontSize: 9 });
+  fillBox(leftX, leftTopY, leftW, leftBoxH, GREEN, leftLeadLines, {
+    boldLast: Boolean(leadName),
+    fontSize: 9,
+  });
 
   fillBox(leftX, leftBotY, leftW, leftBoxH, CYAN, [
     'Project team',
@@ -1192,29 +1199,38 @@ export function drawTeamStructure(
     .strokeColor(GREEN)
     .stroke();
 
-  // Right stakeholder stack
-  const rightRows: Array<{ color: string; label: string }> = [
-    { color: ORANGE, label: input.clientCompany || 'Client Company' },
-    { color: NAVY, label: 'Project Sponsor' },
-    { color: GREEN, label: 'Project management' },
-    { color: DARK_GREEN, label: 'Subject experts' },
-    { color: CYAN, label: 'Project team' },
+  // Right stakeholder stack — use admin sponsor / champion when provided
+  const sponsor = String(input.projectSponsor || '').trim();
+  const champion = String(input.projectChampion || '').trim();
+  const rightRows: Array<{ color: string; lines: string[] }> = [
+    { color: ORANGE, lines: [input.clientCompany || 'Client'] },
+    {
+      color: NAVY,
+      lines: sponsor ? ['Project Sponsor', sponsor] : ['Project Sponsor'],
+    },
+    {
+      color: GREEN,
+      lines: champion ? ['Project Champion', champion] : ['Project management'],
+    },
+    { color: DARK_GREEN, lines: ['Subject experts'] },
+    { color: CYAN, lines: ['Project team'] },
   ];
   for (let i = 0; i < rightRows.length; i += 1) {
     const by = y0 + i * (rowH + rowGap);
-    const label = rightRows[i].label;
-    const long = label.length > 22;
+    const lines = rightRows[i].lines;
+    const label = lines.join(' ');
+    const long = label.length > 22 || lines.length > 1;
     if (long) {
       doc.rect(rightX, by, rightW, rowH).fill(rightRows[i].color);
-      doc.fillColor(WHITE).font('Helvetica').fontSize(8)
-        .text(label, rightX + 6, by + Math.max(6, (rowH - 20) / 2), {
+      doc.fillColor(WHITE).font('Helvetica').fontSize(lines.length > 1 ? 7.5 : 8)
+        .text(lines.join('\n'), rightX + 6, by + Math.max(4, (rowH - lines.length * 11) / 2), {
           width: rightW - 12,
           align: 'center',
-          height: rowH - 10,
+          height: rowH - 8,
           ellipsis: true,
         });
     } else {
-      fillBox(rightX, by, rightW, rowH, rightRows[i].color, [label], { fontSize: 10 });
+      fillBox(rightX, by, rightW, rowH, rightRows[i].color, lines, { fontSize: 10 });
     }
   }
 
@@ -1259,7 +1275,7 @@ export function drawTeamStructure(
 const TEAM_TABLE_GREEN = '#196B23';
 
 export const DEFAULT_PROPOSED_TEAM_INTRO =
-  'Physical Risk Consultancy have led consulting projects for many leading organisations across a diverse range of industry sectors. We have experience in developing physical security management blueprints, as well as designing policies and SOPs. We are PSIRA registered and a member of the SA Security Association. Depending on the volume of work an Analyst and security consultants will be contracted for the project.';
+  ''; // Kept for callers; PDF no longer injects canned team intro copy.
 
 function teamBulletLines(value: string | null | undefined): string[] {
   const plain = stripHtmlToPlain(value || '').trim();
@@ -1349,16 +1365,18 @@ export function drawProposedTeamSection(
   },
   contentW: number,
 ) {
-  const intro = (input.intro || '').trim() || DEFAULT_PROPOSED_TEAM_INTRO;
-  ensureProposalSpace(doc, chrome, 48);
-  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(9.5)
-    .text(stripHtmlToPlain(intro), {
-      width: contentW,
-      align: 'justify',
-      lineGap: 1.5,
-    });
-  markProposalBodyContent(doc);
-  doc.moveDown(0.55);
+  const intro = (input.intro || '').trim();
+  if (intro) {
+    ensureProposalSpace(doc, chrome, 48);
+    doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(9.5)
+      .text(stripHtmlToPlain(intro), {
+        width: contentW,
+        align: 'justify',
+        lineGap: 1.5,
+      });
+    markProposalBodyContent(doc);
+    doc.moveDown(0.55);
+  }
 
   const cols = [
     { label: 'Project position', width: Math.floor(contentW * 0.14) },
@@ -1396,15 +1414,21 @@ export function drawProposedTeamSection(
 
   drawHeader();
 
-  const members = input.teamMembers.length
-    ? input.teamMembers
-    : [{ name: '—', role: 'To be confirmed', projectPosition: 'To be confirmed' }];
+  const members = input.teamMembers.filter((m) => m.name?.trim() || m.role?.trim());
+  if (!members.length) {
+    ensureProposalSpace(doc, chrome, 28);
+    doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Oblique').fontSize(9)
+      .text('No team members have been added for this proposal.', x0, doc.y + 6, {
+        width: contentW,
+      });
+    markProposalBodyContent(doc);
+    doc.moveDown(0.8);
+  }
 
   for (const member of members) {
     const position = projectPositionLines(member);
     const name = stripHtmlToPlain(member.name || '').trim() || '—';
-    const summary = stripHtmlToPlain(member.biography || member.summary || '').trim()
-      || 'Biography to be confirmed.';
+    const summary = stripHtmlToPlain(member.biography || member.summary || '').trim() || '—';
     const knowledgeLines = teamBulletLines(
       member.relevantAreasOfKnowledge || member.qualifications || '',
     );
@@ -1446,16 +1470,21 @@ export function drawProposedTeamSection(
   }
 
   // Client experience — full-width block under the team table
-  const expLines = input.experienceItems.length
-    ? input.experienceItems.map((exp) => {
-        const desc = stripHtmlToPlain(exp.description || '').trim();
-        const title = stripHtmlToPlain(exp.engagementTitle || '').trim();
-        const client = stripHtmlToPlain(exp.clientName || '').trim();
-        if (desc) return desc;
-        if (title && client) return `${title} — ${client}`;
-        return client || title || '—';
-      })
-    : ['Relevant client experience to be confirmed during proposal finalisation.'];
+  const expLines = input.experienceItems
+    .map((exp) => {
+      const desc = stripHtmlToPlain(exp.description || '').trim();
+      const title = stripHtmlToPlain(exp.engagementTitle || '').trim();
+      const client = stripHtmlToPlain(exp.clientName || '').trim();
+      if (desc) return desc;
+      if (title && client) return `${title} — ${client}`;
+      return client || title || '';
+    })
+    .filter(Boolean);
+
+  // Client experience — only when admin added experience items
+  if (!expLines.length) {
+    return;
+  }
 
   const labelH = 14;
   const bulletsH = measureBulletBlock(doc, expLines, contentW - pad * 2, fontSize);
@@ -1506,30 +1535,37 @@ export function drawAcceptanceBlock(
 ) {
   const x0 = PROPOSAL_MARGIN;
   const ink = PROPOSAL_COLORS.INK;
-  const contactName = (input.preparedByName || 'Wayne Hermanson').trim();
-  const contactEmail = (input.preparedByEmail || 'wayne@physicalrisk.com').trim();
-  const client = (input.clientCompany || 'Client Company').trim();
+  const contactName = String(input.preparedByName || '').trim() || 'Physical Risk Consultancy';
+  const contactEmail = String(input.preparedByEmail || '').trim();
+  const client = (input.clientCompany || 'Client').trim();
   const accept = input.accept;
 
   ensureProposalSpace(doc, chrome, 280);
   doc.x = x0;
   doc.y += 4;
 
-  // Instructional paragraph with mailto link on the contact email
+  // Instructional paragraph — only link mailto when admin provided an email
   doc.fillColor(ink).font('Helvetica').fontSize(10);
   const introLead =
     'Should Physical Risk Consultancy be the selected as the service provider, please indicate acceptance of this proposal through signature of the proposal acceptance below. Return signed acceptance to ';
-  doc.text(`${introLead}${contactName} (`, x0, doc.y, {
-    width: contentW,
-    continued: true,
-    lineGap: 2,
-  });
-  doc.fillColor('#0563C1').text(contactEmail, {
-    link: `mailto:${contactEmail}`,
-    underline: true,
-    continued: true,
-  });
-  doc.fillColor(ink).text(').', { underline: false });
+  if (contactEmail) {
+    doc.text(`${introLead}${contactName} (`, x0, doc.y, {
+      width: contentW,
+      continued: true,
+      lineGap: 2,
+    });
+    doc.fillColor('#0563C1').text(contactEmail, {
+      link: `mailto:${contactEmail}`,
+      underline: true,
+      continued: true,
+    });
+    doc.fillColor(ink).text(').', { underline: false });
+  } else {
+    doc.text(`${introLead}${contactName}.`, x0, doc.y, {
+      width: contentW,
+      lineGap: 2,
+    });
+  }
   markProposalBodyContent(doc);
   doc.moveDown(1.1);
 

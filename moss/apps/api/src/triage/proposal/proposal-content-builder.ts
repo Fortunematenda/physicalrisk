@@ -181,8 +181,9 @@ export function buildPhysicalRiskProposalInput(input: {
       operationalSitesLabel: triageSnap?.organisation?.operationalSitesLabel,
       securityExpenditureLabel: triageSnap?.organisation?.securityExpenditureLabel,
       industry: input.organisation?.industry || input.lead.industry,
-      templateText: template.understandingNeedsTemplate
-        ? applyProposalPlaceholders(template.understandingNeedsTemplate, placeholders)
+      // Only use an admin-configured DB template — never builtin boilerplate
+      templateText: input.template?.understandingNeedsTemplate
+        ? applyProposalPlaceholders(input.template.understandingNeedsTemplate, placeholders)
         : null,
     }),
   );
@@ -202,9 +203,15 @@ export function buildPhysicalRiskProposalInput(input: {
   if (objectivesPlain && understandingPlain && objectivesPlain === understandingPlain) {
     objectives = '';
   }
-  objectives =
-    objectives
-    || applyProposalPlaceholders(template.objectiveTemplate || '', placeholders);
+
+  // Prefer admin-saved / triage fields only — do not inject builtin template boilerplate at PDF time.
+  const pickAdminText = (...candidates: Array<string | null | undefined>) => {
+    for (const c of candidates) {
+      const v = String(c || '').trim();
+      if (v) return v;
+    }
+    return '';
+  };
 
   return {
     proposalNumber: String(p.proposalNumber || 'DRAFT'),
@@ -213,7 +220,7 @@ export function buildPhysicalRiskProposalInput(input: {
     validUntil,
     productCode,
     proposalTitle,
-    proposalSubtitle: String(p.subtitle || template.subtitleTemplate || '') || null,
+    proposalSubtitle: String(p.subtitle || '').trim() || null,
     clientCompany,
     clientContact,
     clientPosition: triageSnap?.prospect?.jobTitle || null,
@@ -226,46 +233,35 @@ export function buildPhysicalRiskProposalInput(input: {
     assuranceBandLabel: triageSnap?.assuranceBandLabel ?? null,
     understandingOfNeeds,
     objectives,
-    scope:
-      String(p.scopeSummary || input.lead.scopeIndicativeScope || '').trim()
-      || applyProposalPlaceholders(template.scopeTemplate || '', placeholders),
-    approach:
-      String(p.approach || '').trim()
-      || applyProposalPlaceholders(template.approachTemplate || '', placeholders),
-    methodology:
-      String(p.methodology || '').trim()
-      || applyProposalPlaceholders(
-        template.methodologyTemplate || 'Physical Risk utilises established strategy, risk and Total Security Management methodologies.',
-        placeholders,
-      ),
-    deliverables:
-      String(p.deliverables || '').trim()
-      || applyProposalPlaceholders(template.deliverablesTemplate || '', placeholders),
-    exclusions:
-      String(p.exclusions || '').trim()
-      || defaultContent.projectExclusions.join('\n')
-      || applyProposalPlaceholders(template.exclusionsTemplate || '', placeholders),
-    assumptions:
-      String(p.assumptions || '').trim()
-      || defaultContent.feeAssumptions.join('\n')
-      || applyProposalPlaceholders(template.assumptionTemplate || '', placeholders),
-    statementOfResponsibility:
-      String(p.statementOfResponsibility || '').trim()
-      || applyProposalPlaceholders(template.responsibilityTemplate || '', placeholders),
-    termsAndConditions:
-      String(p.termsAndConditions || '').trim()
-      || applyProposalPlaceholders(template.termsTemplate || '', placeholders),
-    acceptanceTerms:
-      String(p.acceptanceTerms || '').trim()
-      || applyProposalPlaceholders(template.acceptanceTemplate || '', placeholders),
-    paymentTerms: String(p.paymentTerms || feeDefaults.paymentTerms).trim(),
-    timelineNarrative: String(p.timelineNarrative || input.lead.scopeExpectedTimeline || '') || null,
+    scope: pickAdminText(p.scopeSummary as string, input.lead.scopeIndicativeScope),
+    approach: pickAdminText(p.approach as string),
+    methodology: pickAdminText(p.methodology as string),
+    deliverables: pickAdminText(p.deliverables as string),
+    exclusions: pickAdminText(
+      p.exclusions as string,
+      defaultContent.projectExclusions.join('\n'),
+    ),
+    assumptions: pickAdminText(
+      p.assumptions as string,
+      defaultContent.feeAssumptions.join('\n'),
+    ),
+    statementOfResponsibility: pickAdminText(p.statementOfResponsibility as string),
+    termsAndConditions: pickAdminText(p.termsAndConditions as string),
+    acceptanceTerms: pickAdminText(p.acceptanceTerms as string),
+    paymentTerms: pickAdminText(p.paymentTerms as string, feeDefaults.paymentTerms),
+    timelineNarrative:
+      pickAdminText(p.timelineNarrative as string, input.lead.scopeExpectedTimeline) || null,
     estimatedProjectWeeks: p.estimatedProjectWeeks != null ? Number(p.estimatedProjectWeeks) : null,
     preparedByName: input.preparedByName || null,
     preparedByEmail: input.preparedByEmail || null,
-    projectSponsor: String(p.projectSponsor || '') || null,
-    projectChampion: String(p.projectChampion || '') || null,
-    leadConsultant: input.preparedByName || null,
+    projectSponsor: pickAdminText(p.projectSponsor as string) || null,
+    projectChampion: pickAdminText(p.projectChampion as string) || null,
+    leadConsultant:
+      pickAdminText(
+        p.leadConsultant as string,
+        defaultContent.teamMembers.find((m) => m.name?.trim())?.name,
+        input.preparedByName,
+      ) || null,
     currency: String(p.currency || feeDefaults.currency),
     analystHourlyRate: Number(p.analystHourlyRate ?? feeDefaults.analystHourlyRate),
     specialistHourlyRate: Number(p.specialistHourlyRate ?? feeDefaults.specialistHourlyRate),
