@@ -231,7 +231,7 @@ export const BUILTIN_TEMPLATES = [
     termsTemplate:
       'Standard Physical Risk terms and conditions of service apply. Payment terms: {{PAYMENT_TERMS}}. Proposal valid until {{VALID_UNTIL}}.',
     acceptanceTemplate:
-      'By signing below, {{CLIENT_COMPANY}} accepts this proposal and authorises Physical Risk to commence the agreed engagement on the terms set out herein.',
+      'Should Physical Risk Consultancy be the selected as the service provider, please indicate acceptance of this proposal through signature of the proposal acceptance below.',
     feeDefaults: {
       analystHourlyRate: DEFAULT_ANALYST_RATE,
       specialistHourlyRate: DEFAULT_SPECIALIST_RATE,

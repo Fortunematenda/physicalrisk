@@ -50,7 +50,7 @@ export function dedupeRepeatedNarrative(value: string): string {
 
 /** Strip tags to plain text (for table cells / validation emptiness). */
 export function stripHtmlToPlain(value: string): string {
-  const raw = String(value || '');
+  const raw = unescapeProposalHtml(String(value || ''));
   if (!looksLikeHtml(raw)) return raw;
   return raw
     .replace(/<\s*br\s*\/?>/gi, '\n')
@@ -94,9 +94,22 @@ function decodeEntities(text: string): string {
     .replace(/&#39;/gi, "'");
 }
 
+/** TipTap sometimes stores escaped markup (&lt;li&gt;...) — decode once so parsers see real tags. */
+export function unescapeProposalHtml(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (looksLikeHtml(raw)) return raw;
+  if (/&lt;\/?[a-z]/i.test(raw)) {
+    const decoded = decodeEntities(raw);
+    if (looksLikeHtml(decoded)) return decoded;
+  }
+  return raw;
+}
+
 function parseInline(html: string, base: RichInlineStyle = {}): RichInlineRun[] {
   const runs: RichInlineRun[] = [];
-  const tokenRe = /<\/?(?:strong|b|em|i|u|br)\s*\/?>/gi;
+  // Match any tag so unknown markup (li, span, etc.) is never printed literally.
+  const tokenRe = /<\/?[a-z][a-z0-9]*(?:\s[^>]*)?\s*\/?>/gi;
   let last = 0;
   let style: RichInlineStyle = { ...base };
   let match: RegExpExecArray | null;
@@ -119,19 +132,21 @@ function parseInline(html: string, base: RichInlineStyle = {}): RichInlineRun[] 
   while ((match = tokenRe.exec(html))) {
     if (match.index > last) pushText(html.slice(last, match.index));
     const tag = match[0].toLowerCase();
-    if (tag.startsWith('<br')) {
+    const name = tag.replace(/^<\/?/, '').replace(/[\s/>].*$/, '');
+    if (name === 'br') {
       pushText('\n');
     } else if (tag.startsWith('</')) {
-      if (tag.includes('strong') || tag.includes('</b')) style = { ...style, bold: base.bold };
-      else if (tag.includes('em') || tag.includes('</i')) style = { ...style, italic: base.italic };
-      else if (tag.includes('u')) style = { ...style, underline: base.underline };
-    } else if (tag.includes('strong') || tag === '<b>' || tag.startsWith('<b ')) {
+      if (name === 'strong' || name === 'b') style = { ...style, bold: base.bold };
+      else if (name === 'em' || name === 'i') style = { ...style, italic: base.italic };
+      else if (name === 'u') style = { ...style, underline: base.underline };
+    } else if (name === 'strong' || name === 'b') {
       style = { ...style, bold: true };
-    } else if (tag.includes('em') || tag === '<i>' || tag.startsWith('<i ')) {
+    } else if (name === 'em' || name === 'i') {
       style = { ...style, italic: true };
-    } else if (tag.startsWith('<u')) {
+    } else if (name === 'u') {
       style = { ...style, underline: true };
     }
+    // All other tags (li, p, span, ul, …) are consumed and not emitted as text.
     last = match.index + match[0].length;
   }
   if (last < html.length) pushText(html.slice(last));
@@ -175,7 +190,7 @@ function extractInner(html: string, openTag: string): { inner: string; rest: str
 
 /** Parse TipTap/simple HTML into PDF-friendly blocks. Falls back to plain paragraphs. */
 export function parseProposalRichText(value: string): RichBlock[] {
-  const raw = String(value || '').trim();
+  const raw = unescapeProposalHtml(String(value || '').trim());
   if (!raw) return [];
   if (!looksLikeHtml(raw)) {
     return raw
@@ -210,7 +225,7 @@ export function parseProposalRichText(value: string): RichBlock[] {
               type: 'list-item',
               ordered,
               index: itemIndex++,
-              runs: [{ text: stray, style: {} }],
+              runs: [{ text: decodeEntities(stray), style: {} }],
             });
           }
           break;
@@ -221,6 +236,30 @@ export function parseProposalRichText(value: string): RichBlock[] {
         const runs = parseInline(item.inner.replace(/<\/?p(?:\s[^>]*)?>/gi, ''));
         if (runs.length) {
           blocks.push({ type: 'list-item', ordered, index: itemIndex++, runs });
+        }
+      }
+      continue;
+    }
+
+    // Bare <li> (TipTap fragment / template join without wrapping <ul>)
+    if (/^<li(?:\s[^>]*)?>/i.test(remaining)) {
+      let itemIndex = 1;
+      while (/^<li(?:\s[^>]*)?>/i.test(remaining.trim())) {
+        remaining = remaining.replace(/^\s+/, '');
+        const item = extractInner(remaining, 'li');
+        if (!item) {
+          // Unclosed <li> — strip tags and emit once
+          const runs = parseInline(remaining);
+          if (runs.length) {
+            blocks.push({ type: 'list-item', ordered: false, index: itemIndex++, runs });
+          }
+          remaining = '';
+          break;
+        }
+        remaining = item.rest;
+        const runs = parseInline(item.inner.replace(/<\/?p(?:\s[^>]*)?>/gi, ''));
+        if (runs.length) {
+          blocks.push({ type: 'list-item', ordered: false, index: itemIndex++, runs });
         }
       }
       continue;
@@ -245,10 +284,10 @@ export function parseProposalRichText(value: string): RichBlock[] {
     }
 
     // Unknown / bare text until next block tag
-    const nextBlock = remaining.search(/<(?:p|ul|ol|div)(?:\s[^>]*)?>/i);
+    const nextBlock = remaining.search(/<(?:p|ul|ol|div|li)(?:\s[^>]*)?>/i);
     const chunk = nextBlock === -1 ? remaining : remaining.slice(0, nextBlock);
     remaining = nextBlock === -1 ? '' : remaining.slice(nextBlock);
-    const runs = parseInline(chunk.replace(/<\/?(?:span|div)(?:\s[^>]*)?>/gi, ''));
+    const runs = parseInline(chunk);
     if (runs.length) blocks.push({ type: 'paragraph', runs });
   }
 

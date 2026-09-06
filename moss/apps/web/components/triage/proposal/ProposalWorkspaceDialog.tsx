@@ -1014,13 +1014,27 @@ export function ProposalWorkspaceDialog({
                           value={member.role}
                           onChange={(e) => updateTeamMember(index, 'role', e.target.value)}
                         />
+                        <Input
+                          className="bg-white sm:col-span-2"
+                          placeholder="Project position (e.g. Project Manager / Physical Security SME)"
+                          value={member.projectPosition || ''}
+                          onChange={(e) => updateTeamMember(index, 'projectPosition', e.target.value)}
+                        />
                         <RichTextEditor
                           className="sm:col-span-2"
                           minHeightClassName="min-h-[88px]"
                           maxHeightClassName="max-h-[220px]"
-                          placeholder="Biography / summary"
+                          placeholder="Summary / biography"
                           value={member.biography || member.summary || ''}
                           onChange={(v) => updateTeamMember(index, 'biography', v)}
+                        />
+                        <RichTextEditor
+                          className="sm:col-span-2"
+                          minHeightClassName="min-h-[88px]"
+                          maxHeightClassName="max-h-[220px]"
+                          placeholder="Relevant areas of knowledge (one item per line)"
+                          value={member.relevantAreasOfKnowledge || member.qualifications || ''}
+                          onChange={(v) => updateTeamMember(index, 'relevantAreasOfKnowledge', v)}
                         />
                       </div>
                     ))}
@@ -1028,6 +1042,91 @@ export function ProposalWorkspaceDialog({
                       <p className="text-sm text-muted-foreground">
                         No team members yet. Add profiles or select from the consultant library when
                         available.
+                      </p>
+                    ) : null}
+
+                    <div className="flex items-center justify-between pt-2">
+                      <FieldLabel>Client experience</FieldLabel>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const items = [...draft.contentSnapshot.experienceItems];
+                          items.push({
+                            clientName: '',
+                            description: '',
+                            displayOrder: items.length + 1,
+                          });
+                          patchDraft({
+                            contentSnapshot: {
+                              ...draft.contentSnapshot,
+                              experienceItems: items,
+                            },
+                          });
+                        }}
+                      >
+                        <Plus className="size-4" />
+                        Add experience
+                      </Button>
+                    </div>
+                    {draft.contentSnapshot.experienceItems.map((exp, index) => (
+                      <div
+                        key={`exp-${exp.displayOrder}-${index}`}
+                        className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-2"
+                      >
+                        <Input
+                          className="bg-white"
+                          placeholder="Client name"
+                          value={exp.clientName}
+                          onChange={(e) => {
+                            const items = [...draft.contentSnapshot.experienceItems];
+                            items[index] = { ...items[index], clientName: e.target.value };
+                            patchDraft({
+                              contentSnapshot: {
+                                ...draft.contentSnapshot,
+                                experienceItems: items,
+                              },
+                            });
+                          }}
+                        />
+                        <Input
+                          className="bg-white"
+                          placeholder="Engagement title (optional)"
+                          value={exp.engagementTitle || ''}
+                          onChange={(e) => {
+                            const items = [...draft.contentSnapshot.experienceItems];
+                            items[index] = { ...items[index], engagementTitle: e.target.value };
+                            patchDraft({
+                              contentSnapshot: {
+                                ...draft.contentSnapshot,
+                                experienceItems: items,
+                              },
+                            });
+                          }}
+                        />
+                        <RichTextEditor
+                          className="sm:col-span-2"
+                          minHeightClassName="min-h-[72px]"
+                          maxHeightClassName="max-h-[180px]"
+                          placeholder="Experience description (shown as a bullet on the PDF)"
+                          value={exp.description}
+                          onChange={(v) => {
+                            const items = [...draft.contentSnapshot.experienceItems];
+                            items[index] = { ...items[index], description: v };
+                            patchDraft({
+                              contentSnapshot: {
+                                ...draft.contentSnapshot,
+                                experienceItems: items,
+                              },
+                            });
+                          }}
+                        />
+                      </div>
+                    ))}
+                    {!draft.contentSnapshot.experienceItems.length ? (
+                      <p className="text-sm text-muted-foreground">
+                        Optional. Client experience bullets appear under the Proposed team table.
                       </p>
                     ) : null}
                   </TabsContent>

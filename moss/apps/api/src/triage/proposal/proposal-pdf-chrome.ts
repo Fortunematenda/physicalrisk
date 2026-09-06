@@ -1,7 +1,8 @@
 import type PDFDocument from 'pdfkit';
 import { defaultReportBrand, resolveReportLogoPath } from '../../reports/pdf-letterhead';
 import { resolveProposalCoverLogoPath, resolveProposalSlideHeaderPath } from '../../reports/scl-report-branding';
-import { parseProposalRichText, richFont, stripHtmlToPlain } from './proposal-rich-text';
+import { dedupeRepeatedNarrative, parseProposalRichText, richFont, stripHtmlToPlain } from './proposal-rich-text';
+import { drawSecurityReviewDiagram } from './security-review-diagram';
 
 export const PROPOSAL_PAGE_WIDTH = 841.89;
 export const PROPOSAL_PAGE_HEIGHT = 473.56;
@@ -9,7 +10,7 @@ export const PROPOSAL_MARGIN = 36;
 /** PPT master header aspect ratio (12192000 × 1549400 EMU). */
 const PPT_HEADER_ASPECT = 1549400 / 12192000;
 export const PROPOSAL_HEADER_H = Math.round(PROPOSAL_PAGE_WIDTH * PPT_HEADER_ASPECT) + 6;
-export const PROPOSAL_FOOTER_H = 28;
+export const PROPOSAL_FOOTER_H = 34;
 export const PROPOSAL_TOP_BAR_H = 6;
 
 const BLACK = '#111111';
@@ -352,9 +353,13 @@ export function drawProposalFooter(
 
   doc.moveTo(margin, y).lineTo(pageW - margin, y).lineWidth(0.5).strokeColor(PROPOSAL_COLORS.RULE).stroke();
 
-  if (chrome.logoPath) {
+  // Full wordmark on every page footer
+  const footerLogo = chrome.coverLogoPath || chrome.logoPath;
+  const logoH = 24;
+  const logoW = 120;
+  if (footerLogo) {
     try {
-      doc.image(chrome.logoPath, pageW - margin - 44, y + 5, { height: 14 });
+      doc.image(footerLogo, pageW - margin - logoW, y + 2, { height: logoH });
     } catch {
       /* skip */
     }
@@ -366,7 +371,7 @@ export function drawProposalFooter(
       margin,
       y + 9,
       {
-        width: pageW - margin * 2 - 56,
+        width: pageW - margin * 2 - logoW - 12,
         height: 12,
         align: 'left',
         lineBreak: false,
@@ -402,7 +407,7 @@ export function bodyText(
 ) {
   const startX = opts.x ?? PROPOSAL_MARGIN;
   const fontSize = opts.fontSize ?? 10;
-  const blocks = parseProposalRichText(text);
+  const blocks = parseProposalRichText(dedupeRepeatedNarrative(String(text || '')));
   if (!blocks.length) {
     doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Oblique').fontSize(Math.max(8, fontSize - 1))
       .text('To be confirmed during proposal finalisation.', startX, doc.y, { width, lineGap: 2 });
@@ -652,92 +657,7 @@ export function beginScopeObjectivesSlide(doc: PDFKit.PDFDocument, _chrome: Prop
   trackPageY(doc);
 }
 
-const SECURITY_REVIEW_STEPS = [
-  'Best practice',
-  'Legislation',
-  'Policies & Procedures',
-  'Contracts',
-  'Intelligent',
-  'Strategy',
-];
-
-/** PPTX-style staircase from AS IS current state to Security Blueprint TO BE. */
-export function drawSecurityReviewDiagram(
-  doc: PDFKit.PDFDocument,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-) {
-  const barW = 26;
-  const olive = '#6D7A3A';
-  const oliveDark = '#4F5A2C';
-  const toBeGreen = '#A4C45A';
-  const ink = PROPOSAL_COLORS.INK;
-
-  doc.save();
-
-  // "Security Review" spine
-  doc.rect(x, y, barW, h).fill(olive);
-  doc.save();
-  doc.translate(x + barW / 2, y + h / 2);
-  doc.rotate(-90);
-  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-    .text('Security Review', -h / 2 + 8, -4, { width: h - 16, align: 'center', lineBreak: false });
-  doc.restore();
-
-  const innerX = x + barW + 10;
-  const innerW = w - barW - 12;
-  const baseY = y + h - 30;
-
-  // AS IS oval
-  const asIsCx = innerX + 58;
-  const asIsCy = baseY + 6;
-  doc.ellipse(asIsCx, asIsCy, 54, 17).fill(oliveDark);
-  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(7)
-    .text('AS IS', asIsCx - 54, asIsCy - 12, { width: 108, align: 'center', lineBreak: false });
-  doc.font('Helvetica').fontSize(6.5)
-    .text('Current State', asIsCx - 54, asIsCy - 2, { width: 108, align: 'center', lineBreak: false });
-
-  // Staircase treads
-  const stepCount = SECURITY_REVIEW_STEPS.length;
-  const stepW = Math.min(72, Math.floor((innerW - 70) / stepCount));
-  let sx = innerX + 4;
-  const sy = baseY - 8;
-  for (let i = 0; i < stepCount; i += 1) {
-    const rise = 14 + i * 11;
-    const treadX = sx + i * (stepW * 0.55);
-    const treadY = sy - rise;
-    doc.moveTo(treadX, sy).lineTo(treadX, treadY).lineWidth(1).strokeColor(ink).stroke();
-    doc.moveTo(treadX, treadY).lineTo(treadX + stepW, treadY).lineWidth(1).strokeColor(ink).stroke();
-    doc.fillColor(ink).font('Helvetica').fontSize(6.5)
-      .text(SECURITY_REVIEW_STEPS[i], treadX + 2, treadY - 11, {
-        width: stepW + 16,
-        lineBreak: false,
-      });
-  }
-
-  // Arrow to TO BE
-  const arrowX = innerX + innerW - 36;
-  const arrowTop = y + 42;
-  doc.moveTo(arrowX, baseY - 20).lineTo(arrowX, arrowTop + 18).lineWidth(1.2).strokeColor(ink).stroke();
-  doc.moveTo(arrowX, arrowTop + 18).lineTo(arrowX - 4, arrowTop + 24).lineWidth(1.2).strokeColor(ink).stroke();
-  doc.moveTo(arrowX, arrowTop + 18).lineTo(arrowX + 4, arrowTop + 24).lineWidth(1.2).strokeColor(ink).stroke();
-
-  // TO BE banner
-  const toBeW = Math.min(118, innerW - 20);
-  const toBeX = innerX + innerW - toBeW;
-  doc.rect(toBeX, y + 8, toBeW, 34).fill(toBeGreen);
-  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-    .text('Security Blueprint', toBeX + 4, y + 13, { width: toBeW - 8, align: 'center', lineBreak: false });
-  doc.font('Helvetica').fontSize(7)
-    .text('TO BE / Desired state', toBeX + 4, y + 24, { width: toBeW - 8, align: 'center', lineBreak: false });
-
-  doc.restore();
-  markProposalBodyContent(doc);
-}
-
-/** Scope slide — two-column PPTX layout with Security Review diagram (not the AS IS/TO BE strip). */
+/** Scope slide — two-column PPT layout; Security Review diagram under Approach (right). */
 export function drawScopeAndObjectivesSlide(
   doc: PDFKit.PDFDocument,
   chrome: ProposalPdfChrome,
@@ -753,39 +673,46 @@ export function drawScopeAndObjectivesSlide(
   const leftX = PROPOSAL_MARGIN;
   const rightX = PROPOSAL_MARGIN + colW + gutter;
   const topY = doc.y;
-  const diagramH = 172;
-  const diagramY = PROPOSAL_PAGE_HEIGHT - PROPOSAL_MARGIN - diagramH - 10;
-  const logoH = 30;
+  const footerGap = 18;
+  const maxDiagramBottom = contentBottom() - footerGap;
+  const bodyTopY = topY + 28;
 
   doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(20)
     .text('Scope and Objectives', leftX, topY, { width: colW, lineGap: 0 });
   doc.text('Approach', rightX, topY, { width: colW, lineGap: 0 });
   markProposalBodyContent(doc);
 
-  const bodyTopY = topY + 30;
   const leftContent = [input.scopeObjectives, input.scopeBody].filter((v) => v?.trim()).join('\n\n');
 
   doc.y = bodyTopY;
   doc.x = leftX;
   bodyText(doc, chrome, leftContent, colW, { x: leftX, fontSize: 8.5 });
 
+  // Approach copy first — diagram must sit below it (never paint over the paragraph)
   doc.y = bodyTopY;
   doc.x = rightX;
   bodyText(doc, chrome, input.approach, colW, {
     x: rightX,
     fontSize: 8.5,
   });
+  const approachEndY = doc.y;
 
-  drawSecurityReviewDiagram(doc, rightX, diagramY, colW, diagramH);
+  const diagramTopGap = 12;
+  const preferredH = 155;
+  const minH = 128;
+  let diagramY = approachEndY + diagramTopGap;
+  let diagramH = preferredH;
 
-  const logo = chrome.coverLogoPath || chrome.logoPath;
-  if (logo) {
-    try {
-      doc.image(logo, PROPOSAL_MARGIN + contentW - 118, diagramY + diagramH - logoH + 4, { height: logoH });
-    } catch {
-      /* skip */
-    }
+  if (diagramY + minH > maxDiagramBottom) {
+    // Not enough room below the paragraph — pin a compact diagram to the bottom
+    diagramH = Math.max(minH, Math.min(preferredH, maxDiagramBottom - (approachEndY + 8)));
+    diagramY = Math.max(approachEndY + 8, maxDiagramBottom - diagramH);
+  } else {
+    diagramH = Math.min(preferredH, maxDiagramBottom - diagramY);
   }
+
+  drawSecurityReviewDiagram(doc, chrome, rightX, diagramY, colW, diagramH);
+  markProposalBodyContent(doc);
 
   doc.y = contentBottom();
   doc.x = PROPOSAL_MARGIN;
@@ -842,23 +769,205 @@ export function drawAsIsToBeStrip(
   markProposalBodyContent(doc);
 }
 
+const PHASE_MATRIX = {
+  labelBg: '#1A1A1A',
+  phase1: { head: '#2E75B6', body: '#2E75B6' },
+  phase2: { head: '#5B9BD5', body: '#5B9BD5' },
+  phase3: { head: '#548235', body: '#548235' },
+  exclusions: { head: '#1F4D2A', body: '#1F4D2A' },
+  gutter: 2.5,
+  white: '#FFFFFF',
+} as const;
+
+function phaseBulletLines(value: string): string[] {
+  const plain = stripHtmlToPlain(value || '').trim();
+  if (!plain) return [];
+  return plain
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/^[•●▪◦\-\u2013\u2014*]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function drawPhaseMatrixCellText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  opts: { bold?: boolean; fontSize?: number; bullets?: boolean; pad?: number } = {},
+) {
+  const pad = opts.pad ?? 5;
+  const fontSize = opts.fontSize ?? 7;
+  const maxH = h - pad * 2;
+  if (maxH < fontSize) return;
+
+  if (opts.bullets) {
+    const lines = phaseBulletLines(text);
+    if (!lines.length) return;
+    let ty = y + pad;
+    doc.fillColor(PHASE_MATRIX.white).font('Helvetica').fontSize(fontSize);
+    for (const line of lines) {
+      if (ty >= y + h - pad - fontSize) break;
+      const block = `• ${line}`;
+      const blockH = doc.heightOfString(block, { width: w - pad * 2, lineGap: 1 });
+      doc.text(block, x + pad, ty, {
+        width: w - pad * 2,
+        lineGap: 1,
+        height: Math.min(blockH + 2, y + h - pad - ty),
+      });
+      ty += blockH + 2;
+    }
+    return;
+  }
+
+  doc.fillColor(PHASE_MATRIX.white)
+    .font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
+    .fontSize(fontSize)
+    .text(stripHtmlToPlain(text || ''), x + pad, y + pad, {
+      width: w - pad * 2,
+      height: maxH,
+      align: 'left',
+      lineGap: 1,
+    });
+}
+
+/**
+ * PPT-style Approach matrix: Project phases | Phase 1–3 | PROJECT EXCLUSIONS
+ * with Key activities + Deliverables rows (coloured cells, white text).
+ */
 export function drawPhaseMatrix(
   doc: PDFKit.PDFDocument,
   chrome: ProposalPdfChrome,
   phases: Array<{ name: string; keyActivities: string; deliverables: string }>,
   contentW: number,
+  opts: { exclusions?: string[] } = {},
 ) {
-  const phaseColW = Math.floor((contentW - 110) / 3);
-  const cols = [
-    { label: 'Project phases', width: 110 },
-    { label: 'Phase 1', width: phaseColW },
-    { label: 'Phase 2', width: phaseColW },
-    { label: 'Phase 3', width: phaseColW },
+  const x0 = PROPOSAL_MARGIN;
+  const gutter = PHASE_MATRIX.gutter;
+  const labelW = 78;
+  const exclW = Math.floor(contentW * 0.18);
+  const phaseW = Math.floor((contentW - labelW - exclW - gutter * 4) / 3);
+  const colWidths = [labelW, phaseW, phaseW, phaseW, exclW];
+  const colXs: number[] = [];
+  let cx = x0;
+  for (let i = 0; i < colWidths.length; i += 1) {
+    colXs.push(cx);
+    cx += colWidths[i] + gutter;
+  }
+
+  const p = [
+    phases[0] || { name: 'Phase 1', keyActivities: '', deliverables: '' },
+    phases[1] || { name: 'Phase 2', keyActivities: '', deliverables: '' },
+    phases[2] || { name: 'Phase 3', keyActivities: '', deliverables: '' },
   ];
-  drawTableHeader(doc, cols, PROPOSAL_MARGIN);
-  drawTableRow(doc, chrome, ['Name', ...phases.map((p) => p.name)], cols.map((c) => c.width), PROPOSAL_MARGIN, { boldFirst: true, minH: 24 });
-  drawTableRow(doc, chrome, ['Key activities', ...phases.map((p) => p.keyActivities)], cols.map((c) => c.width), PROPOSAL_MARGIN, { minH: 36 });
-  drawTableRow(doc, chrome, ['Deliverables', ...phases.map((p) => p.deliverables)], cols.map((c) => c.width), PROPOSAL_MARGIN, { minH: 36 });
+  const exclusionLines = (opts.exclusions || [])
+    .map((e) => stripHtmlToPlain(e).trim())
+    .filter(Boolean);
+  const exclusionsText = exclusionLines.length
+    ? `The following will not form part of the project:\n${exclusionLines.join('\n')}`
+    : 'The following will not form part of the project:\n—';
+
+  const headerH = 48;
+  const deliverH = 56;
+  // Activities row fills remaining usable height on the page
+  const usable = contentBottom() - doc.y - 8;
+  const activitiesH = Math.max(120, usable - headerH - deliverH - gutter * 2);
+  const totalH = headerH + gutter + activitiesH + gutter + deliverH;
+
+  ensureProposalSpace(doc, chrome, Math.min(totalH, contentBottom() - (PROPOSAL_HEADER_H + 14)));
+  const y0 = doc.y;
+
+  const colColors = [
+    { head: PHASE_MATRIX.labelBg, body: PHASE_MATRIX.labelBg },
+    PHASE_MATRIX.phase1,
+    PHASE_MATRIX.phase2,
+    PHASE_MATRIX.phase3,
+    PHASE_MATRIX.exclusions,
+  ];
+
+  const headerCells = [
+    'Project phases',
+    p[0].name || 'Phase 1',
+    p[1].name || 'Phase 2',
+    p[2].name || 'Phase 3',
+    'PROJECT EXCLUSIONS',
+  ];
+  const activityCells = [
+    'Key activities',
+    p[0].keyActivities,
+    p[1].keyActivities,
+    p[2].keyActivities,
+    exclusionsText,
+  ];
+  const deliverCells = [
+    'Deliverables',
+    p[0].deliverables,
+    p[1].deliverables,
+    p[2].deliverables,
+    '',
+  ];
+
+  const drawRow = (
+    cells: string[],
+    rowY: number,
+    rowH: number,
+    mode: 'head' | 'body',
+    rowOpts: { bulletsFrom?: number } = {},
+  ) => {
+    for (let i = 0; i < cells.length; i += 1) {
+      const fill = i === 0
+        ? PHASE_MATRIX.labelBg
+        : mode === 'head'
+          ? colColors[i].head
+          : colColors[i].body;
+      doc.rect(colXs[i], rowY, colWidths[i], rowH).fill(fill);
+
+      if (i === 0) {
+        drawPhaseMatrixCellText(doc, cells[i], colXs[i], rowY, colWidths[i], rowH, {
+          bold: true,
+          fontSize: 10,
+        });
+      } else if (mode === 'head') {
+        drawPhaseMatrixCellText(doc, cells[i], colXs[i], rowY, colWidths[i], rowH, {
+          bold: true,
+          fontSize: 9,
+        });
+      } else if (rowOpts.bulletsFrom != null && i >= rowOpts.bulletsFrom) {
+        drawPhaseMatrixCellText(doc, cells[i], colXs[i], rowY, colWidths[i], rowH, {
+          bullets: true,
+          fontSize: 8,
+        });
+      } else {
+        drawPhaseMatrixCellText(doc, cells[i], colXs[i], rowY, colWidths[i], rowH, {
+          bold: false,
+          fontSize: 8.5,
+        });
+      }
+    }
+  };
+
+  // Row 1 — phase headers
+  drawRow(headerCells, y0, headerH, 'head');
+  // Row 2 — key activities (+ exclusions body)
+  const actY = y0 + headerH + gutter;
+  drawRow(activityCells, actY, activitiesH, 'body', { bulletsFrom: 1 });
+  // Row 3 — deliverables (exclusions cell empty / same dark fill)
+  const delY = actY + activitiesH + gutter;
+  for (let i = 0; i < deliverCells.length; i += 1) {
+    const fill = i === 0 ? PHASE_MATRIX.labelBg : colColors[i].head;
+    doc.rect(colXs[i], delY, colWidths[i], deliverH).fill(fill);
+    if (i === 0 || deliverCells[i]) {
+      drawPhaseMatrixCellText(doc, deliverCells[i], colXs[i], delY, colWidths[i], deliverH, {
+        bold: i === 0,
+        fontSize: i === 0 ? 10 : 8.5,
+      });
+    }
+  }
+
+  doc.y = delY + deliverH + 10;
+  doc.x = x0;
+  markProposalBodyContent(doc);
 }
 
 export function drawTimelineIntro(
@@ -867,23 +976,36 @@ export function drawTimelineIntro(
   minWeeks: number,
   contentW: number,
 ) {
-  ensureProposalSpace(doc, _chrome, 48);
-  const y = doc.y;
-  const prefix = 'We estimate the project to run for a minimum of ';
-  const suffix =
-    ' weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:';
+  clearPdfTextState(doc);
 
+  const paragraph =
+    `We estimate the project to run for a minimum of ${minWeeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
+
+  doc.font('Helvetica').fontSize(10);
+  const textH = doc.heightOfString(paragraph, { width: contentW, lineGap: 2 });
+  ensureProposalSpace(doc, _chrome, textH + 28);
+
+  const x0 = PROPOSAL_MARGIN;
+  const y0 = doc.y;
+
+  // One measured block so wrapping stays above the table (no PDFKit continued flow)
   doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(10);
-  doc.text(prefix, PROPOSAL_MARGIN, y, { continued: true, lineBreak: false });
-  doc.font('Helvetica-Bold').text(String(minWeeks), { continued: true, lineBreak: false });
-  doc.font('Helvetica').text(suffix, { width: contentW, lineGap: 2 });
-  doc.moveDown(0.5);
+  doc.text(paragraph, x0, y0, {
+    width: contentW,
+    align: 'left',
+    lineGap: 2,
+  });
+
+  doc.x = x0;
+  doc.y = y0 + textH + 14;
   markProposalBodyContent(doc);
   clearPdfTextState(doc);
 }
 
-const TIMELINE_BAR_COLORS = ['#00796B', '#5B9BD5', '#70AD47'];
-const TIMELINE_GRID_BG = '#F2F2F2';
+const TIMELINE_HEADER = '#1F567D';
+const TIMELINE_BAR_COLORS = ['#1F567D', '#5D9CEC', '#51A334'];
+const TIMELINE_GRID_BG = '#E6E6E6';
+const TIMELINE_LABEL_BG = '#D9D9D9';
 const TIMELINE_GRID_LINE = '#FFFFFF';
 
 /** Gantt-style phases/weeks table matching the Physical Risk proposal template slide. */
@@ -894,6 +1016,9 @@ export function drawProposedTimelineTable(
   maxWeeks: number,
   contentW: number,
 ) {
+  clearPdfTextState(doc);
+  doc.x = PROPOSAL_MARGIN;
+
   const labelW = Math.floor(contentW * 0.28);
   const weekW = Math.floor((contentW - labelW) / maxWeeks);
   const tableW = labelW + weekW * maxWeeks;
@@ -907,18 +1032,18 @@ export function drawProposedTimelineTable(
   });
   const tableH = headerH + rowHeights.reduce((sum, h) => sum + h, 0);
 
-  ensureProposalSpace(doc, chrome, tableH + 8);
+  ensureProposalSpace(doc, chrome, tableH + 12);
   const topY = doc.y;
 
   // Header row
-  doc.rect(x0, topY, labelW, headerH).fill(PROPOSAL_COLORS.TABLE_HEAD);
-  doc.fillColor(PROPOSAL_COLORS.TABLE_HEAD_TEXT).font('Helvetica-Bold').fontSize(8)
+  doc.rect(x0, topY, labelW, headerH).fill(TIMELINE_HEADER);
+  doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
     .text('Phases / Weeks', x0 + 6, topY + 7, { width: labelW - 10, lineBreak: false });
 
   for (let w = 1; w <= maxWeeks; w += 1) {
     const cx = x0 + labelW + (w - 1) * weekW;
-    doc.rect(cx, topY, weekW, headerH).fill(PROPOSAL_COLORS.TABLE_HEAD);
-    doc.fillColor(PROPOSAL_COLORS.TABLE_HEAD_TEXT).font('Helvetica-Bold').fontSize(8)
+    doc.rect(cx, topY, weekW, headerH).fill(TIMELINE_HEADER);
+    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
       .text(String(w), cx, topY + 7, { width: weekW, align: 'center', lineBreak: false });
   }
 
@@ -929,11 +1054,15 @@ export function drawProposedTimelineTable(
     const label = `${row.sequence} - ${row.name}`;
     const barColor = row.color || TIMELINE_BAR_COLORS[idx % TIMELINE_BAR_COLORS.length];
 
-    // Label cell
-    doc.rect(x0, rowY, labelW, rowH).fill(TIMELINE_GRID_BG);
+    // Label cell — text clipped to column width (wraps, does not spill onto bars)
+    doc.rect(x0, rowY, labelW, rowH).fill(TIMELINE_LABEL_BG);
     doc.rect(x0, rowY, labelW, rowH).lineWidth(0.75).strokeColor(TIMELINE_GRID_LINE).stroke();
     doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(9)
-      .text(label, x0 + 6, rowY + 6, { width: labelW - 12, lineGap: 1 });
+      .text(label, x0 + 6, rowY + 6, {
+        width: labelW - 12,
+        height: rowH - 10,
+        lineGap: 1,
+      });
 
     // Week grid cells
     for (let w = 1; w <= maxWeeks; w += 1) {
@@ -962,6 +1091,7 @@ export function drawProposedTimelineTable(
   doc.y = topY + tableH + 10;
   doc.x = x0;
   markProposalBodyContent(doc);
+  clearPdfTextState(doc);
 }
 
 /** @deprecated Use drawProposedTimelineTable */
@@ -987,36 +1117,374 @@ export function drawTeamStructure(
   input: { clientCompany: string; leadConsultant: string },
   contentW: number,
 ) {
-  ensureProposalSpace(doc, chrome, 130);
-  const y = doc.y;
-  const colW = Math.floor((contentW - 60) / 2);
-  const leftX = PROPOSAL_MARGIN;
-  const rightX = PROPOSAL_MARGIN + colW + 60;
-  const boxH = 108;
+  ensureProposalSpace(doc, chrome, 240);
+  const y0 = doc.y + 10;
+  const x0 = PROPOSAL_MARGIN;
+  const totalW = contentW;
 
-  doc.rect(leftX, y, colW, boxH).lineWidth(1).strokeColor(PROPOSAL_COLORS.TABLE_HEAD).stroke();
-  doc.rect(rightX, y, colW, boxH).lineWidth(1).strokeColor(PROPOSAL_COLORS.GREEN).stroke();
+  // Exact palette sampled from the PPT "Proposed team structure" reference
+  const GREEN = '#4EA72F';
+  const CYAN = '#0F9ED6';
+  const ORANGE = '#E97132';
+  const NAVY = '#15607F';
+  const DARK_GREEN = '#196B23';
+  const ARROW = '#196B23';
+  const WHITE = '#FFFFFF';
 
-  doc.fillColor(PROPOSAL_COLORS.TABLE_HEAD).font('Helvetica-Bold').fontSize(9)
-    .text('Physical Risk', leftX + 8, y + 8, { width: colW - 16 });
-  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(8)
-    .text('Project management', leftX + 8, y + 24, { width: colW - 16 })
-    .text('Subject expert', leftX + 8, y + 36, { width: colW - 16 })
-    .text(input.leadConsultant || 'Lead consultant', leftX + 8, y + 48, { width: colW - 16, lineBreak: false })
-    .text('Project team / Consultants', leftX + 8, y + 64, { width: colW - 16 });
+  const leftW = Math.floor(totalW * 0.26);
+  const rightW = Math.floor(totalW * 0.26);
+  const midGap = totalW - leftW - rightW;
+  const leftX = x0;
+  const rightX = x0 + leftW + midGap;
+  const stackH = 210;
+  const rowGap = 5;
+  const rowH = (stackH - rowGap * 4) / 5;
+  const leftBoxH = 62;
+  // Align left hierarchy with top/bottom of right stack (PPT layout)
+  const leftTopY = y0;
+  const leftBotY = y0 + stackH - leftBoxH;
 
-  doc.fillColor(PROPOSAL_COLORS.GREEN).font('Helvetica-Bold').fontSize(9)
-    .text(input.clientCompany, rightX + 8, y + 8, { width: colW - 16 });
-  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(8)
-    .text('Project sponsor', rightX + 8, y + 24, { width: colW - 16 })
-    .text('Project management', rightX + 8, y + 36, { width: colW - 16 })
-    .text('Subject experts', rightX + 8, y + 48, { width: colW - 16 })
-    .text('Project team', rightX + 8, y + 60, { width: colW - 16 });
+  const fillBox = (
+    bx: number,
+    by: number,
+    bw: number,
+    bh: number,
+    color: string,
+    lines: string[],
+    opts?: { boldLast?: boolean; fontSize?: number },
+  ) => {
+    doc.rect(bx, by, bw, bh).fill(color);
+    const fontSize = opts?.fontSize ?? 9;
+    const lineH = fontSize + 3;
+    const blockH = lines.length * lineH;
+    let ty = by + (bh - blockH) / 2;
+    for (let i = 0; i < lines.length; i += 1) {
+      const bold = Boolean(opts?.boldLast && i === lines.length - 1);
+      doc.fillColor(WHITE)
+        .font(bold ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(bold ? fontSize + 1 : fontSize)
+        .text(lines[i], bx + 4, ty, {
+          width: bw - 8,
+          align: 'center',
+          lineBreak: false,
+        });
+      ty += lineH;
+    }
+  };
 
-  doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Bold').fontSize(8)
-    .text('↔ Liaison ↔', leftX + colW + 8, y + 48, { width: 44, align: 'center', lineBreak: false });
+  // Left hierarchy — Physical Risk team
+  fillBox(leftX, leftTopY, leftW, leftBoxH, GREEN, [
+    'Project management',
+    'Subject Expert',
+    input.leadConsultant || 'Lead consultant',
+  ], { boldLast: true, fontSize: 9 });
 
-  doc.y = y + boxH + 12;
+  fillBox(leftX, leftBotY, leftW, leftBoxH, CYAN, [
+    'Project team',
+    'Consultants',
+  ], { fontSize: 10 });
+
+  // Vertical connector between left boxes
+  const midLeftX = leftX + leftW / 2;
+  doc.moveTo(midLeftX, leftTopY + leftBoxH)
+    .lineTo(midLeftX, leftBotY)
+    .lineWidth(1.5)
+    .strokeColor(GREEN)
+    .stroke();
+
+  // Right stakeholder stack
+  const rightRows: Array<{ color: string; label: string }> = [
+    { color: ORANGE, label: input.clientCompany || 'Client Company' },
+    { color: NAVY, label: 'Project Sponsor' },
+    { color: GREEN, label: 'Project management' },
+    { color: DARK_GREEN, label: 'Subject experts' },
+    { color: CYAN, label: 'Project team' },
+  ];
+  for (let i = 0; i < rightRows.length; i += 1) {
+    const by = y0 + i * (rowH + rowGap);
+    const label = rightRows[i].label;
+    const long = label.length > 22;
+    if (long) {
+      doc.rect(rightX, by, rightW, rowH).fill(rightRows[i].color);
+      doc.fillColor(WHITE).font('Helvetica').fontSize(8)
+        .text(label, rightX + 6, by + Math.max(6, (rowH - 20) / 2), {
+          width: rightW - 12,
+          align: 'center',
+          height: rowH - 10,
+          ellipsis: true,
+        });
+    } else {
+      fillBox(rightX, by, rightW, rowH, rightRows[i].color, [label], { fontSize: 10 });
+    }
+  }
+
+  // Centre thick double-headed Liaison arrow
+  const arrowH = 36;
+  const arrowY = y0 + stackH / 2 - arrowH / 2;
+  const arrowLeft = leftX + leftW + 16;
+  const arrowRight = rightX - 16;
+  const arrowW = arrowRight - arrowLeft;
+  const head = 16;
+  const bodyTop = arrowY + 7;
+  const bodyBot = arrowY + arrowH - 7;
+  const midY = arrowY + arrowH / 2;
+
+  doc.save();
+  doc
+    .moveTo(arrowLeft, midY)
+    .lineTo(arrowLeft + head, bodyTop)
+    .lineTo(arrowLeft + head, bodyBot)
+    .closePath()
+    .fill(ARROW);
+  doc
+    .moveTo(arrowRight, midY)
+    .lineTo(arrowRight - head, bodyTop)
+    .lineTo(arrowRight - head, bodyBot)
+    .closePath()
+    .fill(ARROW);
+  doc.rect(arrowLeft + head - 1, bodyTop, arrowW - head * 2 + 2, bodyBot - bodyTop).fill(ARROW);
+  doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(12)
+    .text('Liaison', arrowLeft + head, midY - 7, {
+      width: arrowW - head * 2,
+      align: 'center',
+      lineBreak: false,
+    });
+  doc.restore();
+
+  doc.y = y0 + stackH + 28;
+  doc.x = PROPOSAL_MARGIN;
+  markProposalBodyContent(doc);
+}
+
+const TEAM_TABLE_GREEN = '#196B23';
+
+export const DEFAULT_PROPOSED_TEAM_INTRO =
+  'Physical Risk Consultancy have led consulting projects for many leading organisations across a diverse range of industry sectors. We have experience in developing physical security management blueprints, as well as designing policies and SOPs. We are PSIRA registered and a member of the SA Security Association. Depending on the volume of work an Analyst and security consultants will be contracted for the project.';
+
+function teamBulletLines(value: string | null | undefined): string[] {
+  const plain = stripHtmlToPlain(value || '').trim();
+  if (!plain) return [];
+  return plain
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/^[•●▪◦\-\u2013\u2014*]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+function measureBulletBlock(
+  doc: PDFKit.PDFDocument,
+  lines: string[],
+  width: number,
+  fontSize: number,
+): number {
+  if (!lines.length) return fontSize + 4;
+  doc.font('Helvetica').fontSize(fontSize);
+  const textW = Math.max(20, width - 14);
+  let h = 0;
+  for (const line of lines) {
+    h += doc.heightOfString(`• ${line}`, { width: textW, lineGap: 1 }) + 2;
+  }
+  return Math.max(fontSize + 4, h);
+}
+
+function drawBulletBlock(
+  doc: PDFKit.PDFDocument,
+  lines: string[],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fontSize: number,
+) {
+  if (!lines.length) {
+    doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica').fontSize(fontSize)
+      .text('—', x, y, { width, height, lineBreak: false });
+    return;
+  }
+  const textW = Math.max(20, width - 14);
+  let ty = y;
+  const bottom = y + height;
+  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(fontSize);
+  for (const line of lines) {
+    if (ty >= bottom - fontSize) break;
+    const block = `• ${line}`;
+    const h = doc.heightOfString(block, { width: textW, lineGap: 1 });
+    doc.text(block, x, ty, { width: textW, lineGap: 1, height: Math.min(h + 2, bottom - ty) });
+    ty += h + 2;
+  }
+}
+
+function projectPositionLines(member: {
+  role: string;
+  projectPosition?: string | null;
+}): string {
+  const pos = stripHtmlToPlain(member.projectPosition || '').trim();
+  if (pos) return pos.replace(/\s*\/\s*/g, '\n');
+  return stripHtmlToPlain(member.role || '').trim() || '—';
+}
+
+/**
+ * PPT-style Proposed team section: intro + green-header table
+ * (Project position | Name | Summary | Relevant areas of knowledge)
+ * with a full-width Client experience block underneath.
+ */
+export function drawProposedTeamSection(
+  doc: PDFKit.PDFDocument,
+  chrome: ProposalPdfChrome,
+  input: {
+    intro?: string | null;
+    teamMembers: Array<{
+      name: string;
+      role: string;
+      projectPosition?: string | null;
+      biography?: string | null;
+      summary?: string | null;
+      relevantAreasOfKnowledge?: string | null;
+      qualifications?: string | null;
+    }>;
+    experienceItems: Array<{
+      clientName: string;
+      description: string;
+      engagementTitle?: string | null;
+    }>;
+  },
+  contentW: number,
+) {
+  const intro = (input.intro || '').trim() || DEFAULT_PROPOSED_TEAM_INTRO;
+  ensureProposalSpace(doc, chrome, 48);
+  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(9.5)
+    .text(stripHtmlToPlain(intro), {
+      width: contentW,
+      align: 'justify',
+      lineGap: 1.5,
+    });
+  markProposalBodyContent(doc);
+  doc.moveDown(0.55);
+
+  const cols = [
+    { label: 'Project position', width: Math.floor(contentW * 0.14) },
+    { label: 'Name', width: Math.floor(contentW * 0.13) },
+    { label: 'Summary', width: Math.floor(contentW * 0.36) },
+    { label: 'Relevant areas of knowledge', width: 0 },
+  ];
+  cols[3].width = contentW - cols[0].width - cols[1].width - cols[2].width;
+  const colWidths = cols.map((c) => c.width);
+  const x0 = PROPOSAL_MARGIN;
+  const headerH = 22;
+  const fontSize = 8;
+  const pad = 5;
+  const border = '#4A4A4A';
+
+  const drawHeader = () => {
+    ensureProposalSpace(doc, chrome, headerH + 4);
+    const y = doc.y;
+    let cx = x0;
+    for (const col of cols) {
+      doc.rect(cx, y, col.width, headerH).fill(TEAM_TABLE_GREEN);
+      doc.rect(cx, y, col.width, headerH).lineWidth(0.6).strokeColor(border).stroke();
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
+        .text(col.label, cx + pad, y + 7, {
+          width: col.width - pad * 2,
+          align: 'left',
+          lineBreak: false,
+        });
+      cx += col.width;
+    }
+    doc.y = y + headerH;
+    doc.x = x0;
+    markProposalBodyContent(doc);
+  };
+
+  drawHeader();
+
+  const members = input.teamMembers.length
+    ? input.teamMembers
+    : [{ name: '—', role: 'To be confirmed', projectPosition: 'To be confirmed' }];
+
+  for (const member of members) {
+    const position = projectPositionLines(member);
+    const name = stripHtmlToPlain(member.name || '').trim() || '—';
+    const summary = stripHtmlToPlain(member.biography || member.summary || '').trim()
+      || 'Biography to be confirmed.';
+    const knowledgeLines = teamBulletLines(
+      member.relevantAreasOfKnowledge || member.qualifications || '',
+    );
+
+    doc.font('Helvetica').fontSize(fontSize);
+    const posH = doc.heightOfString(position, { width: colWidths[0] - pad * 2, lineGap: 1 }) + pad * 2;
+    const nameH = doc.heightOfString(name, { width: colWidths[1] - pad * 2, lineGap: 1 }) + pad * 2;
+    const sumH = doc.heightOfString(summary, { width: colWidths[2] - pad * 2, lineGap: 1.2 }) + pad * 2;
+    const knowH = measureBulletBlock(doc, knowledgeLines, colWidths[3], fontSize) + pad * 2;
+    const rowH = Math.max(36, posH, nameH, sumH, knowH);
+
+    const pageBefore = currentPageIndex(doc);
+    ensureProposalSpace(doc, chrome, Math.min(rowH + 4, contentBottom() - (PROPOSAL_HEADER_H + 14) - 8));
+    if (currentPageIndex(doc) !== pageBefore) {
+      drawHeader();
+    }
+
+    const y = doc.y;
+    const cells = [position, name, summary];
+    let cx = x0;
+    for (let i = 0; i < 3; i += 1) {
+      doc.rect(cx, y, colWidths[i], rowH).fill('#FFFFFF');
+      doc.rect(cx, y, colWidths[i], rowH).lineWidth(0.6).strokeColor(border).stroke();
+      doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(fontSize)
+        .text(cells[i], cx + pad, y + pad, {
+          width: colWidths[i] - pad * 2,
+          lineGap: i === 2 ? 1.2 : 1,
+          height: rowH - pad * 2,
+        });
+      cx += colWidths[i];
+    }
+    doc.rect(cx, y, colWidths[3], rowH).fill('#FFFFFF');
+    doc.rect(cx, y, colWidths[3], rowH).lineWidth(0.6).strokeColor(border).stroke();
+    drawBulletBlock(doc, knowledgeLines, cx + pad, y + pad, colWidths[3] - pad, rowH - pad * 2, fontSize);
+
+    doc.y = y + rowH;
+    doc.x = x0;
+    markProposalBodyContent(doc);
+  }
+
+  // Client experience — full-width block under the team table
+  const expLines = input.experienceItems.length
+    ? input.experienceItems.map((exp) => {
+        const desc = stripHtmlToPlain(exp.description || '').trim();
+        const title = stripHtmlToPlain(exp.engagementTitle || '').trim();
+        const client = stripHtmlToPlain(exp.clientName || '').trim();
+        if (desc) return desc;
+        if (title && client) return `${title} — ${client}`;
+        return client || title || '—';
+      })
+    : ['Relevant client experience to be confirmed during proposal finalisation.'];
+
+  const labelH = 14;
+  const bulletsH = measureBulletBlock(doc, expLines, contentW - pad * 2, fontSize);
+  const expH = labelH + bulletsH + pad * 2 + 4;
+
+  const expPageBefore = currentPageIndex(doc);
+  ensureProposalSpace(doc, chrome, Math.min(expH + 4, contentBottom() - (PROPOSAL_HEADER_H + 14) - 8));
+  if (currentPageIndex(doc) !== expPageBefore) {
+    drawHeader();
+  }
+
+  const ey = doc.y;
+  const drawH = Math.min(expH, Math.max(48, contentBottom() - ey));
+  doc.rect(x0, ey, contentW, drawH).fill('#FFFFFF');
+  doc.rect(x0, ey, contentW, drawH).lineWidth(0.6).strokeColor(border).stroke();
+  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(9)
+    .text('Client experience', x0 + pad, ey + pad, { width: contentW - pad * 2, lineBreak: false });
+  drawBulletBlock(
+    doc,
+    expLines,
+    x0 + pad,
+    ey + pad + labelH,
+    contentW - pad * 2,
+    drawH - pad * 2 - labelH,
+    fontSize,
+  );
+
+  doc.y = ey + drawH + 10;
+  doc.x = x0;
   markProposalBodyContent(doc);
 }
 
@@ -1025,6 +1493,8 @@ export function drawAcceptanceBlock(
   chrome: ProposalPdfChrome,
   input: {
     clientCompany: string;
+    preparedByName?: string | null;
+    preparedByEmail?: string | null;
     accept?: {
       acceptedPlace?: string | null;
       acceptedDate?: string | null;
@@ -1034,28 +1504,155 @@ export function drawAcceptanceBlock(
   },
   contentW: number,
 ) {
-  doc.moveDown(0.6);
-  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(11)
-    .text('ACCEPTANCE OF PROPOSAL', { width: contentW });
-  doc.moveDown(0.3);
-  doc.font('Helvetica').fontSize(10).fillColor(PROPOSAL_COLORS.INK)
-    .text(`Client company: ${input.clientCompany}`, { width: contentW });
-
+  const x0 = PROPOSAL_MARGIN;
+  const ink = PROPOSAL_COLORS.INK;
+  const contactName = (input.preparedByName || 'Wayne Hermanson').trim();
+  const contactEmail = (input.preparedByEmail || 'wayne@physicalrisk.com').trim();
+  const client = (input.clientCompany || 'Client Company').trim();
   const accept = input.accept;
-  const fields: Array<[string, string]> = [
-    ['Signed at (PLACE):', accept?.acceptedPlace || '______________________'],
-    ['Date:', accept?.acceptedDate || '______________________'],
-    ['Full Name:', accept?.acceptedByName || '______________________'],
-    ['Signature:', accept?.acceptedByName ? 'Electronically accepted' : '______________________'],
-    ['VAT reference number:', accept?.clientVatNumber || '______________________'],
-  ];
-  for (const [label, value] of fields) {
-    ensureProposalSpace(doc, chrome, 16);
-    doc.moveDown(0.35);
-    doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Bold').fontSize(9).text(label, { continued: true });
-    doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(10).text(` ${value}`);
+
+  ensureProposalSpace(doc, chrome, 280);
+  doc.x = x0;
+  doc.y += 4;
+
+  // Instructional paragraph with mailto link on the contact email
+  doc.fillColor(ink).font('Helvetica').fontSize(10);
+  const introLead =
+    'Should Physical Risk Consultancy be the selected as the service provider, please indicate acceptance of this proposal through signature of the proposal acceptance below. Return signed acceptance to ';
+  doc.text(`${introLead}${contactName} (`, x0, doc.y, {
+    width: contentW,
+    continued: true,
+    lineGap: 2,
+  });
+  doc.fillColor('#0563C1').text(contactEmail, {
+    link: `mailto:${contactEmail}`,
+    underline: true,
+    continued: true,
+  });
+  doc.fillColor(ink).text(').', { underline: false });
+  markProposalBodyContent(doc);
+  doc.moveDown(1.1);
+
+  // Centered section heading
+  ensureProposalSpace(doc, chrome, 24);
+  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(12)
+    .text('ACCEPTANCE OF PROPOSAL', x0, doc.y, {
+      width: contentW,
+      align: 'center',
+    });
+  markProposalBodyContent(doc);
+  doc.moveDown(0.85);
+
+  // Legal paragraph 1
+  ensureProposalSpace(doc, chrome, 48);
+  doc.fillColor(ink).font('Helvetica').fontSize(10)
+    .text(
+      'I warrant that, if this Agreement was received from Physical Risk Consultancy in electronic format, the version hereof signed by me is as received. This approval authorises Physical Risk to conduct the work as outlined in this proposal.',
+      { width: contentW, align: 'left', lineGap: 2 },
+    );
+  markProposalBodyContent(doc);
+  doc.moveDown(0.75);
+
+  // Legal paragraph 2 — client company name bold mid-sentence
+  ensureProposalSpace(doc, chrome, 56);
+  doc.fillColor(ink).font('Helvetica').fontSize(10)
+    .text('On behalf of ', { width: contentW, continued: true, lineGap: 2 });
+  doc.font('Helvetica-Bold').text(client, { continued: true });
+  doc.font('Helvetica').text(
+    ' I hereby certify that I am duly authorised to enter into this Agreement, and I confirm our understanding, consent and authorisation of the terms of appointment, the Physical Risk Terms and Conditions as set out in Appendix A, scope of Engagement and Fees and Expenses set out in this Agreement',
+  );
+  markProposalBodyContent(doc);
+  doc.moveDown(1.2);
+
+  const drawFieldLine = (
+    label: string,
+    value: string | null | undefined,
+    lineWidth: number,
+  ) => {
+    const fy = doc.y;
+    ensureProposalSpace(doc, chrome, 22);
+    doc.fillColor(ink).font('Helvetica').fontSize(10);
+    const labelW = doc.widthOfString(label);
+    doc.text(label, x0, fy, { lineBreak: false });
+    const lineStart = x0 + labelW + 6;
+    const lineEnd = lineStart + lineWidth;
+    const baseline = fy + 11;
+    doc.moveTo(lineStart, baseline)
+      .lineTo(lineEnd, baseline)
+      .lineWidth(0.75)
+      .strokeColor('#111111')
+      .stroke();
+    const filled = String(value || '').trim();
+    if (filled) {
+      doc.fillColor(ink).font('Helvetica').fontSize(10)
+        .text(filled, lineStart + 2, fy, {
+          width: Math.max(20, lineWidth - 4),
+          lineBreak: false,
+        });
+    }
+    return fy + 22;
+  };
+
+  // Signed at (PLACE) …… on (DATE): …… — compact lines, not full width
+  ensureProposalSpace(doc, chrome, 24);
+  {
+    const y = doc.y;
+    const placeLabel = 'Signed at (PLACE) ';
+    const onDateLabel = ' on (DATE): ';
+    doc.fillColor(ink).font('Helvetica').fontSize(10);
+    const placeLabelW = doc.widthOfString(placeLabel);
+    const onDateLabelW = doc.widthOfString(onDateLabel);
+    const placeLineW = 150;
+    const dateLineW = 200;
+    const gap = 14;
+
+    doc.text(placeLabel, x0, y, { lineBreak: false });
+    const placeLineStart = x0 + placeLabelW;
+    const placeLineEnd = placeLineStart + placeLineW;
+    const baseline = y + 11;
+    doc.moveTo(placeLineStart, baseline).lineTo(placeLineEnd, baseline)
+      .lineWidth(0.75).strokeColor('#111111').stroke();
+    if (accept?.acceptedPlace) {
+      doc.text(String(accept.acceptedPlace), placeLineStart + 2, y, {
+        width: placeLineW - 4,
+        lineBreak: false,
+      });
+    }
+
+    const dateLabelX = placeLineEnd + gap;
+    doc.text(onDateLabel, dateLabelX, y, { lineBreak: false });
+    const dateLineStart = dateLabelX + onDateLabelW;
+    const dateLineEnd = dateLineStart + dateLineW;
+    doc.moveTo(dateLineStart, baseline).lineTo(dateLineEnd, baseline)
+      .lineWidth(0.75).strokeColor('#111111').stroke();
+    if (accept?.acceptedDate) {
+      doc.text(String(accept.acceptedDate), dateLineStart + 2, y, {
+        width: dateLineW - 4,
+        lineBreak: false,
+      });
+    }
+
+    doc.y = y + 26;
+    doc.x = x0;
     markProposalBodyContent(doc);
   }
+
+  // Short fill-in lines (match PPT — leave clear space on the right)
+  const shortLineW = 220;
+  const vatLineW = 280;
+
+  doc.y = drawFieldLine('Full Name: ', accept?.acceptedByName, shortLineW);
+  doc.x = x0;
+  markProposalBodyContent(doc);
+
+  const signatureValue = accept?.acceptedByName ? 'Electronically accepted' : null;
+  doc.y = drawFieldLine('Signature: ', signatureValue, shortLineW);
+  doc.x = x0;
+  markProposalBodyContent(doc);
+
+  doc.y = drawFieldLine('VAT reference number: ', accept?.clientVatNumber, vatLineW);
+  doc.x = x0;
+  markProposalBodyContent(doc);
 }
 
 export { PROPOSAL_COLORS as COLORS };

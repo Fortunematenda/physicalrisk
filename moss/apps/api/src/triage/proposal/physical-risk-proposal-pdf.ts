@@ -14,6 +14,7 @@ import {
   drawProposalFooter,
   drawProposedTimelineTable,
   drawScopeAndObjectivesSlide,
+  drawProposedTeamSection,
   drawTableHeader,
   drawTableRow,
   drawTeamStructure,
@@ -37,6 +38,13 @@ const CONTENT_W = PROPOSAL_PAGE_WIDTH - PROPOSAL_MARGIN * 2;
 const CONTENTS_PAGE_INDEX = 1;
 
 type TocEntry = { title: string; page: number; indent?: boolean };
+
+function phaseBulletLinesFromText(value: string): string[] {
+  return String(value || '')
+    .split(/\r?\n+/)
+    .map((line) => line.replace(/^[•●▪◦\-\u2013\u2014*]\s*/, '').trim())
+    .filter(Boolean);
+}
 
 function padPhases(input: PhysicalRiskProposalInput) {
   const phases = [...input.content.phases.slice(0, 3)];
@@ -122,15 +130,15 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       drawTableRow(doc, chrome, [row.area, row.description], [180, CONTENT_W - 180], PROPOSAL_MARGIN, { boldFirst: true });
     }
 
-    // Approach / phases
+    // Approach / phases (PPT coloured matrix)
     beginMajorSection(doc, chrome, 'Approach', CONTENT_W, { pageBreak: true });
     mark('Approach');
-    drawPhaseMatrix(doc, chrome, padPhases(input), CONTENT_W);
-    doc.moveDown(0.5);
-    doc.fillColor('#111').font('Helvetica-Bold').fontSize(10).text('Project exclusions');
-    markProposalBodyContent(doc);
-    doc.moveDown(0.2);
-    bodyText(doc, chrome, input.content.projectExclusions.join('\n') || input.exclusions, CONTENT_W);
+    const exclusionItems = input.content.projectExclusions.length
+      ? input.content.projectExclusions
+      : phaseBulletLinesFromText(input.exclusions);
+    drawPhaseMatrix(doc, chrome, padPhases(input), CONTENT_W, {
+      exclusions: exclusionItems,
+    });
 
     // Detailed approach
     beginMajorSection(doc, chrome, 'Our detailed approach', CONTENT_W);
@@ -261,37 +269,23 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       leadConsultant: input.leadConsultant || input.preparedByName || 'Lead consultant',
     }, CONTENT_W);
 
-    // Team bios
-    beginMajorSection(doc, chrome, 'Proposed team', CONTENT_W);
+    // Team bios + client experience (PPT table layout)
+    beginMajorSection(doc, chrome, 'Proposed team', CONTENT_W, { pageBreak: true });
     mark('Proposed team', { indent: true });
     const team = input.content.teamMembers.length
       ? input.content.teamMembers
       : input.preparedByName
-        ? [{ name: input.preparedByName, role: 'Lead Consultant', projectPosition: 'Project Lead', displayOrder: 1 }]
+        ? [{
+            name: input.preparedByName,
+            role: 'Lead Consultant',
+            projectPosition: 'Project Lead',
+            displayOrder: 1,
+          }]
         : [];
-    for (const member of team) {
-      ensureProposalSpace(doc, chrome, 36);
-      doc.fillColor('#111').font('Helvetica-Bold').fontSize(11).text(member.name);
-      markProposalBodyContent(doc);
-      doc.fillColor('#666').font('Helvetica').fontSize(9)
-        .text(`${member.role}${member.projectPosition ? ` · ${member.projectPosition}` : ''}`);
-      markProposalBodyContent(doc);
-      if (member.biography) bodyText(doc, chrome, member.biography, CONTENT_W);
-      doc.moveDown(0.4);
-    }
-
-    // Experience
-    beginMajorSection(doc, chrome, 'Relevant experience', CONTENT_W);
-    mark('Relevant experience', { indent: true });
-    const expCols = [160, CONTENT_W - 160];
-    drawTableHeader(doc, [{ label: 'Client', width: expCols[0] }, { label: 'Description', width: expCols[1] }], PROPOSAL_MARGIN);
-    if (!input.content.experienceItems.length) {
-      drawTableRow(doc, chrome, ['—', 'Relevant experience to be confirmed during proposal finalisation.'], expCols, PROPOSAL_MARGIN);
-    } else {
-      for (const exp of input.content.experienceItems) {
-        drawTableRow(doc, chrome, [exp.clientName, exp.description], expCols, PROPOSAL_MARGIN, { minH: 28 });
-      }
-    }
+    drawProposedTeamSection(doc, chrome, {
+      teamMembers: team,
+      experienceItems: input.content.experienceItems,
+    }, CONTENT_W);
 
     // Appendix A
     beginMajorSection(doc, chrome, 'Appendix A - Terms & conditions of service', CONTENT_W, { pageBreak: true });
@@ -301,9 +295,10 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     // Appendix B
     beginMajorSection(doc, chrome, 'Appendix B - Acceptance of proposal', CONTENT_W, { pageBreak: true });
     mark('Appendix B – Acceptance of proposal');
-    bodyText(doc, chrome, input.acceptanceTerms, CONTENT_W);
     drawAcceptanceBlock(doc, chrome, {
       clientCompany: input.clientCompany,
+      preparedByName: input.preparedByName || input.leadConsultant,
+      preparedByEmail: input.preparedByEmail,
       accept: input.content.acceptance,
     }, CONTENT_W);
 

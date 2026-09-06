@@ -37,6 +37,7 @@ export type ProposalTeamMember = {
   projectPosition?: string | null;
   biography?: string | null;
   summary?: string | null;
+  relevantAreasOfKnowledge?: string | null;
   qualifications?: string | null;
   yearsExperience?: number | null;
   displayOrder: number;

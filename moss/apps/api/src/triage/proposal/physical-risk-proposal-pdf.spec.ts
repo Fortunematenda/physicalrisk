@@ -79,8 +79,23 @@ function samplePdfInput(): PhysicalRiskProposalInput {
         { name: 'Define Target State', startWeek: 5, endWeek: 8, sequence: 2 },
         { name: 'Reporting and Executive Briefing', startWeek: 9, endWeek: 11, sequence: 3 },
       ],
-      teamMembers: [{ name: 'Lead Consultant', role: 'Project lead', displayOrder: 1 }],
-      experienceItems: [],
+      teamMembers: [{
+        name: 'Wayne Hermanson',
+        role: 'Lead Consultant',
+        projectPosition: 'Project Manager / Physical Security SME',
+        biography:
+          'Wayne has 37 years experience in 22 African countries. He was a Lieutenant Colonel specializing in counter-insurgency and peacekeeping.',
+        relevantAreasOfKnowledge:
+          'Physical Risk Management\nCrisis Risk Management\nFraud Risk Management\nISO-aligned Physical Risk Interventions',
+        displayOrder: 1,
+      }],
+      experienceItems: [
+        {
+          clientName: 'Mining Client',
+          description: 'Operating environment stability for mining operations in Angola (1996).',
+          displayOrder: 1,
+        },
+      ],
       methodologyItems: [{ name: 'Strategy Development', description: 'Align security with business objectives' }],
       deliverableSections: [{ title: 'Final report', description: 'Executive diagnostic report' }],
       projectExclusions: ['Implementation services'],
