@@ -975,9 +975,15 @@ export function drawTimelineIntro(
 ) {
   clearPdfTextState(doc);
 
+  const weeks = Math.max(1, Math.round(Number(minWeeks) || 1));
+  const defaultParagraph =
+    `We estimate the project to run for a minimum of ${weeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
+
+  // Only use admin narrative when it is a full intro paragraph — short triage
+  // notes like "Approximately 10 weeks" must not replace the PPT wording.
   const custom = String(narrative || '').trim();
-  const paragraph = custom
-    || `We estimate the project to run for a minimum of ${minWeeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
+  const useCustom = custom.length >= 120 || /illustrated below/i.test(custom);
+  const paragraph = useCustom ? custom : defaultParagraph;
 
   doc.font('Helvetica').fontSize(10);
   const textH = doc.heightOfString(paragraph, { width: contentW, lineGap: 2 });
@@ -986,7 +992,6 @@ export function drawTimelineIntro(
   const x0 = PROPOSAL_MARGIN;
   const y0 = doc.y;
 
-  // One measured block so wrapping stays above the table (no PDFKit continued flow)
   doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica').fontSize(10);
   doc.text(paragraph, x0, y0, {
     width: contentW,
@@ -1070,8 +1075,8 @@ export function drawProposedTimelineTable(
     }
 
     // Phase bar across week columns
-    const start = Math.max(1, row.startWeek);
-    const end = Math.min(maxWeeks, row.endWeek);
+    const start = Math.max(1, Number(row.startWeek) || 1);
+    const end = Math.min(maxWeeks, Math.max(start, Number(row.endWeek) || start));
     if (end >= start) {
       const barX = x0 + labelW + (start - 1) * weekW + 2;
       const barW = (end - start + 1) * weekW - 4;

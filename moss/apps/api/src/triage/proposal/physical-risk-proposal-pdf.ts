@@ -255,29 +255,44 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     sectionTitle(doc, 'Statement of responsibility', chrome.red, CONTENT_W);
     bodyText(doc, chrome, input.statementOfResponsibility, CONTENT_W);
 
-    // Timeline — dedicated slide with template Gantt table
+    // Timeline — dedicated slide with Gantt from admin timeline rows (or phase weeks)
     beginMajorSection(doc, chrome, 'Proposed timelines', CONTENT_W, { pageBreak: true });
     mark('Proposed timelines', { indent: true });
-    const timelineRows = input.content.timelineRows.length
+    const timelineRows = (input.content.timelineRows.length
       ? input.content.timelineRows
       : input.content.phases
           .filter((p) => p.name?.trim() && p.name !== '—')
           .map((p) => ({
             name: p.name,
-            startWeek: p.startWeek || p.sequence,
-            endWeek: p.endWeek || p.sequence + 2,
+            startWeek: Number(p.startWeek) || p.sequence,
+            endWeek: Number(p.endWeek) || p.sequence + 2,
             sequence: p.sequence,
             color: p.color,
-          }));
+          }))
+    )
+      .map((row, idx) => ({
+        ...row,
+        name: String(row.name || '').trim(),
+        startWeek: Math.max(1, Number(row.startWeek) || 1),
+        endWeek: Math.max(1, Number(row.endWeek) || Number(row.startWeek) || 1),
+        sequence: Number(row.sequence) || idx + 1,
+      }))
+      .filter((row) => row.name.length > 0)
+      .map((row) => ({
+        ...row,
+        endWeek: Math.max(row.startWeek, row.endWeek),
+      }));
+
     const maxFromRows = timelineRows.length
-      ? Math.max(...timelineRows.map((r) => Number(r.endWeek) || 0))
+      ? Math.max(...timelineRows.map((r) => r.endWeek))
       : 0;
-    const maxEndWeek = Math.max(
+    // Week columns follow the Gantt bars; estimated weeks drives the intro copy.
+    const maxEndWeek = Math.max(1, maxFromRows);
+    const minWeeks = Math.max(
       1,
       Number(input.estimatedProjectWeeks) || 0,
-      maxFromRows,
+      maxEndWeek,
     );
-    const minWeeks = Number(input.estimatedProjectWeeks) || maxEndWeek;
     drawTimelineIntro(doc, chrome, minWeeks, CONTENT_W, input.timelineNarrative);
     if (timelineRows.length) {
       drawProposedTimelineTable(doc, chrome, timelineRows, maxEndWeek, CONTENT_W);

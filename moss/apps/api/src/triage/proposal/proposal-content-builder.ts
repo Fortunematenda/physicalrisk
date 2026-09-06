@@ -249,8 +249,7 @@ export function buildPhysicalRiskProposalInput(input: {
     termsAndConditions: pickAdminText(p.termsAndConditions as string),
     acceptanceTerms: pickAdminText(p.acceptanceTerms as string),
     paymentTerms: pickAdminText(p.paymentTerms as string, feeDefaults.paymentTerms),
-    timelineNarrative:
-      pickAdminText(p.timelineNarrative as string, input.lead.scopeExpectedTimeline) || null,
+    timelineNarrative: pickAdminText(p.timelineNarrative as string) || null,
     estimatedProjectWeeks: p.estimatedProjectWeeks != null ? Number(p.estimatedProjectWeeks) : null,
     preparedByName: input.preparedByName || null,
     preparedByEmail: input.preparedByEmail || null,
