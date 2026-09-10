@@ -101,7 +101,7 @@ export class EmailService {
     private readonly storage: StorageService,
   ) {}
 
-  async enqueue(input: EnqueueInput) {
+  private createEmailJob(input: EnqueueInput) {
     return this.prisma.emailJob.create({
       data: {
         recipient: input.recipient,
@@ -117,6 +117,20 @@ export class EmailService {
   }
 
   /**
+   * Queue an email and kick SMTP delivery immediately (do not wait for the
+   * once-a-minute cron). Cron remains the retry safety net for failures.
+   */
+  async enqueue(input: EnqueueInput) {
+    const job = await this.createEmailJob(input);
+    void this.processJobById(job.id).catch((error: any) => {
+      this.logger.warn(
+        `Immediate email delivery failed for ${job.id}: ${error?.message || error}`,
+      );
+    });
+    return job;
+  }
+
+  /**
    * Enqueue then immediately attempt SMTP delivery for that job.
    * Throws if SMTP is missing or the send fails — callers must not mark business
    * state as "sent" unless this resolves.
@@ -129,7 +143,7 @@ export class EmailService {
       );
     }
 
-    const job = await this.enqueue(input);
+    const job = await this.createEmailJob(input);
     const result = await this.processJobById(job.id);
     if (!result.ok) {
       throw new BadRequestException(
@@ -151,10 +165,19 @@ export class EmailService {
     if (!job) return { ok: false, job: null, error: 'Email job not found.' };
     if (job.status === EmailJobStatus.SENT) return { ok: true, job };
 
-    await this.prisma.emailJob.update({
-      where: { id: job.id },
+    // Optimistic claim — avoids double-send if cron and immediate kick race.
+    const claimed = await this.prisma.emailJob.updateMany({
+      where: {
+        id: job.id,
+        status: { in: [EmailJobStatus.PENDING, EmailJobStatus.QUEUED] },
+      },
       data: { status: EmailJobStatus.PROCESSING, attemptCount: { increment: 1 } },
     });
+    if (claimed.count === 0) {
+      const latest = await this.prisma.emailJob.findUnique({ where: { id: jobId } });
+      if (latest?.status === EmailJobStatus.SENT) return { ok: true, job: latest };
+      return { ok: false, job: latest, error: 'Email job is already being processed.' };
+    }
 
     try {
       const payload = (job.payload as Record<string, unknown>) || {};
@@ -617,10 +640,14 @@ export class EmailService {
 
     let processed = 0;
     for (const job of jobs) {
-      await this.prisma.emailJob.update({
-        where: { id: job.id },
+      const claimed = await this.prisma.emailJob.updateMany({
+        where: {
+          id: job.id,
+          status: { in: [EmailJobStatus.PENDING, EmailJobStatus.QUEUED] },
+        },
         data: { status: EmailJobStatus.PROCESSING, attemptCount: { increment: 1 } },
       });
+      if (claimed.count === 0) continue;
       try {
         const payload = (job.payload as Record<string, unknown>) || {};
         const html = this.renderBody(job.template, payload);
