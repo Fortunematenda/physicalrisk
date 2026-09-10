@@ -2031,7 +2031,7 @@ export class TriageCommercialService {
       where: { id: user.id },
       select: { firstName: true, lastName: true, email: true, systemRole: true },
     });
-    const sender = this.resolveProposalSenderSignature(prepared);
+    const sender = await this.resolveProposalSenderSignature(prepared);
 
     if (proposalPdfV2Enabled()) {
       const template = resolveTemplateConfig(
@@ -2070,20 +2070,24 @@ export class TriageCommercialService {
     return { buffer, fileName, pdfInput };
   }
 
-  private resolveProposalSenderSignature(
+  private async resolveProposalSenderSignature(
     prepared: {
       firstName?: string | null;
       lastName?: string | null;
       email?: string | null;
       systemRole?: string | null;
     } | null,
-  ): { name: string | null; email: string | null } {
+  ): Promise<{ name: string | null; email: string | null }> {
     const fullName = [prepared?.firstName, prepared?.lastName].filter(Boolean).join(' ').trim();
     const roleLabel = this.proposalSenderRoleLabel(prepared?.systemRole);
+    const smtp = await this.email.getSmtpPublicView();
+    const salesEmail =
+      String(smtp.fromEmail || '').trim()
+      || 'sales@physicalrisk.com';
     return {
-      // Prefer the logged-in user's name; fall back to role title (Analyst / Administrator).
-      name: fullName || roleLabel || prepared?.email || null,
-      email: prepared?.email?.trim() || null,
+      // Prefer the logged-in user's name; contact email is always the sales SMTP identity.
+      name: fullName || roleLabel || smtp.fromName || salesEmail,
+      email: salesEmail,
     };
   }
 

@@ -317,9 +317,13 @@ export class EmailService {
     const row = await this.prisma.systemSetting.findUnique({ where: { key: SMTP_SETTING_KEY } });
     const stored = this.parseStoredSmtp(row?.value);
 
-    // Prefer non-empty DB values; empty strings must not wipe environment SMTP.
+    // Prefer non-empty DB values for host/port/password merge; empty strings must not wipe env.
+    // Sender identity (user / fromEmail / fromName) always prefers env when set so proposal
+    // and triage mail send as sales@ from .env.sso, not a stale DB override (e.g. developers@).
     const pickStr = (dbVal: string | undefined, envVal: string) =>
       dbVal !== undefined && dbVal.trim() ? dbVal : envVal;
+    const preferEnvStr = (envVal: string, dbVal: string | undefined) =>
+      envVal.trim() ? envVal.trim() : (dbVal !== undefined && dbVal.trim() ? dbVal.trim() : '');
 
     const hasDbHost = Boolean(stored.host?.trim());
     if (hasDbHost || row) {
@@ -327,10 +331,10 @@ export class EmailService {
         host: pickStr(stored.host, env.host) || '',
         port: stored.port ?? env.port ?? 587,
         secure: stored.secure ?? env.secure,
-        user: pickStr(stored.user, env.user) || '',
-        password: pickStr(stored.password, env.password) || '',
-        fromEmail: pickStr(stored.fromEmail, env.fromEmail) || '',
-        fromName: pickStr(stored.fromName, env.fromName) || 'MOSS',
+        user: preferEnvStr(env.user, stored.user) || '',
+        password: preferEnvStr(env.password, stored.password) || '',
+        fromEmail: preferEnvStr(env.fromEmail, stored.fromEmail) || '',
+        fromName: preferEnvStr(env.fromName, stored.fromName) || 'MOSS',
       });
       return {
         config,
