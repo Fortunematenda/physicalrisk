@@ -11,6 +11,7 @@ type PollSummary = {
   skipped: number;
   errors: number;
   attachmentsBackfilled: number;
+  busy?: boolean;
 };
 
 function addressList(field: unknown): string[] {
@@ -32,24 +33,36 @@ function headerString(value: unknown): string | undefined {
   return undefined;
 }
 
-/** Keep real file attachments; skip embedded inline images used for HTML signatures. */
+function isInternalMailboxAddress(fromAddress: string) {
+  const fromLower = fromAddress.toLowerCase();
+  return (
+    fromLower.includes('@physicalrisk.com')
+    || fromLower.includes('mailer-daemon')
+    || fromLower.includes('postmaster')
+  );
+}
+
+/** Keep real file attachments; skip tiny embedded signature images. */
 function mapParsedAttachments(attachments: MailparserAttachment[] | undefined) {
   if (!attachments?.length) return [];
   return attachments
     .filter((attachment) => {
       const disposition = String(attachment.contentDisposition || '').toLowerCase();
-      const hasFilename = Boolean(attachment.filename?.trim());
-      const isInlineImage =
-        disposition === 'inline'
-        && Boolean(attachment.cid)
-        && String(attachment.contentType || '').startsWith('image/');
-      if (isInlineImage && !hasFilename) return false;
-      if (!hasFilename && disposition !== 'attachment') return false;
+      const filename = attachment.filename?.trim() || '';
+      const hasFilename = Boolean(filename);
+      const contentType = String(attachment.contentType || '');
       const size = attachment.size || attachment.content?.length || 0;
+      const isInlineImage =
+        (disposition === 'inline' || Boolean(attachment.cid))
+        && contentType.startsWith('image/');
+      // Signature / logo embeds — keep named files (e.g. signed PDF renamed oddly) via size floor.
+      if (isInlineImage && (!hasFilename || size < 40 * 1024)) return false;
+      if (!hasFilename && disposition !== 'attachment' && !contentType.includes('pdf')) return false;
       return size > 0 && size <= 25 * 1024 * 1024;
     })
     .map((attachment) => ({
-      filename: attachment.filename?.trim() || `attachment-${attachment.checksum || 'file'}`,
+      filename: attachment.filename?.trim()
+        || (String(attachment.contentType || '').includes('pdf') ? 'attachment.pdf' : `attachment-${attachment.checksum || 'file'}`),
       mimeType: attachment.contentType || 'application/octet-stream',
       content: Buffer.isBuffer(attachment.content)
         ? attachment.content
@@ -62,11 +75,31 @@ function mapParsedAttachments(attachments: MailparserAttachment[] | undefined) {
 export class TriageInboundImapService {
   private readonly logger = new Logger(TriageInboundImapService.name);
   private polling = false;
+  /** Avoid re-parsing the same unmatched Seen message every 15s (clears on API restart). */
+  private readonly recentlySkipped = new Map<string, number>();
 
   constructor(
     private readonly config: ConfigService,
     private readonly communications: TriageCommunicationsService,
   ) {}
+
+  private skipKeyStillHot(key: string) {
+    const at = this.recentlySkipped.get(key);
+    if (!at) return false;
+    if (Date.now() - at > 30 * 60 * 1000) {
+      this.recentlySkipped.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  private rememberSkip(key: string) {
+    this.recentlySkipped.set(key, Date.now());
+    if (this.recentlySkipped.size > 500) {
+      const oldest = [...this.recentlySkipped.entries()].sort((a, b) => a[1] - b[1]).slice(0, 100);
+      for (const [k] of oldest) this.recentlySkipped.delete(k);
+    }
+  }
 
   isEnabled() {
     const flag = String(this.config.get('INBOUND_IMAP_ENABLED') || '').trim().toLowerCase();
@@ -82,7 +115,14 @@ export class TriageInboundImapService {
 
   async pollInbox(): Promise<PollSummary> {
     if (this.polling) {
-      return { processed: 0, duplicates: 0, skipped: 0, errors: 0, attachmentsBackfilled: 0 };
+      return {
+        processed: 0,
+        duplicates: 0,
+        skipped: 0,
+        errors: 0,
+        attachmentsBackfilled: 0,
+        busy: true,
+      };
     }
     this.polling = true;
     try {
@@ -139,29 +179,31 @@ export class TriageInboundImapService {
       await client.connect();
       const lock = await client.getMailboxLock(mailbox);
       try {
-        // Only unread mail — previously re-downloaded 14 days of messages every poll.
-        const searchResult = await client.search({ seen: false }, { uid: true });
-        const uids = Array.isArray(searchResult) ? searchResult : [];
+        const unreadResult = await client.search({ seen: false }, { uid: true });
+        const unreadUids = Array.isArray(unreadResult) ? unreadResult : [];
 
-        // Also scan recent mail to recover attachments missed on earlier ingest.
+        // Also ingest recent Seen mail not yet in triage (clients/webmail often auto-mark Seen).
         const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const recentResult = await client.search({ since }, { uid: true });
-        const recentUids = Array.isArray(recentResult) ? recentResult : [];
-        const backfillUids = recentUids.slice(-40).filter((uid) => !uids.includes(uid));
+        const recentUids = (Array.isArray(recentResult) ? recentResult : []).slice(-50);
+        const ingestUids = Array.from(new Set([...unreadUids, ...recentUids]));
 
-        const unreadMessages = uids.length
-          ? await client.fetchAll(uids, { source: true }, { uid: true })
-          : [];
-        const backfillMessages = backfillUids.length
-          ? await client.fetchAll(backfillUids, { source: true }, { uid: true })
+        const messages = ingestUids.length
+          ? await client.fetchAll(ingestUids, { source: true }, { uid: true })
           : [];
 
         const handledUids: number[] = [];
 
-        for (const message of unreadMessages) {
+        for (const message of messages) {
           if (!message.source || !message.uid) continue;
           try {
             const parsed = await simpleParser(message.source);
+            const skipKey = parsed.messageId || `imap-${message.uid}`;
+            const isUnread = unreadUids.includes(message.uid);
+            if (!isUnread && this.skipKeyStillHot(skipKey)) {
+              continue;
+            }
+
             const fromAddress =
               parsed.from?.value?.[0]?.address
               || parsed.from?.text
@@ -197,47 +239,26 @@ export class TriageInboundImapService {
                 if (backfill.updated) summary.attachmentsBackfilled += 1;
               }
               handledUids.push(message.uid);
+              this.recentlySkipped.delete(skipKey);
             } else if (result.skipped) {
               summary.skipped += 1;
               this.logger.warn(
-                `IMAP message skipped (no triage thread match): from=${fromAddress} subject=${parsed.subject || '(none)'} inReplyTo=${headerString(parsed.inReplyTo) || '(none)'}`,
+                `IMAP message skipped (no triage thread match): from=${fromAddress} subject=${parsed.subject || '(none)'} inReplyTo=${headerString(parsed.inReplyTo) || '(none)'} attachments=${attachments.length}`,
               );
-              // Stop reprocessing internal/system mail that will never match a triage thread.
-              const fromLower = fromAddress.toLowerCase();
-              if (
-                fromLower.includes('@physicalrisk.com')
-                || fromLower.includes('mailer-daemon')
-                || fromLower.includes('postmaster')
-              ) {
+              if (isInternalMailboxAddress(fromAddress)) {
                 handledUids.push(message.uid);
+              } else if (!isUnread) {
+                this.rememberSkip(skipKey);
               }
             } else {
               summary.processed += 1;
               handledUids.push(message.uid);
+              this.recentlySkipped.delete(skipKey);
             }
           } catch (error: any) {
             summary.errors += 1;
             this.logger.warn(
               `Failed to process IMAP message uid=${message.uid}: ${error?.message || error}`,
-            );
-          }
-        }
-
-        for (const message of backfillMessages) {
-          if (!message.source || !message.uid) continue;
-          try {
-            const parsed = await simpleParser(message.source);
-            const attachments = mapParsedAttachments(parsed.attachments);
-            if (!attachments.length) continue;
-            const backfill = await this.communications.backfillInboundAttachments(
-              parsed.messageId || null,
-              `imap-${message.uid}`,
-              attachments,
-            );
-            if (backfill.updated) summary.attachmentsBackfilled += 1;
-          } catch (error: any) {
-            this.logger.warn(
-              `Failed attachment backfill uid=${message.uid}: ${error?.message || error}`,
             );
           }
         }

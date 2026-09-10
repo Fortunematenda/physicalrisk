@@ -377,7 +377,7 @@ export function TriageCommunicationsPanel({
       if (document.visibilityState === 'hidden') return;
       try {
         const result = await apiFetch<{
-          poll?: { processed?: number };
+          poll?: { processed?: number; attachmentsBackfilled?: number; busy?: boolean };
           unreadCount?: number;
         }>(`/triage/submissions/${submissionId}/communications/check-inbox`, {
           method: 'POST',
@@ -388,8 +388,9 @@ export function TriageCommunicationsPanel({
           onSummaryChange?.({ unreadCount: result.unreadCount });
         }
         const processed = result.poll?.processed || 0;
-        if (processed > 0) {
-          setNewEmailBannerCount(processed);
+        const backfilled = result.poll?.attachmentsBackfilled || 0;
+        if (processed > 0 || backfilled > 0) {
+          if (processed > 0) setNewEmailBannerCount(processed);
           await load({ soft: true });
         }
       } catch {
@@ -704,22 +705,60 @@ export function TriageCommunicationsPanel({
     setBusy(true);
     try {
       const result = await apiFetch<{
-        poll: { processed: number; duplicates: number; skipped: number };
+        poll: {
+          processed: number;
+          duplicates: number;
+          skipped: number;
+          attachmentsBackfilled?: number;
+          busy?: boolean;
+        };
         unreadCount?: number;
       }>(`/triage/submissions/${submissionId}/communications/check-inbox`, { method: 'POST' });
-      const imported = result.poll?.processed || 0;
-      if (typeof result.unreadCount === 'number') {
+      let poll = result.poll;
+      // Cron may hold the IMAP lock; retry once so Check inbox still imports.
+      if (poll?.busy) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        const retry = await apiFetch<{
+          poll: {
+            processed: number;
+            duplicates: number;
+            skipped: number;
+            attachmentsBackfilled?: number;
+            busy?: boolean;
+          };
+          unreadCount?: number;
+        }>(`/triage/submissions/${submissionId}/communications/check-inbox`, { method: 'POST' });
+        poll = retry.poll;
+        if (typeof retry.unreadCount === 'number') {
+          onSummaryChange?.({ unreadCount: retry.unreadCount });
+        }
+      } else if (typeof result.unreadCount === 'number') {
         onSummaryChange?.({ unreadCount: result.unreadCount });
       }
+      const imported = poll?.processed || 0;
+      const backfilled = poll?.attachmentsBackfilled || 0;
       if (imported > 0) {
         setNewEmailBannerCount(imported);
       }
       toast({
-        title: imported > 0 ? `${imported} new reply imported` : 'Inbox checked',
+        title:
+          imported > 0
+            ? `${imported} new reply imported`
+            : backfilled > 0
+              ? 'Attachments recovered'
+              : poll?.busy
+                ? 'Inbox still syncing'
+                : 'Inbox checked',
         description:
           imported > 0
             ? 'Client replies were added to the timeline.'
-            : 'No new client replies were found in the mailbox.',
+            : backfilled > 0
+              ? 'Missing attachments were attached to existing replies.'
+              : poll?.busy
+                ? 'Mailbox poll was busy — try Check inbox again in a few seconds.'
+                : poll?.skipped
+                  ? `${poll.skipped} mailbox message(s) could not be matched to this lead.`
+                  : 'No new client replies were found in the mailbox.',
       });
       await load({ soft: true });
     } catch (e) {

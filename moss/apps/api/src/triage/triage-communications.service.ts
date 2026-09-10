@@ -11,6 +11,7 @@ import {
   CommunicationMessageStatus,
   CommunicationMessageType,
   Prisma,
+  TriageProposalStatus,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { AuditService } from '../audit/audit.service';
@@ -1104,7 +1105,7 @@ export class TriageCommunicationsService {
       if (prior?.thread) return prior.thread;
     }
 
-    // Fallback: match client From address to a triage lead email / proposal addressee.
+    // Fallback: match client From to lead email, or prior outbound To (proposal addressee).
     const fromEmail = String(payload.from || '')
       .trim()
       .toLowerCase()
@@ -1112,34 +1113,99 @@ export class TriageCommunicationsService {
     if (fromEmail.includes('@')) {
       const lead = await this.prisma.publicLead.findFirst({
         where: {
-          OR: [
-            { email: { equals: fromEmail, mode: 'insensitive' } },
-          ],
+          email: { equals: fromEmail, mode: 'insensitive' },
         },
         orderBy: { updatedAt: 'desc' },
       });
       if (lead) {
-        let thread = await this.prisma.communicationThread.findFirst({
-          where: { publicLeadId: lead.id },
-          orderBy: { lastMessageAt: 'desc' },
-        });
-        if (!thread) {
-          const suffix = randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
-          thread = await this.prisma.communicationThread.create({
-            data: {
-              threadNumber: `TRIAGE-COMM-${suffix}`,
-              correlationToken: `${lead.id.slice(-8)}-${randomUUID().slice(0, 8)}`,
-              publicLeadId: lead.id,
-              subject: payload.subject || `Inbound from ${fromEmail}`,
-              lastMessageAt: new Date(),
-            },
-          });
+        return this.ensureLeadCommunicationThread(
+          lead.id,
+          payload.subject || `Inbound from ${fromEmail}`,
+        );
+      }
+
+      const outbound = await this.prisma.communicationMessage.findFirst({
+        where: {
+          direction: CommunicationDirection.OUTBOUND,
+          deletedAt: null,
+          OR: [
+            { toAddresses: { has: fromEmail } },
+            { toAddresses: { has: String(payload.from || '').trim() } },
+          ],
+        },
+        include: { thread: true },
+        orderBy: [{ sentAt: 'desc' }, { createdAt: 'desc' }],
+      });
+      if (outbound?.thread) return outbound.thread;
+
+      // Case-insensitive scan of recent outbound recipients (Postgres array `has` is exact).
+      const recentOutbound = await this.prisma.communicationMessage.findMany({
+        where: {
+          direction: CommunicationDirection.OUTBOUND,
+          deletedAt: null,
+          sentAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+        },
+        include: { thread: true },
+        orderBy: { sentAt: 'desc' },
+        take: 200,
+      });
+      const matchedOutbound = recentOutbound.find((message) =>
+        (message.toAddresses || []).some((addr) => String(addr).trim().toLowerCase() === fromEmail),
+      );
+      if (matchedOutbound?.thread) return matchedOutbound.thread;
+
+      // Match proposal Client-tab / addressee email (may differ from PublicLead.email).
+      const recentProposals = await this.prisma.triageProposal.findMany({
+        where: {
+          status: {
+            in: [
+              TriageProposalStatus.SENT,
+              TriageProposalStatus.VIEWED,
+              TriageProposalStatus.ACCEPTED,
+            ],
+          },
+        },
+        select: { publicLeadId: true, contextSnapshot: true, updatedAt: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 150,
+      });
+      for (const proposal of recentProposals) {
+        const snap = proposal.contextSnapshot as {
+          proposalAddressee?: { email?: string | null };
+        } | null;
+        const addresseeEmail = String(snap?.proposalAddressee?.email || '')
+          .trim()
+          .toLowerCase();
+        if (addresseeEmail && addresseeEmail === fromEmail) {
+          return this.ensureLeadCommunicationThread(
+            proposal.publicLeadId,
+            payload.subject || `Inbound from ${fromEmail}`,
+          );
         }
-        return thread;
       }
     }
 
     return null;
+  }
+
+  private async ensureLeadCommunicationThread(publicLeadId: string, subject: string) {
+    let thread = await this.prisma.communicationThread.findFirst({
+      where: { publicLeadId },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    if (!thread) {
+      const suffix = randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+      thread = await this.prisma.communicationThread.create({
+        data: {
+          threadNumber: `TRIAGE-COMM-${suffix}`,
+          correlationToken: `${publicLeadId.slice(-8)}-${randomUUID().slice(0, 8)}`,
+          publicLeadId,
+          subject,
+          lastMessageAt: new Date(),
+        },
+      });
+    }
+    return thread;
   }
 }
 

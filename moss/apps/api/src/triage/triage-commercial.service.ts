@@ -1765,6 +1765,11 @@ export class TriageCommercialService {
       versionLabel,
       sendType,
       jobPayload: (job?.payload || {}) as Record<string, unknown>,
+      documentStorageKey: proposal.documentStorageKey,
+      documentFileName:
+        proposal.documentFileName
+        || `Physical_Risk_Executive_Advisory_Proposal_${lead.organisationName.replace(/\s+/g, '_')}.pdf`,
+      documentMimeType: proposal.documentMimeType || 'application/pdf',
     });
 
     await this.prisma.triageProposal.update({
@@ -1808,6 +1813,9 @@ export class TriageCommercialService {
     versionLabel: string;
     sendType: 'INITIAL' | 'RESEND';
     jobPayload: Record<string, unknown>;
+    documentStorageKey?: string | null;
+    documentFileName?: string | null;
+    documentMimeType?: string | null;
   }) {
     const internetMessageId = String(input.jobPayload.internetMessageId || '').trim() || null;
     const providerMessageId = String(input.jobPayload.providerMessageId || '').trim() || null;
@@ -1834,9 +1842,10 @@ export class TriageCommercialService {
     const smtpView = await this.email.getSmtpPublicView();
     const fromAddress = smtpView.fromEmail || 'sales@physicalrisk.com';
     const preview = `${input.sendType === 'RESEND' ? 'Resent' : 'Sent'} proposal ${input.proposalNumber} ${input.versionLabel}`;
+    const recipientNorm = input.recipient.trim().toLowerCase();
 
     try {
-      await this.prisma.communicationMessage.create({
+      const message = await this.prisma.communicationMessage.create({
         data: {
           threadId: thread.id,
           publicLeadId: input.publicLeadId,
@@ -1846,7 +1855,7 @@ export class TriageCommercialService {
           providerMessageId: providerMessageId || internetMessageId,
           internetMessageId: internetMessageId || providerMessageId,
           fromAddress,
-          toAddresses: [input.recipient],
+          toAddresses: [recipientNorm],
           subject: input.subject,
           textBody: preview,
           previewText: preview,
@@ -1855,6 +1864,28 @@ export class TriageCommercialService {
           sentAt: new Date(),
         },
       });
+
+      const storageKey = String(input.documentStorageKey || '').trim();
+      if (storageKey) {
+        const filename = String(input.documentFileName || 'proposal.pdf').trim() || 'proposal.pdf';
+        let sizeBytes = 0;
+        try {
+          const buf = await this.storage.getBuffer(storageKey);
+          sizeBytes = buf?.length || 0;
+        } catch {
+          sizeBytes = 0;
+        }
+        await this.prisma.communicationAttachment.create({
+          data: {
+            messageId: message.id,
+            filename,
+            mimeType: input.documentMimeType || 'application/pdf',
+            sizeBytes,
+            storageKey,
+          },
+        });
+      }
+
       await this.prisma.communicationThread.update({
         where: { id: thread.id },
         data: { lastMessageAt: new Date(), subject: thread.subject || input.subject },
