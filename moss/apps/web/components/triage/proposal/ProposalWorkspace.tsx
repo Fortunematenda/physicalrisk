@@ -950,7 +950,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                 </div>
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="m-0 text-xs text-slate-500">Version</p>
-                  <p className="m-0 mt-1 font-semibold">v{workspace?.version || 1}</p>
+                  <p className="m-0 mt-1 font-semibold">{workspace?.versionLabel || `v${workspace?.version || 1}`}</p>
                 </div>
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="m-0 text-xs text-slate-500">Total (VAT incl)</p>
@@ -1407,28 +1407,47 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                     Add row
                   </Button>
                 </div>
+                <div className="hidden gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500 sm:grid sm:grid-cols-[1fr_7rem_7rem_2.5rem]">
+                  <span>Phase / Activity</span>
+                  <span>Start week</span>
+                  <span>End week</span>
+                  <span className="sr-only">Remove</span>
+                </div>
                 {draft.contentSnapshot.timelineRows.map((row, index) => (
                   <div key={`tl-${row.sequence}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_7rem_7rem_2.5rem]">
-                    <Input
-                      className="bg-white"
-                      placeholder="Activity"
-                      value={row.name}
-                      onChange={(e) => updateTimeline(index, 'name', e.target.value)}
-                    />
-                    <Input
-                      className="bg-white"
-                      type="number"
-                      placeholder="Start wk"
-                      value={String(row.startWeek)}
-                      onChange={(e) => updateTimeline(index, 'startWeek', Number(e.target.value) || 0)}
-                    />
-                    <Input
-                      className="bg-white"
-                      type="number"
-                      placeholder="End wk"
-                      value={String(row.endWeek)}
-                      onChange={(e) => updateTimeline(index, 'endWeek', Number(e.target.value) || 0)}
-                    />
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-slate-500 sm:hidden">Phase / Activity</span>
+                      <Input
+                        className="bg-white"
+                        placeholder="Activity"
+                        value={row.name}
+                        onChange={(e) => updateTimeline(index, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-slate-500 sm:hidden">Start week</span>
+                      <Input
+                        className="bg-white"
+                        type="number"
+                        min={1}
+                        placeholder="Start week"
+                        aria-label="Start week"
+                        value={String(row.startWeek)}
+                        onChange={(e) => updateTimeline(index, 'startWeek', Number(e.target.value) || 0)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-slate-500 sm:hidden">End week</span>
+                      <Input
+                        className="bg-white"
+                        type="number"
+                        min={1}
+                        placeholder="End week"
+                        aria-label="End week"
+                        value={String(row.endWeek)}
+                        onChange={(e) => updateTimeline(index, 'endWeek', Number(e.target.value) || 0)}
+                      />
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1442,7 +1461,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                 ))}
                 {!draft.contentSnapshot.timelineRows.length ? (
                   <p className="text-sm text-muted-foreground">
-                    No Gantt rows yet. Add rows for the PDF timeline chart.
+                    No Gantt rows yet. Add rows for the PDF timeline chart. Bars run from Start week through End week (inclusive) and may overlap.
                   </p>
                 ) : null}
               </div>

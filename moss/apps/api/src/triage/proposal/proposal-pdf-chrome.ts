@@ -724,7 +724,7 @@ export function drawCoverPage(
     clientPhone?: string | null;
     proposalNumber: string;
     proposalDate: string;
-    proposalVersion: number;
+    proposalVersion: number | string;
   },
 ) {
   startProposalPage(doc, chrome, { cover: true });
@@ -736,10 +736,16 @@ export function drawCoverPage(
 
   const productTitle = resolveCoverProductTitle(input.proposalTitle, input.productCode);
   const company = String(input.clientCompany || '').trim();
-  const versionNum = Number(input.proposalVersion);
-  const versionLabel = Number.isFinite(versionNum)
-    ? (Number.isInteger(versionNum) ? `${versionNum}.0` : String(versionNum))
-    : '1.0';
+  const rawVersion = input.proposalVersion;
+  const versionLabel =
+    typeof rawVersion === 'string' && rawVersion.trim()
+      ? rawVersion.trim()
+      : (() => {
+          const versionNum = Number(rawVersion);
+          return Number.isFinite(versionNum)
+            ? (Number.isInteger(versionNum) ? `${versionNum}.0` : String(versionNum))
+            : '1.0';
+        })();
 
   // Title group — slightly above vertical centre for better balance
   const eyebrow = 'PROJECT PROPOSAL';
@@ -1645,13 +1651,14 @@ export function drawProposedTimelineTable(
   // Header row
   doc.rect(x0, topY, labelW, headerH).fill(TIMELINE_HEADER);
   doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-    .text('Phases / Weeks', x0 + 6, topY + 7, { width: labelW - 10, lineBreak: false });
+    .text('Phase / Activity', x0 + 6, topY + 7, { width: labelW - 10, lineBreak: false });
 
   for (let w = 1; w <= maxWeeks; w += 1) {
     const cx = x0 + labelW + (w - 1) * weekW;
     doc.rect(cx, topY, weekW, headerH).fill(TIMELINE_HEADER);
-    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-      .text(String(w), cx, topY + 7, { width: weekW, align: 'center', lineBreak: false });
+    const weekLabel = weekW >= 36 ? `WEEK ${w}` : String(w);
+    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(weekW >= 36 ? 7 : 8)
+      .text(weekLabel, cx, topY + 7, { width: weekW, align: 'center', lineBreak: false });
   }
 
   // Body rows

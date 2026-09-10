@@ -34,7 +34,7 @@ export type SclReportBrandConfig = {
 };
 
 export const DEFAULT_SCL_REPORT_BRANDING: SclReportBrandConfig = {
-  consultancyName: 'Physical Risk Consultancy (Pty) Ltd',
+  consultancyName: 'Physical Risk Consultancy',
   shortName: 'Physical Risk',
   website: 'https://www.physicalrisk.com',
   websiteDisplay: 'physicalrisk.com',

@@ -1392,7 +1392,23 @@ model TriageProposal {
   documentFileName         String?
   documentMimeType         String?
   documentSizeBytes        Int?
+  /// Major version (always 1 for a given proposal number in current workflow).
   version                  Int                  @default(1)
+  /// Minor revision after first send (0 → v1 / 1.0, then 1 → v1.1, 2 → v1.2).
+  versionRevision          Int                  @default(0)
+  /// How many times the proposal PDF was emailed (initial + resends).
+  sendCount                Int                  @default(0)
+  /// INITIAL | RESEND
+  lastSendType             String?
+  lastSentById             String?
+  acceptedByName           String?
+  /// SIGNED_PROPOSAL_RECEIVED | EMAIL_CONFIRMATION | MANUAL_CONFIRMATION | OTHER
+  acceptanceMethod         String?
+  acceptanceNotes          String?
+  signedDocumentStorageKey String?
+  signedDocumentFileName   String?
+  signedDocumentMimeType   String?
+  signedDocumentSizeBytes  Int?
   createdById              String
   createdAt                DateTime             @default(now())
   updatedAt                DateTime             @updatedAt

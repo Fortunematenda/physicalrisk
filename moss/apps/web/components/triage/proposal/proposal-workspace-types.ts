@@ -243,6 +243,8 @@ export type ProposalWorkspace = {
   readyToSend?: boolean;
   validationIssues?: ProposalValidationIssue[];
   version?: number;
+  versionRevision?: number;
+  versionLabel?: string;
   status?: string;
   /** Present when a stored proposal PDF/upload exists. */
   hasDocument?: boolean;

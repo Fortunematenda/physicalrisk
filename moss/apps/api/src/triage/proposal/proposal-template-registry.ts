@@ -267,7 +267,7 @@ export function buildPlaceholderMap(input: {
   clientPosition?: string | null;
   proposalNumber: string;
   proposalDate: string;
-  proposalVersion: number;
+  proposalVersion: number | string;
   proposalTitle: string;
   triageReference?: string | null;
   paymentTerms?: string | null;

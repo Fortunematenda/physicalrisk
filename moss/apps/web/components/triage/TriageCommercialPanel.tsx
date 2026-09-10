@@ -144,7 +144,16 @@ export function TriageCommercialPanel({
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
   const [pdfPreview, setPdfPreview] = useState<{ bytes: ArrayBuffer; title: string } | null>(null);
-  const [confirmAction, setConfirmAction] = useState<'ACCEPTED' | 'DECLINED' | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'DECLINED' | null>(null);
+  const [resendOpen, setResendOpen] = useState(false);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [acceptDraft, setAcceptDraft] = useState({
+    acceptanceDate: new Date().toISOString().slice(0, 10),
+    acceptedByName: '',
+    acceptanceMethod: 'SIGNED_PROPOSAL_RECEIVED',
+    acceptanceNotes: '',
+  });
+  const [signedFile, setSignedFile] = useState<File | null>(null);
   const [readiness, setReadiness] = useState<{
     ready: boolean;
     blocking: ProposalValidationIssue[];
@@ -318,7 +327,7 @@ export function TriageCommercialPanel({
     );
   }
 
-  async function proposalAction(action: 'ACCEPTED' | 'DECLINED') {
+  async function proposalAction(action: 'DECLINED') {
     if (!activeProposal?.id) return;
     await run(
       async () => {
@@ -329,8 +338,50 @@ export function TriageCommercialPanel({
         setConfirmAction(null);
       },
       {
-        title: action === 'ACCEPTED' ? 'Proposal accepted' : 'Proposal declined',
+        title: 'Proposal declined',
       },
+    );
+  }
+
+  async function resendProposal() {
+    const recipient =
+      String(prospect?.email || '').trim()
+      || String(item.email || '').trim();
+    await run(
+      async () => {
+        await apiFetch(`/triage/submissions/${submissionId}/proposal-resend`, {
+          method: 'POST',
+          body: JSON.stringify({ recipientEmail: recipient || undefined }),
+        });
+        setResendOpen(false);
+      },
+      {
+        title: 'Proposal resent',
+        description: recipient
+          ? `Same PDF resent to ${recipient}. Version unchanged.`
+          : 'Same PDF resent. Version unchanged.',
+      },
+    );
+  }
+
+  async function submitAcceptance() {
+    if (!activeProposal?.id) return;
+    await run(
+      async () => {
+        const form = new FormData();
+        form.append('acceptanceDate', acceptDraft.acceptanceDate);
+        form.append('acceptedByName', acceptDraft.acceptedByName);
+        form.append('acceptanceMethod', acceptDraft.acceptanceMethod);
+        form.append('acceptanceNotes', acceptDraft.acceptanceNotes);
+        if (signedFile) form.append('signedFile', signedFile);
+        await apiFetch(`/triage/submissions/${submissionId}/proposals/${activeProposal.id}/accept`, {
+          method: 'POST',
+          body: form,
+        });
+        setAcceptOpen(false);
+        setSignedFile(null);
+      },
+      { title: 'Proposal accepted' },
     );
   }
 
@@ -663,16 +714,30 @@ export function TriageCommercialPanel({
                 </Button>
               ) : null}
               {proposalIsSent && hasDocument ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isBusy}
-                  onClick={() => void ensureAndPreview()}
-                >
-                  <Eye className="size-4" />
-                  View proposal
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isBusy}
+                    onClick={() => void ensureAndPreview()}
+                  >
+                    <Eye className="size-4" />
+                    View proposal
+                  </Button>
+                  {!isDeclined ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isBusy}
+                      onClick={() => setResendOpen(true)}
+                    >
+                      <Send className="size-4" />
+                      Resend proposal
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
               {stepKey === 'ready' && !proposalIsSent ? (
                 <Button
@@ -706,7 +771,14 @@ export function TriageCommercialPanel({
                 variant="outline"
                 size="sm"
                 disabled={isBusy}
-                onClick={() => setConfirmAction('ACCEPTED')}
+                onClick={() => {
+                  setAcceptDraft((d) => ({
+                    ...d,
+                    acceptedByName: d.acceptedByName || (prospectName !== '—' ? prospectName : ''),
+                    acceptanceDate: new Date().toISOString().slice(0, 10),
+                  }));
+                  setAcceptOpen(true);
+                }}
               >
                 Mark accepted
               </Button>
@@ -719,6 +791,56 @@ export function TriageCommercialPanel({
               >
                 Mark declined
               </Button>
+            </div>
+          ) : null}
+
+          {isAccepted ? (
+            <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm">
+              <p className="m-0 font-semibold text-emerald-900">Proposal documents</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Original proposal</p>
+                  <p className="m-0 truncate font-medium">{activeProposal?.documentFileName || '—'}</p>
+                </div>
+                <div>
+                  <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Signed proposal</p>
+                  <p className="m-0 truncate font-medium">
+                    {activeProposal?.signedDocumentFileName || 'Not uploaded'}
+                  </p>
+                  {activeProposal?.signedDocumentStorageKey ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-emerald-800"
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            const data = await apiFetch<{ url: string }>(
+                              `/triage/submissions/${submissionId}/proposals/${activeProposal.id}/signed-download`,
+                            );
+                            if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
+                          } catch (e) {
+                            toast({
+                              variant: 'error',
+                              title: 'Download failed',
+                              description: e instanceof Error ? e.message : 'Unable to download signed PDF.',
+                            });
+                          }
+                        })();
+                      }}
+                    >
+                      Download signed PDF
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              <p className="m-0 text-emerald-900">
+                Accepted {fmtDate(activeProposal?.acceptedAt)}
+                {activeProposal?.acceptedByName ? ` · ${activeProposal.acceptedByName}` : ''}
+                {activeProposal?.acceptanceMethod
+                  ? ` · ${String(activeProposal.acceptanceMethod).replaceAll('_', ' ').toLowerCase()}`
+                  : ''}
+              </p>
             </div>
           ) : null}
         </CardContent>
@@ -943,13 +1065,9 @@ export function TriageCommercialPanel({
       <AlertDialog open={confirmAction != null} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmAction === 'ACCEPTED' ? 'Mark proposal as accepted?' : 'Mark proposal as declined?'}
-            </AlertDialogTitle>
+            <AlertDialogTitle>Mark proposal as declined?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmAction === 'ACCEPTED'
-                ? `This confirms that the client has accepted proposal ${proposalNumber}.`
-                : `This records that the client declined proposal ${proposalNumber}.`}
+              This records that the client declined proposal {proposalNumber}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -961,7 +1079,116 @@ export function TriageCommercialPanel({
                 if (confirmAction) void proposalAction(confirmAction);
               }}
             >
-              {confirmAction === 'ACCEPTED' ? 'Confirm acceptance' : 'Confirm decline'}
+              Confirm decline
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={resendOpen} onOpenChange={setResendOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resend proposal</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will resend proposal {proposalNumber}
+              {activeProposal?.version != null
+                ? ` ${
+                    activeProposal.versionRevision
+                      ? `v${activeProposal.version}.${activeProposal.versionRevision}`
+                      : `v${activeProposal.version}`
+                  }`
+                : ''}{' '}
+              to{' '}
+              <strong>
+                {String(prospect?.email || item.email || 'the client email on file').trim()}
+              </strong>
+              . The PDF and version stay the same.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                void resendProposal();
+              }}
+            >
+              Resend proposal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={acceptOpen} onOpenChange={setAcceptOpen}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark proposal as accepted</AlertDialogTitle>
+            <AlertDialogDescription>
+              Record how the client accepted. Upload the signed return PDF if available — this does not
+              replace the original outgoing proposal.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-3 py-2">
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Acceptance date</span>
+              <Input
+                type="date"
+                value={acceptDraft.acceptanceDate}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceDate: e.target.value }))}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Accepted by</span>
+              <Input
+                value={acceptDraft.acceptedByName}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptedByName: e.target.value }))}
+                placeholder="Client signatory name"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Acceptance method</span>
+              <FilterSelect
+                value={acceptDraft.acceptanceMethod}
+                onChange={(v) => setAcceptDraft((d) => ({ ...d, acceptanceMethod: v }))}
+                placeholder="Select method"
+                includeAll={false}
+                options={[
+                  { value: 'SIGNED_PROPOSAL_RECEIVED', label: 'Signed proposal received' },
+                  { value: 'EMAIL_CONFIRMATION', label: 'Email confirmation' },
+                  { value: 'MANUAL_CONFIRMATION', label: 'Manual confirmation' },
+                  { value: 'OTHER', label: 'Other' },
+                ]}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Notes</span>
+              <Textarea
+                value={acceptDraft.acceptanceNotes}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceNotes: e.target.value }))}
+                rows={3}
+                placeholder="Optional notes"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Signed proposal attachment (PDF)</span>
+              <Input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(e) => setSignedFile(e.target.files?.[0] || null)}
+              />
+            </label>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                void submitAcceptance();
+              }}
+            >
+              Confirm acceptance
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

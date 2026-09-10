@@ -24,6 +24,10 @@ import {
   rejectClonedNarrative,
   sanitizeProposalNarrativeHtml,
 } from './proposal-rich-text';
+import {
+  formatProposalVersionCover,
+  readProposalVersionParts,
+} from './proposal-version';
 
 export function resolveTemplateConfig(productCode: string, dbTemplate?: ProposalTemplateConfig | null) {
   if (dbTemplate) return dbTemplate;
@@ -193,13 +197,16 @@ export function buildPhysicalRiskProposalInput(input: {
     paymentTerms: '50% on acceptance, 50% on delivery',
   };
 
+  const versionParts = readProposalVersionParts(p as { version?: number; versionRevision?: number });
+  const proposalVersionLabel = formatProposalVersionCover(versionParts.major, versionParts.revision);
+
   const placeholders = buildPlaceholderMap({
     clientCompany,
     clientContact,
     clientPosition: clientPosition || undefined,
     proposalNumber: String(p.proposalNumber || 'DRAFT'),
     proposalDate,
-    proposalVersion: Number(p.version) || 1,
+    proposalVersion: proposalVersionLabel,
     proposalTitle,
     triageReference: triageSnap?.triageReference || input.assessmentReference,
     paymentTerms: String(p.paymentTerms || feeDefaults.paymentTerms),
@@ -347,7 +354,7 @@ export function buildPhysicalRiskProposalInput(input: {
 
   return {
     proposalNumber: String(p.proposalNumber || 'DRAFT'),
-    proposalVersion: Number(p.version) || 1,
+    proposalVersion: proposalVersionLabel,
     proposalDate,
     validUntil,
     productCode,

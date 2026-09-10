@@ -549,7 +549,7 @@ export function renderExecutiveAdvisoryProposalPdf(input: ProposalPdfInput): Pro
     doc.rect(margin, confY, contentW, confH).fill(BLACK);
     doc.fillColor('#FFFFFF').font('Helvetica').fontSize(FS.conf)
       .text(
-        'This document is confidential and intended solely for the named organisation. It may not be distributed without the prior written consent of Physical Risk Consultancy (Pty) Ltd.',
+        'This document is confidential and intended solely for the named organisation. It may not be distributed without the prior written consent of Physical Risk Consultancy.',
         margin + 10,
         confY + 8,
         { width: contentW - 20, align: 'center', lineGap: 1 },

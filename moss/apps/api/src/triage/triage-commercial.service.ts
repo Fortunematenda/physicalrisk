@@ -50,11 +50,27 @@ import {
 import { mergeContentSnapshot, readContentSnapshot } from './proposal/proposal-template-registry';
 import { canMarkReadyToSend, validateProposalForSend } from './proposal/proposal-validation';
 import type { ProposalContentSnapshot } from './proposal/proposal-template-types';
+import {
+  formatProposalVersionFile,
+  formatProposalVersionShort,
+  readProposalVersionParts,
+} from './proposal/proposal-version';
+import {
+  normalizeTimelineRows,
+  validateTimelineRows,
+} from './proposal/proposal-timeline';
 
 const PROPOSAL_MIME = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/msword',
+]);
+
+const ACCEPTANCE_METHODS = new Set([
+  'SIGNED_PROPOSAL_RECEIVED',
+  'EMAIL_CONFIRMATION',
+  'MANUAL_CONFIRMATION',
+  'OTHER',
 ]);
 
 const PROPOSAL_ACTIONS = new Set([
@@ -940,6 +956,7 @@ export class TriageCommercialService {
         status: TriageProposalStatus.DRAFT,
         source: TriageProposalSource.PLATFORM,
         version: 1,
+        versionRevision: 0,
         createdById: user.id,
         contentSnapshot: defaultContent as object,
         analystHourlyRate: feeDefaults.analystHourlyRate,
@@ -1036,15 +1053,22 @@ export class TriageCommercialService {
     if (proposal.specialistHourlyRate == null) patch.specialistHourlyRate = pdfInput.specialistHourlyRate;
     if (proposal.vatRate == null) patch.vatRate = pdfInput.vatRate;
 
-    // Repair inflated draft versions from the old "bump on every PDF generate" bug.
+    // Repair inflated majors from the old "bump on every PDF generate" bug.
     const clientFacing: TriageProposalStatus[] = [
       TriageProposalStatus.SENT,
       TriageProposalStatus.VIEWED,
       TriageProposalStatus.ACCEPTED,
       TriageProposalStatus.DECLINED,
     ];
-    if (!clientFacing.includes(proposal.status) && Number(proposal.version) > 1) {
+    if (Number(proposal.version) > 1) {
       patch.version = 1;
+      patch.versionRevision = 0;
+    } else if (
+      !clientFacing.includes(proposal.status)
+      && Number((proposal as { versionRevision?: number }).versionRevision || 0) > 0
+    ) {
+      // Drafts never carry a post-send revision.
+      patch.versionRevision = 0;
     }
 
     if (!Object.keys(patch).length) return proposal;
@@ -1121,8 +1145,23 @@ export class TriageCommercialService {
       ),
       validationIssues: validation,
       version: proposal.version,
+      versionRevision: (proposal as { versionRevision?: number }).versionRevision || 0,
+      versionLabel: formatProposalVersionShort(
+        proposal.version,
+        (proposal as { versionRevision?: number }).versionRevision || 0,
+      ),
       status: proposal.status,
       hasDocument: Boolean(proposal.documentStorageKey),
+      documentFileName: proposal.documentFileName,
+      documentStorageKey: proposal.documentStorageKey,
+      signedDocumentFileName: (proposal as { signedDocumentFileName?: string | null }).signedDocumentFileName || null,
+      signedDocumentStorageKey: (proposal as { signedDocumentStorageKey?: string | null }).signedDocumentStorageKey || null,
+      acceptedAt: proposal.acceptedAt,
+      acceptedByName: (proposal as { acceptedByName?: string | null }).acceptedByName || null,
+      acceptanceMethod: (proposal as { acceptanceMethod?: string | null }).acceptanceMethod || null,
+      acceptanceNotes: (proposal as { acceptanceNotes?: string | null }).acceptanceNotes || null,
+      sendCount: (proposal as { sendCount?: number }).sendCount || 0,
+      lastSendType: (proposal as { lastSendType?: string | null }).lastSendType || null,
       proposalId: proposal.id,
     };
   }
@@ -1216,7 +1255,23 @@ export class TriageCommercialService {
     const nextContent: ProposalContentSnapshot = {
       ...mergedContent,
       feeLineItems: recalculateAllLineItems(mergedContent.feeLineItems),
+      timelineRows: normalizeTimelineRows(
+        mergedContent.timelineRows || [],
+        input.estimatedProjectWeeks !== undefined
+          ? input.estimatedProjectWeeks
+          : proposal.estimatedProjectWeeks,
+      ),
     };
+
+    const timelineIssues = validateTimelineRows(
+      nextContent.timelineRows,
+      input.estimatedProjectWeeks !== undefined
+        ? input.estimatedProjectWeeks
+        : proposal.estimatedProjectWeeks,
+    );
+    if (timelineIssues.length) {
+      throw new BadRequestException(timelineIssues.map((i) => i.message).join(' '));
+    }
 
     const nextDiscount =
       input.discount !== undefined ? Number(input.discount) || 0 : Number(proposal.discount) || 0;
@@ -1259,9 +1314,16 @@ export class TriageCommercialService {
       || input.fee !== undefined
       || input.discount !== undefined
       || input.vatRate !== undefined
-      || input.expensesEstimate !== undefined;
-    const bumpVersion =
+      || input.expensesEstimate !== undefined
+      || input.timeline !== undefined
+      || input.timelineNarrative !== undefined
+      || input.estimatedProjectWeeks !== undefined;
+    // After first send, material edits bump minor revision (1.0 → 1.1), not major.
+    const bumpRevision =
       sentStatuses.includes(proposal.status) && materialEdit && Boolean(proposal.documentStorageKey);
+    const currentRevision = Number((proposal as { versionRevision?: number }).versionRevision || 0);
+    const nextRevision = bumpRevision ? currentRevision + 1 : currentRevision;
+    const nextMajor = 1;
 
     const existingSnap = (proposal.contextSnapshot as Record<string, unknown>) || {};
     const existingAddressee =
@@ -1346,7 +1408,8 @@ export class TriageCommercialService {
               : input.fee !== undefined
                 ? input.fee
                 : proposal!.fee,
-          version: bumpVersion ? (proposal!.version || 1) + 1 : proposal!.version,
+          version: nextMajor,
+          versionRevision: nextRevision,
           currency: input.currency?.trim() || proposal!.currency,
           deliverables:
             input.deliverables !== undefined
@@ -1443,18 +1506,17 @@ export class TriageCommercialService {
     await this.storage.put(storageKey, buffer, 'application/pdf');
 
     const hadDocument = Boolean(proposal.documentStorageKey);
-    // Version stays at 1 while preparing. It only advances after the client has
-    // already received a proposal (material workspace edits bump it separately).
-    // Regenerating the PDF during draft must NOT inflate v1 → v5/v6.
+    // Regenerating the PDF must never inflate major version. Drafts stay at 1.0;
+    // client-facing keeps current major+revision.
+    const parts = readProposalVersionParts(proposal as { version?: number; versionRevision?: number });
     const clientFacingStatuses: TriageProposalStatus[] = [
       TriageProposalStatus.SENT,
       TriageProposalStatus.VIEWED,
       TriageProposalStatus.ACCEPTED,
       TriageProposalStatus.DECLINED,
     ];
-    const nextVersion = clientFacingStatuses.includes(proposal.status)
-      ? Math.max(1, proposal.version || 1)
-      : 1;
+    const nextMajor = 1;
+    const nextRevision = clientFacingStatuses.includes(proposal.status) ? parts.revision : 0;
     const updated = await this.prisma.triageProposal.update({
       where: { id: proposal.id },
       data: {
@@ -1463,7 +1525,8 @@ export class TriageCommercialService {
         documentMimeType: 'application/pdf',
         documentSizeBytes: buffer.length,
         source: TriageProposalSource.PLATFORM,
-        version: nextVersion,
+        version: nextMajor,
+        versionRevision: nextRevision,
       },
       include: { createdBy: { select: userSelect } },
     });
@@ -1516,6 +1579,20 @@ export class TriageCommercialService {
     });
     if (!proposal) throw new BadRequestException('No proposal workspace exists yet.');
 
+    const alreadySent = (
+      [
+        TriageProposalStatus.SENT,
+        TriageProposalStatus.VIEWED,
+        TriageProposalStatus.ACCEPTED,
+        TriageProposalStatus.DECLINED,
+      ] as TriageProposalStatus[]
+    ).includes(proposal.status);
+    if (alreadySent) {
+      throw new BadRequestException(
+        'This proposal was already sent. Use Resend proposal to deliver the same PDF again.',
+      );
+    }
+
     if (proposalPdfV2Enabled()) {
       const org = lead.organisationId
         ? await this.prisma.organisation.findUnique({ where: { id: lead.organisationId } })
@@ -1535,8 +1612,7 @@ export class TriageCommercialService {
       }
     }
 
-    // Always regenerate so the signature block matches the logged-in sender
-    // (Analyst / Administrator / etc.), not whoever last generated the PDF.
+    // Initial send: regenerate so the signature matches the logged-in sender.
     proposal = await this.generateProposalPdf(publicLeadId, user);
 
     await this.prisma.publicLead.update({
@@ -1544,23 +1620,114 @@ export class TriageCommercialService {
       data: { proposalPreparedById: user.id },
     });
 
+    await this.deliverProposalEmail({
+      publicLeadId,
+      lead,
+      proposal,
+      user,
+      sendType: 'INITIAL',
+      markSent: true,
+    });
+
+    return this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+  }
+
+  /**
+   * Resend the exact stored PDF without regenerating or bumping version.
+   * Status stays SENT / ACCEPTED.
+   */
+  async resendProposalToClient(
+    publicLeadId: string,
+    user: AuthUser,
+    opts?: { recipientEmail?: string },
+  ) {
+    this.assertCommercialWrite(user);
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+
+    const proposal = await this.prisma.triageProposal.findFirst({
+      where: { publicLeadId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!proposal) throw new BadRequestException('No proposal workspace exists yet.');
+
+    const resendable = (
+      [
+        TriageProposalStatus.SENT,
+        TriageProposalStatus.VIEWED,
+        TriageProposalStatus.ACCEPTED,
+      ] as TriageProposalStatus[]
+    ).includes(proposal.status);
+    if (!resendable) {
+      throw new BadRequestException('Only sent or accepted proposals can be resent.');
+    }
+    if (!proposal.documentStorageKey) {
+      throw new BadRequestException('No proposal PDF is stored to resend.');
+    }
+
+    await this.deliverProposalEmail({
+      publicLeadId,
+      lead,
+      proposal,
+      user,
+      sendType: 'RESEND',
+      markSent: false,
+      recipientOverride: opts?.recipientEmail,
+    });
+
+    return { ok: true, proposalId: proposal.id, sendType: 'RESEND' as const };
+  }
+
+  private async deliverProposalEmail(input: {
+    publicLeadId: string;
+    lead: {
+      id: string;
+      email: string | null;
+      firstName: string | null;
+      organisationName: string;
+      organisationId: string | null;
+    };
+    proposal: {
+      id: string;
+      proposalNumber: string;
+      documentStorageKey: string | null;
+      documentFileName: string | null;
+      documentMimeType: string | null;
+      version: number;
+      versionRevision?: number | null;
+      contextSnapshot: unknown;
+      sendCount?: number | null;
+    };
+    user: AuthUser;
+    sendType: 'INITIAL' | 'RESEND';
+    markSent: boolean;
+    recipientOverride?: string;
+  }) {
+    const { publicLeadId, lead, proposal, user, sendType, markSent } = input;
     const snap = readProposalContextSnapshot(proposal.contextSnapshot);
     const addressee =
       ((snap as { proposalAddressee?: Record<string, string | null> } | null)?.proposalAddressee)
       || {};
     const recipient =
-      String(addressee.email || '').trim()
+      String(input.recipientOverride || '').trim()
+      || String(addressee.email || '').trim()
       || String(lead.email || '').trim();
     if (!recipient) {
       throw new BadRequestException(
         'No recipient email. Set the Client tab email or the triage lead email before sending.',
       );
     }
+    if (!proposal.documentStorageKey) {
+      throw new BadRequestException('Proposal PDF is missing. Generate or upload it before sending.');
+    }
+
     const recipientFirstName =
       String(addressee.addressedTo || '').trim().split(/\s+/)[0]
       || lead.firstName;
+    const parts = readProposalVersionParts(proposal);
+    const versionLabel = formatProposalVersionShort(parts.major, parts.revision);
 
-    // Deliver via SMTP before marking SENT — do not claim "sent" on enqueue alone.
+    // Deliver via SMTP before marking SENT / recording success.
     await this.email.enqueueAndDeliver({
       recipient,
       subject: `Executive Advisory Proposal — ${lead.organisationName}`,
@@ -1578,24 +1745,142 @@ export class TriageCommercialService {
           proposal.documentFileName
           || `Physical_Risk_Executive_Advisory_Proposal_${lead.organisationName.replace(/\s+/g, '_')}.pdf`,
         attachmentContentType: proposal.documentMimeType || 'application/pdf',
+        sendType,
+        proposalVersion: versionLabel,
       },
     });
 
-    const updated = await this.proposalRecordAction(publicLeadId, proposal.id, 'SENT', user);
+    await this.prisma.triageProposal.update({
+      where: { id: proposal.id },
+      data: {
+        sendCount: (Number(proposal.sendCount) || 0) + 1,
+        lastSendType: sendType,
+        lastSentById: user.id,
+      },
+    });
+
+    if (markSent) {
+      await this.proposalRecordAction(publicLeadId, proposal.id, 'SENT', user);
+    }
 
     await this.audit.record({
       userId: user.id,
-      action: 'PROPOSAL_SENT_TO_CLIENT',
+      action: sendType === 'RESEND' ? 'PROPOSAL_RESENT_TO_CLIENT' : 'PROPOSAL_SENT_TO_CLIENT',
       entityType: 'TriageProposal',
       entityId: proposal.id,
       metadata: {
         publicLeadId,
         proposalNumber: proposal.proposalNumber,
+        proposalVersion: versionLabel,
         recipient,
+        sendType,
+      },
+    });
+  }
+
+  async acceptProposalWithDetails(
+    publicLeadId: string,
+    proposalId: string,
+    input: {
+      acceptanceDate?: string;
+      acceptedByName?: string;
+      acceptanceMethod?: string;
+      acceptanceNotes?: string;
+    },
+    user: AuthUser,
+    signedFile?: { buffer: Buffer; originalname: string; mimetype: string; size: number },
+  ) {
+    this.assertCommercialWrite(user);
+    const proposal = await this.prisma.triageProposal.findFirst({
+      where: { id: proposalId, publicLeadId },
+    });
+    if (!proposal) throw new NotFoundException('Proposal not found.');
+
+    const method = String(input.acceptanceMethod || 'MANUAL_CONFIRMATION').trim().toUpperCase();
+    if (!ACCEPTANCE_METHODS.has(method)) {
+      throw new BadRequestException('Invalid acceptance method.');
+    }
+
+    let signedPatch: Record<string, unknown> = {};
+    if (signedFile) {
+      if (!PROPOSAL_MIME.has(signedFile.mimetype) && !signedFile.mimetype.includes('pdf')) {
+        throw new BadRequestException('Signed proposal must be a PDF (or approved Word format).');
+      }
+      const safeBase = String(signedFile.originalname || 'signed.pdf')
+        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+        .slice(0, 180);
+      const parts = readProposalVersionParts(proposal as { version?: number; versionRevision?: number });
+      const ver = formatProposalVersionFile(parts.major, parts.revision);
+      const fileName =
+        proposal.documentFileName?.replace(/\.pdf$/i, '') 
+          ? `${String(proposal.documentFileName).replace(/\.pdf$/i, '')}_SIGNED.pdf`
+          : `Physical_Risk_Proposal_${proposal.proposalNumber}_${ver}_SIGNED.pdf`;
+      const storageKey = `triage/${publicLeadId}/proposals/signed/${Date.now()}-${safeBase}`;
+      await this.storage.put(storageKey, signedFile.buffer, signedFile.mimetype || 'application/pdf');
+      signedPatch = {
+        signedDocumentStorageKey: storageKey,
+        signedDocumentFileName: fileName,
+        signedDocumentMimeType: signedFile.mimetype || 'application/pdf',
+        signedDocumentSizeBytes: signedFile.size,
+      };
+    }
+
+    const acceptedAt = input.acceptanceDate
+      ? new Date(input.acceptanceDate)
+      : proposal.acceptedAt || new Date();
+    if (Number.isNaN(acceptedAt.getTime())) {
+      throw new BadRequestException('Invalid acceptance date.');
+    }
+
+    await this.prisma.triageProposal.update({
+      where: { id: proposalId },
+      data: {
+        ...signedPatch,
+        acceptedByName: String(input.acceptedByName || '').trim() || null,
+        acceptanceMethod: method,
+        acceptanceNotes: String(input.acceptanceNotes || '').trim() || null,
+        acceptedAt,
+      },
+    });
+
+    const updated = await this.proposalRecordAction(publicLeadId, proposalId, 'ACCEPTED', user);
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_ACCEPTED_WITH_DETAILS',
+      entityType: 'TriageProposal',
+      entityId: proposalId,
+      metadata: {
+        publicLeadId,
+        proposalNumber: proposal.proposalNumber,
+        acceptanceMethod: method,
+        acceptedByName: input.acceptedByName || null,
+        hasSignedDocument: Boolean(signedFile),
       },
     });
 
     return updated;
+  }
+
+  async downloadSignedProposal(publicLeadId: string, proposalId: string, user: AuthUser) {
+    this.assertCommercialWrite(user);
+    const proposal = await this.prisma.triageProposal.findFirst({
+      where: { id: proposalId, publicLeadId },
+    });
+    const key = (proposal as { signedDocumentStorageKey?: string | null } | null)?.signedDocumentStorageKey;
+    if (!proposal || !key) {
+      throw new NotFoundException('Signed proposal document not found.');
+    }
+    const url = await this.storage.signedDownloadUrl(
+      key,
+      900,
+      (proposal as { signedDocumentFileName?: string | null }).signedDocumentFileName || 'signed-proposal.pdf',
+    );
+    return {
+      url,
+      fileName: (proposal as { signedDocumentFileName?: string | null }).signedDocumentFileName,
+      mimeType: (proposal as { signedDocumentMimeType?: string | null }).signedDocumentMimeType,
+    };
   }
 
   private async renderProposalBuffer(publicLeadId: string, user: AuthUser) {
@@ -1644,7 +1929,11 @@ export class TriageCommercialService {
       });
       const buffer = await renderPhysicalRiskProposalPdf(pdfInput);
       const orgSlug = lead.organisationName.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
-      const fileName = `Physical_Risk_Proposal_${orgSlug || 'Client'}_${proposal.proposalNumber}_v${proposal.version || 1}.pdf`;
+      const ver = formatProposalVersionFile(
+        (proposal as { version?: number }).version || 1,
+        (proposal as { versionRevision?: number }).versionRevision || 0,
+      );
+      const fileName = `Physical_Risk_Proposal_${orgSlug || 'Client'}_${proposal.proposalNumber}_${ver}.pdf`;
       return { buffer, fileName, pdfInput };
     }
 
@@ -1653,9 +1942,11 @@ export class TriageCommercialService {
     pdfInput.preparedByEmail = sender.email;
     const buffer = await renderExecutiveAdvisoryProposalPdf(pdfInput);
     const orgSlug = lead.organisationName.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
-    const fileName = `Physical_Risk_Executive_Advisory_Proposal_${orgSlug || 'Client'}_v${
-      proposal.version || 1
-    }.pdf`;
+    const ver = formatProposalVersionFile(
+      (proposal as { version?: number }).version || 1,
+      (proposal as { versionRevision?: number }).versionRevision || 0,
+    );
+    const fileName = `Physical_Risk_Executive_Advisory_Proposal_${orgSlug || 'Client'}_${ver}.pdf`;
     return { buffer, fileName, pdfInput };
   }
 

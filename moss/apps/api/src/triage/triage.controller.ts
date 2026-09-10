@@ -395,6 +395,59 @@ export class TriageController {
     return this.commercial.sendProposalToClient(id, user).then(() => this.service.get(id, user));
   }
 
+  @Post('submissions/:id/proposal-resend')
+  resendProposal(
+    @Param('id') id: string,
+    @Body() body: { recipientEmail?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commercial
+      .resendProposalToClient(id, user, { recipientEmail: body?.recipientEmail })
+      .then(() => this.service.get(id, user));
+  }
+
+  @Post('submissions/:id/proposals/:proposalId/accept')
+  @UseInterceptors(FileInterceptor('signedFile', { limits: { fileSize: 25 * 1024 * 1024 } }))
+  acceptProposal(
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+    @UploadedFile() signedFile: Express.Multer.File | undefined,
+    @Body()
+    body: {
+      acceptanceDate?: string;
+      acceptedByName?: string;
+      acceptanceMethod?: string;
+      acceptanceNotes?: string;
+    },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commercial
+      .acceptProposalWithDetails(
+        id,
+        proposalId,
+        body || {},
+        user,
+        signedFile
+          ? {
+              buffer: signedFile.buffer,
+              originalname: signedFile.originalname,
+              mimetype: signedFile.mimetype,
+              size: signedFile.size,
+            }
+          : undefined,
+      )
+      .then(() => this.service.get(id, user));
+  }
+
+  @Get('submissions/:id/proposals/:proposalId/signed-download')
+  downloadSignedProposal(
+    @Param('id') id: string,
+    @Param('proposalId') proposalId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commercial.downloadSignedProposal(id, proposalId, user);
+  }
+
   @Get('communications/unread-summary')
   communicationsUnreadSummary(@CurrentUser() user: AuthUser) {
     return this.communications.getGlobalUnreadSummary(user);

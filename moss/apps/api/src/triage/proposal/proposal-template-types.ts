@@ -178,7 +178,8 @@ export type ProposalTemplateConfig = {
 
 export type PhysicalRiskProposalInput = {
   proposalNumber: string;
-  proposalVersion: number;
+  /** Cover/meta version label (e.g. "1.0", "1.2") or legacy major int. */
+  proposalVersion: number | string;
   proposalDate: string;
   validUntil?: string | null;
   productCode: string;

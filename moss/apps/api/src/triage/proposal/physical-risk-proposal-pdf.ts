@@ -33,6 +33,10 @@ import {
 } from './proposal-pdf-chrome';
 import { stripHtmlToPlain } from './proposal-rich-text';
 import {
+  normalizeTimelineRows,
+  resolveGanttMaxWeeks,
+} from './proposal-timeline';
+import {
   resolveProposalSectionHeading,
   type PhysicalRiskProposalInput,
   type ProposalSectionHeadingKey,
@@ -407,7 +411,7 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     // Timeline — dedicated slide with Gantt from admin timeline rows (or phase weeks)
     beginMajorSection(doc, chrome, heading('timelines'), CONTENT_W, { pageBreak: true });
     mark(heading('timelines'), { indent: true });
-    const timelineRows = (input.content.timelineRows.length
+    const rawTimeline = input.content.timelineRows.length
       ? input.content.timelineRows
       : input.content.phases
           .filter((p) => p.name?.trim() && p.name !== '—')
@@ -417,31 +421,18 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
             endWeek: Number(p.endWeek) || p.sequence + 2,
             sequence: p.sequence,
             color: p.color,
-          }))
-    )
-      .map((row, idx) => ({
-        ...row,
-        name: String(row.name || '').trim(),
-        startWeek: Math.max(1, Number(row.startWeek) || 1),
-        endWeek: Math.max(1, Number(row.endWeek) || Number(row.startWeek) || 1),
-        sequence: Number(row.sequence) || idx + 1,
-      }))
-      .filter((row) => row.name.length > 0)
-      .map((row) => ({
-        ...row,
-        endWeek: Math.max(row.startWeek, row.endWeek),
-      }));
+          }));
+    const timelineRows = normalizeTimelineRows(
+      rawTimeline,
+      input.estimatedProjectWeeks,
+    ).map((row, idx) => ({
+      ...row,
+      color: (rawTimeline[idx] as { color?: string } | undefined)?.color,
+    }));
 
-    const maxFromRows = timelineRows.length
-      ? Math.max(...timelineRows.map((r) => r.endWeek))
-      : 0;
-    // Week columns follow the Gantt bars; estimated weeks drives the intro copy.
-    const maxEndWeek = Math.max(1, maxFromRows);
-    const minWeeks = Math.max(
-      1,
-      Number(input.estimatedProjectWeeks) || 0,
-      maxEndWeek,
-    );
+    // Columns cover estimated project weeks and any later end week; bars use start/end.
+    const maxEndWeek = resolveGanttMaxWeeks(timelineRows, input.estimatedProjectWeeks);
+    const minWeeks = Math.max(1, Number(input.estimatedProjectWeeks) || 0, maxEndWeek);
     drawTimelineIntro(
       doc,
       chrome,
