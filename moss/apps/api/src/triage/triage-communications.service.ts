@@ -276,6 +276,30 @@ export class TriageCommunicationsService {
         type: CommunicationMessageType.OUTBOUND_EMAIL,
         direction: CommunicationDirection.OUTBOUND,
       };
+    } else if (activeMailbox === 'inbox') {
+      // Inbox = client inbound + call logs only. Outbound lives in Sent.
+      if (filter === 'calls') {
+        messageWhere = { deletedAt: null, type: { in: callTypes } };
+      } else if (filter === 'email') {
+        messageWhere = {
+          deletedAt: null,
+          status: { not: CommunicationMessageStatus.DRAFT },
+          type: CommunicationMessageType.INBOUND_EMAIL,
+          direction: CommunicationDirection.INBOUND,
+        };
+      } else {
+        messageWhere = {
+          deletedAt: null,
+          OR: [
+            {
+              status: { not: CommunicationMessageStatus.DRAFT },
+              type: CommunicationMessageType.INBOUND_EMAIL,
+              direction: CommunicationDirection.INBOUND,
+            },
+            { type: { in: callTypes } },
+          ],
+        };
+      }
     } else if (filter === 'calls') {
       messageWhere = { deletedAt: null, type: { in: callTypes } };
     } else if (filter === 'all') {
@@ -287,7 +311,7 @@ export class TriageCommunicationsService {
         ],
       };
     } else {
-      // email + inbox: inbound non-draft emails
+      // email (legacy / unspecified mailbox): inbound non-draft emails
       messageWhere = {
         deletedAt: null,
         status: { not: CommunicationMessageStatus.DRAFT },

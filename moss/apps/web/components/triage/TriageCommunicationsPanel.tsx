@@ -337,12 +337,13 @@ export function TriageCommunicationsPanel({
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
-  const load = useCallback(async (opts?: { soft?: boolean }) => {
+  const load = useCallback(async (opts?: { soft?: boolean; mailbox?: Mailbox }) => {
     if (!opts?.soft) setLoading(true);
+    const activeMailbox = opts?.mailbox || mailbox;
     try {
       const params = new URLSearchParams({
-        filter: mailbox === 'inbox' ? 'all' : 'email',
-        mailbox,
+        filter: activeMailbox === 'inbox' ? 'all' : 'email',
+        mailbox: activeMailbox,
       });
       if (searchQuery) params.set('q', searchQuery);
       const [communications, summary] = await Promise.all([
@@ -675,7 +676,10 @@ export function TriageCommunicationsPanel({
       }
 
       if (saveDraft) {
-        toast({ title: 'Draft saved', description: 'Your draft was saved to the timeline.' });
+        toast({ title: 'Draft saved', description: 'Your draft was saved to Drafts.' });
+        setMailbox('drafts');
+        setOpenThreadId(null);
+        await load({ mailbox: 'drafts' });
       } else {
         clearLocalDraft(submissionId);
         setComposeOpen(false);
@@ -683,12 +687,14 @@ export function TriageCommunicationsPanel({
         setComposeExpanded(false);
         setShowComposeQuoted(false);
         setComposeAttachments([]);
+        setMailbox('sent');
+        setOpenThreadId(null);
         toast({
           title: 'Email sent',
-          description: 'The message was added to the conversation.',
+          description: 'The message is in Sent.',
         });
+        await load({ mailbox: 'sent' });
       }
-      await load();
     } catch (e) {
       toast({
         variant: 'error',
