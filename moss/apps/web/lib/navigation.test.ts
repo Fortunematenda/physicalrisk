@@ -14,6 +14,8 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     const moss = NAV_SECTIONS.find((s) => s.id === 'moss');
     const somod = NAV_SECTIONS.find((s) => s.id === 'somod');
     expect(triage?.label).toBe('Executive Triage');
+    expect(triage?.items.map((i) => i.id)).toEqual(['triage-submissions']);
+    expect(triage?.items.map((i) => i.href)).not.toContain('/reports#executive-triage-reports');
     expect(advisory?.label).toBe('Executive Advisory');
     expect(scl?.label).toBe('Security Cost Leakage');
     expect(moss?.label).toBe('MOSS');

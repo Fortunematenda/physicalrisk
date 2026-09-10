@@ -1,14 +1,33 @@
 import { getToken } from 'next-auth/jwt';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { cacheAccessToken, getCachedAccessToken } from '@/lib/token-cache';
+import {
+  cacheAccessToken,
+  getCachedAccessToken,
+  isCachedAccessTokenFresh,
+} from '@/lib/token-cache';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const SESSION_COOKIE = 'moss.next-auth.session-token';
 
-async function resolveBearer(req: NextRequest): Promise<string | null> {
+type RefreshedTokens = {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+};
+
+/**
+ * Resolve a fresh Keycloak access token for upstream API calls.
+ * The in-memory cache previously returned expired tokens until process restart,
+ * which made Nest reject JWTs (~5 min) and the browser redirect to SSO — looking
+ * like the triage page "refreshed" every few minutes.
+ */
+async function resolveBearer(
+  req: NextRequest,
+  opts?: { forceRefresh?: boolean },
+): Promise<string | null> {
   const secret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
   const token = await getToken({
     req,
@@ -17,22 +36,22 @@ async function resolveBearer(req: NextRequest): Promise<string | null> {
     secureCookie: false,
   });
 
-  if (token?.error === 'RefreshTokenError') {
-    // fall through
-  } else {
-    const cached = getCachedAccessToken(token?.sub);
-    if (cached?.accessToken) return cached.accessToken;
+  if (token?.error !== 'RefreshTokenError') {
+    const sub = typeof token?.sub === 'string' ? token.sub : null;
+    if (!opts?.forceRefresh && isCachedAccessTokenFresh(sub)) {
+      return getCachedAccessToken(sub)?.accessToken || null;
+    }
 
-    if (typeof token?.refreshToken === 'string' && token.refreshToken) {
-      const refreshed = await refreshKeycloakToken(token.refreshToken);
-      if (refreshed && token.sub) {
-        cacheAccessToken(
-          token.sub,
-          refreshed,
-          token.refreshToken,
-          Math.floor(Date.now() / 1000) + 300,
-        );
-        return refreshed;
+    const cached = getCachedAccessToken(sub);
+    const refreshToken =
+      (cached?.refreshToken && String(cached.refreshToken)) ||
+      (typeof token?.refreshToken === 'string' ? token.refreshToken : '');
+
+    if (sub && refreshToken) {
+      const refreshed = await refreshKeycloakToken(refreshToken);
+      if (refreshed) {
+        cacheAccessToken(sub, refreshed.accessToken, refreshed.refreshToken, refreshed.expiresAt);
+        return refreshed.accessToken;
       }
     }
   }
@@ -41,7 +60,7 @@ async function resolveBearer(req: NextRequest): Promise<string | null> {
   return headerToken || null;
 }
 
-async function refreshKeycloakToken(refreshToken: string): Promise<string | null> {
+async function refreshKeycloakToken(refreshToken: string): Promise<RefreshedTokens | null> {
   const issuer =
     process.env.KEYCLOAK_ISSUER || 'https://auth.physicalrisk.com/realms/physicalrisk';
   const clientId = process.env.KEYCLOAK_CLIENT_ID || '';
@@ -60,8 +79,17 @@ async function refreshKeycloakToken(refreshToken: string): Promise<string | null
       }),
     });
     if (!response.ok) return null;
-    const data = (await response.json()) as { access_token?: string };
-    return typeof data.access_token === 'string' ? data.access_token : null;
+    const data = (await response.json()) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+    if (typeof data.access_token !== 'string') return null;
+    return {
+      accessToken: data.access_token,
+      refreshToken: typeof data.refresh_token === 'string' ? data.refresh_token : refreshToken,
+      expiresAt: Math.floor(Date.now() / 1000) + Number(data.expires_in || 300),
+    };
   } catch (err) {
     console.error('[moss-gw] refresh failed', err);
     return null;
@@ -79,7 +107,7 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
     (req.method === 'GET' && subPath === 'public/triage/proposal') ||
     (req.method === 'POST' && subPath === 'public/triage/proposal');
 
-  const bearer = isPublicAssessmentRoute ? null : await resolveBearer(req);
+  let bearer = isPublicAssessmentRoute ? null : await resolveBearer(req);
 
   if (!isPublicAssessmentRoute && !bearer) {
     return NextResponse.json(
@@ -91,26 +119,11 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
   const base = (process.env.INTERNAL_API_URL || 'http://moss-api:4000').replace(/\/$/, '');
   const url = `${base}/api/${subPath}${req.nextUrl.search}`;
 
-  const headers = new Headers();
-  if (bearer) headers.set('Authorization', `Bearer ${bearer}`);
-  const cookie = req.headers.get('cookie');
-  if (cookie) headers.set('Cookie', cookie);
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) headers.set('X-Forwarded-For', forwardedFor);
   const contentType = req.headers.get('content-type');
-  if (contentType) headers.set('Content-Type', contentType);
-  const accept = req.headers.get('accept');
-  if (accept) headers.set('Accept', accept);
-
   const isMultipartUpload = contentType?.includes('multipart/form-data');
   const maxBodyBytes = isMultipartUpload ? 25 * 1024 * 1024 : 102_400;
 
-  const init: RequestInit = {
-    method: req.method,
-    headers,
-    cache: 'no-store',
-  };
-
+  let requestBody: ArrayBuffer | undefined;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const body = await req.arrayBuffer();
     if (body.byteLength > maxBodyBytes) {
@@ -124,12 +137,38 @@ async function proxy(req: NextRequest, pathSegments: string[]) {
         { status: 413 },
       );
     }
-    if (body.byteLength) init.body = body;
+    if (body.byteLength) requestBody = body;
   }
+
+  const buildInit = (accessToken: string | null): RequestInit => {
+    const headers = new Headers();
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+    const cookie = req.headers.get('cookie');
+    if (cookie) headers.set('Cookie', cookie);
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    if (forwardedFor) headers.set('X-Forwarded-For', forwardedFor);
+    if (contentType) headers.set('Content-Type', contentType);
+    const accept = req.headers.get('accept');
+    if (accept) headers.set('Accept', accept);
+    const init: RequestInit = {
+      method: req.method,
+      headers,
+      cache: 'no-store',
+    };
+    if (requestBody) init.body = requestBody;
+    return init;
+  };
 
   let upstream: Response;
   try {
-    upstream = await fetch(url, init);
+    upstream = await fetch(url, buildInit(bearer));
+    // Expired access token race: refresh once and retry.
+    if (upstream.status === 401 && !isPublicAssessmentRoute) {
+      bearer = await resolveBearer(req, { forceRefresh: true });
+      if (bearer) {
+        upstream = await fetch(url, buildInit(bearer));
+      }
+    }
   } catch (err) {
     console.error('[moss-gw] upstream fetch failed', err);
     return NextResponse.json(

@@ -42,7 +42,6 @@ export default function ReportPage() {
   const productCode = String(report?.assessment?.productCode || '');
   const isTriageReport = productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
   const isAdvisoryReport = useMemo(() => {
-    if (viewParam === 'triage') return false;
     if (viewParam === 'advisory') return true;
     if (viewParam === 'scl') return false;
     if (isTriageReport) return false;
@@ -61,11 +60,13 @@ export default function ReportPage() {
         if (suggested) setEmail(suggested);
 
         const code = String(data.assessment?.productCode || '');
-        if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE' && viewParam !== 'triage') {
-          router.replace(`/reports/${id}?view=triage`);
+        // Triage indications live on Triage submissions — don't keep a separate reports surface.
+        if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
+          const triageId = data.triageSubmissionId || data.assessment?.id;
+          router.replace(triageId ? `/triage/${triageId}` : '/triage');
           return;
         }
-        if (ADVISORY_PRODUCTS.has(code) && code !== 'EXECUTIVE_GOVERNANCE_TRIAGE' && viewParam !== 'advisory') {
+        if (ADVISORY_PRODUCTS.has(code) && viewParam !== 'advisory') {
           router.replace(`/reports/${id}?view=advisory`);
         }
       })
@@ -89,16 +90,8 @@ export default function ReportPage() {
     }
   }
 
-  const backHref = isTriageReport || viewParam === 'triage'
-    ? '/reports#executive-triage-reports'
-    : isAdvisoryReport
-      ? '/reports#executive-advisory-reports'
-      : '/reports';
-  const backLabel = isTriageReport || viewParam === 'triage'
-    ? 'Back to triage reports'
-    : isAdvisoryReport
-      ? 'Back to advisory reports'
-      : 'Back to Cost Leakage reports';
+  const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
+  const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
   const workHref = engagementHref(productCode, report?.assessment?.id, report?.triageSubmissionId);
 
   return (

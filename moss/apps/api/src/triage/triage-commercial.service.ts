@@ -50,7 +50,6 @@ import {
 import { mergeContentSnapshot, readContentSnapshot } from './proposal/proposal-template-registry';
 import { canMarkReadyToSend, validateProposalForSend } from './proposal/proposal-validation';
 import type { ProposalContentSnapshot } from './proposal/proposal-template-types';
-import { dedupeRepeatedNarrative } from './proposal/proposal-rich-text';
 
 const PROPOSAL_MIME = new Set([
   'application/pdf',
@@ -940,6 +939,7 @@ export class TriageCommercialService {
         title: `${lead.organisationName} — Executive Advisory Diagnostic`,
         status: TriageProposalStatus.DRAFT,
         source: TriageProposalSource.PLATFORM,
+        version: 1,
         createdById: user.id,
         contentSnapshot: defaultContent as object,
         analystHourlyRate: feeDefaults.analystHourlyRate,
@@ -989,27 +989,63 @@ export class TriageCommercialService {
       template,
     });
 
-    // Only seed missing structured content / rates. Do not inject template narrative
-    // into blank admin fields — those stay blank until the admin fills them.
+    // Only seed missing structured content / rates. Do not rewrite admin narrative
+    // with dedupe on load — that strips intentional blank lines in the editor.
     const patch: Record<string, unknown> = {};
     if (!hasStructuredContent) patch.contentSnapshot = defaultContent;
-    if (proposal.objectives?.trim()) {
-      const cleaned = dedupeRepeatedNarrative(proposal.objectives);
-      if (cleaned !== proposal.objectives) patch.objectives = cleaned;
-    }
-    if (proposal.understandingOfNeeds?.trim()) {
-      const cleaned = dedupeRepeatedNarrative(proposal.understandingOfNeeds);
-      if (cleaned !== proposal.understandingOfNeeds) patch.understandingOfNeeds = cleaned;
-    } else if (pdfInput.understandingOfNeeds?.trim()) {
+    if (!proposal.understandingOfNeeds?.trim() && pdfInput.understandingOfNeeds?.trim()) {
       // Triage-derived understanding (not builtin template boilerplate)
       patch.understandingOfNeeds = pdfInput.understandingOfNeeds;
     }
+    // Do not rewrite Understanding on every workspace load — that fought user edits / saves.
     if (!proposal.paymentTerms?.trim() && pdfInput.paymentTerms?.trim()) {
       patch.paymentTerms = pdfInput.paymentTerms;
+    }
+    // Seed Appendix A / responsibility / assumptions from the PPT template when blank
+    // so the Terms tab matches what the PDF will render.
+    if (!proposal.termsAndConditions?.trim() && pdfInput.termsAndConditions?.trim()) {
+      patch.termsAndConditions = pdfInput.termsAndConditions;
+    }
+    if (!proposal.statementOfResponsibility?.trim() && pdfInput.statementOfResponsibility?.trim()) {
+      patch.statementOfResponsibility = pdfInput.statementOfResponsibility;
+    }
+    if (!proposal.assumptions?.trim() && pdfInput.assumptions?.trim()) {
+      patch.assumptions = pdfInput.assumptions;
+    }
+    if (!proposal.acceptanceTerms?.trim() && pdfInput.acceptanceTerms?.trim()) {
+      patch.acceptanceTerms = pdfInput.acceptanceTerms;
+    }
+    // Seed Scope tab defaults from triage / lead so PDF + UI stay aligned until admin edits.
+    if (!proposal.sitesOrBusinessUnits?.trim()) {
+      const snap = readProposalContextSnapshot(proposal.contextSnapshot) as {
+        organisation?: { operationalSitesLabel?: string | null };
+      } | null;
+      const seedSites =
+        lead.scopeSitesOrBusinessUnits?.trim()
+        || snap?.organisation?.operationalSitesLabel?.trim()
+        || '';
+      if (seedSites) patch.sitesOrBusinessUnits = seedSites;
+    }
+    if (!proposal.objectives?.trim() && lead.scopeClientObjectives?.trim()) {
+      patch.objectives = lead.scopeClientObjectives.trim();
+    }
+    if (!proposal.scopeSummary?.trim() && lead.scopeIndicativeScope?.trim()) {
+      patch.scopeSummary = lead.scopeIndicativeScope.trim();
     }
     if (proposal.analystHourlyRate == null) patch.analystHourlyRate = pdfInput.analystHourlyRate;
     if (proposal.specialistHourlyRate == null) patch.specialistHourlyRate = pdfInput.specialistHourlyRate;
     if (proposal.vatRate == null) patch.vatRate = pdfInput.vatRate;
+
+    // Repair inflated draft versions from the old "bump on every PDF generate" bug.
+    const clientFacing: TriageProposalStatus[] = [
+      TriageProposalStatus.SENT,
+      TriageProposalStatus.VIEWED,
+      TriageProposalStatus.ACCEPTED,
+      TriageProposalStatus.DECLINED,
+    ];
+    if (!clientFacing.includes(proposal.status) && Number(proposal.version) > 1) {
+      patch.version = 1;
+    }
 
     if (!Object.keys(patch).length) return proposal;
 
@@ -1045,6 +1081,16 @@ export class TriageCommercialService {
       ...templateView,
       productCode: proposal.productCode,
       subtitle: proposal.subtitle,
+      // Prefer columns on the proposal row so Scope tab edits always win over triage fallbacks.
+      clientObjective: proposal.objectives?.trim()
+        ? proposal.objectives
+        : templateView.clientObjective,
+      sitesOrBusinessUnits: proposal.sitesOrBusinessUnits?.trim()
+        ? proposal.sitesOrBusinessUnits
+        : templateView.sitesOrBusinessUnits,
+      indicativeScope: proposal.scopeSummary?.trim()
+        ? proposal.scopeSummary
+        : templateView.indicativeScope,
       understandingOfNeeds: proposal.understandingOfNeeds,
       methodology: proposal.methodology,
       approach: proposal.approach,
@@ -1256,7 +1302,7 @@ export class TriageCommercialService {
         data: {
           scopeClientObjectives:
             input.clientObjective !== undefined
-              ? dedupeRepeatedNarrative(input.clientObjective).trim() || null
+              ? input.clientObjective.trim() || null
               : lead.scopeClientObjectives,
           scopeSitesOrBusinessUnits:
             input.sitesOrBusinessUnits !== undefined
@@ -1279,7 +1325,7 @@ export class TriageCommercialService {
           subtitle: input.subtitle !== undefined ? input.subtitle.trim() || null : proposal!.subtitle,
           objectives:
             input.clientObjective !== undefined
-              ? dedupeRepeatedNarrative(input.clientObjective).trim() || null
+              ? input.clientObjective.trim() || null
               : proposal!.objectives,
           sitesOrBusinessUnits:
             input.sitesOrBusinessUnits !== undefined
@@ -1309,7 +1355,7 @@ export class TriageCommercialService {
           terms: input.terms !== undefined ? input.terms.trim() || null : proposal!.terms,
           understandingOfNeeds:
             input.understandingOfNeeds !== undefined
-              ? dedupeRepeatedNarrative(input.understandingOfNeeds).trim() || null
+              ? input.understandingOfNeeds.trim() || null
               : proposal!.understandingOfNeeds,
           methodology:
             input.methodology !== undefined ? input.methodology.trim() || null : proposal!.methodology,
@@ -1397,6 +1443,18 @@ export class TriageCommercialService {
     await this.storage.put(storageKey, buffer, 'application/pdf');
 
     const hadDocument = Boolean(proposal.documentStorageKey);
+    // Version stays at 1 while preparing. It only advances after the client has
+    // already received a proposal (material workspace edits bump it separately).
+    // Regenerating the PDF during draft must NOT inflate v1 → v5/v6.
+    const clientFacingStatuses: TriageProposalStatus[] = [
+      TriageProposalStatus.SENT,
+      TriageProposalStatus.VIEWED,
+      TriageProposalStatus.ACCEPTED,
+      TriageProposalStatus.DECLINED,
+    ];
+    const nextVersion = clientFacingStatuses.includes(proposal.status)
+      ? Math.max(1, proposal.version || 1)
+      : 1;
     const updated = await this.prisma.triageProposal.update({
       where: { id: proposal.id },
       data: {
@@ -1405,7 +1463,7 @@ export class TriageCommercialService {
         documentMimeType: 'application/pdf',
         documentSizeBytes: buffer.length,
         source: TriageProposalSource.PLATFORM,
-        version: (proposal.version || 1) + (hadDocument ? 1 : 0),
+        version: nextVersion,
       },
       include: { createdBy: { select: userSelect } },
     });
@@ -1486,15 +1544,32 @@ export class TriageCommercialService {
       data: { proposalPreparedById: user.id },
     });
 
-    await this.email.enqueue({
-      recipient: lead.email,
+    const snap = readProposalContextSnapshot(proposal.contextSnapshot);
+    const addressee =
+      ((snap as { proposalAddressee?: Record<string, string | null> } | null)?.proposalAddressee)
+      || {};
+    const recipient =
+      String(addressee.email || '').trim()
+      || String(lead.email || '').trim();
+    if (!recipient) {
+      throw new BadRequestException(
+        'No recipient email. Set the Client tab email or the triage lead email before sending.',
+      );
+    }
+    const recipientFirstName =
+      String(addressee.addressedTo || '').trim().split(/\s+/)[0]
+      || lead.firstName;
+
+    // Deliver via SMTP before marking SENT — do not claim "sent" on enqueue alone.
+    await this.email.enqueueAndDeliver({
+      recipient,
       subject: `Executive Advisory Proposal — ${lead.organisationName}`,
       template: 'triage_proposal_sent',
       relatedType: 'TriageProposal',
       relatedId: proposal.id,
       organisationId: lead.organisationId || undefined,
       payload: {
-        firstName: lead.firstName,
+        firstName: recipientFirstName,
         organisationName: lead.organisationName,
         proposalReference: proposal.proposalNumber,
         recommendedProduct: 'Executive Advisory Diagnostic',
@@ -1516,7 +1591,7 @@ export class TriageCommercialService {
       metadata: {
         publicLeadId,
         proposalNumber: proposal.proposalNumber,
-        recipient: lead.email,
+        recipient,
       },
     });
 

@@ -25,6 +25,31 @@ type RichTextEditorProps = {
   disabled?: boolean;
 };
 
+type RichTextFlushFn = () => void;
+
+const richTextFlushers = new Set<RichTextFlushFn>();
+
+function registerRichTextFlush(fn: RichTextFlushFn) {
+  richTextFlushers.add(fn);
+  return () => {
+    richTextFlushers.delete(fn);
+  };
+}
+
+/**
+ * Push every mounted TipTap editor's current HTML into its React onChange.
+ * Call before Save / Preview so last keystrokes are not left only in the editor DOM.
+ */
+export function flushAllRichTextEditors() {
+  richTextFlushers.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      // ignore individual editor failures
+    }
+  });
+}
+
 function ToolbarButton({
   label,
   active,
@@ -67,8 +92,24 @@ export function plainTextToHtml(value: string): string {
 
 function normalizeHtml(html: string): string {
   const trimmed = String(html || '').trim();
-  if (!trimmed || trimmed === '<p></p>' || trimmed === '<p><br></p>') return '';
-  return trimmed;
+  if (!trimmed || trimmed === '<p></p>' || trimmed === '<p><br></p>' || trimmed === '<p><br/></p>') {
+    return '';
+  }
+  // Normalize empty paragraph variants so controlled re-renders don't fight TipTap,
+  // and intentional blank lines between paragraphs survive as <p><br></p>.
+  return trimmed
+    .replace(/<p>\s*<\/p>/gi, '<p><br></p>')
+    .replace(/<p>\s*<br\s*\/?>\s*<\/p>/gi, '<p><br></p>');
+}
+
+/** Compare HTML ignoring empty-paragraph spelling so setContent does not thrash. */
+function htmlEquiv(a: string, b: string): boolean {
+  const norm = (v: string) =>
+    normalizeHtml(v)
+      .replace(/<p><br><\/p>/gi, '<p><br></p>')
+      .replace(/\s+/g, ' ')
+      .trim();
+  return norm(a) === norm(b);
 }
 
 export function RichTextEditor({
@@ -77,11 +118,13 @@ export function RichTextEditor({
   placeholder = 'Enter text…',
   className,
   minHeightClassName = 'min-h-[120px]',
-  maxHeightClassName = 'max-h-[280px]',
+  maxHeightClassName,
   disabled = false,
 }: RichTextEditorProps) {
   const lastEmittedRef = useRef(normalizeHtml(value));
   const scrollParentRef = useRef<HTMLElement | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -103,7 +146,7 @@ export function RichTextEditor({
       attributes: {
         class: cn(
           'max-w-none px-3 py-2 text-sm leading-relaxed text-slate-800 outline-none',
-          '[&_p]:my-1 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5',
+          'break-words [overflow-wrap:anywhere] [&_p]:my-1 [&_p]:min-h-[1.25em] [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5',
           '[&_strong]:font-semibold [&_em]:italic [&_u]:underline',
           minHeightClassName,
         ),
@@ -125,9 +168,15 @@ export function RichTextEditor({
       },
     },
     onUpdate: ({ editor: ed }) => {
+      // Always accept keystrokes from a focused editor. Skipping updates when a
+      // Radix ancestor had [hidden] made Understanding appear "not editable".
+      if (!ed.isFocused) {
+        const dom = ed.view?.dom as HTMLElement | undefined;
+        if (dom?.closest?.('[hidden], .hidden, .proposal-tab-inactive')) return;
+      }
       const html = normalizeHtml(ed.getHTML());
       lastEmittedRef.current = html;
-      onChange(html);
+      onChangeRef.current(html);
     },
   });
 
@@ -135,7 +184,8 @@ export function RichTextEditor({
     if (!editor) return;
     const next = normalizeHtml(plainTextToHtml(value));
     const current = normalizeHtml(editor.getHTML());
-    if (next === current || next === lastEmittedRef.current) return;
+    // Never clobber an in-progress blank line the user just inserted.
+    if (htmlEquiv(next, current) || htmlEquiv(next, lastEmittedRef.current)) return;
     if (editor.isFocused) return;
     editor.commands.setContent(next || '', { emitUpdate: false });
     lastEmittedRef.current = next;
@@ -145,6 +195,20 @@ export function RichTextEditor({
     if (!editor) return;
     editor.setEditable(!disabled);
   }, [editor, disabled]);
+
+  useEffect(() => {
+    if (!editor) return;
+    return registerRichTextFlush(() => {
+      // Always flush — including force-mounted / visually hidden tab panels —
+      // so blank lines and last keystrokes are not dropped on tab switch.
+      const html = normalizeHtml(editor.getHTML());
+      // Never flush an empty shell over content we already emitted / were given.
+      if (!html && lastEmittedRef.current) return;
+      if (htmlEquiv(html, lastEmittedRef.current)) return;
+      lastEmittedRef.current = html;
+      onChangeRef.current(html);
+    });
+  }, [editor]);
 
   if (!editor) {
     return (
@@ -207,13 +271,24 @@ export function RichTextEditor({
         </ToolbarButton>
       </div>
 
-      {/* Scrollable body — no CSS resize (it spilled under the modal footer) */}
+      {/* Cap height when requested; chain wheel to the page at scroll edges. */}
       <div
         className={cn(
-          'min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:none]',
+          'min-h-0 min-w-0 [overflow-anchor:none]',
+          maxHeightClassName ? 'overflow-y-auto overscroll-y-auto' : 'overflow-visible',
           minHeightClassName,
           maxHeightClassName,
         )}
+        onWheel={(e) => {
+          if (!maxHeightClassName) return;
+          const el = e.currentTarget;
+          const atTop = el.scrollTop <= 0;
+          const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+          if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) {
+            // Let the page scroll instead of trapping the wheel in an empty editor scroll.
+            window.scrollBy({ top: e.deltaY, left: 0, behavior: 'auto' });
+          }
+        }}
         onMouseDown={(e) => {
           if (e.target === e.currentTarget) {
             e.preventDefault();
@@ -221,7 +296,7 @@ export function RichTextEditor({
           }
         }}
       >
-        <EditorContent editor={editor} className="[&_.ProseMirror]:min-h-[inherit]" />
+        <EditorContent editor={editor} className="min-w-0 [&_.ProseMirror]:min-h-[inherit]" />
       </div>
     </div>
   );

@@ -108,12 +108,14 @@ export function useNavBadges(): NavBadges {
 
     let cancelled = false;
     const loadBadges = () => {
+      // skipAuthRedirect: badge polling must never trigger a full SSO bounce.
+      const pollOpts = { skipAuthRedirect: true } as const;
       Promise.all([
         role === 'ADMIN' || role === 'ANALYST'
           ? apiFetch<{
               awaitingReview?: unknown[];
               summary?: { totalInQueue?: number };
-            }>('/analyst/queue').catch(() => ({
+            }>('/analyst/queue', pollOpts).catch(() => ({
               awaitingReview: [] as unknown[],
               summary: undefined as { totalInQueue?: number } | undefined,
             }))
@@ -122,11 +124,13 @@ export function useNavBadges(): NavBadges {
               summary: undefined as { totalInQueue?: number } | undefined,
             }),
         role === 'ADMIN'
-          ? apiFetch<Array<{ status: string }>>('/admin/emails').catch(() => [])
+          ? apiFetch<Array<{ status: string }>>('/admin/emails', pollOpts).catch(() => [])
           : Promise.resolve([]),
-        apiFetch<{ unreadCount?: number }>('/triage/communications/unread-summary').catch(() => ({
-          unreadCount: 0,
-        })),
+        apiFetch<{ unreadCount?: number }>('/triage/communications/unread-summary', pollOpts).catch(
+          () => ({
+            unreadCount: 0,
+          }),
+        ),
       ]).then(([queue, emails, triageUnread]) => {
         if (cancelled) return;
         const queueCount =

@@ -25,7 +25,6 @@ import { TriageCommercialPanel } from '@/components/triage/TriageCommercialPanel
 import { TriageCommunicationsPanel } from '@/components/triage/TriageCommunicationsPanel';
 import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import { useConfirm } from '@/components/confirm-dialog';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -250,9 +249,7 @@ export default function TriageSubmissionDetailPage() {
   const [tab, setTabState] = useState<TabId>(urlTab);
   const [item, setItem] = useState<any>(null);
   const itemRef = useRef<any>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
   const [responseQuery, setResponseQuery] = useState('');
   const [analysts, setAnalysts] = useState<any[]>([]);
   const [commercialOwners, setCommercialOwners] = useState<any[]>([]);
@@ -349,10 +346,9 @@ export default function TriageSubmissionDetailPage() {
   }, [tab, commercialFocus, clearCommercialFocus]);
 
   const load = useCallback(async (opts?: { soft?: boolean }) => {
-    setError('');
-    // Never blank the whole page when we already have data (tab changes / soft refresh).
+    // Soft refresh keeps the current page mounted (preserves open modals / tab state).
     const soft = Boolean(opts?.soft) || Boolean(itemRef.current);
-    if (!soft) setLoading(true);
+    const hadItem = soft;
     try {
       const data = await apiFetch<any>(`/triage/submissions/${id}`);
       setItem(data);
@@ -366,16 +362,63 @@ export default function TriageSubmissionDetailPage() {
         router.replace(qs ? `/triage/${data.id}?${qs}` : `/triage/${data.id}`, { scroll: false });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to load submission.');
-    } finally {
-      setLoading(false);
+      toast({
+        id: 'triage-load-error',
+        variant: 'error',
+        title: 'Unable to load',
+        description: e instanceof Error ? e.message : 'Unable to load submission.',
+      });
+      if (!hadItem) {
+        setItem(null);
+        itemRef.current = null;
+      }
     }
-  }, [id, router]);
+  }, [id, router, toast]);
 
+  // Only refetch when the submission id changes. Do not depend on `router`/`load`
+  // identity — Next.js router identity can change on searchParams updates and was
+  // remounting this page (closing the Prepare Proposal modal).
   useEffect(() => {
-    itemRef.current = null;
-    if (id) void load({ soft: false });
-  }, [id, load]);
+    if (!id) return;
+    const keepMounted = Boolean(itemRef.current) && String(itemRef.current.id) === id;
+    // Never blank the page (and close open modals) when we already have this submission.
+    if (!keepMounted) {
+      itemRef.current = null;
+      setItem(null);
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch<any>(`/triage/submissions/${id}`);
+        if (cancelled) return;
+        setItem(data);
+        itemRef.current = data;
+        if (data?.id && data.id !== id) {
+          const qs =
+            typeof window !== 'undefined'
+              ? new URLSearchParams(window.location.search).toString()
+              : '';
+          router.replace(qs ? `/triage/${data.id}?${qs}` : `/triage/${data.id}`, { scroll: false });
+        }
+      } catch (e) {
+        if (cancelled) return;
+        toast({
+          id: 'triage-load-error',
+          variant: 'error',
+          title: 'Unable to load',
+          description: e instanceof Error ? e.message : 'Unable to load submission.',
+        });
+        if (!keepMounted) {
+          setItem(null);
+          itemRef.current = null;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- id only; router used for redirect
+  }, [id]);
 
   useEffect(() => {
     apiFetch<any[]>('/admin/users/analysts').then(setAnalysts).catch(() => []);
@@ -384,14 +427,15 @@ export default function TriageSubmissionDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    apiFetch<{ unreadCount: number }>(`/triage/submissions/${id}/communications/summary`)
+    apiFetch<{ unreadCount: number }>(`/triage/submissions/${id}/communications/summary`, {
+      skipAuthRedirect: true,
+    })
       .then((summary) => setUnreadCommCount(summary.unreadCount || 0))
       .catch(() => setUnreadCommCount(0));
   }, [id, tab]);
 
   async function run(fn: () => Promise<void>, success?: { title: string; description: string }) {
     setBusy(true);
-    setError('');
     try {
       await fn();
       await load({ soft: true });
@@ -405,7 +449,6 @@ export default function TriageSubmissionDetailPage() {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unable to update submission.';
-      setError(message);
       toast({
         id: 'triage-error',
         variant: 'error',
@@ -486,7 +529,6 @@ export default function TriageSubmissionDetailPage() {
     });
     if (!ok) return;
     setBusy(true);
-    setError('');
     try {
       const data = await apiFetch<{ engagement: { id: string } }>(`/triage/submissions/${id}/convert`, {
         method: 'POST',
@@ -496,7 +538,6 @@ export default function TriageSubmissionDetailPage() {
       else await load({ soft: true });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unable to create the Executive Advisory Diagnostic.';
-      setError(message);
       toast({ variant: 'error', title: 'Conversion failed', description: message });
     } finally {
       setBusy(false);
@@ -695,17 +736,13 @@ export default function TriageSubmissionDetailPage() {
       ] as Array<{ state: 'done' | 'current' | 'pending' | 'warning'; label: string }>;
     }, [item, score, proposalStatus]);
 
-  if (loading || !item) {
+  // Keep the workspace mounted whenever we already have data — a loading flag alone
+  // must not remount Commercial / open proposal dialogs.
+  if (!item) {
     return (
       <AuthGate>
         <Shell title="Triage submission" hideSearch>
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to load</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : (
-            <div className="triage-detail-workspace space-y-4 pb-8">
+          <div className="triage-detail-workspace space-y-4 pb-8">
               <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
                 <Skeleton className="h-4 w-48" />
                 <Skeleton className="h-8 w-72 max-w-full" />
@@ -721,7 +758,6 @@ export default function TriageSubmissionDetailPage() {
                 <Skeleton className="h-48 w-full rounded-lg" />
               </div>
             </div>
-          )}
         </Shell>
       </AuthGate>
     );
@@ -747,13 +783,6 @@ export default function TriageSubmissionDetailPage() {
           }}
         />
         <div className="triage-detail-workspace space-y-4 pb-8">
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to continue</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
-
           {/* Information card */}
           <Card className="rounded-xl border-slate-200 shadow-sm">
             <CardContent className="space-y-4 p-5 sm:p-6">

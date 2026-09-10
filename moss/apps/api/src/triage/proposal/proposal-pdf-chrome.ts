@@ -1,7 +1,7 @@
 import type PDFDocument from 'pdfkit';
 import { defaultReportBrand, resolveReportLogoPath } from '../../reports/pdf-letterhead';
 import { resolveProposalCoverLogoPath, resolveProposalSlideHeaderPath } from '../../reports/scl-report-branding';
-import { dedupeRepeatedNarrative, parseProposalRichText, richFont, stripHtmlToPlain } from './proposal-rich-text';
+import { dedupeRepeatedNarrative, normalizeNarrativeHtmlForPdf, parseProposalRichText, richFont, stripHtmlToPlain } from './proposal-rich-text';
 import { drawSecurityReviewDiagram } from './security-review-diagram';
 
 export const PROPOSAL_PAGE_WIDTH = 841.89;
@@ -61,6 +61,15 @@ export function createProposalChrome(): ProposalPdfChrome {
 
 export function contentBottom(): number {
   return PROPOSAL_PAGE_HEIGHT - PROPOSAL_FOOTER_H - PROPOSAL_MARGIN;
+}
+
+/** Temporary column clamp for PPT two-column slides (Approach text above diagram). */
+let contentBottomClamp: number | null = null;
+
+function effectiveContentBottom(): number {
+  const base = contentBottom();
+  if (contentBottomClamp == null) return base;
+  return Math.min(base, contentBottomClamp);
 }
 
 export function hasBodyContent(doc: PDFKit.PDFDocument): boolean {
@@ -341,6 +350,7 @@ export function drawProposalFooter(
   pageIndex: number,
   pageCount: number,
   proposalNumber: string,
+  opts: { cover?: boolean } = {},
 ) {
   clearPdfTextState(doc);
 
@@ -365,9 +375,13 @@ export function drawProposalFooter(
     }
   }
 
+  const leftLabel = opts.cover
+    ? `${chrome.brandName}  ·  ${proposalNumber}`
+    : `${chrome.brandName}  ·  ${proposalNumber}  ·  Page ${pageIndex} of ${pageCount}`;
+
   doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica').fontSize(7)
     .text(
-      `${chrome.brandName}  ·  ${proposalNumber}  ·  Page ${pageIndex} of ${pageCount}`,
+      leftLabel,
       margin,
       y + 9,
       {
@@ -398,22 +412,178 @@ export function sectionTitle(
   markProposalBodyContent(doc);
 }
 
+/**
+ * How many characters of `text` fit in `maxHeight` at the current font.
+ * Prefers breaking on a space so words are not split mid-glyph.
+ */
+function fitPlainTextLength(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  width: number,
+  maxHeight: number,
+  lineGap: number,
+): number {
+  const raw = String(text || '');
+  if (!raw) return 0;
+  if (maxHeight <= 0) return 0;
+  if (doc.heightOfString(raw, { width, lineGap }) <= maxHeight) return raw.length;
+
+  let lo = 0;
+  let hi = raw.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (doc.heightOfString(raw.slice(0, mid), { width, lineGap }) <= maxHeight) lo = mid;
+    else hi = mid - 1;
+  }
+
+  let cut = Math.max(0, lo);
+  if (cut >= raw.length) return raw.length;
+  if (cut === 0) {
+    // At least one character so we always make progress on a fresh page.
+    return Math.min(1, raw.length);
+  }
+
+  const space = raw.lastIndexOf(' ', cut);
+  const breakAt = raw.lastIndexOf('\n', cut);
+  const soft = Math.max(space, breakAt);
+  if (soft >= Math.floor(cut * 0.4)) cut = soft;
+  return Math.max(1, cut);
+}
+
+function richBlockPlain(block: { runs: Array<{ text: string }> }): string {
+  return block.runs.map((r) => r.text).join('');
+}
+
+function drawRichBlockOnce(
+  doc: PDFKit.PDFDocument,
+  block: {
+    type: 'paragraph' | 'list-item';
+    ordered?: boolean;
+    index?: number;
+    runs: Array<{ text: string; style: { bold?: boolean; italic?: boolean; underline?: boolean } }>;
+  },
+  startX: number,
+  width: number,
+  fontSize: number,
+) {
+  const prefix =
+    block.type === 'list-item'
+      ? block.ordered
+        ? `${block.index}. `
+        : '• '
+      : '';
+  const indent = block.type === 'list-item' ? 12 : 0;
+  const x = startX + indent;
+  const usableW = width - indent;
+  const y = doc.y;
+
+  doc.font('Helvetica').fontSize(fontSize);
+  const prefixW = prefix ? doc.widthOfString(prefix) : 0;
+  if (prefix) {
+    doc.fillColor(PROPOSAL_COLORS.INK)
+      .text(prefix, x, y, { lineBreak: false, continued: false });
+  }
+
+  const textX = x + prefixW;
+  const textW = Math.max(24, usableW - prefixW);
+  doc.x = textX;
+  doc.y = y;
+
+  const runs = block.runs.length ? block.runs : [{ text: ' ', style: {} }];
+  runs.forEach((run, idx) => {
+    const isLast = idx === runs.length - 1;
+    doc.fillColor(PROPOSAL_COLORS.INK)
+      .font(richFont(run.style))
+      .fontSize(fontSize);
+    const textOpts: PDFKit.Mixins.TextOptions = {
+      width: textW,
+      lineGap: 2,
+      continued: !isLast,
+      underline: Boolean(run.style.underline),
+    };
+    if (idx === 0) {
+      doc.text(run.text, textX, y, textOpts);
+    } else {
+      doc.text(run.text, textOpts);
+    }
+  });
+
+  doc.x = startX;
+  doc.moveDown(block.type === 'list-item' ? 0.15 : 0.3);
+}
+
 export function bodyText(
   doc: PDFKit.PDFDocument,
   chrome: ProposalPdfChrome,
   text: string,
   width: number,
-  opts: { x?: number; fontSize?: number } = {},
-) {
+  opts: { x?: number; fontSize?: number; narrative?: boolean; paginate?: boolean; skipDedupe?: boolean } = {},
+): string {
   const startX = opts.x ?? PROPOSAL_MARGIN;
   const fontSize = opts.fontSize ?? 10;
-  const blocks = parseProposalRichText(dedupeRepeatedNarrative(String(text || '')));
+  const lineGap = 2;
+  const paginate = opts.paginate !== false;
+  let source = String(text || '');
+  if (opts.narrative) {
+    const cleaned = normalizeNarrativeHtmlForPdf(source);
+    const cleanedPlain = stripHtmlToPlain(cleaned).trim();
+    const originalPlain = stripHtmlToPlain(source).trim();
+    // Never blank out a section that still has readable source text.
+    source = cleanedPlain ? cleaned : originalPlain ? source : '';
+  } else if (!opts.skipDedupe) {
+    source = dedupeRepeatedNarrative(source);
+  }
+  const blocks = parseProposalRichText(source);
   if (!blocks.length) {
-    return;
+    // Last resort: draw plain text so Understanding never disappears.
+    const plain = stripHtmlToPlain(String(text || '')).trim();
+    if (!plain) return '';
+    if (paginate) ensureProposalSpace(doc, chrome, 16);
+    if (!paginate && effectiveContentBottom() - doc.y < fontSize + lineGap + 2) {
+      return plain;
+    }
+    doc.fillColor(PROPOSAL_COLORS.INK)
+      .font('Helvetica')
+      .fontSize(fontSize)
+      .text(plain, startX, doc.y, { width, lineGap });
+    markProposalBodyContent(doc);
+    return '';
   }
 
-  for (const block of blocks) {
-    ensureProposalSpace(doc, chrome, 16);
+  const minLine = fontSize + lineGap + 2;
+  const usablePageH = () => effectiveContentBottom() - (PROPOSAL_HEADER_H + 14);
+  const formatBlockPlain = (block: (typeof blocks)[number]) => {
+    const plain = richBlockPlain(block).replace(/\s+$/g, '');
+    if (!plain && block.type === 'paragraph') return '';
+    if (block.type === 'list-item') {
+      return block.ordered ? `${block.index}. ${plain}` : `• ${plain}`;
+    }
+    return plain;
+  };
+  const leftoverFrom = (startIdx: number, firstPartial = '') => {
+    const parts: string[] = [];
+    if (firstPartial.trim()) parts.push(firstPartial.trim());
+    for (let j = startIdx; j < blocks.length; j += 1) {
+      const p = formatBlockPlain(blocks[j]);
+      if (p) parts.push(p);
+    }
+    return parts.join('\n').trim();
+  };
+
+  for (let i = 0; i < blocks.length; i += 1) {
+    const block = blocks[i];
+    const plain = richBlockPlain(block).replace(/\s+$/g, '');
+    if (!plain && block.type === 'paragraph') {
+      // Preserve blank paragraph gaps from the editor.
+      if (paginate) ensureProposalSpace(doc, chrome, minLine);
+      if (!paginate && effectiveContentBottom() - doc.y < minLine) {
+        return leftoverFrom(i);
+      }
+      doc.y += fontSize * 0.7;
+      markProposalBodyContent(doc);
+      continue;
+    }
+
     const prefix =
       block.type === 'list-item'
         ? block.ordered
@@ -421,45 +591,123 @@ export function bodyText(
           : '• '
         : '';
     const indent = block.type === 'list-item' ? 12 : 0;
-    const x = startX + indent;
-    const usableW = width - indent;
-    const y = doc.y;
+    const usableW = Math.max(24, width - indent);
 
     doc.font('Helvetica').fontSize(fontSize);
-    const prefixW = prefix ? doc.widthOfString(prefix) : 0;
-    if (prefix) {
-      doc.fillColor(PROPOSAL_COLORS.INK)
-        .text(prefix, x, y, { lineBreak: false, continued: false });
+    const measure = `${prefix}${plain || ' '}`;
+    const fullH = doc.heightOfString(measure, { width: usableW, lineGap }) + 6;
+    const room = effectiveContentBottom() - doc.y;
+
+    // Whole block fits on this page — keep rich formatting.
+    if (fullH <= room) {
+      if (paginate) ensureProposalSpace(doc, chrome, Math.min(fullH, minLine));
+      drawRichBlockOnce(doc, block, startX, width, fontSize);
+      markProposalBodyContent(doc);
+      continue;
     }
 
-    const textX = x + prefixW;
-    const textW = Math.max(24, usableW - prefixW);
-    doc.x = textX;
-    doc.y = y;
-
-    const runs = block.runs.length ? block.runs : [{ text: ' ', style: {} }];
-    runs.forEach((run, idx) => {
-      const isLast = idx === runs.length - 1;
-      doc.fillColor(PROPOSAL_COLORS.INK)
-        .font(richFont(run.style))
-        .fontSize(fontSize);
-      const textOpts: PDFKit.Mixins.TextOptions = {
-        width: textW,
-        lineGap: 2,
-        continued: !isLast,
-        underline: Boolean(run.style.underline),
-      };
-      if (idx === 0) {
-        doc.text(run.text, textX, y, textOpts);
-      } else {
-        doc.text(run.text, textOpts);
+    if (!paginate) {
+      // Fixed slide / column: fill remaining space on this page — never skip the block.
+      let remaining = plain;
+      let leadPrefix = prefix;
+      let guard = 0;
+      while (remaining.length && guard < 200) {
+        guard += 1;
+        const roomNow = effectiveContentBottom() - doc.y;
+        if (roomNow < minLine * 2) break;
+        const chunkBudget = Math.max(minLine, roomNow - 4);
+        const prefixed = `${leadPrefix}${remaining}`;
+        doc.font('Helvetica').fontSize(fontSize);
+        const fit = fitPlainTextLength(doc, prefixed, usableW, chunkBudget, lineGap);
+        if (fit <= leadPrefix.length) break;
+        const chunk = prefixed.slice(0, fit);
+        const consumed = fit - leadPrefix.length;
+        const x = startX + indent;
+        const y = doc.y;
+        doc.fillColor(PROPOSAL_COLORS.INK)
+          .font('Helvetica')
+          .fontSize(fontSize)
+          .text(chunk, x, y, { width: usableW, lineGap, continued: false });
+        markProposalBodyContent(doc);
+        remaining = remaining.slice(Math.max(1, consumed)).replace(/^\s+/, '');
+        leadPrefix = '';
+        if (effectiveContentBottom() - doc.y < minLine * 2) break;
       }
-    });
+      doc.x = startX;
+      if (remaining.length) {
+        return leftoverFrom(i + 1, remaining);
+      }
+      doc.moveDown(block.type === 'list-item' ? 0.15 : 0.3);
+      markProposalBodyContent(doc);
+      continue;
+    }
+
+    // Too tall for remaining space (or the whole slide) — paginate as plain text
+    // so content continues onto the next page instead of being clipped.
+    let remaining = plain;
+    let leadPrefix = prefix;
+    let guard = 0;
+    while (remaining.length && guard < 500) {
+      guard += 1;
+      let roomNow = effectiveContentBottom() - doc.y;
+      if (roomNow < minLine * 2) {
+        ensureProposalSpace(doc, chrome, Math.max(minLine * 6, Math.min(usablePageH(), 120)));
+        roomNow = effectiveContentBottom() - doc.y;
+      }
+
+      const chunkBudget = Math.max(minLine, roomNow - 4);
+      const prefixed = `${leadPrefix}${remaining}`;
+      doc.font('Helvetica').fontSize(fontSize);
+      const fit = fitPlainTextLength(doc, prefixed, usableW, chunkBudget, lineGap);
+
+      if (fit <= leadPrefix.length) {
+        // Not enough room even for one line — force a fresh page.
+        ensureProposalSpace(doc, chrome, Math.max(minLine * 6, Math.min(usablePageH(), 120)));
+        continue;
+      }
+
+      const chunk = prefixed.slice(0, fit);
+      const consumed = fit - leadPrefix.length;
+      const x = startX + indent;
+      const y = doc.y;
+      doc.fillColor(PROPOSAL_COLORS.INK)
+        .font('Helvetica')
+        .fontSize(fontSize)
+        .text(chunk, x, y, { width: usableW, lineGap, continued: false });
+      markProposalBodyContent(doc);
+
+      remaining = remaining.slice(Math.max(1, consumed)).replace(/^\s+/, '');
+      leadPrefix = ''; // continuation pages drop the list bullet/number
+
+      if (remaining.length && effectiveContentBottom() - doc.y < minLine * 2) {
+        ensureProposalSpace(doc, chrome, Math.max(minLine * 6, Math.min(usablePageH(), 120)));
+      }
+    }
 
     doc.x = startX;
     doc.moveDown(block.type === 'list-item' ? 0.15 : 0.3);
     markProposalBodyContent(doc);
   }
+  return '';
+}
+
+/** Cover product headline — Wayne official Level 2 name: Executive Advisory Diagnostic. */
+export function resolveCoverProductTitle(
+  title: string,
+  productCode?: string | null,
+): string {
+  const raw = String(title || '').trim();
+  const code = String(productCode || '').trim();
+  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+    return 'Executive Advisory Diagnostic';
+  }
+  // Drop "Client — Product" prefixes so the headline stays product-only.
+  const stripped = raw.replace(/^[^—–\n]+[—–]\s*/, '').trim();
+  // Normalize any leftover outdated "Governance Diagnostic" wording.
+  if (/executive\s+governance\s+diagnostic/i.test(stripped || raw)) {
+    return 'Executive Advisory Diagnostic';
+  }
+  return stripped || raw;
 }
 
 export function drawCoverPage(
@@ -467,7 +715,13 @@ export function drawCoverPage(
   chrome: ProposalPdfChrome,
   input: {
     proposalTitle: string;
+    productCode?: string | null;
+    proposalSubtitle?: string | null;
     clientCompany: string;
+    clientContact?: string | null;
+    clientPosition?: string | null;
+    clientEmail?: string | null;
+    clientPhone?: string | null;
     proposalNumber: string;
     proposalDate: string;
     proposalVersion: number;
@@ -480,29 +734,98 @@ export function drawCoverPage(
   const textW = pageW - margin * 2;
   const textX = margin;
 
-  const coverTitle = `Project Proposal\nfor the ${input.proposalTitle}\nfor ${input.clientCompany}`;
-  const titleFontSize = 30;
-  const lineGap = 10;
-  // PPTX cover/footer wordmark (image1.jpg, 830×185)
-  const logoH = 40;
-  const logoW = Math.round(logoH * (830 / 185));
+  const productTitle = resolveCoverProductTitle(input.proposalTitle, input.productCode);
+  const company = String(input.clientCompany || '').trim();
+  const versionNum = Number(input.proposalVersion);
+  const versionLabel = Number.isFinite(versionNum)
+    ? (Number.isInteger(versionNum) ? `${versionNum}.0` : String(versionNum))
+    : '1.0';
 
-  doc.font('Helvetica').fontSize(titleFontSize);
-  const titleHeight = doc.heightOfString(coverTitle, { width: textW, lineGap });
-  const contentTop = PROPOSAL_HEADER_H + 24;
-  const contentBottom = pageH - margin - logoH - 16;
-  const titleY = contentTop + Math.max(0, (contentBottom - contentTop - titleHeight) / 2);
+  // Title group — slightly above vertical centre for better balance
+  const eyebrow = 'PROJECT PROPOSAL';
+  const preparedLabel = 'Prepared for';
+  const eyebrowSize = 26;
+  const productSize = 40;
+  const preparedLabelSize = 16;
+  const companySize = 26;
+  const metaSize = 11;
+  const metaLineH = 16;
+  const titleBlockW = textW * 0.86;
+  const titleBlockX = textX + (textW - titleBlockW) / 2;
 
-  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica').fontSize(titleFontSize)
-    .text(coverTitle, textX, titleY, { width: textW, align: 'center', lineGap });
+  doc.font('Helvetica').fontSize(productSize);
+  const productH = doc.heightOfString(productTitle, {
+    width: titleBlockW,
+    align: 'center',
+    lineGap: 2,
+  });
 
-  const logoPath = chrome.coverLogoPath || chrome.logoPath;
-  if (logoPath) {
-    try {
-      doc.image(logoPath, pageW - margin - logoW, pageH - margin - logoH, { height: logoH });
-    } catch {
-      /* skip */
-    }
+  const contentTop = PROPOSAL_HEADER_H + 36;
+  const availableH = pageH - contentTop - margin - 120;
+  const titleY = contentTop + Math.max(8, availableH * 0.18);
+
+  const savedMargins = { ...doc.page.margins };
+  doc.page.margins = { top: 0, left: 0, right: 0, bottom: 0 };
+
+  let y = titleY;
+  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica').fontSize(eyebrowSize)
+    .text(eyebrow, titleBlockX, y, { width: titleBlockW, align: 'center', lineBreak: false });
+  y += eyebrowSize + 14;
+
+  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(productSize)
+    .text(productTitle, titleBlockX, y, {
+      width: titleBlockW,
+      align: 'center',
+      lineGap: 2,
+    });
+  y += productH + 22;
+
+  doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica').fontSize(preparedLabelSize)
+    .text(preparedLabel, titleBlockX, y, { width: titleBlockW, align: 'center', lineBreak: false });
+  y += preparedLabelSize + 10;
+
+  doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica-Bold').fontSize(companySize)
+    .text(company || '—', titleBlockX, y, {
+      width: titleBlockW,
+      align: 'center',
+      lineBreak: false,
+    });
+  y += companySize + 22;
+
+  // Date / Version / Proposal Ref — centered under company name (no client contact block)
+  const drawCenteredMeta = (label: string, value: string, atY: number) => {
+    doc.font('Helvetica-Bold').fontSize(metaSize);
+    const labelW = doc.widthOfString(label);
+    doc.font('Helvetica').fontSize(metaSize);
+    const valueW = doc.widthOfString(value);
+    const totalW = labelW + valueW;
+    const startX = textX + (textW - totalW) / 2;
+    doc.fillColor(PROPOSAL_COLORS.INK).font('Helvetica-Bold').fontSize(metaSize)
+      .text(label, startX, atY, { width: labelW + 1, lineBreak: false });
+    doc.font('Helvetica').text(value, startX + labelW, atY, {
+      width: valueW + 2,
+      lineBreak: false,
+    });
+  };
+
+  drawCenteredMeta('Date: ', String(input.proposalDate || '—'), y);
+  y += metaLineH;
+  drawCenteredMeta('Version: ', versionLabel, y);
+  y += metaLineH;
+  drawCenteredMeta('Proposal Ref: ', String(input.proposalNumber || '—'), y);
+
+  drawProposalFooter(doc, chrome, 0, 0, input.proposalNumber, { cover: true });
+
+  doc.page.margins = savedMargins;
+
+  const internal = doc as PdfKitInternal;
+  while (Array.isArray(internal._pageBuffer) && internal._pageBuffer.length > 1) {
+    removeLastBufferedPage(doc);
+  }
+  try {
+    doc.switchToPage(0);
+  } catch {
+    /* ignore */
   }
 
   doc.x = margin;
@@ -530,11 +853,11 @@ export function drawContentsPage(
   doc.y = PROPOSAL_HEADER_H + 22;
   doc.x = left;
 
-  const topRowH = 24;
+  const topRowH = 20;
 
   for (const entry of entries) {
     const y = doc.y;
-    if (y > contentBottom() - 18) break;
+    if (y > contentBottom() - 16) break;
 
     const indent = 0;
     const titleX = left + indent;
@@ -643,24 +966,79 @@ export function drawTableRow(
   markProposalBodyContent(doc);
 }
 
-export function beginScopeObjectivesSlide(doc: PDFKit.PDFDocument, _chrome: ProposalPdfChrome) {
-  doc.addPage({ size: [PROPOSAL_PAGE_WIDTH, PROPOSAL_PAGE_HEIGHT], margin: PROPOSAL_MARGIN });
-  clearProposalHeaderTitle();
-  doc.rect(0, 0, PROPOSAL_PAGE_WIDTH, PROPOSAL_PAGE_HEIGHT).fill('#FFFFFF');
-  doc.y = PROPOSAL_MARGIN + 6;
-  doc.x = PROPOSAL_MARGIN;
-  markProposalBodyContent(doc);
-  trackPageY(doc);
+/** Scope slide uses the same brand header title strip as every other major section. */
+export function beginScopeObjectivesSlide(
+  doc: PDFKit.PDFDocument,
+  chrome: ProposalPdfChrome,
+  title = 'Scope and Objectives',
+) {
+  beginMajorSection(doc, chrome, title, 0, { pageBreak: true });
 }
 
-/** Scope slide — two-column PPT layout; Security Review diagram under Approach (right). */
+function measureRichTextHeight(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  width: number,
+  fontSize: number,
+): number {
+  const source = dedupeRepeatedNarrative(String(text || ''));
+  const blocks = parseProposalRichText(source);
+  const lineGap = 2;
+  let height = 0;
+  doc.font('Helvetica').fontSize(fontSize);
+  if (!blocks.length) {
+    const plain = stripHtmlToPlain(source).trim();
+    if (!plain) return 0;
+    return doc.heightOfString(plain, { width, lineGap }) + 4;
+  }
+  for (const block of blocks) {
+    const plain = richBlockPlain(block).replace(/\s+$/g, '');
+    if (!plain && block.type === 'paragraph') {
+      height += fontSize * 0.7;
+      continue;
+    }
+    const prefix =
+      block.type === 'list-item' ? (block.ordered ? `${block.index}. ` : '• ') : '';
+    const indent = block.type === 'list-item' ? 12 : 0;
+    const usableW = Math.max(24, width - indent);
+    height +=
+      doc.heightOfString(`${prefix}${plain || ' '}`, { width: usableW, lineGap }) + 6;
+    height += fontSize * (block.type === 'list-item' ? 0.15 : 0.3);
+  }
+  return height;
+}
+
+function measureLabeledBlockHeight(
+  doc: PDFKit.PDFDocument,
+  label: string,
+  body: string,
+  width: number,
+  fontSize: number,
+): number {
+  const text = String(body || '').trim();
+  if (!text) return 0;
+  doc.font('Helvetica-Bold').fontSize(9);
+  const labelH = doc.heightOfString(label, { width, lineGap: 0 }) + 4;
+  return labelH + measureRichTextHeight(doc, text, width, fontSize) + 10;
+}
+
+/**
+ * Scope slide — PPT two-column layout on page 1:
+ * left = Client objectives / Sites / Exclusions / Indicative scope;
+ * right = Approach + fixed Security Review diagram at the bottom.
+ * Overflow continues on the next page(s) still side-by-side (left scope / right Approach).
+ * The diagram size/position is not shrunk to make room for Approach text.
+ */
 export function drawScopeAndObjectivesSlide(
   doc: PDFKit.PDFDocument,
   chrome: ProposalPdfChrome,
   input: {
     scopeObjectives: string;
+    sitesOrBusinessUnits?: string | null;
     scopeBody: string;
     approach: string;
+    /** Shown under Scope only when present (same field as Approach matrix exclusions). */
+    exclusions?: string | null;
   },
   contentW: number,
 ) {
@@ -668,51 +1046,258 @@ export function drawScopeAndObjectivesSlide(
   const colW = Math.floor((contentW - gutter) / 2);
   const leftX = PROPOSAL_MARGIN;
   const rightX = PROPOSAL_MARGIN + colW + gutter;
-  const topY = doc.y;
   const footerGap = 18;
-  const maxDiagramBottom = contentBottom() - footerGap;
-  const bodyTopY = topY + 28;
+  const maxBottom = contentBottom() - footerGap;
+  const fontSize = 8.5;
+  const preferredDiagramH = 155;
+  const minDiagramH = 128;
+  const diagramTopGap = 12;
 
-  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(20)
-    .text('Scope and Objectives', leftX, topY, { width: colW, lineGap: 0 });
-  doc.text('Approach', rightX, topY, { width: colW, lineGap: 0 });
+  const objectivesText = String(input.scopeObjectives || '').trim();
+  const sitesText = String(input.sitesOrBusinessUnits || '').trim();
+  const exclusionsRaw = String(input.exclusions || '').trim();
+  const exclusionsPlain = stripHtmlToPlain(exclusionsRaw).trim();
+  const hasExclusions = Boolean(exclusionsPlain);
+  const scopeText = String(input.scopeBody || '').trim();
+  const approachRaw = String(input.approach || '').trim();
+
+  // Page title is already in the top brand header via beginScopeObjectivesSlide.
+  const colTitleY = doc.y;
+  doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(12)
+    .text('Approach', rightX, colTitleY, { width: colW, lineGap: 0 });
   markProposalBodyContent(doc);
+  const bodyTopY = colTitleY + 18;
 
-  const leftContent = [input.scopeObjectives, input.scopeBody].filter((v) => v?.trim()).join('\n\n');
+  // Fixed diagram band at the bottom of the right column (do not shrink for long Approach).
+  let diagramH = preferredDiagramH;
+  let diagramY = maxBottom - diagramH;
+  if (diagramY < bodyTopY + 48) {
+    diagramH = Math.max(minDiagramH, maxBottom - (bodyTopY + 48));
+    diagramY = maxBottom - diagramH;
+  }
+  const approachTextBottom = Math.max(bodyTopY + 24, diagramY - diagramTopGap);
+
+  // Right column — Approach above the fixed diagram; leftover continues later.
+  let approachLeftover = '';
+  doc.y = bodyTopY;
+  doc.x = rightX;
+  if (approachRaw) {
+    contentBottomClamp = approachTextBottom;
+    try {
+      approachLeftover = bodyText(doc, chrome, approachRaw, colW, {
+        x: rightX,
+        fontSize,
+        paginate: false,
+      });
+    } finally {
+      contentBottomClamp = null;
+    }
+  }
+  const approachEndY = Math.min(doc.y, approachTextBottom);
+
+  if (diagramH >= 80) {
+    drawSecurityReviewDiagram(doc, chrome, rightX, diagramY, colW, diagramH);
+    markProposalBodyContent(doc);
+  }
+
+  // Left column — always reserve room for Sites / Exclusions / Indicative scope
+  // so long Client objectives cannot hide them on slide 1.
+  doc.font('Helvetica').fontSize(fontSize);
+  const sitesPlain = stripHtmlToPlain(sitesText).trim();
+  const sitesReserve = sitesPlain
+    ? Math.min(52, 16 + doc.heightOfString(sitesPlain, { width: colW, lineGap: 2 }) + 12)
+    : 0;
+  const exclusionsReserve = hasExclusions
+    ? Math.min(64, 16 + doc.heightOfString(exclusionsPlain, { width: colW, lineGap: 2 }) + 12)
+    : 0;
+  // Keep a solid reserved band so Indicative scope always has room to paint.
+  const scopeReserve = scopeText
+    ? Math.min(
+        88,
+        Math.max(
+          56,
+          18 + Math.min(64, doc.heightOfString(stripHtmlToPlain(scopeText).slice(0, 280), { width: colW, lineGap: 2 })) + 14,
+        ),
+      )
+    : 0;
+  const objectivesBottom = Math.max(
+    bodyTopY + 40,
+    maxBottom - sitesReserve - exclusionsReserve - scopeReserve,
+  );
+
+  type PendingField = { label: string; text: string; continued?: boolean };
+  const leftPending: PendingField[] = [];
+
+  const paintLeftBlock = (
+    label: string,
+    body: string,
+    stopAt: number,
+    opts: { force?: boolean } = {},
+  ): string => {
+    const text = String(body || '').trim();
+    if (!text) return '';
+    if (!opts.force && doc.y > stopAt - 18) return text;
+    // Forced blocks (Sites / Indicative) jump into their reserved band instead of skipping.
+    if (opts.force && doc.y > stopAt - 18) {
+      doc.y = Math.max(bodyTopY + 24, stopAt - Math.min(72, Math.max(36, stopAt - bodyTopY) * 0.35));
+    }
+    doc.x = leftX;
+    doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(9)
+      .text(label, leftX, doc.y, { width: colW, lineGap: 0 });
+    markProposalBodyContent(doc);
+    doc.moveDown(0.12);
+    const before = doc.y;
+    contentBottomClamp = stopAt;
+    let leftover = '';
+    try {
+      leftover = bodyText(doc, chrome, text, colW, { x: leftX, fontSize, paginate: false });
+    } finally {
+      contentBottomClamp = null;
+    }
+    if (doc.y < before + 2) doc.y = before + fontSize + 2;
+    doc.moveDown(0.2);
+    return leftover.trim();
+  };
 
   doc.y = bodyTopY;
   doc.x = leftX;
-  bodyText(doc, chrome, leftContent, colW, { x: leftX, fontSize: 8.5 });
 
-  // Approach copy first — diagram must sit below it (never paint over the paragraph)
-  doc.y = bodyTopY;
-  doc.x = rightX;
-  bodyText(doc, chrome, input.approach, colW, {
-    x: rightX,
-    fontSize: 8.5,
-  });
-  const approachEndY = doc.y;
-
-  const diagramTopGap = 12;
-  const preferredH = 155;
-  const minH = 128;
-  let diagramY = approachEndY + diagramTopGap;
-  let diagramH = preferredH;
-
-  if (diagramY + minH > maxDiagramBottom) {
-    // Not enough room below the paragraph — pin a compact diagram to the bottom
-    diagramH = Math.max(minH, Math.min(preferredH, maxDiagramBottom - (approachEndY + 8)));
-    diagramY = Math.max(approachEndY + 8, maxDiagramBottom - diagramH);
-  } else {
-    diagramH = Math.min(preferredH, maxDiagramBottom - diagramY);
+  if (objectivesText) {
+    const leftover = paintLeftBlock('Client objectives', objectivesText, objectivesBottom);
+    if (leftover) leftPending.push({ label: 'Client objectives', text: leftover, continued: true });
   }
 
-  drawSecurityReviewDiagram(doc, chrome, rightX, diagramY, colW, diagramH);
-  markProposalBodyContent(doc);
+  if (sitesText) {
+    const sitesY = Math.max(doc.y, objectivesBottom - sitesReserve - exclusionsReserve - scopeReserve + 2);
+    doc.y = Math.min(sitesY, maxBottom - Math.max(28, sitesReserve + exclusionsReserve + scopeReserve - 8));
+    const leftover = paintLeftBlock(
+      'Sites / business units',
+      sitesText,
+      maxBottom - exclusionsReserve - scopeReserve,
+      { force: true },
+    );
+    if (leftover) leftPending.push({ label: 'Sites / business units', text: leftover, continued: true });
+  }
 
-  doc.y = contentBottom();
+  if (hasExclusions) {
+    const exclY = Math.max(doc.y + 2, maxBottom - exclusionsReserve - scopeReserve + 2);
+    doc.y = Math.min(exclY, maxBottom - Math.max(28, exclusionsReserve + scopeReserve - 4));
+    const leftover = paintLeftBlock(
+      'Exclusions',
+      exclusionsRaw,
+      maxBottom - (scopeText ? scopeReserve : 6),
+      { force: true },
+    );
+    if (leftover) leftPending.push({ label: 'Exclusions', text: leftover, continued: true });
+  }
+
+  // Always pin Indicative scope into its reserved bottom band so it cannot disappear.
+  if (scopeText) {
+    const scopeBand = Math.max(36, scopeReserve);
+    const scopeY = Math.max(doc.y + 2, maxBottom - scopeBand + 2);
+    doc.y = Math.min(scopeY, maxBottom - Math.max(30, scopeBand - 8));
+    const leftover = paintLeftBlock('Indicative scope', scopeText, maxBottom, { force: true });
+    if (leftover) leftPending.push({ label: 'Indicative scope', text: leftover, continued: true });
+  }
+  const leftEndY = doc.y;
+
+  // Keep first-slide geometry intact (diagram stays where it was drawn).
+  doc.y = Math.max(leftEndY, approachEndY, diagramY + Math.max(diagramH, 0), maxBottom);
   doc.x = PROPOSAL_MARGIN;
   markProposalBodyContent(doc);
+
+  const hasLeftPending = leftPending.some((p) => p.text.trim());
+  const hasApproachPending = Boolean(approachLeftover.trim());
+  if (!hasLeftPending && !hasApproachPending) return;
+
+  // Continuation page(s): keep side-by-side Scope | Approach (no diagram — already shown).
+  let leftQueue = leftPending.filter((p) => p.text.trim());
+  let approachQueue = approachLeftover.trim();
+
+  const startContinuationPage = () => {
+    doc.addPage({ size: [PROPOSAL_PAGE_WIDTH, PROPOSAL_PAGE_HEIGHT], margin: PROPOSAL_MARGIN });
+    startProposalPage(doc, chrome);
+    trackPageY(doc);
+    doc.fillColor(PROPOSAL_COLORS.MUTED).font('Helvetica-Oblique').fontSize(8.5)
+      .text('Scope and Objectives (continued)', PROPOSAL_MARGIN, doc.y, { width: contentW });
+    markProposalBodyContent(doc);
+    doc.moveDown(0.4);
+  };
+
+  while (leftQueue.length || approachQueue) {
+    startContinuationPage();
+    const contTop = doc.y;
+    const contBottom = contentBottom() - footerGap;
+
+    // Right column subtitle when Approach still has content.
+    if (approachQueue) {
+      doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(11)
+        .text('Approach', rightX, contTop, { width: colW, lineGap: 0 });
+      markProposalBodyContent(doc);
+    }
+    const colBodyTop = contTop + (approachQueue ? 16 : 0);
+
+    // Paint Approach leftover in the right column for this page.
+    let nextApproach = '';
+    if (approachQueue) {
+      doc.y = colBodyTop;
+      doc.x = rightX;
+      contentBottomClamp = contBottom;
+      try {
+        nextApproach = bodyText(doc, chrome, approachQueue, colW, {
+          x: rightX,
+          fontSize: 9,
+          paginate: false,
+        });
+      } finally {
+        contentBottomClamp = null;
+      }
+    }
+    const rightEndY = doc.y;
+
+    // Paint left leftovers for this page (in order).
+    const nextLeft: PendingField[] = [];
+    doc.y = colBodyTop;
+    doc.x = leftX;
+    for (let i = 0; i < leftQueue.length; i += 1) {
+      const item = leftQueue[i];
+      if (doc.y > contBottom - 22) {
+        for (let j = i; j < leftQueue.length; j += 1) nextLeft.push(leftQueue[j]);
+        break;
+      }
+      const heading = item.continued ? `${item.label} (continued)` : item.label;
+      doc.x = leftX;
+      doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(9)
+        .text(heading, leftX, doc.y, { width: colW, lineGap: 0 });
+      markProposalBodyContent(doc);
+      doc.moveDown(0.12);
+      contentBottomClamp = contBottom;
+      let leftover = '';
+      try {
+        leftover = bodyText(doc, chrome, item.text, colW, {
+          x: leftX,
+          fontSize: 9,
+          paginate: false,
+        });
+      } finally {
+        contentBottomClamp = null;
+      }
+      doc.moveDown(0.25);
+      if (leftover.trim()) {
+        nextLeft.push({ label: item.label, text: leftover, continued: true });
+        for (let j = i + 1; j < leftQueue.length; j += 1) nextLeft.push(leftQueue[j]);
+        break;
+      }
+    }
+    const leftContEnd = doc.y;
+
+    doc.y = Math.max(leftContEnd, rightEndY, contBottom);
+    doc.x = PROPOSAL_MARGIN;
+    markProposalBodyContent(doc);
+
+    leftQueue = nextLeft;
+    approachQueue = nextApproach.trim();
+  }
 }
 
 export function drawTwoColumnSection(
@@ -972,6 +1557,7 @@ export function drawTimelineIntro(
   minWeeks: number,
   contentW: number,
   narrative?: string | null,
+  summary?: string | null,
 ) {
   clearPdfTextState(doc);
 
@@ -979,12 +1565,30 @@ export function drawTimelineIntro(
   const defaultParagraph =
     `We estimate the project to run for a minimum of ${weeks} weeks, including any updates required to the report. Interviews, workshops and walk-through activities will run concurrently where possible. Our timeline is highly dependent on key resources being available to attend the workshops or meetings and providing the information required to populate the assessments as and when scheduled by Physical Risk. Our proposed timeline is illustrated below:`;
 
-  // Only use admin narrative when it is a full intro paragraph — short triage
-  // notes like "Approximately 10 weeks" must not replace the PPT wording.
-  const custom = String(narrative || '').trim();
-  const useCustom = custom.length >= 120 || /illustrated below/i.test(custom);
-  const paragraph = useCustom ? custom : defaultParagraph;
+  // TipTap stores HTML — never pass raw markup to PDFKit text().
+  const customRaw = dedupeRepeatedNarrative(String(narrative || '').trim());
+  const customPlain = stripHtmlToPlain(customRaw).replace(/\s+/g, ' ').trim();
+  const summaryPlain = stripHtmlToPlain(String(summary || '').trim()).replace(/\s+/g, ' ').trim();
+  // Full admin narrative replaces the PPT wording; short notes / Timeline summary
+  // are shown above the standard intro so they still appear in the layout.
+  const useCustom = customPlain.length >= 120 || /illustrated below/i.test(customPlain);
 
+  if (useCustom) {
+    bodyText(doc, _chrome, customRaw, contentW, { fontSize: 10 });
+    doc.x = PROPOSAL_MARGIN;
+    doc.moveDown(0.55);
+    clearPdfTextState(doc);
+    return;
+  }
+
+  const leadPlain = summaryPlain || (customPlain.length > 0 && customPlain.length < 120 ? customPlain : '');
+  if (leadPlain) {
+    bodyText(doc, _chrome, leadPlain, contentW, { fontSize: 10 });
+    doc.x = PROPOSAL_MARGIN;
+    doc.moveDown(0.35);
+  }
+
+  const paragraph = defaultParagraph;
   doc.font('Helvetica').fontSize(10);
   const textH = doc.heightOfString(paragraph, { width: contentW, lineGap: 2 });
   ensureProposalSpace(doc, _chrome, textH + 28);
@@ -1529,6 +2133,7 @@ export function drawAcceptanceBlock(
     clientCompany: string;
     preparedByName?: string | null;
     preparedByEmail?: string | null;
+    acceptanceTerms?: string | null;
     accept?: {
       acceptedPlace?: string | null;
       acceptedDate?: string | null;
@@ -1544,20 +2149,20 @@ export function drawAcceptanceBlock(
   const contactEmail = String(input.preparedByEmail || '').trim();
   const client = (input.clientCompany || 'Client').trim();
   const accept = input.accept;
+  const customTerms = String(input.acceptanceTerms || '').trim();
 
-  ensureProposalSpace(doc, chrome, 280);
   doc.x = x0;
-  doc.y += 4;
+  doc.y += 2;
 
   // Instructional paragraph — only link mailto when admin provided an email
-  doc.fillColor(ink).font('Helvetica').fontSize(10);
+  doc.fillColor(ink).font('Helvetica').fontSize(9.5);
   const introLead =
     'Should Physical Risk Consultancy be the selected as the service provider, please indicate acceptance of this proposal through signature of the proposal acceptance below. Return signed acceptance to ';
   if (contactEmail) {
     doc.text(`${introLead}${contactName} (`, x0, doc.y, {
       width: contentW,
       continued: true,
-      lineGap: 2,
+      lineGap: 1.5,
     });
     doc.fillColor('#0563C1').text(contactEmail, {
       link: `mailto:${contactEmail}`,
@@ -1568,42 +2173,53 @@ export function drawAcceptanceBlock(
   } else {
     doc.text(`${introLead}${contactName}.`, x0, doc.y, {
       width: contentW,
-      lineGap: 2,
+      lineGap: 1.5,
     });
   }
   markProposalBodyContent(doc);
-  doc.moveDown(1.1);
+  doc.moveDown(0.7);
 
-  // Centered section heading
-  ensureProposalSpace(doc, chrome, 24);
+  // Terms-tab acceptance copy (when provided) sits above the signature page.
+  // Keep full admin text — legal wording often repeats clauses intentionally.
+  if (customTerms) {
+    bodyText(doc, chrome, customTerms, contentW, { fontSize: 9.5, skipDedupe: true });
+    doc.x = x0;
+    doc.moveDown(0.5);
+  }
+
+  // Dedicated page: warrant text + all signatory fields stay together (never split).
+  doc.addPage({ size: [PROPOSAL_PAGE_WIDTH, PROPOSAL_PAGE_HEIGHT], margin: PROPOSAL_MARGIN });
+  startProposalPage(doc, chrome);
+  trackPageY(doc);
+  doc.x = x0;
+
+  const fontSize = 9.5;
+  const lineGap = 1.5;
+
   doc.fillColor(PROPOSAL_COLORS.BLACK).font('Helvetica-Bold').fontSize(12)
     .text('ACCEPTANCE OF PROPOSAL', x0, doc.y, {
       width: contentW,
       align: 'center',
     });
   markProposalBodyContent(doc);
-  doc.moveDown(0.85);
+  doc.moveDown(0.55);
 
-  // Legal paragraph 1
-  ensureProposalSpace(doc, chrome, 48);
-  doc.fillColor(ink).font('Helvetica').fontSize(10)
+  doc.fillColor(ink).font('Helvetica').fontSize(fontSize)
     .text(
       'I warrant that, if this Agreement was received from Physical Risk Consultancy in electronic format, the version hereof signed by me is as received. This approval authorises Physical Risk to conduct the work as outlined in this proposal.',
-      { width: contentW, align: 'left', lineGap: 2 },
+      { width: contentW, align: 'left', lineGap },
     );
   markProposalBodyContent(doc);
-  doc.moveDown(0.75);
+  doc.moveDown(0.45);
 
-  // Legal paragraph 2 — client company name bold mid-sentence
-  ensureProposalSpace(doc, chrome, 56);
-  doc.fillColor(ink).font('Helvetica').fontSize(10)
-    .text('On behalf of ', { width: contentW, continued: true, lineGap: 2 });
+  doc.fillColor(ink).font('Helvetica').fontSize(fontSize)
+    .text('On behalf of ', { width: contentW, continued: true, lineGap });
   doc.font('Helvetica-Bold').text(client, { continued: true });
   doc.font('Helvetica').text(
-    ' I hereby certify that I am duly authorised to enter into this Agreement, and I confirm our understanding, consent and authorisation of the terms of appointment, the Physical Risk Terms and Conditions as set out in Appendix A, scope of Engagement and Fees and Expenses set out in this Agreement',
+    ' I hereby certify that I am duly authorised to enter into this Agreement, and I confirm our understanding, consent and authorisation of the terms of appointment, the Physical Risk Terms and Conditions as set out in Appendix A, scope of Engagement and Fees and Expenses set out in this Agreement.',
   );
   markProposalBodyContent(doc);
-  doc.moveDown(1.2);
+  doc.moveDown(0.7);
 
   const drawFieldLine = (
     label: string,
@@ -1611,13 +2227,12 @@ export function drawAcceptanceBlock(
     lineWidth: number,
   ) => {
     const fy = doc.y;
-    ensureProposalSpace(doc, chrome, 22);
-    doc.fillColor(ink).font('Helvetica').fontSize(10);
+    doc.fillColor(ink).font('Helvetica').fontSize(fontSize);
     const labelW = doc.widthOfString(label);
     doc.text(label, x0, fy, { lineBreak: false });
     const lineStart = x0 + labelW + 6;
     const lineEnd = lineStart + lineWidth;
-    const baseline = fy + 11;
+    const baseline = fy + 10;
     doc.moveTo(lineStart, baseline)
       .lineTo(lineEnd, baseline)
       .lineWidth(0.75)
@@ -1625,22 +2240,21 @@ export function drawAcceptanceBlock(
       .stroke();
     const filled = String(value || '').trim();
     if (filled) {
-      doc.fillColor(ink).font('Helvetica').fontSize(10)
+      doc.fillColor(ink).font('Helvetica').fontSize(fontSize)
         .text(filled, lineStart + 2, fy, {
           width: Math.max(20, lineWidth - 4),
           lineBreak: false,
         });
     }
-    return fy + 22;
+    return fy + 20;
   };
 
-  // Signed at (PLACE) …… on (DATE): …… — compact lines, not full width
-  ensureProposalSpace(doc, chrome, 24);
+  // Signed at (PLACE) …… on (DATE): …… — keep on same page as other signatory lines
   {
     const y = doc.y;
     const placeLabel = 'Signed at (PLACE) ';
     const onDateLabel = ' on (DATE): ';
-    doc.fillColor(ink).font('Helvetica').fontSize(10);
+    doc.fillColor(ink).font('Helvetica').fontSize(fontSize);
     const placeLabelW = doc.widthOfString(placeLabel);
     const onDateLabelW = doc.widthOfString(onDateLabel);
     const placeLineW = 150;
@@ -1650,7 +2264,7 @@ export function drawAcceptanceBlock(
     doc.text(placeLabel, x0, y, { lineBreak: false });
     const placeLineStart = x0 + placeLabelW;
     const placeLineEnd = placeLineStart + placeLineW;
-    const baseline = y + 11;
+    const baseline = y + 10;
     doc.moveTo(placeLineStart, baseline).lineTo(placeLineEnd, baseline)
       .lineWidth(0.75).strokeColor('#111111').stroke();
     if (accept?.acceptedPlace) {
@@ -1673,12 +2287,11 @@ export function drawAcceptanceBlock(
       });
     }
 
-    doc.y = y + 26;
+    doc.y = y + 22;
     doc.x = x0;
     markProposalBodyContent(doc);
   }
 
-  // Short fill-in lines (match PPT — leave clear space on the right)
   const shortLineW = 220;
   const vatLineW = 280;
 

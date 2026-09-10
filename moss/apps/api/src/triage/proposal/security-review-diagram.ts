@@ -76,9 +76,18 @@ export function drawSecurityReviewDiagram(
   doc.save();
   doc.translate(x + barW / 2, y + h / 2);
   doc.rotate(-90);
-  doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(compact ? 7.5 : 8.5)
-    .text('Security Review', -h / 2 + 6, -4, {
-      width: h - 12,
+  // Scale title to the spine length so "Security Review" is never clipped to "Security Rev".
+  const spineLabel = 'Security Review';
+  const spineTextW = Math.max(40, h - 16);
+  let spineFont = compact ? 7.5 : 8.5;
+  doc.font('Helvetica-Bold').fontSize(spineFont);
+  while (spineFont > 5.5 && doc.widthOfString(spineLabel) > spineTextW) {
+    spineFont -= 0.5;
+    doc.fontSize(spineFont);
+  }
+  doc.fillColor(WHITE).font('Helvetica-Bold').fontSize(spineFont)
+    .text(spineLabel, -h / 2 + 8, -4, {
+      width: spineTextW,
       align: 'center',
       lineBreak: false,
     });

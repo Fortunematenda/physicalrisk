@@ -1,5 +1,3 @@
-import { dedupeRepeatedNarrative } from '@/lib/proposal-html';
-
 export type ProposalPhase = {
   sequence: number;
   name: string;
@@ -51,6 +49,59 @@ export type ProposalExperienceItem = {
   displayOrder: number;
 };
 
+export const PROPOSAL_SECTION_HEADING_KEYS = [
+  'introduction',
+  'understanding',
+  'scope',
+  'methodology',
+  'approach',
+  'detailedApproach',
+  'deliverables',
+  'fees',
+  'assumptions',
+  'timelines',
+  'teamStructure',
+  'team',
+  'appendixA',
+  'appendixB',
+] as const;
+
+export type ProposalSectionHeadingKey = (typeof PROPOSAL_SECTION_HEADING_KEYS)[number];
+
+export const DEFAULT_PROPOSAL_SECTION_HEADINGS: Record<ProposalSectionHeadingKey, string> = {
+  introduction: 'Introduction',
+  understanding: 'Understanding your needs',
+  scope: 'Scope and Objectives',
+  methodology: 'Methodology',
+  approach: 'Approach',
+  detailedApproach: 'Our detailed approach',
+  deliverables: 'Deliverables',
+  fees: 'Our proposed fees',
+  assumptions: 'Fees and project assumptions',
+  timelines: 'Proposed timelines',
+  teamStructure: 'Proposed team structure',
+  team: 'Proposed team',
+  appendixA: 'Appendix A - Terms & conditions of service',
+  appendixB: 'Appendix B - Acceptance of proposal',
+};
+
+export const PROPOSAL_SECTION_HEADING_LABELS: Record<ProposalSectionHeadingKey, string> = {
+  introduction: 'Introduction',
+  understanding: 'Understanding',
+  scope: 'Scope',
+  methodology: 'Methodology',
+  approach: 'Approach',
+  detailedApproach: 'Detailed approach',
+  deliverables: 'Deliverables',
+  fees: 'Fees',
+  assumptions: 'Assumptions',
+  timelines: 'Timelines',
+  teamStructure: 'Team structure',
+  team: 'Team',
+  appendixA: 'Appendix A',
+  appendixB: 'Appendix B',
+};
+
 export type ProposalContentSnapshot = {
   phases: ProposalPhase[];
   feeLineItems: ProposalFeeLineItem[];
@@ -59,6 +110,18 @@ export type ProposalContentSnapshot = {
   experienceItems: ProposalExperienceItem[];
   methodologyItems: { name: string; description: string }[];
   deliverableSections: { title: string; description: string }[];
+  /** Admin-authored extra PDF sections (after Deliverables, before Fees). */
+  customSections?: Array<{
+    id: string;
+    title: string;
+    body: string;
+    sequence: number;
+    pageBreak?: boolean;
+  }>;
+  /** Optional overrides for fixed PDF section titles (Contents + page headers). */
+  sectionHeadings?: Partial<Record<ProposalSectionHeadingKey, string>>;
+  /** Intro paragraph above the fees table (time-and-materials / rates copy). */
+  feesIntroduction?: string | null;
   projectExclusions: string[];
   feeAssumptions: string[];
 };
@@ -75,6 +138,47 @@ export type ProposalValidationIssue = {
   message: string;
   blocking: boolean;
 };
+
+/** Workspace tab + scroll target for a readiness validation field. */
+export type ProposalValidationTarget = {
+  tab: string;
+  fieldId: string;
+};
+
+/**
+ * Maps API validateProposalForSend() field keys to proposal workspace tabs/anchors.
+ * Used by “Complete missing information” deep-links.
+ */
+export const PROPOSAL_VALIDATION_FIELD_TARGETS: Record<string, ProposalValidationTarget> = {
+  clientCompany: { tab: 'client', fieldId: 'organisationName' },
+  clientContact: { tab: 'client', fieldId: 'addressedTo' },
+  proposalTitle: { tab: 'overview', fieldId: 'subtitle' },
+  proposalNumber: { tab: 'overview', fieldId: 'overview' },
+  objectives: { tab: 'scope', fieldId: 'clientObjective' },
+  scope: { tab: 'scope', fieldId: 'indicativeScope' },
+  deliverables: { tab: 'scope', fieldId: 'deliverables' },
+  understandingOfNeeds: { tab: 'understanding', fieldId: 'understandingOfNeeds' },
+  termsAndConditions: { tab: 'terms', fieldId: 'termsAndConditions' },
+  acceptanceTerms: { tab: 'terms', fieldId: 'acceptanceTerms' },
+  paymentTerms: { tab: 'fees', fieldId: 'paymentTerms' },
+  phases: { tab: 'methodology', fieldId: 'phases' },
+  feeLineItems: { tab: 'fees', fieldId: 'feeLineItems' },
+  feeTotals: { tab: 'fees', fieldId: 'feeLineItems' },
+  preparedByName: { tab: 'team', fieldId: 'team' },
+};
+
+export function proposalValidationTarget(field: string | null | undefined): ProposalValidationTarget {
+  const key = String(field || '').trim();
+  if (!key) return { tab: 'overview', fieldId: 'overview' };
+  if (PROPOSAL_VALIDATION_FIELD_TARGETS[key]) return PROPOSAL_VALIDATION_FIELD_TARGETS[key];
+  const byFieldId = Object.values(PROPOSAL_VALIDATION_FIELD_TARGETS).find((t) => t.fieldId === key);
+  if (byFieldId) return byFieldId;
+  return { tab: 'overview', fieldId: key };
+}
+
+export function proposalFieldDomId(fieldId: string): string {
+  return `proposal-field-${fieldId}`;
+}
 
 export const PROPOSAL_CURRENCY_OPTIONS = [
   { value: 'ZAR', label: 'ZAR — South African Rand' },
@@ -190,12 +294,100 @@ export function emptyContentSnapshot(): ProposalContentSnapshot {
     experienceItems: [],
     methodologyItems: [],
     deliverableSections: [],
+    customSections: [],
+    sectionHeadings: {},
+    feesIntroduction: null,
     projectExclusions: [],
     feeAssumptions: [],
   };
 }
 
+/** Convert stored TipTap/HTML (or plain) into editable plain text for textareas. */
+export function toEditablePlain(value: string | null | undefined): string {
+  const raw = String(value || '');
+  if (!raw.trim()) return '';
+  if (!/<[a-z][\s\S]*>/i.test(raw)) return raw;
+  return raw
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|li|div|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * True when text is the auto rates sentence (any currency/amount formatting).
+ * Those should not be persisted — PDF regenerates from live Analyst/Specialist rates.
+ */
+export function isAutoFeesIntroduction(value: string | null | undefined): boolean {
+  const plain = toEditablePlain(value)
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!plain) return true;
+  return (
+    plain.startsWith('the costs below are estimated on a time-and-materials basis')
+    && plain.includes('analyst rate:')
+    && plain.includes('specialist rate:')
+  );
+}
+
+/** Collapse TipTap accidental duplicate paragraphs of the same fees intro. */
+export function collapseDuplicateFeesIntroduction(
+  value: string | null | undefined,
+): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const plain = toEditablePlain(raw).replace(/\s+/g, ' ').trim();
+  if (!plain) return '';
+  // Repeated identical paragraphs → keep a single copy.
+  const parts = plain
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length > 1 && parts.every((p) => p === parts[0])) {
+    return parts[0];
+  }
+  // Prefer original HTML when not a pure duplicate block.
+  if (/<[a-z][\s\S]*>/i.test(raw) && !isAutoFeesIntroduction(raw)) return raw;
+  return plain;
+}
+
+/** Persist only custom fees intro; auto rates sentence stays null so PDF tracks rates. */
+export function feesIntroductionForSave(
+  value: string | null | undefined,
+): string | null {
+  const collapsed = collapseDuplicateFeesIntroduction(value);
+  if (!collapsed || isAutoFeesIntroduction(collapsed)) return null;
+  return collapsed;
+}
+
+/** Editor display: custom text, else live default from current rates. */
+export function feesIntroductionForDisplay(
+  value: string | null | undefined,
+  analystHourlyRate: string | number | null | undefined,
+  specialistHourlyRate: string | number | null | undefined,
+  currency?: string | null,
+): string {
+  const collapsed = collapseDuplicateFeesIntroduction(value);
+  if (collapsed && !isAutoFeesIntroduction(collapsed)) return collapsed;
+  return defaultFeesIntroduction(analystHourlyRate, specialistHourlyRate, currency);
+}
+
 export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft {
+  const snap = ws.contentSnapshot || emptyContentSnapshot();
+  const analystHourlyRate = ws.analystHourlyRate != null ? String(ws.analystHourlyRate) : '985';
+  const specialistHourlyRate = ws.specialistHourlyRate != null ? String(ws.specialistHourlyRate) : '1825';
+  const currency = normalizeProposalCurrency(ws.currency);
+  const savedIntro = feesIntroductionForSave(snap.feesIntroduction);
   return {
     organisationName: ws.organisationName || '',
     addressedTo: ws.addressedTo || '',
@@ -205,13 +397,13 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
     introduction: ws.introduction || '',
     deliverables: ws.deliverables || '',
     terms: ws.terms || '',
-    clientObjective: dedupeRepeatedNarrative(ws.clientObjective || ''),
+    clientObjective: ws.clientObjective || '',
     sitesOrBusinessUnits: ws.sitesOrBusinessUnits || '',
-    indicativeScope: dedupeRepeatedNarrative(ws.indicativeScope || ''),
+    indicativeScope: ws.indicativeScope || '',
     timeline: ws.timeline || '',
-    currency: normalizeProposalCurrency(ws.currency),
+    currency,
     subtitle: ws.subtitle || '',
-    understandingOfNeeds: dedupeRepeatedNarrative(ws.understandingOfNeeds || ''),
+    understandingOfNeeds: ws.understandingOfNeeds || '',
     methodology: ws.methodology || '',
     approach: ws.approach || '',
     exclusions: ws.exclusions || '',
@@ -219,8 +411,8 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
     statementOfResponsibility: ws.statementOfResponsibility || '',
     termsAndConditions: ws.termsAndConditions || '',
     acceptanceTerms: ws.acceptanceTerms || '',
-    analystHourlyRate: ws.analystHourlyRate != null ? String(ws.analystHourlyRate) : '985',
-    specialistHourlyRate: ws.specialistHourlyRate != null ? String(ws.specialistHourlyRate) : '1825',
+    analystHourlyRate,
+    specialistHourlyRate,
     discount: ws.discount != null ? String(ws.discount) : '0',
     vatRate: ws.vatRate != null ? String(ws.vatRate) : '0.15',
     expensesEstimate: ws.expensesEstimate != null ? String(ws.expensesEstimate) : '0',
@@ -229,11 +421,21 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
     timelineNarrative: ws.timelineNarrative || '',
     projectSponsor: ws.projectSponsor || '',
     projectChampion: ws.projectChampion || '',
-    contentSnapshot: ws.contentSnapshot || emptyContentSnapshot(),
+    contentSnapshot: {
+      ...snap,
+      phases: snap.phases || [],
+      teamMembers: snap.teamMembers || [],
+      experienceItems: snap.experienceItems || [],
+      customSections: snap.customSections || [],
+      sectionHeadings: snap.sectionHeadings || {},
+      // null = live rates default in the editor / PDF (do not lock stale rate text).
+      feesIntroduction: savedIntro,
+      methodologyItems: snap.methodologyItems || [],
+    },
   };
 }
 
-export function draftToPayload(draft: ProposalWorkspaceDraft, feeTotals?: ProposalFeeTotals) {
+export function draftToPayload(draft: ProposalWorkspaceDraft, _feeTotals?: ProposalFeeTotals) {
   return {
     organisationName: draft.organisationName,
     addressedTo: draft.addressedTo,
@@ -243,13 +445,13 @@ export function draftToPayload(draft: ProposalWorkspaceDraft, feeTotals?: Propos
     introduction: draft.introduction,
     deliverables: draft.deliverables,
     terms: draft.terms,
-    clientObjective: dedupeRepeatedNarrative(draft.clientObjective),
+    clientObjective: draft.clientObjective,
     sitesOrBusinessUnits: draft.sitesOrBusinessUnits,
-    indicativeScope: dedupeRepeatedNarrative(draft.indicativeScope),
+    indicativeScope: draft.indicativeScope,
     timeline: draft.timeline,
     currency: draft.currency,
     subtitle: draft.subtitle,
-    understandingOfNeeds: dedupeRepeatedNarrative(draft.understandingOfNeeds),
+    understandingOfNeeds: draft.understandingOfNeeds,
     methodology: draft.methodology,
     approach: draft.approach,
     exclusions: draft.exclusions,
@@ -267,8 +469,10 @@ export function draftToPayload(draft: ProposalWorkspaceDraft, feeTotals?: Propos
     timelineNarrative: draft.timelineNarrative,
     projectSponsor: draft.projectSponsor,
     projectChampion: draft.projectChampion,
-    contentSnapshot: draft.contentSnapshot,
-    expectedGrandTotal: feeTotals?.grandTotal,
+    contentSnapshot: {
+      ...draft.contentSnapshot,
+      feesIntroduction: feesIntroductionForSave(draft.contentSnapshot.feesIntroduction),
+    },
   };
 }
 
@@ -285,6 +489,17 @@ export function formatMoney(amount: number, currency = 'ZAR') {
   }
 }
 
+/** Default PDF fees intro — editable on the Fees tab. */
+export function defaultFeesIntroduction(
+  analystHourlyRate: string | number | null | undefined,
+  specialistHourlyRate: string | number | null | undefined,
+  currency?: string | null,
+): string {
+  const analyst = Number(analystHourlyRate) || 985;
+  const specialist = Number(specialistHourlyRate) || 1825;
+  return `The costs below are estimated on a time-and-materials basis. Analyst rate: ${formatMoney(analyst, currency || 'ZAR')} per hour. Specialist rate: ${formatMoney(specialist, currency || 'ZAR')} per hour.`;
+}
+
 export function recalcLineItemFee(item: ProposalFeeLineItem): ProposalFeeLineItem {
   if (item.hours != null && item.rate != null) {
     return { ...item, fee: Math.round(Number(item.hours) * Number(item.rate) * 100) / 100 };
@@ -293,13 +508,13 @@ export function recalcLineItemFee(item: ProposalFeeLineItem): ProposalFeeLineIte
 }
 
 export function clientFeeTotals(draft: ProposalWorkspaceDraft): ProposalFeeTotals {
-  const subtotal = draft.contentSnapshot.feeLineItems.reduce(
-    (sum, row) => sum + (Number(row.fee) || 0),
-    0,
-  );
+  const lineItems = draft.contentSnapshot.feeLineItems.map(recalcLineItemFee);
+  const subtotal = lineItems.reduce((sum, row) => sum + (Number(row.fee) || 0), 0);
   const discount = Math.max(0, Number(draft.discount) || 0);
   const discountedSubtotal = Math.max(0, subtotal - discount);
-  const vatRate = Number(draft.vatRate) || 0;
+  // Accept 0.15 or 15 (%)
+  const rawVat = Number(draft.vatRate) || 0;
+  const vatRate = rawVat > 1 ? rawVat / 100 : rawVat;
   const vatAmount = Math.round(discountedSubtotal * vatRate * 100) / 100;
   const expenses = Number(draft.expensesEstimate) || 0;
   const grandTotal = Math.round((discountedSubtotal + vatAmount + expenses) * 100) / 100;

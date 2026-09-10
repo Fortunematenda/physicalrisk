@@ -113,36 +113,9 @@ export function defaultStrategyPhases(): ProposalPhase[] {
   ];
 }
 
-export function defaultEadFeeLineItems(rates: ProposalFeeDefaults): ProposalFeeLineItem[] {
-  return [
-    {
-      id: 'phase-1',
-      phase: '1',
-      description: 'Information Gathering and Assessment',
-      hours: 80,
-      rate: rates.analystHourlyRate,
-      fee: 80 * rates.analystHourlyRate,
-      sequence: 1,
-    },
-    {
-      id: 'phase-2',
-      phase: '2',
-      description: 'Define Target State',
-      hours: 60,
-      rate: rates.specialistHourlyRate,
-      fee: 60 * rates.specialistHourlyRate,
-      sequence: 2,
-    },
-    {
-      id: 'phase-3',
-      phase: '3',
-      description: 'Reporting and Executive Briefing',
-      hours: 40,
-      rate: rates.specialistHourlyRate,
-      fee: 40 * rates.specialistHourlyRate,
-      sequence: 3,
-    },
-  ];
+export function defaultEadFeeLineItems(_rates?: ProposalFeeDefaults): ProposalFeeLineItem[] {
+  // Do not seed placeholder fee rows — consultants enter hours/rates per engagement.
+  return [];
 }
 
 export function defaultTimelineFromPhases(phases: ProposalPhase[]): ProposalTimelineRow[] {
@@ -229,7 +202,7 @@ export const BUILTIN_TEMPLATES = [
     responsibilityTemplate:
       'This assessment is point-in-time and scope-bound. Deliverables are prepared solely for {{CLIENT_COMPANY}}. Third parties may not rely on this work. This is not certification or a representation of the entire universe of security risk.',
     termsTemplate:
-      'Standard Physical Risk terms and conditions of service apply. Payment terms: {{PAYMENT_TERMS}}. Proposal valid until {{VALID_UNTIL}}.',
+      'All services provided by Physical Risk to {{CLIENT_COMPANY}} shall be in accordance with a written agreement, which shall be provided should Physical Risk Consultancy be awarded the requested service.',
     acceptanceTemplate:
       'Should Physical Risk Consultancy be the selected as the service provider, please indicate acceptance of this proposal through signature of the proposal acceptance below.',
     feeDefaults: {
@@ -332,6 +305,17 @@ export function mergeContentSnapshot(
     experienceItems: pickNonEmptyArray(incoming.experienceItems, existing.experienceItems),
     methodologyItems: pickNonEmptyArray(incoming.methodologyItems, existing.methodologyItems),
     deliverableSections: pickNonEmptyArray(incoming.deliverableSections, existing.deliverableSections),
+    // Allow clearing invented sections (empty array is intentional, unlike seeded tables).
+    customSections: Array.isArray(incoming.customSections)
+      ? incoming.customSections
+      : existing.customSections || [],
+    sectionHeadings: incoming.sectionHeadings
+      ? { ...(existing.sectionHeadings || {}), ...incoming.sectionHeadings }
+      : existing.sectionHeadings,
+    feesIntroduction:
+      incoming.feesIntroduction !== undefined
+        ? incoming.feesIntroduction
+        : existing.feesIntroduction,
     projectExclusions: pickNonEmptyArray(incoming.projectExclusions, existing.projectExclusions),
     feeAssumptions: pickNonEmptyArray(incoming.feeAssumptions, existing.feeAssumptions),
     acceptance: incoming.acceptance ?? existing.acceptance,
@@ -347,6 +331,9 @@ export function readContentSnapshot(value: unknown): ProposalContentSnapshot {
     experienceItems: [],
     methodologyItems: [],
     deliverableSections: [],
+    customSections: [],
+    sectionHeadings: {},
+    feesIntroduction: null,
     projectExclusions: [],
     feeAssumptions: [],
   };
@@ -360,6 +347,11 @@ export function readContentSnapshot(value: unknown): ProposalContentSnapshot {
     experienceItems: Array.isArray(v.experienceItems) ? v.experienceItems : [],
     methodologyItems: Array.isArray(v.methodologyItems) ? v.methodologyItems : [],
     deliverableSections: Array.isArray(v.deliverableSections) ? v.deliverableSections : [],
+    customSections: Array.isArray(v.customSections) ? v.customSections : [],
+    sectionHeadings:
+      v.sectionHeadings && typeof v.sectionHeadings === 'object' ? { ...v.sectionHeadings } : {},
+    feesIntroduction:
+      typeof v.feesIntroduction === 'string' ? v.feesIntroduction : v.feesIntroduction ?? null,
     projectExclusions: Array.isArray(v.projectExclusions) ? v.projectExclusions : [],
     feeAssumptions: Array.isArray(v.feeAssumptions) ? v.feeAssumptions : [],
     acceptance: v.acceptance,

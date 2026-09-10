@@ -20,9 +20,15 @@ export function getToken() {
   return window.localStorage.getItem('moss_token');
 }
 
-export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers = new Headers(options.headers || {});
-  if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+type ApiFetchOptions = RequestInit & {
+  /** Background polls should not bounce the whole app through SSO on a transient 401. */
+  skipAuthRedirect?: boolean;
+};
+
+export async function apiFetch<T = any>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  const { skipAuthRedirect, ...fetchOptions } = options;
+  const headers = new Headers(fetchOptions.headers || {});
+  if (!(fetchOptions.body instanceof FormData)) headers.set('Content-Type', 'application/json');
 
   // BFF mode: rely on session cookie; do not send stale localStorage Bearer.
   const useBff = API_BASE.includes('/api/gw');
@@ -36,12 +42,12 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
+    ...fetchOptions,
     headers,
     cache: 'no-store',
     credentials: 'same-origin',
   });
-  if (response.status === 401 && typeof window !== 'undefined') {
+  if (response.status === 401 && typeof window !== 'undefined' && !skipAuthRedirect) {
     window.localStorage.removeItem('moss_token');
     const { isLoggingOut, redirectToLogin } = await import('./sso');
     // Cooldown stops post-login blink loops when APIs briefly reject a valid SSO token.

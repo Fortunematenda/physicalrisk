@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { parseProposalRichText, stripHtmlToPlain, unescapeProposalHtml } from './proposal-rich-text';
+import {
+  dedupeRepeatedNarrative,
+  isClonedFromNarrative,
+  normalizeNarrativeHtmlForPdf,
+  parseProposalRichText,
+  rejectClonedNarrative,
+  sanitizeProposalNarrativeHtml,
+  stripHtmlToPlain,
+  unescapeProposalHtml,
+} from './proposal-rich-text';
 
 describe('proposal rich text', () => {
   it('strips html to plain text', () => {
@@ -53,5 +62,103 @@ describe('proposal rich text', () => {
   it('keeps plain text paragraphs', () => {
     const blocks = parseProposalRichText('Line one\n\nLine two');
     expect(blocks).toHaveLength(2);
+  });
+
+  it('preserves blank paragraph spacers between text', () => {
+    const html =
+      '<p>First paragraph.</p><p></p><p>Second paragraph.</p><p><br></p><p>Third.</p>';
+    const blocks = parseProposalRichText(html);
+    expect(blocks.filter((b) => b.type === 'paragraph')).toHaveLength(5);
+    const emptyCount = blocks.filter(
+      (b) => b.type === 'paragraph' && (!b.runs.length || b.runs.every((r) => !r.text.trim())),
+    ).length;
+    expect(emptyCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('dedupe keeps blank paragraph gaps', () => {
+    const html =
+      '<p>Physical Risk requires an independent review.</p>'
+      + '<p></p>'
+      + '<p>Physical Risk will assess the following:</p>';
+    const result = dedupeRepeatedNarrative(html);
+    expect(result).toContain('<p><br></p>');
+    expect(result).toContain('independent review');
+    expect(result).toContain('will assess the following');
+  });
+
+  it('strips timeline html duplicates to a single plain paragraph', () => {
+    const html =
+      '<p>Bretune Technologies requires an independent, evidence-led review of executive assurance arrangements following completion of the Executive Governance Triage (EGT-2026-000008). Physical Risk will assess governance effectiveness, provider accountability and decision-useful reporting across the agreed scope.</p>'
+      + '<p>Bretune Technologies requires an independent, evidence-led review of executive assurance arrangements following completion of the Executive Governance Triage (EGT-2026-000008). Physical Risk will assess governance effectiveness, provider accountability and decision-useful reporting across the agreed scope.</p>';
+    const cleaned = dedupeRepeatedNarrative(html);
+    const plain = stripHtmlToPlain(cleaned);
+    expect(plain).not.toMatch(/<\/?p>/i);
+    expect(plain.toLowerCase().split('bretune technologies').length - 1).toBe(1);
+  });
+
+  it('normalizes Understanding narrative lists into clean paragraphs', () => {
+    const html =
+      '<ul>'
+      + '<li><p>Brisholiving requires an independent review of executive assurance arrangements. Physical Risk will assess governance effectiveness across the agreed scope.</p></li>'
+      + '<li><p>Brisholiving requires an independent review of executive assurance arrangements.</p></li>'
+      + '<li><p>Brisholiving requires an independent review of executive assurance arrangements. Physical Risk will assess governance effectiveness across the agreed scope.invent new PDF sections.</p></li>'
+      + '</ul>'
+      + '<p>Physical Risk will assess governance effectiveness across the agreed scope.invent new PDF sections.</p>';
+    const cleaned = normalizeNarrativeHtmlForPdf(html);
+    expect(cleaned).not.toMatch(/<li/i);
+    expect(cleaned).not.toMatch(/invent new PDF sections/i);
+    const blocks = parseProposalRichText(cleaned);
+    expect(blocks.every((b) => b.type === 'paragraph')).toBe(true);
+    expect(blocks.length).toBeGreaterThanOrEqual(1);
+    expect(stripHtmlToPlain(cleaned).toLowerCase()).toContain('brisholiving requires');
+    expect(stripHtmlToPlain(cleaned).toLowerCase()).not.toContain('invent new pdf sections');
+    // Must not collapse away most of the source text.
+    expect(stripHtmlToPlain(cleaned).length).toBeGreaterThan(80);
+  });
+
+  it('never blanks narrative that still has readable text', () => {
+    const html = '<p>Brisholiving requires an independent evidence-led review.</p>';
+    expect(stripHtmlToPlain(normalizeNarrativeHtmlForPdf(html))).toContain('Brisholiving');
+    expect(stripHtmlToPlain(normalizeNarrativeHtmlForPdf('Plain understanding text.'))).toContain(
+      'Plain understanding',
+    );
+  });
+
+  it('detects Understanding clones pasted into other fields', () => {
+    const und =
+      'Brisholiving requires an independent, evidence-led review of executive assurance arrangements following completion of the Executive Governance Triage (EGT-2026-000009). Physical Risk will assess governance effectiveness.';
+    expect(isClonedFromNarrative(und, und)).toBe(true);
+    expect(isClonedFromNarrative(`<p>${und}</p>`, und)).toBe(true);
+    expect(isClonedFromNarrative(und.slice(0, 200), und)).toBe(true);
+    expect(rejectClonedNarrative(und, und)).toBe('');
+    expect(rejectClonedNarrative('Client wants clearer reporting and accountability.', und)).toContain(
+      'clearer reporting',
+    );
+    expect(
+      isClonedFromNarrative(
+        `Current-state assessment findings. ${und}`,
+        und,
+      ),
+    ).toBe(true);
+  });
+
+  it('preserves blank paragraph spacers for Understanding', () => {
+    const html = '<p>First paragraph.</p><p></p><p><br></p><p>Second paragraph.</p>';
+    const cleaned = normalizeNarrativeHtmlForPdf(html);
+    expect(cleaned).toContain('<p><br></p>');
+    expect(cleaned).toContain('First paragraph.');
+    expect(cleaned).toContain('Second paragraph.');
+  });
+
+  it('strips vfProposed timelines bleed from Understanding narrative', () => {
+    const html =
+      '<p>Bretune Technologies requires an independent, evidence-led review of executive assurance arrangements following completion of the Executive Governance Triage (EGT-2026-000008). Physical Risk will assess governance effectiveness, provider accountability and decision-useful reporting across the agreed scope.vfProposed timelines</p>'
+      + '<p>Bretune Technologies requires an independent, evidence-led review of executive assurance arrangements following completion of the Executive Governance Triage (EGT-2026-000008). Physical Risk will assess governance effectiveness, provider accountability and decision-useful reporting across the agreed scope.vf</p>';
+    const cleaned = sanitizeProposalNarrativeHtml(html);
+    const plain = stripHtmlToPlain(cleaned);
+    expect(plain.toLowerCase()).toContain('bretune technologies requires');
+    expect(plain.toLowerCase()).not.toContain('proposed timelines');
+    expect(plain.toLowerCase()).not.toMatch(/\bvf\b/);
+    expect(plain.toLowerCase().split('bretune technologies').length - 1).toBe(1);
   });
 });

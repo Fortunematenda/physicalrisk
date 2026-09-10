@@ -60,6 +60,61 @@ export type ProposalDeliverableSection = {
   description: string;
 };
 
+/** Admin-authored extra PDF sections (beyond the fixed Physical Risk deck). */
+export type ProposalCustomSection = {
+  id: string;
+  title: string;
+  body: string;
+  sequence: number;
+  /** Start this section on a new landscape page. */
+  pageBreak?: boolean;
+};
+
+/** Keys for editable major PDF section headings (Contents + page titles). */
+export const PROPOSAL_SECTION_HEADING_KEYS = [
+  'introduction',
+  'understanding',
+  'scope',
+  'methodology',
+  'approach',
+  'detailedApproach',
+  'deliverables',
+  'fees',
+  'assumptions',
+  'timelines',
+  'teamStructure',
+  'team',
+  'appendixA',
+  'appendixB',
+] as const;
+
+export type ProposalSectionHeadingKey = (typeof PROPOSAL_SECTION_HEADING_KEYS)[number];
+
+export const DEFAULT_PROPOSAL_SECTION_HEADINGS: Record<ProposalSectionHeadingKey, string> = {
+  introduction: 'Introduction',
+  understanding: 'Understanding your needs',
+  scope: 'Scope and Objectives',
+  methodology: 'Methodology',
+  approach: 'Approach',
+  detailedApproach: 'Our detailed approach',
+  deliverables: 'Deliverables',
+  fees: 'Our proposed fees',
+  assumptions: 'Fees and project assumptions',
+  timelines: 'Proposed timelines',
+  teamStructure: 'Proposed team structure',
+  team: 'Proposed team',
+  appendixA: 'Appendix A - Terms & conditions of service',
+  appendixB: 'Appendix B - Acceptance of proposal',
+};
+
+export function resolveProposalSectionHeading(
+  headings: Partial<Record<ProposalSectionHeadingKey, string>> | null | undefined,
+  key: ProposalSectionHeadingKey,
+): string {
+  const override = String(headings?.[key] || '').trim();
+  return override || DEFAULT_PROPOSAL_SECTION_HEADINGS[key];
+}
+
 export type ProposalContentSnapshot = {
   phases: ProposalPhase[];
   feeLineItems: ProposalFeeLineItem[];
@@ -68,6 +123,15 @@ export type ProposalContentSnapshot = {
   experienceItems: ProposalExperienceItem[];
   methodologyItems: ProposalMethodologyItem[];
   deliverableSections: ProposalDeliverableSection[];
+  /** Optional extra major sections rendered in the PDF after Deliverables. */
+  customSections?: ProposalCustomSection[];
+  /** Optional overrides for fixed PDF section titles (Contents + headers). */
+  sectionHeadings?: Partial<Record<ProposalSectionHeadingKey, string>>;
+  /**
+   * Intro paragraph above the fees table
+   * (e.g. time-and-materials + analyst/specialist rates).
+   */
+  feesIntroduction?: string | null;
   projectExclusions: string[];
   feeAssumptions: string[];
   acceptance?: {
@@ -120,6 +184,8 @@ export type PhysicalRiskProposalInput = {
   productCode: string;
   proposalTitle: string;
   proposalSubtitle?: string | null;
+  /** Optional letter intro from Overview tab (legacy). */
+  proposalIntroduction?: string | null;
   clientCompany: string;
   clientContact: string;
   clientPosition?: string | null;
@@ -133,6 +199,8 @@ export type PhysicalRiskProposalInput = {
   understandingOfNeeds: string;
   objectives: string;
   scope: string;
+  /** Sites / business units from the Scope tab (admin workspace). */
+  sitesOrBusinessUnits?: string | null;
   approach: string;
   methodology: string;
   deliverables: string;
@@ -142,6 +210,8 @@ export type PhysicalRiskProposalInput = {
   termsAndConditions: string;
   acceptanceTerms: string;
   paymentTerms: string;
+  /** Short timeline summary from Timeline tab (e.g. "Approximately 10 weeks"). */
+  timelineSummary?: string | null;
   timelineNarrative?: string | null;
   estimatedProjectWeeks?: number | null;
   preparedByName?: string | null;

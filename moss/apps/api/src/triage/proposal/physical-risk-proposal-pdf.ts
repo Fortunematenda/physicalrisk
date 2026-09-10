@@ -31,16 +31,46 @@ import {
   startBodyPages,
   trimToTrackedContentPages,
 } from './proposal-pdf-chrome';
-import type { PhysicalRiskProposalInput } from './proposal-template-types';
+import { stripHtmlToPlain } from './proposal-rich-text';
+import {
+  resolveProposalSectionHeading,
+  type PhysicalRiskProposalInput,
+  type ProposalSectionHeadingKey,
+} from './proposal-template-types';
 
+/** Auto rates sentence (any amount/currency) — PDF should use live rates instead. */
+function isAutoFeesIntroduction(value: string | null | undefined): boolean {
+  const plain = stripHtmlToPlain(String(value || ''))
+    .replace(/\u00a0/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!plain) return true;
+  return (
+    plain.startsWith('the costs below are estimated on a time-and-materials basis')
+    && plain.includes('analyst rate:')
+    && plain.includes('specialist rate:')
+  );
+}
+
+function resolveFeesIntroduction(input: PhysicalRiskProposalInput): string {
+  const raw = String(input.content.feesIntroduction || '').trim();
+  if (raw && !isAutoFeesIntroduction(raw)) return raw;
+  return `The costs below are estimated on a time-and-materials basis. Analyst rate: ${formatProposalMoney(input.analystHourlyRate, input.currency)} per hour. Specialist rate: ${formatProposalMoney(input.specialistHourlyRate, input.currency)} per hour.`;
+}
 const CONTENT_W = PROPOSAL_PAGE_WIDTH - PROPOSAL_MARGIN * 2;
 const CONTENTS_PAGE_INDEX = 1;
 
 type TocEntry = { title: string; page: number; indent?: boolean };
 
 function phaseBulletLinesFromText(value: string): string[] {
-  return String(value || '')
-    .split(/\r?\n+/)
+  const plain = stripHtmlToPlain(String(value || ''))
+    .replace(/\r\n/g, '\n')
+    .trim();
+  if (!plain) return [];
+  return plain
+    .split(/\n+/)
     .map((line) => line.replace(/^[•●▪◦\-\u2013\u2014*]\s*/, '').trim())
     .filter(Boolean);
 }
@@ -83,7 +113,13 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     // Cover
     drawCoverPage(doc, chrome, {
       proposalTitle: input.proposalTitle,
+      productCode: input.productCode,
+      proposalSubtitle: input.proposalSubtitle,
       clientCompany: input.clientCompany,
+      clientContact: input.clientContact,
+      clientPosition: input.clientPosition,
+      clientEmail: input.clientEmail,
+      clientPhone: input.clientPhone,
       proposalNumber: input.proposalNumber,
       proposalDate: input.proposalDate,
       proposalVersion: input.proposalVersion,
@@ -96,29 +132,44 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     const mark = (title: string, opts: { indent?: boolean } = {}) => {
       toc.push({ title, page: currentPageIndex(doc), indent: opts.indent });
     };
+    const heading = (key: ProposalSectionHeadingKey) =>
+      resolveProposalSectionHeading(input.content.sectionHeadings, key);
+
+    // Optional Overview introduction (legacy letter) — only when admin provided text
+    const introduction = String(input.proposalIntroduction || '').trim();
+    if (introduction) {
+      beginMajorSection(doc, chrome, heading('introduction'), CONTENT_W);
+      mark(heading('introduction'));
+      bodyText(doc, chrome, introduction, CONTENT_W);
+    }
 
     // Understanding your needs
-    beginMajorSection(doc, chrome, 'Understanding your needs', CONTENT_W);
-    mark('Understanding your needs');
-    bodyText(doc, chrome, input.understandingOfNeeds, CONTENT_W);
+    beginMajorSection(doc, chrome, heading('understanding'), CONTENT_W);
+    mark(heading('understanding'));
+    bodyText(doc, chrome, input.understandingOfNeeds, CONTENT_W, { narrative: true });
 
-    // Scope and objectives — PPTX two-column slide with Security Review diagram
-    beginScopeObjectivesSlide(doc, chrome);
-    mark('Scope and objectives');
+    // Scope and objectives — original PPT two-column slide + Security Review diagram
+    beginScopeObjectivesSlide(doc, chrome, heading('scope'));
+    mark(heading('scope'));
+    const exclusionsForScope =
+      String(input.exclusions || '').trim()
+      || (input.content.projectExclusions || []).join('\n');
     drawScopeAndObjectivesSlide(
       doc,
       chrome,
       {
         scopeObjectives: input.objectives,
+        sitesOrBusinessUnits: input.sitesOrBusinessUnits,
         scopeBody: input.scope,
         approach: input.approach,
+        exclusions: exclusionsForScope,
       },
       CONTENT_W,
     );
 
     // Methodology
-    beginMajorSection(doc, chrome, 'Methodology', CONTENT_W, { pageBreak: true });
-    mark('Methodology');
+    beginMajorSection(doc, chrome, heading('methodology'), CONTENT_W, { pageBreak: true });
+    mark(heading('methodology'));
     bodyText(doc, chrome, input.methodology, CONTENT_W);
     const methodologyItems = input.content.methodologyItems.filter(
       (row) => row.name?.trim() || row.description?.trim(),
@@ -142,18 +193,20 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     }
 
     // Approach / phases (PPT coloured matrix)
-    beginMajorSection(doc, chrome, 'Approach', CONTENT_W, { pageBreak: true });
-    mark('Approach');
-    const exclusionItems = input.content.projectExclusions.length
-      ? input.content.projectExclusions
-      : phaseBulletLinesFromText(input.exclusions);
+    beginMajorSection(doc, chrome, heading('approach'), CONTENT_W, { pageBreak: true });
+    mark(heading('approach'));
+    // Prefer Scope-tab exclusions text; fall back to structured content exclusions
+    const exclusionFromScope = phaseBulletLinesFromText(input.exclusions);
+    const exclusionItems = exclusionFromScope.length
+      ? exclusionFromScope
+      : input.content.projectExclusions;
     drawPhaseMatrix(doc, chrome, padPhases(input), CONTENT_W, {
       exclusions: exclusionItems,
     });
 
     // Detailed approach
-    beginMajorSection(doc, chrome, 'Our detailed approach', CONTENT_W);
-    mark('Our detailed approach');
+    beginMajorSection(doc, chrome, heading('detailedApproach'), CONTENT_W);
+    mark(heading('detailedApproach'));
     const detCols = [56, 200, 200, CONTENT_W - 456];
     drawTableHeader(
       doc,
@@ -190,8 +243,8 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       (s) => s.title?.trim() || s.description?.trim(),
     );
     if (deliverableSections.length || input.deliverables.trim()) {
-      beginMajorSection(doc, chrome, 'Deliverables', CONTENT_W);
-      mark('Deliverables');
+      beginMajorSection(doc, chrome, heading('deliverables'), CONTENT_W);
+      mark(heading('deliverables'));
       if (deliverableSections.length) {
         for (const section of deliverableSections) {
           ensureProposalSpace(doc, chrome, 24);
@@ -204,60 +257,156 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       }
     }
 
-    // Fees
-    beginMajorSection(doc, chrome, 'Proposed fees', CONTENT_W, { pageBreak: true });
-    mark('Proposed fees');
-    doc.fillColor('#333').font('Helvetica').fontSize(9)
-      .text(
-        `Analyst rate: ${formatProposalMoney(input.analystHourlyRate, input.currency)} per hour. Specialist rate: ${formatProposalMoney(input.specialistHourlyRate, input.currency)} per hour.`,
-        { width: CONTENT_W },
-      );
-    markProposalBodyContent(doc);
-    doc.moveDown(0.4);
-    const feeCols = [CONTENT_W - 180, 60, 120];
+    // Admin-invented custom sections (optional extras beyond the fixed deck)
+    const customSections = (input.content.customSections || [])
+      .filter((s) => String(s.title || '').trim() || String(s.body || '').trim())
+      .slice()
+      .sort((a, b) => (Number(a.sequence) || 0) - (Number(b.sequence) || 0));
+    for (const section of customSections) {
+      const title = String(section.title || 'Additional section').trim() || 'Additional section';
+      beginMajorSection(doc, chrome, title, CONTENT_W, {
+        pageBreak: section.pageBreak !== false,
+      });
+      mark(title);
+      bodyText(doc, chrome, String(section.body || '').trim() || '—', CONTENT_W);
+    }
+
+    // Fees — simple Phase / Hours / Fee table with clear Ex VAT and Incl VAT
+    beginMajorSection(doc, chrome, heading('fees'), CONTENT_W, { pageBreak: true });
+    mark(heading('fees'));
+    bodyText(doc, chrome, resolveFeesIntroduction(input), CONTENT_W, { fontSize: 9 });
+    doc.moveDown(0.45);
+
+    const feeCols = [CONTENT_W - 200, 70, 130];
     drawTableHeader(
       doc,
-      [{ label: 'Phase / Description', width: feeCols[0] }, { label: 'Hours', width: feeCols[1] }, { label: 'Fee', width: feeCols[2] }],
+      [
+        { label: 'Phase', width: feeCols[0] },
+        { label: 'Hours', width: feeCols[1] },
+        { label: 'Fee', width: feeCols[2] },
+      ],
       PROPOSAL_MARGIN,
     );
+
+    let totalHours = 0;
     for (const row of input.content.feeLineItems) {
+      const phase = String(row.phase || '').trim();
+      const description = String(row.description || '').trim();
+      const phaseLabel =
+        phase && description && !description.toLowerCase().startsWith(phase.toLowerCase())
+          ? `${phase}. ${description}`
+          : description || phase || '—';
+      const hours = row.hours != null ? Number(row.hours) : null;
+      if (hours != null && Number.isFinite(hours)) totalHours += hours;
       drawTableRow(
         doc,
         chrome,
-        [row.description, row.hours != null ? String(row.hours) : '—', formatProposalMoney(row.fee, input.currency)],
+        [
+          phaseLabel,
+          hours != null ? String(hours) : '—',
+          formatProposalMoney(row.fee, input.currency),
+        ],
         feeCols,
         PROPOSAL_MARGIN,
         { boldFirst: true },
       );
     }
-    drawTableRow(doc, chrome, ['Subtotal', '', formatProposalMoney(input.feeTotals.subtotal, input.currency)], feeCols, PROPOSAL_MARGIN, { boldFirst: true });
-    if (input.discount > 0) {
-      drawTableRow(doc, chrome, ['Discount', '', `-${formatProposalMoney(input.discount, input.currency)}`], feeCols, PROPOSAL_MARGIN);
+
+    const hoursLabel = totalHours > 0 ? String(Math.round(totalHours * 100) / 100) : '';
+    const discount = Number(input.discount) || 0;
+    const expenses = Number(input.expensesEstimate) || 0;
+    const vatPct = input.vatRate > 1 ? Math.round(input.vatRate) : Math.round(input.vatRate * 100);
+
+    // Optional discount rows only when set — keep the table simple otherwise.
+    if (discount > 0) {
+      drawTableRow(
+        doc,
+        chrome,
+        ['Subtotal', hoursLabel, formatProposalMoney(input.feeTotals.subtotal, input.currency)],
+        feeCols,
+        PROPOSAL_MARGIN,
+        { boldFirst: true },
+      );
+      drawTableRow(
+        doc,
+        chrome,
+        ['Discount', '', `-${formatProposalMoney(discount, input.currency)}`],
+        feeCols,
+        PROPOSAL_MARGIN,
+      );
     }
-    drawTableRow(doc, chrome, [`VAT (${Math.round(input.vatRate * 100)}%)`, '', formatProposalMoney(input.feeTotals.vatAmount, input.currency)], feeCols, PROPOSAL_MARGIN);
-    if (input.expensesEstimate > 0) {
-      drawTableRow(doc, chrome, ['Expenses (estimated)', '', formatProposalMoney(input.expensesEstimate, input.currency)], feeCols, PROPOSAL_MARGIN);
+
+    drawTableRow(
+      doc,
+      chrome,
+      [
+        'Total (Ex. VAT)',
+        discount > 0 ? '' : hoursLabel,
+        formatProposalMoney(input.feeTotals.discountedSubtotal, input.currency),
+      ],
+      feeCols,
+      PROPOSAL_MARGIN,
+      { boldFirst: true, fill: '#F4F6F8' },
+    );
+    drawTableRow(
+      doc,
+      chrome,
+      [`VAT (${vatPct}%)`, '', formatProposalMoney(input.feeTotals.vatAmount, input.currency)],
+      feeCols,
+      PROPOSAL_MARGIN,
+    );
+    // Expenses after VAT so the Incl. VAT total clearly includes them.
+    if (expenses > 0) {
+      drawTableRow(
+        doc,
+        chrome,
+        ['Expenses (estimated)', '', formatProposalMoney(expenses, input.currency)],
+        feeCols,
+        PROPOSAL_MARGIN,
+      );
     }
     drawTableRow(
       doc,
       chrome,
-      ['Total', '', formatProposalMoney(input.feeTotals.grandTotal, input.currency)],
+      ['Total (Incl. VAT)', '', formatProposalMoney(input.feeTotals.grandTotal, input.currency)],
       feeCols,
       PROPOSAL_MARGIN,
       { boldFirst: true, fill: '#E8F0FE' },
     );
 
+    const paymentTerms = String(input.paymentTerms || '').trim();
+    if (paymentTerms) {
+      doc.moveDown(0.55);
+      ensureProposalSpace(doc, chrome, 36);
+      sectionTitle(doc, 'Payment terms', chrome.red, CONTENT_W);
+      bodyText(doc, chrome, paymentTerms, CONTENT_W);
+    }
+
     // Assumptions + responsibility
-    beginMajorSection(doc, chrome, 'Fees and project assumptions', CONTENT_W);
-    mark('Fees and project assumptions');
-    bodyText(doc, chrome, input.assumptions, CONTENT_W);
+    beginMajorSection(doc, chrome, heading('assumptions'), CONTENT_W);
+    mark(heading('assumptions'));
+    const feeAssumptionLines = (input.content.feeAssumptions || [])
+      .map((line) => String(line || '').trim())
+      .filter(Boolean);
+    if (feeAssumptionLines.length) {
+      bodyText(
+        doc,
+        chrome,
+        feeAssumptionLines.map((line) => `• ${line}`).join('\n'),
+        CONTENT_W,
+      );
+      if (String(input.assumptions || '').trim()) doc.moveDown(0.25);
+    }
+    if (String(input.assumptions || '').trim()) {
+      bodyText(doc, chrome, input.assumptions, CONTENT_W);
+    }
     doc.moveDown(0.3);
     sectionTitle(doc, 'Statement of responsibility', chrome.red, CONTENT_W);
     bodyText(doc, chrome, input.statementOfResponsibility, CONTENT_W);
 
     // Timeline — dedicated slide with Gantt from admin timeline rows (or phase weeks)
-    beginMajorSection(doc, chrome, 'Proposed timelines', CONTENT_W, { pageBreak: true });
-    mark('Proposed timelines', { indent: true });
+    beginMajorSection(doc, chrome, heading('timelines'), CONTENT_W, { pageBreak: true });
+    mark(heading('timelines'), { indent: true });
     const timelineRows = (input.content.timelineRows.length
       ? input.content.timelineRows
       : input.content.phases
@@ -293,14 +442,21 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       Number(input.estimatedProjectWeeks) || 0,
       maxEndWeek,
     );
-    drawTimelineIntro(doc, chrome, minWeeks, CONTENT_W, input.timelineNarrative);
+    drawTimelineIntro(
+      doc,
+      chrome,
+      minWeeks,
+      CONTENT_W,
+      input.timelineNarrative,
+      input.timelineSummary,
+    );
     if (timelineRows.length) {
       drawProposedTimelineTable(doc, chrome, timelineRows, maxEndWeek, CONTENT_W);
     }
 
     // Team structure
-    beginMajorSection(doc, chrome, 'Proposed team structure', CONTENT_W, { pageBreak: true });
-    mark('Proposed team structure', { indent: true });
+    beginMajorSection(doc, chrome, heading('teamStructure'), CONTENT_W, { pageBreak: true });
+    mark(heading('teamStructure'), { indent: true });
     drawTeamStructure(doc, chrome, {
       clientCompany: input.clientCompany,
       leadConsultant: input.leadConsultant || input.preparedByName || '',
@@ -309,25 +465,37 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
     }, CONTENT_W);
 
     // Team bios + client experience (PPT table layout)
-    beginMajorSection(doc, chrome, 'Proposed team', CONTENT_W, { pageBreak: true });
-    mark('Proposed team', { indent: true });
+    beginMajorSection(doc, chrome, heading('team'), CONTENT_W, { pageBreak: true });
+    mark(heading('team'), { indent: true });
     drawProposedTeamSection(doc, chrome, {
       teamMembers: input.content.teamMembers,
       experienceItems: input.content.experienceItems,
     }, CONTENT_W);
 
     // Appendix A
-    beginMajorSection(doc, chrome, 'Appendix A - Terms & conditions of service', CONTENT_W, { pageBreak: true });
-    mark('Appendix A – Terms and conditions of service');
-    bodyText(doc, chrome, input.termsAndConditions, CONTENT_W);
+    beginMajorSection(doc, chrome, heading('appendixA'), CONTENT_W, { pageBreak: true });
+    mark(heading('appendixA'));
+    const appendixA = String(input.termsAndConditions || '').trim();
+    if (appendixA) {
+      // Keep full legal wording — do not collapse repeated clauses.
+      bodyText(doc, chrome, appendixA, CONTENT_W, { skipDedupe: true });
+    } else {
+      bodyText(
+        doc,
+        chrome,
+        `All services provided by Physical Risk to ${input.clientCompany} shall be in accordance with a written agreement, which shall be provided should Physical Risk Consultancy be awarded the requested service.`,
+        CONTENT_W,
+      );
+    }
 
     // Appendix B
-    beginMajorSection(doc, chrome, 'Appendix B - Acceptance of proposal', CONTENT_W, { pageBreak: true });
-    mark('Appendix B – Acceptance of proposal');
+    beginMajorSection(doc, chrome, heading('appendixB'), CONTENT_W, { pageBreak: true });
+    mark(heading('appendixB'));
     drawAcceptanceBlock(doc, chrome, {
       clientCompany: input.clientCompany,
       preparedByName: input.preparedByName || input.leadConsultant,
       preparedByEmail: input.preparedByEmail,
+      acceptanceTerms: input.acceptanceTerms,
       accept: input.content.acceptance,
     }, CONTENT_W);
 

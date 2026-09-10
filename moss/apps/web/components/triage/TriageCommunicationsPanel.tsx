@@ -379,7 +379,10 @@ export function TriageCommunicationsPanel({
         const result = await apiFetch<{
           poll?: { processed?: number };
           unreadCount?: number;
-        }>(`/triage/submissions/${submissionId}/communications/check-inbox`, { method: 'POST' });
+        }>(`/triage/submissions/${submissionId}/communications/check-inbox`, {
+          method: 'POST',
+          skipAuthRedirect: true,
+        });
         if (cancelled) return;
         if (typeof result.unreadCount === 'number') {
           onSummaryChange?.({ unreadCount: result.unreadCount });

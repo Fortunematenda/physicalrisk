@@ -18,13 +18,21 @@ export function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** Accept 0.15 or 15 (percent) — values above 1 are treated as whole-number percents. */
+export function normalizeVatRate(raw: number | string | null | undefined): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  if (n > 1) return n / 100;
+  return n;
+}
+
 export function calculateProposalFees(input: FeeCalculationInput): FeeCalculationResult {
   const subtotal = roundMoney(
     input.lineItems.reduce((sum, row) => sum + (Number(row.fee) || 0), 0),
   );
   const discount = roundMoney(Math.max(0, Number(input.discount) || 0));
   const discountedSubtotal = roundMoney(Math.max(0, subtotal - discount));
-  const vatRate = Number(input.vatRate) || 0;
+  const vatRate = normalizeVatRate(input.vatRate);
   const vatAmount = roundMoney(discountedSubtotal * vatRate);
   const expenses = roundMoney(Number(input.expensesEstimate) || 0);
   const grandTotal = roundMoney(discountedSubtotal + vatAmount + expenses);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   Check,
@@ -31,8 +32,8 @@ import { useToast } from '@/components/ui/toast';
 import { apiFetch, apiFetchBlob } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { deriveEgtAssurancePresentation } from '@moss/shared';
-import { ProposalWorkspaceDialog } from '@/components/triage/proposal/ProposalWorkspaceDialog';
 import type { ProposalValidationIssue, ProposalWorkspace } from '@/components/triage/proposal/proposal-workspace-types';
+import { proposalValidationTarget } from '@/components/triage/proposal/proposal-workspace-types';
 
 const CONTACT_METHODS = [
   { value: 'CALL', label: 'Call' },
@@ -125,9 +126,20 @@ export function TriageCommercialPanel({
   onReload,
   focusSection,
 }: Props) {
+  const router = useRouter();
   const { toast } = useToast();
   const [contactOpen, setContactOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  function openProposalWorkspace(opts?: { validationField?: string | null }) {
+    const field = String(opts?.validationField || '').trim();
+    if (field) {
+      const target = proposalValidationTarget(field);
+      const qs = new URLSearchParams({ tab: target.tab, field });
+      router.push(`/triage/${submissionId}/proposal?${qs.toString()}`);
+      return;
+    }
+    router.push(`/triage/${submissionId}/proposal`);
+  }
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'ACCEPTED' | 'DECLINED' | null>(null);
@@ -181,7 +193,7 @@ export function TriageCommercialPanel({
       document.getElementById('triage-contact-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (focusSection === 'proposal') {
-      document.getElementById('triage-proposal-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      openProposalWorkspace();
     }
   }, [focusSection]);
 
@@ -287,6 +299,10 @@ export function TriageCommercialPanel({
   }
 
   async function sendProposalToClient() {
+    const recipient =
+      String(prospect?.email || '').trim()
+      || String(item.email || '').trim()
+      || 'the client';
     await run(
       async () => {
         await apiFetch(`/triage/submissions/${submissionId}/proposal-send`, {
@@ -294,7 +310,10 @@ export function TriageCommercialPanel({
           body: JSON.stringify({}),
         });
       },
-      { title: 'Proposal sent successfully', description: 'The client has been emailed and status is Sent.' },
+      {
+        title: 'Proposal sent successfully',
+        description: `Email delivered to ${recipient}. If it is missing, check Email Logs and the junk folder.`,
+      },
     );
   }
 
@@ -577,10 +596,18 @@ export function TriageCommercialPanel({
                 {blockingIssues[0] ? (
                   <p className="m-0 flex items-start gap-1.5 text-sm text-amber-800">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                    {blockingIssues[0].message}
-                    {blockingIssues.length > 1
-                      ? ` (+${blockingIssues.length - 1} more)`
-                      : ''}
+                    <button
+                      type="button"
+                      className="text-left underline-offset-2 hover:underline"
+                      onClick={() =>
+                        openProposalWorkspace({ validationField: blockingIssues[0]?.field })
+                      }
+                    >
+                      {blockingIssues[0].message}
+                      {blockingIssues.length > 1
+                        ? ` (+${blockingIssues.length - 1} more)`
+                        : ''}
+                    </button>
                   </p>
                 ) : null}
                 <Button
@@ -588,7 +615,9 @@ export function TriageCommercialPanel({
                   variant="outline"
                   size="sm"
                   className="mt-1"
-                  onClick={() => setDetailsOpen(true)}
+                  onClick={() =>
+                    openProposalWorkspace({ validationField: blockingIssues[0]?.field })
+                  }
                 >
                   Complete missing information
                 </Button>
@@ -663,7 +692,7 @@ export function TriageCommercialPanel({
               size="sm"
               className="sm:ml-auto"
               disabled={isBusy}
-              onClick={() => setDetailsOpen(true)}
+              onClick={() => openProposalWorkspace()}
             >
               Open proposal workspace →
             </Button>
@@ -909,14 +938,6 @@ export function TriageCommercialPanel({
           </div>
         </CardContent>
       </Card>
-
-      <ProposalWorkspaceDialog
-        submissionId={submissionId}
-        open={detailsOpen}
-        onOpenChange={setDetailsOpen}
-        onSaved={onReload}
-        busy={isBusy}
-      />
 
       <AlertDialog open={confirmAction != null} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>

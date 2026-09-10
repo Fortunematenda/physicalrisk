@@ -116,6 +116,79 @@ export class EmailService {
     });
   }
 
+  /**
+   * Enqueue then immediately attempt SMTP delivery for that job.
+   * Throws if SMTP is missing or the send fails — callers must not mark business
+   * state as "sent" unless this resolves.
+   */
+  async enqueueAndDeliver(input: EnqueueInput) {
+    const { config } = await this.resolveSmtpConfig();
+    if (!config.host) {
+      throw new BadRequestException(
+        'SMTP is not configured. The proposal email cannot be delivered. Configure SMTP in Settings / environment and try again.',
+      );
+    }
+
+    const job = await this.enqueue(input);
+    const result = await this.processJobById(job.id);
+    if (!result.ok) {
+      throw new BadRequestException(
+        result.error
+          || 'Failed to deliver the proposal email. Check Email Logs and SMTP settings.',
+      );
+    }
+    return result.job;
+  }
+
+  /** Process a single email job immediately (SMTP send). */
+  async processJobById(jobId: string): Promise<{ ok: boolean; job: any; error?: string }> {
+    const { config } = await this.resolveSmtpConfig();
+    if (!config.host) {
+      return { ok: false, job: null, error: 'SMTP is not configured.' };
+    }
+
+    const job = await this.prisma.emailJob.findUnique({ where: { id: jobId } });
+    if (!job) return { ok: false, job: null, error: 'Email job not found.' };
+    if (job.status === EmailJobStatus.SENT) return { ok: true, job };
+
+    await this.prisma.emailJob.update({
+      where: { id: job.id },
+      data: { status: EmailJobStatus.PROCESSING, attemptCount: { increment: 1 } },
+    });
+
+    try {
+      const payload = (job.payload as Record<string, unknown>) || {};
+      const html = this.renderBody(job.template, payload);
+      const text = html.replace(/<[^>]+>/g, ' ');
+      const attachments = await this.resolveAttachments(payload);
+      const transporter = this.createTransport(config);
+      await transporter.sendMail({
+        from: this.formatFrom(config),
+        to: job.recipient,
+        subject: job.subject,
+        html,
+        text,
+        attachments,
+      });
+      const updated = await this.prisma.emailJob.update({
+        where: { id: job.id },
+        data: { status: EmailJobStatus.SENT, sentAt: new Date(), errorMessage: null },
+      });
+      return { ok: true, job: updated };
+    } catch (error: any) {
+      const message = String(error?.message || error).slice(0, 1000);
+      this.logger.warn(`Email job ${job.id} failed: ${message}`);
+      const updated = await this.prisma.emailJob.update({
+        where: { id: job.id },
+        data: {
+          status: EmailJobStatus.FAILED,
+          errorMessage: message,
+        },
+      });
+      return { ok: false, job: updated, error: message };
+    }
+  }
+
   list(limit = 500) {
     return this.prisma.emailJob.findMany({ orderBy: { createdAt: 'desc' }, take: limit });
   }

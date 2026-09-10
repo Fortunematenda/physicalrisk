@@ -83,11 +83,11 @@ describe('triage communications helpers', () => {
   });
 
   it('prefixes reply subjects once', () => {
-    expect(replySubject('Executive Governance Diagnostic')).toBe(
-      'Re: Executive Governance Diagnostic',
+    expect(replySubject('Executive Advisory Diagnostic')).toBe(
+      'Re: Executive Advisory Diagnostic',
     );
-    expect(replySubject('Re: Executive Governance Diagnostic')).toBe(
-      'Re: Executive Governance Diagnostic',
+    expect(replySubject('Re: Executive Advisory Diagnostic')).toBe(
+      'Re: Executive Advisory Diagnostic',
     );
   });
 

@@ -32,6 +32,14 @@ export function getCachedAccessToken(sub?: string | null): Cached | null {
   return store().get(sub) ?? null;
 }
 
+/** True when the cached access token is usable (with a small skew window). */
+export function isCachedAccessTokenFresh(sub?: string | null, skewSeconds = 60): boolean {
+  const cached = getCachedAccessToken(sub);
+  if (!cached?.accessToken) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return cached.expiresAt > now + skewSeconds;
+}
+
 export function clearCachedAccessToken(sub?: string | null) {
   if (!sub) return;
   store().delete(sub);

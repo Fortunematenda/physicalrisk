@@ -159,7 +159,7 @@ export function buildReferences(existing?: string | null, previousMessageId?: st
 
 export function replySubject(subject?: string | null) {
   const base = (subject || '').trim();
-  if (!base) return 'Re: Executive Governance Diagnostic';
+  if (!base) return 'Re: Executive Advisory Diagnostic';
   return /^re:/i.test(base) ? base : `Re: ${base}`;
 }
 

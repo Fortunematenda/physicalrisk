@@ -41,7 +41,8 @@ export function stripHtmlToPlain(value: string): string {
 
 /**
  * Collapse consecutive duplicate paragraphs/blocks (common TipTap / template paste issue).
- * Works on HTML or plain text. Does not remove intentional distinct paragraphs.
+ * Works on HTML or plain text. Does not remove intentional distinct paragraphs,
+ * and preserves blank paragraph spacers (`<p></p>` / `<p><br></p>`).
  */
 export function dedupeRepeatedNarrative(value: string): string {
   const raw = String(value || '').trim();
@@ -54,7 +55,11 @@ export function dedupeRepeatedNarrative(value: string): string {
     const kept: string[] = [];
     for (const block of blocks) {
       const key = stripHtmlToPlain(block).replace(/\s+/g, ' ').trim().toLowerCase();
-      if (!key) continue;
+      if (!key) {
+        // Keep intentional blank lines between paragraphs (TipTap empty <p>).
+        kept.push('<p><br></p>');
+        continue;
+      }
       if (seen.length && seen[seen.length - 1] === key) continue;
       // Also drop non-consecutive exact duplicates of the opening block (template re-appended).
       if (seen.includes(key) && key === seen[0]) continue;
@@ -64,21 +69,24 @@ export function dedupeRepeatedNarrative(value: string): string {
     return kept.length ? kept.join('') : raw;
   }
 
-  const parts = raw
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length < 2) return raw;
-  const out: string[] = [];
-  for (const part of parts) {
-    const key = part.replace(/\s+/g, ' ').trim().toLowerCase();
-    if (out.length && out[out.length - 1].replace(/\s+/g, ' ').trim().toLowerCase() === key) continue;
-    if (out.some((p) => p.replace(/\s+/g, ' ').trim().toLowerCase() === key) && key === out[0].replace(/\s+/g, ' ').trim().toLowerCase()) {
+  // Preserve blank lines: split on single newlines and keep empty rows between paragraphs.
+  const lines = raw.split(/\n/);
+  const collapsed: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trimEnd();
+    const key = trimmed.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!key) {
+      if (collapsed.length && collapsed[collapsed.length - 1] !== '') collapsed.push('');
       continue;
     }
-    out.push(part);
+    const prevKey = collapsed[collapsed.length - 1]?.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (prevKey === key) continue;
+    if (key === collapsed[0]?.replace(/\s+/g, ' ').trim().toLowerCase() && collapsed.includes(trimmed)) {
+      continue;
+    }
+    collapsed.push(trimmed);
   }
-  return out.join('\n\n');
+  return collapsed.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 /**
