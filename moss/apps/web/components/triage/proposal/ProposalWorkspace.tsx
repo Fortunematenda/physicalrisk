@@ -12,11 +12,13 @@ import { flushSync } from 'react-dom';
 import {
   ChevronDown,
   ChevronLeft,
+  Download,
   Eye,
   Loader2,
   Plus,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -28,6 +30,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -217,6 +226,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   const [draft, setDraft] = useState<ProposalWorkspaceDraft | null>(null);
   const [savedFingerprint, setSavedFingerprint] = useState('');
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState<{ url: string; title: string } | null>(null);
 
   const hasDraftRef = useRef(false);
   const isDirtyRef = useRef(false);
@@ -703,9 +713,13 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
 
   async function openPreviewPdf() {
     const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview`);
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const url = URL.createObjectURL(
+      new Blob([blob], { type: 'application/pdf' }),
+    );
+    setPdfPreview((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return { url, title: 'Proposal preview' };
+    });
   }
 
   async function persistIfNeeded(latest: ProposalWorkspaceDraft) {
@@ -727,11 +741,21 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
           `/triage/submissions/${submissionId}/proposals/${proposalId}/download`,
         );
         if (data?.url) {
+          // Force download via signed URL (attachment disposition).
           window.open(data.url, '_blank', 'noopener,noreferrer');
           return;
         }
       }
-      await openPreviewPdf();
+      // Fallback: download the freshly rendered preview bytes.
+      const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview`);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `Physical_Risk_Proposal_${workspace?.organisationName || 'Client'}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
       toast({
         variant: 'error',
@@ -749,7 +773,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
       const latest = syncEditorsIntoDraft();
       if (!latest) return;
       await persistIfNeeded(latest);
-      await generatePdfSilent();
+      // Preview re-renders live — do not store/generate first (that path feels like a download).
       await openPreviewPdf();
     } catch (e) {
       toast({
@@ -857,7 +881,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[220px]">
                 <DropdownMenuItem disabled={isBusy} onSelect={() => void downloadPdf()}>
-                  <Eye className="size-4" />
+                  <Download className="size-4" />
                   Download PDF
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -1205,12 +1229,6 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                     patchDraft({ vatRate: String(pct / 100) });
                   }}
                 />
-                <FieldInput
-                  label={`Expenses estimate (${currencyLabel})`}
-                  type="number"
-                  value={draft.expensesEstimate}
-                  onChange={(v) => patchDraft({ expensesEstimate: v })}
-                />
               </div>
 
               <FieldTextarea
@@ -1338,6 +1356,17 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+                  <FieldInput
+                    label={`Expenses estimate (${currencyLabel})`}
+                    type="number"
+                    value={draft.expensesEstimate}
+                    onChange={(v) => patchDraft({ expensesEstimate: v })}
+                  />
+                  <p className="text-xs text-slate-500 sm:pb-2">
+                    Shown after VAT on the PDF and included in the grand total.
+                  </p>
                 </div>
                 {feeTotals ? (
                   <dl className="grid gap-1 text-sm sm:grid-cols-2 sm:justify-items-end">
@@ -1573,6 +1602,53 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={Boolean(pdfPreview)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPdfPreview((prev) => {
+              if (prev?.url) URL.revokeObjectURL(prev.url);
+              return null;
+            });
+          }
+        }}
+      >
+        <DialogContent className="flex h-[90vh] max-w-5xl flex-col gap-3 overflow-hidden p-4 sm:p-6">
+          <DialogHeader className="shrink-0 space-y-1 pr-8 text-left">
+            <DialogTitle>{pdfPreview?.title || 'Proposal preview'}</DialogTitle>
+            <DialogDescription>
+              Live PDF preview. Use Download PDF if you need a file.
+            </DialogDescription>
+          </DialogHeader>
+          {pdfPreview ? (
+            <iframe
+              title={pdfPreview.title}
+              src={`${pdfPreview.url}#toolbar=1`}
+              className="min-h-0 w-full flex-1 rounded-md border border-slate-200 bg-slate-50"
+            />
+          ) : null}
+          <div className="flex shrink-0 justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setPdfPreview((prev) => {
+                  if (prev?.url) URL.revokeObjectURL(prev.url);
+                  return null;
+                });
+              }}
+            >
+              <X className="size-4" />
+              Close
+            </Button>
+            <Button type="button" disabled={isBusy} onClick={() => void downloadPdf()}>
+              <Download className="size-4" />
+              Download PDF
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
