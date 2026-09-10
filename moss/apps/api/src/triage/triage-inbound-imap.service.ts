@@ -202,6 +202,15 @@ export class TriageInboundImapService {
               this.logger.warn(
                 `IMAP message skipped (no triage thread match): from=${fromAddress} subject=${parsed.subject || '(none)'} inReplyTo=${headerString(parsed.inReplyTo) || '(none)'}`,
               );
+              // Stop reprocessing internal/system mail that will never match a triage thread.
+              const fromLower = fromAddress.toLowerCase();
+              if (
+                fromLower.includes('@physicalrisk.com')
+                || fromLower.includes('mailer-daemon')
+                || fromLower.includes('postmaster')
+              ) {
+                handledUids.push(message.uid);
+              }
             } else {
               summary.processed += 1;
               handledUids.push(message.uid);

@@ -185,17 +185,32 @@ export class EmailService {
       const text = html.replace(/<[^>]+>/g, ' ');
       const attachments = await this.resolveAttachments(payload);
       const transporter = this.createTransport(config);
-      await transporter.sendMail({
+      const domain = (config.fromEmail.split('@')[1] || 'physicalrisk.com').trim();
+      const internetMessageId =
+        (typeof payload.internetMessageId === 'string' && payload.internetMessageId.trim())
+        || `<${randomUUID()}@${domain}>`;
+      const info = await transporter.sendMail({
         from: this.formatFrom(config),
         to: job.recipient,
         subject: job.subject,
         html,
         text,
         attachments,
+        messageId: internetMessageId,
       });
+      const resolvedId = normalizeMessageId(info.messageId) || internetMessageId;
       const updated = await this.prisma.emailJob.update({
         where: { id: job.id },
-        data: { status: EmailJobStatus.SENT, sentAt: new Date(), errorMessage: null },
+        data: {
+          status: EmailJobStatus.SENT,
+          sentAt: new Date(),
+          errorMessage: null,
+          payload: {
+            ...payload,
+            internetMessageId: resolvedId,
+            providerMessageId: typeof info.messageId === 'string' ? info.messageId : resolvedId,
+          } as Prisma.InputJsonValue,
+        },
       });
       return { ok: true, job: updated };
     } catch (error: any) {

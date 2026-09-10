@@ -1104,6 +1104,41 @@ export class TriageCommunicationsService {
       if (prior?.thread) return prior.thread;
     }
 
+    // Fallback: match client From address to a triage lead email / proposal addressee.
+    const fromEmail = String(payload.from || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^.*<([^>]+)>.*$/, '$1');
+    if (fromEmail.includes('@')) {
+      const lead = await this.prisma.publicLead.findFirst({
+        where: {
+          OR: [
+            { email: { equals: fromEmail, mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (lead) {
+        let thread = await this.prisma.communicationThread.findFirst({
+          where: { publicLeadId: lead.id },
+          orderBy: { lastMessageAt: 'desc' },
+        });
+        if (!thread) {
+          const suffix = randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+          thread = await this.prisma.communicationThread.create({
+            data: {
+              threadNumber: `TRIAGE-COMM-${suffix}`,
+              correlationToken: `${lead.id.slice(-8)}-${randomUUID().slice(0, 8)}`,
+              publicLeadId: lead.id,
+              subject: payload.subject || `Inbound from ${fromEmail}`,
+              lastMessageAt: new Date(),
+            },
+          });
+        }
+        return thread;
+      }
+    }
+
     return null;
   }
 }

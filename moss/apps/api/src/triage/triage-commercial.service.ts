@@ -2,11 +2,15 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   ClientInterest,
   CommercialStage,
+  CommunicationDirection,
+  CommunicationMessageStatus,
+  CommunicationMessageType,
   ProposalStatus,
   SystemRole,
   TriageContactMethod,
@@ -14,7 +18,7 @@ import {
   TriageProposalSource,
   TriageProposalStatus,
 } from '@prisma/client';
-import type { AuthUser } from '../common/current-user.decorator';
+import { randomUUID } from 'crypto';import type { AuthUser } from '../common/current-user.decorator';
 import { generateProposalReference } from '../common/proposal-reference';
 import {
   COMMERCIAL_OWNER_ROLES,
@@ -94,6 +98,8 @@ const userSelect = {
 
 @Injectable()
 export class TriageCommercialService {
+  private readonly logger = new Logger(TriageCommercialService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -1728,7 +1734,7 @@ export class TriageCommercialService {
     const versionLabel = formatProposalVersionShort(parts.major, parts.revision);
 
     // Deliver via SMTP before marking SENT / recording success.
-    await this.email.enqueueAndDeliver({
+    const job = await this.email.enqueueAndDeliver({
       recipient,
       subject: `Executive Advisory Proposal — ${lead.organisationName}`,
       template: 'triage_proposal_sent',
@@ -1748,6 +1754,17 @@ export class TriageCommercialService {
         sendType,
         proposalVersion: versionLabel,
       },
+    });
+
+    await this.recordProposalSendInCommunications({
+      publicLeadId,
+      userId: user.id,
+      recipient,
+      subject: `Executive Advisory Proposal — ${lead.organisationName}`,
+      proposalNumber: proposal.proposalNumber,
+      versionLabel,
+      sendType,
+      jobPayload: (job?.payload || {}) as Record<string, unknown>,
     });
 
     await this.prisma.triageProposal.update({
@@ -1776,6 +1793,78 @@ export class TriageCommercialService {
         sendType,
       },
     });
+  }
+
+  /**
+   * Record proposal send as an outbound Communications message so client replies
+   * (In-Reply-To / References) can be matched into the triage inbox.
+   */
+  private async recordProposalSendInCommunications(input: {
+    publicLeadId: string;
+    userId: string;
+    recipient: string;
+    subject: string;
+    proposalNumber: string;
+    versionLabel: string;
+    sendType: 'INITIAL' | 'RESEND';
+    jobPayload: Record<string, unknown>;
+  }) {
+    const internetMessageId = String(input.jobPayload.internetMessageId || '').trim() || null;
+    const providerMessageId = String(input.jobPayload.providerMessageId || '').trim() || null;
+    if (!internetMessageId && !providerMessageId) return;
+
+    let thread = await this.prisma.communicationThread.findFirst({
+      where: { publicLeadId: input.publicLeadId },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+    if (!thread) {
+      const suffix = randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase();
+      thread = await this.prisma.communicationThread.create({
+        data: {
+          threadNumber: `TRIAGE-COMM-${suffix}`,
+          correlationToken: `${input.publicLeadId.slice(-8)}-${randomUUID().slice(0, 8)}`,
+          publicLeadId: input.publicLeadId,
+          subject: input.subject,
+          createdByUserId: input.userId,
+          lastMessageAt: new Date(),
+        },
+      });
+    }
+
+    const smtpView = await this.email.getSmtpPublicView();
+    const fromAddress = smtpView.fromEmail || 'sales@physicalrisk.com';
+    const preview = `${input.sendType === 'RESEND' ? 'Resent' : 'Sent'} proposal ${input.proposalNumber} ${input.versionLabel}`;
+
+    try {
+      await this.prisma.communicationMessage.create({
+        data: {
+          threadId: thread.id,
+          publicLeadId: input.publicLeadId,
+          type: CommunicationMessageType.OUTBOUND_EMAIL,
+          direction: CommunicationDirection.OUTBOUND,
+          provider: 'SMTP',
+          providerMessageId: providerMessageId || internetMessageId,
+          internetMessageId: internetMessageId || providerMessageId,
+          fromAddress,
+          toAddresses: [input.recipient],
+          subject: input.subject,
+          textBody: preview,
+          previewText: preview,
+          status: CommunicationMessageStatus.SENT,
+          sentByUserId: input.userId,
+          sentAt: new Date(),
+        },
+      });
+      await this.prisma.communicationThread.update({
+        where: { id: thread.id },
+        data: { lastMessageAt: new Date(), subject: thread.subject || input.subject },
+      });
+    } catch (error: any) {
+      // Unique message-id race / duplicate resend — do not fail the send.
+      this.logger.warn(
+        `Could not record proposal send in Communications: ${error?.message || error}`,
+      );
+    }
   }
 
   async acceptProposalWithDetails(
