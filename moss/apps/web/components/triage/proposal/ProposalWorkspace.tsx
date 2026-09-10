@@ -18,7 +18,6 @@ import {
   Plus,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -30,13 +29,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,6 +39,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { FilterSelect } from '@/components/ui/filter-select';
+import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { flushAllRichTextEditors, RichTextEditor } from '@/components/ui/rich-text-editor';
 import { useToast } from '@/components/ui/toast';
@@ -226,7 +219,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   const [draft, setDraft] = useState<ProposalWorkspaceDraft | null>(null);
   const [savedFingerprint, setSavedFingerprint] = useState('');
   const [discardOpen, setDiscardOpen] = useState(false);
-  const [pdfPreview, setPdfPreview] = useState<{ url: string; title: string } | null>(null);
+  const [pdfPreview, setPdfPreview] = useState<{ bytes: ArrayBuffer; title: string } | null>(null);
 
   const hasDraftRef = useRef(false);
   const isDirtyRef = useRef(false);
@@ -713,13 +706,8 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
 
   async function openPreviewPdf() {
     const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview`);
-    const url = URL.createObjectURL(
-      new Blob([blob], { type: 'application/pdf' }),
-    );
-    setPdfPreview((prev) => {
-      if (prev?.url) URL.revokeObjectURL(prev.url);
-      return { url, title: 'Proposal preview' };
-    });
+    const bytes = await blob.arrayBuffer();
+    setPdfPreview({ bytes, title: 'Proposal preview' });
   }
 
   async function persistIfNeeded(latest: ProposalWorkspaceDraft) {
@@ -1603,52 +1591,16 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog
+      <PdfPreviewDialog
         open={Boolean(pdfPreview)}
         onOpenChange={(open) => {
-          if (!open) {
-            setPdfPreview((prev) => {
-              if (prev?.url) URL.revokeObjectURL(prev.url);
-              return null;
-            });
-          }
+          if (!open) setPdfPreview(null);
         }}
-      >
-        <DialogContent className="flex h-[90vh] max-w-5xl flex-col gap-3 overflow-hidden p-4 sm:p-6">
-          <DialogHeader className="shrink-0 space-y-1 pr-8 text-left">
-            <DialogTitle>{pdfPreview?.title || 'Proposal preview'}</DialogTitle>
-            <DialogDescription>
-              Live PDF preview. Use Download PDF if you need a file.
-            </DialogDescription>
-          </DialogHeader>
-          {pdfPreview ? (
-            <iframe
-              title={pdfPreview.title}
-              src={`${pdfPreview.url}#toolbar=1`}
-              className="min-h-0 w-full flex-1 rounded-md border border-slate-200 bg-slate-50"
-            />
-          ) : null}
-          <div className="flex shrink-0 justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setPdfPreview((prev) => {
-                  if (prev?.url) URL.revokeObjectURL(prev.url);
-                  return null;
-                });
-              }}
-            >
-              <X className="size-4" />
-              Close
-            </Button>
-            <Button type="button" disabled={isBusy} onClick={() => void downloadPdf()}>
-              <Download className="size-4" />
-              Download PDF
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        pdfBytes={pdfPreview?.bytes || null}
+        title={pdfPreview?.title || 'Proposal preview'}
+        onDownload={() => void downloadPdf()}
+        downloadDisabled={isBusy}
+      />
     </div>
   );
 }

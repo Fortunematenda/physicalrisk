@@ -2,6 +2,6 @@
 const nextConfig = {
   // Standalone needs symlinks (Docker/Linux). Windows local builds lack that privilege.
   ...(process.platform === 'win32' ? {} : { output: 'standalone' }),
-  transpilePackages: ['@moss/shared'],
+  transpilePackages: ['@moss/shared', 'pdfjs-dist'],
 };
 export default nextConfig;
