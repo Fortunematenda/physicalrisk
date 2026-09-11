@@ -1374,10 +1374,18 @@ export class TriageCommercialService {
               assertEmailList(input.email, { fieldLabel: 'Client email' }).join('; '),
             )
           : undefined;
+      const nextLeadPhone =
+        input.phone !== undefined ? input.phone.trim() || null : undefined;
+      const nextOrgName =
+        input.organisationName !== undefined
+          ? input.organisationName.trim() || undefined
+          : undefined;
       await tx.publicLead.update({
         where: { id: publicLeadId },
         data: {
           ...(nextLeadEmail !== undefined && nextLeadEmail ? { email: nextLeadEmail } : {}),
+          ...(nextLeadPhone !== undefined ? { phone: nextLeadPhone } : {}),
+          ...(nextOrgName ? { organisationName: nextOrgName } : {}),
           scopeClientObjectives:
             input.clientObjective !== undefined
               ? input.clientObjective.trim() || null
