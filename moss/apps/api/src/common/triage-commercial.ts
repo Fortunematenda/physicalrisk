@@ -469,17 +469,28 @@ export function buildCommercialWorkspace(input: {
     prospect: {
       firstName: snapshot?.prospect?.firstName || input.lead.firstName,
       lastName: snapshot?.prospect?.lastName || input.lead.lastName,
-      // Prefer Client-tab addressee (editable) over frozen request snapshot / lead.
+      // Prefer live Client-tab / lead contact over frozen request snapshot.
       email:
         snapshot?.proposalAddressee?.email
         || input.lead.email
         || snapshot?.prospect?.email
         || null,
-      phone: snapshot?.prospect?.phone ?? input.lead.phone,
-      jobTitle: snapshot?.prospect?.jobTitle || input.qualification?.jobTitle || null,
+      phone:
+        snapshot?.proposalAddressee?.phone
+        ?? input.lead.phone
+        ?? snapshot?.prospect?.phone
+        ?? null,
+      jobTitle:
+        snapshot?.proposalAddressee?.jobTitle
+        || snapshot?.prospect?.jobTitle
+        || input.qualification?.jobTitle
+        || null,
     },
     organisation: {
-      name: snapshot?.organisation?.name || input.lead.organisationName,
+      name:
+        snapshot?.proposalAddressee?.organisationName
+        || snapshot?.organisation?.name
+        || input.lead.organisationName,
       country: snapshot?.organisation?.country || input.qualification?.country || null,
       industry: snapshot?.organisation?.industry || input.lead.industry,
       operationalSitesLabel:

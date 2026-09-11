@@ -343,7 +343,7 @@ export class OrganisationsService {
   ) {
     const existing = await this.prisma.organisation.findUnique({
       where: { id },
-      select: { id: true, primaryEmail: true },
+      select: { id: true, primaryEmail: true, primaryPhone: true, name: true, industry: true },
     });
     if (!existing) throw new NotFoundException('Organisation not found.');
     const cleaned = Object.fromEntries(
@@ -364,23 +364,41 @@ export class OrganisationsService {
       }
     }
 
+    const nextName =
+      cleaned.name !== undefined ? String(cleaned.name).trim() : undefined;
+    const nextIndustry =
+      cleaned.industry !== undefined ? (cleaned.industry as string | null) : undefined;
+    const nextPrimaryPhone =
+      cleaned.primaryPhone !== undefined ? (cleaned.primaryPhone as string | null) : undefined;
+
     const organisation = await this.prisma.organisation.update({
       where: { id },
       data: {
-        ...(cleaned.name !== undefined ? { name: String(cleaned.name).trim() } : {}),
-        ...(cleaned.industry !== undefined ? { industry: cleaned.industry as string | null } : {}),
+        ...(nextName !== undefined ? { name: nextName } : {}),
+        ...(nextIndustry !== undefined ? { industry: nextIndustry } : {}),
         ...(cleaned.registrationNo !== undefined ? { registrationNo: cleaned.registrationNo as string | null } : {}),
         ...(cleaned.website !== undefined ? { website: cleaned.website as string | null } : {}),
         ...(nextPrimaryEmail !== undefined ? { primaryEmail: nextPrimaryEmail } : {}),
-        ...(cleaned.primaryPhone !== undefined ? { primaryPhone: cleaned.primaryPhone as string | null } : {}),
+        ...(nextPrimaryPhone !== undefined ? { primaryPhone: nextPrimaryPhone } : {}),
       },
     });
 
-    // Keep linked triage leads in sync so header + proposal send use the updated contact email(s).
-    if (nextPrimaryEmail !== undefined && nextPrimaryEmail) {
+    // Keep linked triage submissions + proposal Client fields in sync with organisation contact.
+    const leadPatch: {
+      email?: string;
+      phone?: string | null;
+      organisationName?: string;
+      industry?: string | null;
+    } = {};
+    if (nextPrimaryEmail !== undefined && nextPrimaryEmail) leadPatch.email = nextPrimaryEmail;
+    if (nextPrimaryPhone !== undefined) leadPatch.phone = nextPrimaryPhone;
+    if (nextName !== undefined) leadPatch.organisationName = nextName;
+    if (nextIndustry !== undefined) leadPatch.industry = nextIndustry;
+
+    if (Object.keys(leadPatch).length) {
       await this.prisma.publicLead.updateMany({
         where: { organisationId: id },
-        data: { email: nextPrimaryEmail },
+        data: leadPatch,
       });
 
       const leads = await this.prisma.publicLead.findMany({
@@ -396,14 +414,32 @@ export class OrganisationsService {
         if (!proposal) continue;
         const snap = (proposal.contextSnapshot as Record<string, unknown>) || {};
         const addressee = (snap.proposalAddressee as Record<string, unknown> | undefined) || {};
+        const prospect = (snap.prospect as Record<string, unknown> | undefined) || {};
+        const orgSnap = (snap.organisation as Record<string, unknown> | undefined) || {};
         await this.prisma.triageProposal.update({
           where: { id: proposal.id },
           data: {
             contextSnapshot: {
               ...snap,
+              prospect: {
+                ...prospect,
+                ...(nextPrimaryEmail !== undefined && nextPrimaryEmail
+                  ? { email: nextPrimaryEmail }
+                  : {}),
+                ...(nextPrimaryPhone !== undefined ? { phone: nextPrimaryPhone } : {}),
+              },
+              organisation: {
+                ...orgSnap,
+                ...(nextName !== undefined ? { name: nextName } : {}),
+                ...(nextIndustry !== undefined ? { industry: nextIndustry } : {}),
+              },
               proposalAddressee: {
                 ...addressee,
-                email: nextPrimaryEmail,
+                ...(nextName !== undefined ? { organisationName: nextName } : {}),
+                ...(nextPrimaryEmail !== undefined && nextPrimaryEmail
+                  ? { email: nextPrimaryEmail }
+                  : {}),
+                ...(nextPrimaryPhone !== undefined ? { phone: nextPrimaryPhone } : {}),
               },
             } as object,
           },
