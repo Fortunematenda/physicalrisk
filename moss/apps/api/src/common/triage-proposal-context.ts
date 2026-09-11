@@ -32,6 +32,14 @@ export type ProposalContextSnapshot = {
     operationalSitesLabel: string | null;
     securityExpenditureLabel: string | null;
   };
+  /** Editable Client-tab destination; may be added after initial capture. */
+  proposalAddressee?: {
+    organisationName?: string | null;
+    addressedTo?: string | null;
+    jobTitle?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 };
 
 type LeadRow = {

@@ -63,6 +63,7 @@ import {
   normalizeTimelineRows,
   validateTimelineRows,
 } from './proposal/proposal-timeline';
+import { assertEmailList, normalizeEmailList } from '../common/email-list';
 
 const PROPOSAL_MIME = new Set([
   'application/pdf',
@@ -1355,7 +1356,9 @@ export class TriageCommercialService {
             : existingAddressee.jobTitle ?? null,
         email:
           input.email !== undefined
-            ? input.email.trim() || null
+            ? normalizeEmailList(
+                assertEmailList(input.email, { fieldLabel: 'Client email' }).join('; '),
+              )
             : existingAddressee.email ?? null,
         phone:
           input.phone !== undefined
@@ -1365,9 +1368,16 @@ export class TriageCommercialService {
     };
 
     await this.prisma.$transaction(async (tx) => {
+      const nextLeadEmail =
+        input.email !== undefined
+          ? normalizeEmailList(
+              assertEmailList(input.email, { fieldLabel: 'Client email' }).join('; '),
+            )
+          : undefined;
       await tx.publicLead.update({
         where: { id: publicLeadId },
         data: {
+          ...(nextLeadEmail !== undefined && nextLeadEmail ? { email: nextLeadEmail } : {}),
           scopeClientObjectives:
             input.clientObjective !== undefined
               ? input.clientObjective.trim() || null
@@ -1714,15 +1724,15 @@ export class TriageCommercialService {
     const addressee =
       ((snap as { proposalAddressee?: Record<string, string | null> } | null)?.proposalAddressee)
       || {};
-    const recipient =
+    const recipientRaw =
       String(input.recipientOverride || '').trim()
       || String(addressee.email || '').trim()
       || String(lead.email || '').trim();
-    if (!recipient) {
-      throw new BadRequestException(
-        'No recipient email. Set the Client tab email or the triage lead email before sending.',
-      );
-    }
+    const recipients = assertEmailList(recipientRaw, {
+      required: true,
+      fieldLabel: 'Recipient email',
+    });
+    const recipient = recipients.join(', ');
     if (!proposal.documentStorageKey) {
       throw new BadRequestException('Proposal PDF is missing. Generate or upload it before sending.');
     }
@@ -1759,7 +1769,7 @@ export class TriageCommercialService {
     await this.recordProposalSendInCommunications({
       publicLeadId,
       userId: user.id,
-      recipient,
+      recipients,
       subject: `Executive Advisory Proposal — ${lead.organisationName}`,
       proposalNumber: proposal.proposalNumber,
       versionLabel,
@@ -1807,7 +1817,7 @@ export class TriageCommercialService {
   private async recordProposalSendInCommunications(input: {
     publicLeadId: string;
     userId: string;
-    recipient: string;
+    recipients: string[];
     subject: string;
     proposalNumber: string;
     versionLabel: string;
@@ -1842,7 +1852,7 @@ export class TriageCommercialService {
     const smtpView = await this.email.getSmtpPublicView();
     const fromAddress = smtpView.fromEmail || 'sales@physicalrisk.com';
     const preview = `${input.sendType === 'RESEND' ? 'Resent' : 'Sent'} proposal ${input.proposalNumber} ${input.versionLabel}`;
-    const recipientNorm = input.recipient.trim().toLowerCase();
+    const toAddresses = input.recipients.map((email) => email.trim().toLowerCase()).filter(Boolean);
 
     try {
       const message = await this.prisma.communicationMessage.create({
@@ -1855,7 +1865,7 @@ export class TriageCommercialService {
           providerMessageId: providerMessageId || internetMessageId,
           internetMessageId: internetMessageId || providerMessageId,
           fromAddress,
-          toAddresses: [recipientNorm],
+          toAddresses,
           subject: input.subject,
           textBody: preview,
           previewText: preview,

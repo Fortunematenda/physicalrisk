@@ -1002,7 +1002,16 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
                 onChange={(v) => patchDraft({ addressedTo: v })}
               />
               <FieldInput label="Job title" value={draft.jobTitle} onChange={(v) => patchDraft({ jobTitle: v })} />
-              <FieldInput label="Email" type="email" value={draft.email} onChange={(v) => patchDraft({ email: v })} />
+              <FieldInput
+                label="Email"
+                type="text"
+                value={draft.email}
+                onChange={(v) => patchDraft({ email: v })}
+                placeholder="name@company.com; second@company.com"
+              />
+              <p className="sm:col-span-2 -mt-2 text-xs text-slate-500">
+                Separate multiple proposal recipients with a comma or semicolon.
+              </p>
               <FieldInput label="Phone" value={draft.phone} onChange={(v) => patchDraft({ phone: v })} className="sm:col-span-2" />
               <FieldInput label="Project sponsor" value={draft.projectSponsor} onChange={(v) => patchDraft({ projectSponsor: v })} />
               <FieldInput label="Project champion" value={draft.projectChampion} onChange={(v) => patchDraft({ projectChampion: v })} />

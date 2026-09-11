@@ -431,7 +431,13 @@ export default function OrganisationsPage() {
               </div>
               <div className="field">
                 <label>Primary email</label>
-                <input type="email" value={form.primaryEmail} onChange={(e) => setForm({ ...form, primaryEmail: e.target.value })} />
+                <input
+                  type="text"
+                  inputMode="email"
+                  placeholder="name@company.com; second@company.com"
+                  value={form.primaryEmail}
+                  onChange={(e) => setForm({ ...form, primaryEmail: e.target.value })}
+                />
               </div>
               <div className="field">
                 <label>Primary phone</label>

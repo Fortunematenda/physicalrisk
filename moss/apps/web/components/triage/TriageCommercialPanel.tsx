@@ -178,6 +178,12 @@ export function TriageCommercialPanel({
   const template = item.proposalTemplate || {};
   const activeProposal = item.activeProposal;
   const isBusy = busy || localBusy;
+  const [resendRecipient, setResendRecipient] = useState('');
+
+  const proposalRecipientEmail = () =>
+    String(template.email || '').trim()
+    || String(workspace.prospect?.email || '').trim()
+    || String(item.email || '').trim();
 
   const ownerOptions = useMemo(
     () =>
@@ -309,10 +315,7 @@ export function TriageCommercialPanel({
   }
 
   async function sendProposalToClient() {
-    const recipient =
-      String(prospect?.email || '').trim()
-      || String(item.email || '').trim()
-      || 'the client';
+    const recipient = proposalRecipientEmail() || 'the client';
     await run(
       async () => {
         await apiFetch(`/triage/submissions/${submissionId}/proposal-send`, {
@@ -344,9 +347,7 @@ export function TriageCommercialPanel({
   }
 
   async function resendProposal() {
-    const recipient =
-      String(prospect?.email || '').trim()
-      || String(item.email || '').trim();
+    const recipient = String(resendRecipient || proposalRecipientEmail()).trim();
     await run(
       async () => {
         await apiFetch(`/triage/submissions/${submissionId}/proposal-resend`, {
@@ -1085,7 +1086,13 @@ export function TriageCommercialPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={resendOpen} onOpenChange={setResendOpen}>
+      <AlertDialog
+        open={resendOpen}
+        onOpenChange={(open) => {
+          setResendOpen(open);
+          if (open) setResendRecipient(proposalRecipientEmail());
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Resend proposal</AlertDialogTitle>
@@ -1097,18 +1104,27 @@ export function TriageCommercialPanel({
                       ? `v${activeProposal.version}.${activeProposal.versionRevision}`
                       : `v${activeProposal.version}`
                   }`
-                : ''}{' '}
-              to{' '}
-              <strong>
-                {String(prospect?.email || item.email || 'the client email on file').trim()}
-              </strong>
-              . The PDF and version stay the same.
+                : ''}
+              . The PDF and version stay the same. Separate multiple addresses with a comma or semicolon.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-2 py-1">
+            <label className="text-sm font-medium text-slate-700" htmlFor="resend-recipient">
+              Send to
+            </label>
+            <input
+              id="resend-recipient"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={resendRecipient}
+              onChange={(e) => setResendRecipient(e.target.value)}
+              placeholder="name@company.com; second@company.com"
+              disabled={isBusy}
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isBusy}
+              disabled={isBusy || !resendRecipient.trim()}
               onClick={(e) => {
                 e.preventDefault();
                 void resendProposal();

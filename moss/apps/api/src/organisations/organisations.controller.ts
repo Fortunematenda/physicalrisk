@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsEmail, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../common/roles';
 import { RolesGuard } from '../common/roles.guard';
@@ -14,7 +14,7 @@ class OrganisationDto {
   @IsOptional() @IsString() website?: string;
   @IsOptional()
   @ValidateIf((_, v) => v !== '' && v != null)
-  @IsEmail()
+  @IsString()
   primaryEmail?: string;
   @IsOptional() @IsString() primaryPhone?: string;
 }
@@ -26,7 +26,7 @@ class UpdateOrganisationDto {
   @IsOptional() @IsString() website?: string;
   @IsOptional()
   @ValidateIf((_, v) => v !== '' && v != null)
-  @IsEmail()
+  @IsString()
   primaryEmail?: string;
   @IsOptional() @IsString() primaryPhone?: string;
 }

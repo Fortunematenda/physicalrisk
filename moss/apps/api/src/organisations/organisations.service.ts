@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { assertEmailList, normalizeEmailList } from '../common/email-list';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Default industry catalogue (aligned with SCLI C2 calibration options). */
@@ -167,7 +168,18 @@ export class OrganisationsService {
     primaryEmail?: string;
     primaryPhone?: string;
   }) {
-    return this.prisma.organisation.create({ data });
+    const primaryEmail =
+      data.primaryEmail !== undefined
+        ? normalizeEmailList(
+            assertEmailList(data.primaryEmail, { fieldLabel: 'Primary email' }).join('; '),
+          )
+        : undefined;
+    return this.prisma.organisation.create({
+      data: {
+        ...data,
+        ...(primaryEmail !== undefined ? { primaryEmail } : {}),
+      },
+    });
   }
 
   async get(id: string) {
@@ -329,7 +341,10 @@ export class OrganisationsService {
       primaryPhone?: string;
     },
   ) {
-    const existing = await this.prisma.organisation.findUnique({ where: { id }, select: { id: true } });
+    const existing = await this.prisma.organisation.findUnique({
+      where: { id },
+      select: { id: true, primaryEmail: true },
+    });
     if (!existing) throw new NotFoundException('Organisation not found.');
     const cleaned = Object.fromEntries(
       Object.entries(data).map(([key, value]) => [key, typeof value === 'string' && value.trim() === '' ? null : value]),
@@ -337,17 +352,66 @@ export class OrganisationsService {
     if (cleaned.name !== undefined && (!cleaned.name || String(cleaned.name).trim().length < 2)) {
       throw new BadRequestException('Organisation name is required.');
     }
-    return this.prisma.organisation.update({
+
+    let nextPrimaryEmail: string | null | undefined;
+    if (cleaned.primaryEmail !== undefined) {
+      if (cleaned.primaryEmail == null) {
+        nextPrimaryEmail = null;
+      } else {
+        nextPrimaryEmail = normalizeEmailList(
+          assertEmailList(String(cleaned.primaryEmail), { fieldLabel: 'Primary email' }).join('; '),
+        );
+      }
+    }
+
+    const organisation = await this.prisma.organisation.update({
       where: { id },
       data: {
         ...(cleaned.name !== undefined ? { name: String(cleaned.name).trim() } : {}),
         ...(cleaned.industry !== undefined ? { industry: cleaned.industry as string | null } : {}),
         ...(cleaned.registrationNo !== undefined ? { registrationNo: cleaned.registrationNo as string | null } : {}),
         ...(cleaned.website !== undefined ? { website: cleaned.website as string | null } : {}),
-        ...(cleaned.primaryEmail !== undefined ? { primaryEmail: cleaned.primaryEmail as string | null } : {}),
+        ...(nextPrimaryEmail !== undefined ? { primaryEmail: nextPrimaryEmail } : {}),
         ...(cleaned.primaryPhone !== undefined ? { primaryPhone: cleaned.primaryPhone as string | null } : {}),
       },
     });
+
+    // Keep linked triage leads in sync so header + proposal send use the updated contact email(s).
+    if (nextPrimaryEmail !== undefined && nextPrimaryEmail) {
+      await this.prisma.publicLead.updateMany({
+        where: { organisationId: id },
+        data: { email: nextPrimaryEmail },
+      });
+
+      const leads = await this.prisma.publicLead.findMany({
+        where: { organisationId: id },
+        select: { id: true },
+      });
+      for (const lead of leads) {
+        const proposal = await this.prisma.triageProposal.findFirst({
+          where: { publicLeadId: lead.id },
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, contextSnapshot: true },
+        });
+        if (!proposal) continue;
+        const snap = (proposal.contextSnapshot as Record<string, unknown>) || {};
+        const addressee = (snap.proposalAddressee as Record<string, unknown> | undefined) || {};
+        await this.prisma.triageProposal.update({
+          where: { id: proposal.id },
+          data: {
+            contextSnapshot: {
+              ...snap,
+              proposalAddressee: {
+                ...addressee,
+                email: nextPrimaryEmail,
+              },
+            } as object,
+          },
+        });
+      }
+    }
+
+    return organisation;
   }
 
   async remove(id: string) {

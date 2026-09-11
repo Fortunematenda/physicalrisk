@@ -535,10 +535,15 @@ export default function OrganisationDetailPage() {
               <div className="field">
                 <label>Primary email</label>
                 <input
-                  type="email"
+                  type="text"
+                  inputMode="email"
+                  placeholder="name@company.com; second@company.com"
                   value={form.primaryEmail}
                   onChange={(e) => setForm({ ...form, primaryEmail: e.target.value })}
                 />
+                <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                  Separate multiple addresses with a comma or semicolon.
+                </p>
               </div>
               <div className="field">
                 <label>Primary phone</label>

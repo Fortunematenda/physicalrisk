@@ -469,7 +469,12 @@ export function buildCommercialWorkspace(input: {
     prospect: {
       firstName: snapshot?.prospect?.firstName || input.lead.firstName,
       lastName: snapshot?.prospect?.lastName || input.lead.lastName,
-      email: snapshot?.prospect?.email || input.lead.email,
+      // Prefer Client-tab addressee (editable) over frozen request snapshot / lead.
+      email:
+        snapshot?.proposalAddressee?.email
+        || input.lead.email
+        || snapshot?.prospect?.email
+        || null,
       phone: snapshot?.prospect?.phone ?? input.lead.phone,
       jobTitle: snapshot?.prospect?.jobTitle || input.qualification?.jobTitle || null,
     },

@@ -31,6 +31,7 @@ import {
   replySubject,
   sanitizeEmailHtml,
 } from '../common/triage-communications';
+import { emailListIncludes } from '../common/email-list';
 import { EmailService } from '../email/email.service';
 import { StorageService } from '../evidence/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1135,12 +1136,12 @@ export class TriageCommunicationsService {
       .toLowerCase()
       .replace(/^.*<([^>]+)>.*$/, '$1');
     if (fromEmail.includes('@')) {
-      const lead = await this.prisma.publicLead.findFirst({
-        where: {
-          email: { equals: fromEmail, mode: 'insensitive' },
-        },
+      const recentLeads = await this.prisma.publicLead.findMany({
+        select: { id: true, email: true },
         orderBy: { updatedAt: 'desc' },
+        take: 300,
       });
+      const lead = recentLeads.find((row) => emailListIncludes(row.email, fromEmail));
       if (lead) {
         return this.ensureLeadCommunicationThread(
           lead.id,
@@ -1197,10 +1198,7 @@ export class TriageCommunicationsService {
         const snap = proposal.contextSnapshot as {
           proposalAddressee?: { email?: string | null };
         } | null;
-        const addresseeEmail = String(snap?.proposalAddressee?.email || '')
-          .trim()
-          .toLowerCase();
-        if (addresseeEmail && addresseeEmail === fromEmail) {
+        if (emailListIncludes(snap?.proposalAddressee?.email, fromEmail)) {
           return this.ensureLeadCommunicationThread(
             proposal.publicLeadId,
             payload.subject || `Inbound from ${fromEmail}`,
