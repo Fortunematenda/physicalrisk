@@ -180,10 +180,18 @@ export function TriageCommercialPanel({
   const isBusy = busy || localBusy;
   const [resendRecipient, setResendRecipient] = useState('');
 
-  const proposalRecipientEmail = () =>
-    String(template.email || '').trim()
-    || String(workspace.prospect?.email || '').trim()
-    || String(item.email || '').trim();
+  const defaultResendRecipient = useMemo(
+    () =>
+      String(template.email || '').trim()
+      || String(workspace.prospect?.email || '').trim()
+      || String(item.email || '').trim(),
+    [template.email, workspace.prospect?.email, item.email],
+  );
+
+  function openResendModal() {
+    setResendRecipient(defaultResendRecipient);
+    setResendOpen(true);
+  }
 
   const ownerOptions = useMemo(
     () =>
@@ -315,7 +323,7 @@ export function TriageCommercialPanel({
   }
 
   async function sendProposalToClient() {
-    const recipient = proposalRecipientEmail() || 'the client';
+    const recipient = defaultResendRecipient || 'the client';
     await run(
       async () => {
         await apiFetch(`/triage/submissions/${submissionId}/proposal-send`, {
@@ -347,7 +355,7 @@ export function TriageCommercialPanel({
   }
 
   async function resendProposal() {
-    const recipient = String(resendRecipient || proposalRecipientEmail()).trim();
+    const recipient = String(resendRecipient || defaultResendRecipient).trim();
     await run(
       async () => {
         await apiFetch(`/triage/submissions/${submissionId}/proposal-resend`, {
@@ -732,7 +740,7 @@ export function TriageCommercialPanel({
                       variant="outline"
                       size="sm"
                       disabled={isBusy}
-                      onClick={() => setResendOpen(true)}
+                      onClick={() => openResendModal()}
                     >
                       <Send className="size-4" />
                       Resend proposal
@@ -1090,7 +1098,7 @@ export function TriageCommercialPanel({
         open={resendOpen}
         onOpenChange={(open) => {
           setResendOpen(open);
-          if (open) setResendRecipient(proposalRecipientEmail());
+          if (open) setResendRecipient(defaultResendRecipient);
         }}
       >
         <AlertDialogContent>
@@ -1105,20 +1113,20 @@ export function TriageCommercialPanel({
                       : `v${activeProposal.version}`
                   }`
                 : ''}
-              . The PDF and version stay the same. Separate multiple addresses with a comma or semicolon.
+              . The PDF and version stay the same. Edit the recipients below if needed (comma or semicolon separated).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 py-1">
             <label className="text-sm font-medium text-slate-700" htmlFor="resend-recipient">
               Send to
             </label>
-            <input
+            <Input
               id="resend-recipient"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               value={resendRecipient}
               onChange={(e) => setResendRecipient(e.target.value)}
               placeholder="name@company.com; second@company.com"
               disabled={isBusy}
+              autoFocus
             />
           </div>
           <AlertDialogFooter>
