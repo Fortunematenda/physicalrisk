@@ -80,7 +80,7 @@ const ASSURANCE_VISUAL: Record<AssuranceBandCode, Omit<EgtAssuranceVisual, 'band
   },
   SIGNIFICANT_IMPROVEMENT_REQUIRED: {
     colourName: 'AMBER',
-    colourHex: '#d97706',
+    colourHex: '#ea580c',
     panelHex: '#fff7ed',
     textHex: '#9a3412',
     accessibleLabel: 'SIGNIFICANT IMPROVEMENT REQUIRED — AMBER',

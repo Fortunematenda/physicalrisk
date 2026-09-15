@@ -73,6 +73,13 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     items: [
       { id: 'advisory-engagements', label: 'Diagnostics & assurance', href: '/advisory', icon: IconShieldCheck, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
       { id: 'advisory-reports', label: 'Advisory reports', href: '/reports#executive-advisory-reports', icon: IconFileText, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
+      {
+        id: 'advisory-diagnostic-template',
+        label: 'Diagnostic templates',
+        href: '/admin/ead-diagnostic-template',
+        icon: IconSlidersHorizontal,
+        roles: ['ADMIN'],
+      },
     ],
   },
   {
@@ -256,6 +263,7 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
 export function activeDiagnosticProduct(pathname: string): 'TRIAGE' | 'ADVISORY' | 'SCL' | 'MOSS' | 'SOMOD' | 'PLATFORM' {
   if (pathname === '/triage' || pathname.startsWith('/triage/')) return 'TRIAGE';
   if (pathname === '/advisory' || pathname.startsWith('/advisory/')) return 'ADVISORY';
+  if (pathname.startsWith('/admin/ead-diagnostic-template')) return 'ADVISORY';
   if (pathname === '/moss' || pathname.startsWith('/moss/')) return 'MOSS';
   if (pathname === '/somod' || pathname.startsWith('/somod/')) return 'SOMOD';
   if (

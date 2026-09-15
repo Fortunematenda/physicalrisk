@@ -34,7 +34,7 @@ Product codes and workflows implemented for:
 - Vendor Performance Assurance Review (`VENDOR_PERFORMANCE_ASSURANCE`)
 - Security Governance and Executive Assurance Review (`GOVERNANCE_EXECUTIVE_ASSURANCE`)
 - Cyber-Physical Dependency Review (`CYBER_PHYSICAL_DEPENDENCY`)
-- Shield 360 (`SHIELD360`)
+- Shield 360 (`SHIELD360`) — **RETIRED from Physical Risk portfolio (Stage 5)**; enum retained for historical records only
 
 Each newly added Level 3 product has a product-specific working-paper module set based on the supplied product logic. The system records evidence-led findings and required executive decisions rather than inventing unsupported methodology/scoring.
 

@@ -20,7 +20,8 @@ const LABELS: Record<string, string> = {
   VENDOR_PERFORMANCE_ASSURANCE: 'Vendor Performance Assurance Review',
   GOVERNANCE_EXECUTIVE_ASSURANCE: 'Security Governance & Executive Assurance Review',
   CYBER_PHYSICAL_DEPENDENCY: 'Cyber-Physical Dependency Review',
-  SHIELD360: 'Shield 360',
+  // Legacy label only — Shield 360 is retired and not selectable for new work.
+  SHIELD360: 'Shield 360 (legacy)',
 };
 
 const OUTCOME_STATUSES = new Set([
@@ -133,7 +134,7 @@ export default function AdvisoryPage() {
           <div>
             <h2 className="m-0 text-xl font-semibold">Paid diagnostics and focused assurance</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Level 2 Executive Advisory Diagnostic → Level 3 focused assurance → sustainable remediation.
+              Level 2 Executive Advisory Diagnostic → Level 3 focused assurance.
             </p>
           </div>
           <Button asChild>

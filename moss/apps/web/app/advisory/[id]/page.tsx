@@ -5,7 +5,18 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
   PHYSICAL_RISK_PRODUCTS,
-  getRiskBand,
+  SHIELD360_DRAFT_CORRECTION_MESSAGE,
+  hasValidBusinessConsequences,
+  isEadDiagnosticModuleCode,
+  isLegacyShield360ProductCode,
+  isRichTextFilled,
+  parseBusinessConsequenceCodes,
+  parseDiagnosticResponses,
+  richTextToPlainText,
+  scoreEadDiagnosticCriteria,
+  type EadBusinessConsequenceCode,
+  type EadDiagnosticAnswers,
+  type EadDiagnosticCriterion,
 } from '@moss/shared';
 import {
   AlertCircle,
@@ -19,6 +30,11 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
+import { BusinessConsequenceSelector } from '@/components/advisory/BusinessConsequenceSelector';
+import { EadDiagnosticPanel } from '@/components/advisory/EadDiagnosticPanel';
+import type { AssessmentDiagnosticQuestion } from '@/components/advisory/ManageDiagnosticQuestionsDialog';
+import { RichTextField } from '@/components/advisory/RichTextField';
+import { flushAllRichTextEditors } from '@/components/ui/rich-text-editor';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Shell } from '@/components/Shell';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -45,7 +61,6 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
@@ -62,7 +77,6 @@ const ROUTES: [string, string][] = [
   ['VENDOR_PERFORMANCE_ASSURANCE', PRODUCT_LABELS.VENDOR_PERFORMANCE_ASSURANCE],
   ['GOVERNANCE_EXECUTIVE_ASSURANCE', PRODUCT_LABELS.GOVERNANCE_EXECUTIVE_ASSURANCE],
   ['CYBER_PHYSICAL_DEPENDENCY', PRODUCT_LABELS.CYBER_PHYSICAL_DEPENDENCY],
-  ['SHIELD360', PRODUCT_LABELS.SHIELD360],
 ];
 
 type ModuleReview = {
@@ -71,9 +85,16 @@ type ModuleReview = {
   moduleName: string;
   principalQuestion: string;
   exposureRating?: number | null;
+  diagnosticResponses?: unknown;
+  /** Local working copy of structured diagnostic answers. */
+  diagnosticAnswers?: EadDiagnosticAnswers;
   finding?: string | null;
   evidenceSummary?: string | null;
+  /** Legacy free-text / report-compat string. */
   businessConsequence?: string | null;
+  businessConsequences?: EadBusinessConsequenceCode[];
+  businessConsequenceDetail?: string | null;
+  otherBusinessConsequence?: string | null;
   accountableExecutive?: string | null;
   requiredDecision?: string | null;
   recommendedProduct?: string | null;
@@ -94,33 +115,97 @@ type RequiredFieldKey = 'finding' | 'businessConsequence' | 'requiredDecision';
 
 const REQUIRED_FIELDS: Array<{ key: RequiredFieldKey; label: string }> = [
   { key: 'finding', label: 'Finding' },
-  { key: 'businessConsequence', label: 'Business consequence' },
+  { key: 'businessConsequence', label: 'Business consequences' },
   { key: 'requiredDecision', label: 'Required executive decision' },
 ];
 
-function isModuleComplete(m: ModuleReview) {
-  return Boolean(m.finding?.trim() && m.businessConsequence?.trim() && m.requiredDecision?.trim());
+function moduleConsequenceCodes(m: ModuleReview): EadBusinessConsequenceCode[] {
+  return parseBusinessConsequenceCodes(m.businessConsequences);
 }
 
-function incompleteModules(modules: ModuleReview[]) {
-  return modules.filter((m) => !isModuleComplete(m));
+function isBusinessConsequenceComplete(m: ModuleReview) {
+  return hasValidBusinessConsequences(
+    moduleConsequenceCodes(m),
+    m.otherBusinessConsequence,
+  );
+}
+
+function moduleQuestions(
+  all: AssessmentDiagnosticQuestion[] | undefined,
+  moduleCode: string,
+): AssessmentDiagnosticQuestion[] {
+  return (all || []).filter((q) => q.moduleCode === moduleCode);
+}
+
+function activeCriteriaFromQuestions(questions: AssessmentDiagnosticQuestion[]): EadDiagnosticCriterion[] {
+  return questions
+    .filter((q) => q.isActive)
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .map((q) => ({
+      code: q.questionCode,
+      title: q.title,
+      question: q.questionText,
+      helpText: q.helpText,
+      allowNa: q.allowNa,
+      isRequired: q.isRequired,
+    }));
+}
+
+function isModuleComplete(m: ModuleReview, allQuestions?: AssessmentDiagnosticQuestion[]) {
+  const narrative = Boolean(
+    isRichTextFilled(m.finding) && isRichTextFilled(m.requiredDecision),
+  );
+  if (!narrative || !isBusinessConsequenceComplete(m)) return false;
+  if (!isEadDiagnosticModuleCode(m.moduleCode)) return true;
+  const answers =
+    m.diagnosticAnswers ||
+    parseDiagnosticResponses(m.diagnosticResponses)?.answers ||
+    {};
+  const criteria = activeCriteriaFromQuestions(moduleQuestions(allQuestions, m.moduleCode));
+  if (!criteria.length) {
+    // Fallback while snapshot loads
+    return Object.keys(answers).length > 0;
+  }
+  return scoreEadDiagnosticCriteria(criteria, answers).allRequiredAnswered;
+}
+
+function incompleteModules(
+  modules: ModuleReview[],
+  allQuestions?: AssessmentDiagnosticQuestion[],
+) {
+  return modules.filter((m) => !isModuleComplete(m, allQuestions));
 }
 
 function moduleHasAnyContent(m: ModuleReview) {
+  const answers =
+    m.diagnosticAnswers ||
+    parseDiagnosticResponses(m.diagnosticResponses)?.answers ||
+    {};
+  const hasDiagnostic = Object.values(answers).some((v) => Boolean(v));
   return Boolean(
     m.finding?.trim() ||
       m.evidenceSummary?.trim() ||
       m.businessConsequence?.trim() ||
+      moduleConsequenceCodes(m).length ||
+      m.businessConsequenceDetail?.trim() ||
+      m.otherBusinessConsequence?.trim() ||
       m.accountableExecutive?.trim() ||
       m.requiredDecision?.trim() ||
       m.recommendedProduct?.trim() ||
       m.analystNote?.trim() ||
+      hasDiagnostic ||
       (m.exposureRating != null && Number.isFinite(Number(m.exposureRating))),
   );
 }
 
 function missingRequiredFields(m: ModuleReview) {
-  return REQUIRED_FIELDS.filter((f) => !String(m[f.key] || '').trim());
+  return REQUIRED_FIELDS.filter((f) => {
+    if (f.key === 'businessConsequence') return !isBusinessConsequenceComplete(m);
+    if (f.key === 'finding' || f.key === 'requiredDecision') {
+      return !isRichTextFilled(m[f.key]);
+    }
+    return !String(m[f.key] || '').trim();
+  });
 }
 
 /**
@@ -131,17 +216,16 @@ function missingRequiredFields(m: ModuleReview) {
  */
 function getModuleStatus(
   m: ModuleReview,
-  opts?: { forceAttention?: boolean; reviewAttempted?: boolean },
+  opts?: {
+    forceAttention?: boolean;
+    reviewAttempted?: boolean;
+    allQuestions?: AssessmentDiagnosticQuestion[];
+  },
 ): ModuleStatus {
-  if (isModuleComplete(m)) return 'complete';
+  if (isModuleComplete(m, opts?.allQuestions)) return 'complete';
   if (opts?.forceAttention || opts?.reviewAttempted) return 'needs_attention';
   if (!moduleHasAnyContent(m)) return 'not_started';
   return 'in_progress';
-}
-
-function exposureBandLabel(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(Number(value))) return null;
-  return getRiskBand(Number(value));
 }
 
 function humanizeStatus(value?: string | null) {
@@ -235,7 +319,22 @@ export default function AdvisoryDetail() {
   const load = useCallback(async () => {
     const data = await apiFetch<any>(`/advisory/${id}`);
     setX(data);
-    const rows = (data.advisoryModuleReviews || []) as ModuleReview[];
+    const rows = ((data.advisoryModuleReviews || []) as ModuleReview[]).map((row) => {
+      const snap = parseDiagnosticResponses(row.diagnosticResponses);
+      const codes = parseBusinessConsequenceCodes(row.businessConsequences);
+      // Quietly preserve pre-Stage-2 free text in the detail field (no separate legacy banner).
+      const detail =
+        String(row.businessConsequenceDetail || '').trim() ||
+        (!codes.length && String(row.businessConsequence || '').trim()) ||
+        '';
+      return {
+        ...row,
+        diagnosticAnswers: snap?.answers || row.diagnosticAnswers,
+        businessConsequences: codes,
+        businessConsequenceDetail: detail,
+        otherBusinessConsequence: row.otherBusinessConsequence || '',
+      };
+    });
     setModules(rows);
     setActiveCode((prev) => prev || rows[0]?.moduleCode || '');
     if (data.suggestedRoutes?.length) {
@@ -279,23 +378,24 @@ export default function AdvisoryDetail() {
     [x],
   );
 
-  const missing = useMemo(() => incompleteModules(modules), [modules]);
+  const diagnosticQuestions = (x?.eadDiagnosticQuestions || []) as AssessmentDiagnosticQuestion[];
+  const missing = useMemo(
+    () => incompleteModules(modules, diagnosticQuestions),
+    [modules, diagnosticQuestions],
+  );
   const locked = Boolean(x?.diagnosticOutcome);
   const primaryAnalystLocked = Boolean(x?.primaryAnalystLocked);
-  const hasDiagnosticReport = Boolean(x?.reports?.length);
   const isDiagnostic = x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
   const canCompleteDiagnostic = useMemo(() => {
     if (x?.productCode !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC') return true;
-    return (
-      missing.length === 0 &&
-      confirmedRoutes.some((r) => r.productCode) &&
-      hasDiagnosticReport
-    );
-  }, [x?.productCode, missing.length, confirmedRoutes, hasDiagnosticReport]);
+    return missing.length === 0 && confirmedRoutes.some((r) => r.productCode);
+  }, [x?.productCode, missing.length, confirmedRoutes]);
 
-  const completeCount = modules.filter((m) => isModuleComplete(m)).length;
+  const completeCount = modules.filter((m) => isModuleComplete(m, diagnosticQuestions)).length;
   const progressPct = modules.length ? Math.round((completeCount / modules.length) * 100) : 0;
-  const anyStarted = modules.some((m) => moduleHasAnyContent(m) || isModuleComplete(m));
+  const anyStarted = modules.some(
+    (m) => moduleHasAnyContent(m) || isModuleComplete(m, diagnosticQuestions),
+  );
   const activeModule = modules.find((m) => m.moduleCode === activeCode) || modules[0] || null;
   const activeIndex = modules.findIndex((m) => m.moduleCode === (activeModule?.moduleCode || ''));
   const isLastModule = activeIndex >= 0 && activeIndex === modules.length - 1;
@@ -304,11 +404,11 @@ export default function AdvisoryDetail() {
   const attentionModules = useMemo(
     () =>
       modules.filter((m) => {
-        if (isModuleComplete(m)) return false;
+        if (isModuleComplete(m, diagnosticQuestions)) return false;
         if (missingRequiredFields(m).length === 0) return false;
         return reviewAttempted || attentionCodes.has(m.moduleCode);
       }),
-    [modules, reviewAttempted, attentionCodes],
+    [modules, reviewAttempted, attentionCodes, diagnosticQuestions],
   );
 
   const attentionFieldCount = useMemo(
@@ -320,6 +420,7 @@ export default function AdvisoryDetail() {
     return getModuleStatus(m, {
       forceAttention: attentionCodes.has(m.moduleCode),
       reviewAttempted,
+      allQuestions: diagnosticQuestions,
     });
   }
 
@@ -346,7 +447,9 @@ export default function AdvisoryDetail() {
       if (!code) continue;
       const exposure = Number(m.exposureRating);
       const priority = Number.isFinite(exposure) && exposure >= 70 ? 'HIGH' : 'RECOMMENDED';
-      const rationale = String(m.analystNote || '').trim() || String(m.finding || '').trim().slice(0, 280);
+      const rationale =
+        richTextToPlainText(String(m.analystNote || '')).trim() ||
+        richTextToPlainText(String(m.finding || '')).trim().slice(0, 280);
       const existing = byProduct.get(code);
       if (!existing) {
         byProduct.set(code, {
@@ -381,26 +484,44 @@ export default function AdvisoryDetail() {
     setSaveError('');
     setModules((prev) => {
       const next = prev.map((m) => (m.moduleCode === moduleCode ? { ...m, ...patch } : m));
-      if (!x?.diagnosticOutcome) rebuildSuggestedRoutes(next);
+      // Route suggestions only depend on product / exposure / notes — skip thrashing the form
+      // when only consequence chips or narrative fields change.
+      const routeRelevant =
+        patch.recommendedProduct !== undefined ||
+        patch.exposureRating !== undefined ||
+        patch.analystNote !== undefined ||
+        patch.finding !== undefined;
+      if (!x?.diagnosticOutcome && routeRelevant) rebuildSuggestedRoutes(next);
       return next;
     });
     scheduleAutosave(moduleCode);
   }
 
   async function persistModules(list: ModuleReview[] = modulesRef.current) {
+    flushAllRichTextEditors();
     for (const m of list) {
+      const body: Record<string, unknown> = {
+        finding: m.finding ?? '',
+        evidenceSummary: m.evidenceSummary ?? '',
+        businessConsequences: moduleConsequenceCodes(m),
+        businessConsequenceDetail: m.businessConsequenceDetail ?? '',
+        otherBusinessConsequence: m.otherBusinessConsequence ?? '',
+        accountableExecutive: m.accountableExecutive ?? '',
+        requiredDecision: m.requiredDecision ?? '',
+        recommendedProduct: m.recommendedProduct || '',
+        analystNote: m.analystNote ?? '',
+      };
+      if (isEadDiagnosticModuleCode(m.moduleCode)) {
+        body.diagnosticAnswers =
+          m.diagnosticAnswers ||
+          parseDiagnosticResponses(m.diagnosticResponses)?.answers ||
+          {};
+      } else {
+        body.exposureRating = m.exposureRating ?? '';
+      }
       await apiFetch(`/advisory/${id}/modules/${m.moduleCode}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          exposureRating: m.exposureRating ?? '',
-          finding: m.finding ?? '',
-          evidenceSummary: m.evidenceSummary ?? '',
-          businessConsequence: m.businessConsequence ?? '',
-          accountableExecutive: m.accountableExecutive ?? '',
-          requiredDecision: m.requiredDecision ?? '',
-          recommendedProduct: m.recommendedProduct || '',
-          analystNote: m.analystNote ?? '',
-        }),
+        body: JSON.stringify(body),
       });
     }
   }
@@ -408,14 +529,15 @@ export default function AdvisoryDetail() {
   async function persistSingleModule(moduleCode: string, opts?: { quiet?: boolean }) {
     const m = modulesRef.current.find((row) => row.moduleCode === moduleCode);
     if (!m || locked) return;
-    setSavingModule(true);
-    if (!opts?.quiet) setSaveError('');
+    const quiet = Boolean(opts?.quiet);
+    if (!quiet) setSavingModule(true);
+    if (!quiet) setSaveError('');
     try {
       await persistModules([m]);
       dirtyRef.current = false;
       setLastSavedAt(new Date());
       setSaveError('');
-      if (isModuleComplete(m)) {
+      if (isModuleComplete(m, diagnosticQuestions)) {
         setAttentionCodes((prev) => {
           if (!prev.has(moduleCode)) return prev;
           const next = new Set(prev);
@@ -430,7 +552,7 @@ export default function AdvisoryDetail() {
         id: 'save-error',
         variant: 'error',
         title: 'Save failed',
-        description: opts?.quiet
+        description: quiet
           ? 'Autosave failed. Your latest changes have not been saved.'
           : 'Your latest changes have not been saved.',
         action: {
@@ -440,7 +562,7 @@ export default function AdvisoryDetail() {
       });
       throw e;
     } finally {
-      setSavingModule(false);
+      if (!quiet) setSavingModule(false);
     }
   }
 
@@ -448,7 +570,7 @@ export default function AdvisoryDetail() {
     if (hasOutcome || !rows.length) return;
     const lastCode = rows[rows.length - 1]?.moduleCode;
     if (!lastCode || targetModuleCode !== lastCode) return;
-    if (incompleteModules(rows).length > 0) return;
+    if (incompleteModules(rows, diagnosticQuestions).length > 0) return;
     setCompletionOpen(true);
   }
 
@@ -632,7 +754,13 @@ export default function AdvisoryDetail() {
         return;
       }
       await persistModules(modulesRef.current);
-      const stillMissing = incompleteModules(modulesRef.current);
+      const legacyShield = modulesRef.current.filter((m) =>
+        isLegacyShield360ProductCode(m.recommendedProduct),
+      );
+      if (legacyShield.length) {
+        throw new Error(SHIELD360_DRAFT_CORRECTION_MESSAGE);
+      }
+      const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
       if (stillMissing.length) {
         setReviewAttempted(true);
         markModulesAttention(stillMissing.map((m) => m.moduleCode));
@@ -644,15 +772,12 @@ export default function AdvisoryDetail() {
       }
       const body =
         x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
-          ? { routes: confirmedRoutes.filter((r) => r.productCode) }
+          ? { routes: confirmedRoutes.filter((r) => r.productCode && !isLegacyShield360ProductCode(r.productCode)) }
           : {};
       if (x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && !body.routes?.length) {
         throw new Error(
           'Select a recommended next product on at least one module before completing.',
         );
-      }
-      if (x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && !x?.reports?.length) {
-        throw new Error('Generate the Executive Advisory Brief PDF before completing the diagnostic.');
       }
       const r = await apiFetch<any>(`/advisory/${id}/complete`, {
         method: 'POST',
@@ -684,7 +809,7 @@ export default function AdvisoryDetail() {
       router.push(`/advisory/${id}/outcome`);
       return;
     }
-    const stillMissing = incompleteModules(modulesRef.current);
+    const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
     if (stillMissing.length) {
       setReviewAttempted(true);
       markModulesAttention(stillMissing.map((m) => m.moduleCode));
@@ -715,7 +840,7 @@ export default function AdvisoryDetail() {
     try {
       if (!locked) {
         await persistModules(modulesRef.current);
-        const stillMissing = incompleteModules(modulesRef.current);
+        const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
         if (stillMissing.length) {
           setReviewAttempted(true);
           markModulesAttention(stillMissing.map((m) => m.moduleCode));
@@ -778,11 +903,6 @@ export default function AdvisoryDetail() {
   const productTitle = x.productLabel || PRODUCT_LABELS[x.productCode] || x.title;
   const activeStatus = activeModule ? moduleStatusFor(activeModule) : 'not_started';
   const activeBadge = statusBadgeProps(activeStatus);
-  const exposureLabel = exposureBandLabel(activeModule?.exposureRating);
-  const exposureValue =
-    activeModule?.exposureRating != null && Number.isFinite(Number(activeModule.exposureRating))
-      ? Number(activeModule.exposureRating)
-      : null;
   const primaryName = primary
     ? [primary.user?.firstName, primary.user?.lastName].filter(Boolean).join(' ').trim() ||
       primary.user?.email ||
@@ -816,11 +936,6 @@ export default function AdvisoryDetail() {
       >
         {locked ? 'Regenerate PDF report' : 'Generate PDF report'}
       </Button>
-      {x.reports?.[0]?.id ? (
-        <Button variant="outline" asChild className="h-10 shrink-0 whitespace-nowrap px-4">
-          <a href={`/reports/${x.reports[0].id}?view=advisory`}>Open latest report</a>
-        </Button>
-      ) : null}
     </div>
   );
 
@@ -1114,92 +1229,43 @@ export default function AdvisoryDetail() {
                           </Badge>
                         </div>
 
-                        <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 sm:p-4">
-                          <div className="flex flex-wrap items-end justify-between gap-3">
-                            <div className="space-y-1.5">
-                              <Label htmlFor="exposure-input">Exposure score</Label>
-                              <div className="flex items-baseline gap-2">
-                                <Input
-                                  id="exposure-input"
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  disabled={locked || busy || savingModule}
-                                  value={activeModule.exposureRating ?? ''}
-                                  onChange={(e) =>
-                                    patchModule(activeModule.moduleCode, {
-                                      exposureRating:
-                                        e.target.value === ''
-                                          ? null
-                                          : Math.min(100, Math.max(0, Number(e.target.value))),
-                                    })
-                                  }
-                                  className="h-10 w-[96px] shrink-0 text-base font-semibold"
-                                />
-                                <span className="text-sm font-medium text-slate-500">/ 100</span>
-                              </div>
-                            </div>
-                            {exposureLabel ? (
-                              <Badge
-                                variant={
-                                  exposureLabel === 'Critical' || exposureLabel === 'High'
-                                    ? 'danger'
-                                    : exposureLabel === 'Moderate'
-                                      ? 'warning'
-                                      : 'success'
-                                }
-                                className="shrink-0 px-2.5 py-1 text-sm"
-                              >
-                                {exposureLabel}
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-slate-400">Optional 0–100 internal indicator</span>
+                        {activeModule && isEadDiagnosticModuleCode(activeModule.moduleCode) ? (
+                          <EadDiagnosticPanel
+                            assessmentId={String(id)}
+                            moduleCode={activeModule.moduleCode}
+                            moduleName={activeModule.moduleName}
+                            diagnosticResponses={activeModule.diagnosticResponses}
+                            legacyExposureRating={activeModule.exposureRating}
+                            locked={locked}
+                            busy={busy || savingModule}
+                            questions={moduleQuestions(diagnosticQuestions, activeModule.moduleCode)}
+                            criteria={activeCriteriaFromQuestions(
+                              moduleQuestions(diagnosticQuestions, activeModule.moduleCode),
                             )}
-                          </div>
-
-                          <div className="space-y-2">
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              step={1}
-                              aria-label="Exposure scale"
-                              disabled={locked || busy || savingModule}
-                              value={exposureValue ?? 0}
-                              onChange={(e) =>
-                                patchModule(activeModule.moduleCode, {
-                                  exposureRating: Number(e.target.value),
-                                })
-                              }
-                              className="h-2 w-full cursor-pointer appearance-none rounded-full bg-transparent accent-[#c41230] disabled:cursor-not-allowed disabled:opacity-50 [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-slate-200 [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-slate-200"
-                            />
-                            <div className="relative flex h-2.5 w-full overflow-hidden rounded-full">
-                              <div className="h-full bg-emerald-500" style={{ width: '40%' }} title="Controlled 0–39" />
-                              <div className="h-full bg-amber-400" style={{ width: '20%' }} title="Moderate 40–59" />
-                              <div className="h-full bg-orange-500" style={{ width: '15%' }} title="High 60–74" />
-                              <div className="h-full bg-red-600" style={{ width: '25%' }} title="Critical 75–100" />
-                              {exposureValue != null ? (
-                                <span
-                                  className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-slate-900 shadow"
-                                  style={{ left: `${exposureValue}%` }}
-                                  aria-hidden="true"
-                                />
-                              ) : null}
-                            </div>
-                            <div className="flex justify-between gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                              <span>0 Controlled</span>
-                              <span>40 Moderate</span>
-                              <span>60 High</span>
-                              <span>75 Critical</span>
-                              <span>100</span>
-                            </div>
-                          </div>
-                        </div>
+                            onQuestionsChanged={async () => {
+                              dirtyRef.current = true;
+                              await load();
+                            }}
+                            onAnswersChange={(answers) => {
+                              const criteria = activeCriteriaFromQuestions(
+                                moduleQuestions(diagnosticQuestions, activeModule.moduleCode),
+                              );
+                              const scored = scoreEadDiagnosticCriteria(criteria, answers);
+                              patchModule(activeModule.moduleCode, {
+                                diagnosticAnswers: answers,
+                                exposureRating:
+                                  scored.exposureIndicator == null
+                                    ? null
+                                    : Math.round(scored.exposureIndicator),
+                              });
+                            }}
+                          />
+                        ) : null}
                       </CardHeader>
 
                       <CardContent className="space-y-4 pt-5">
-                        <div className="grid gap-4 md:grid-cols-2">
-                          <FieldText
+                        <div className="grid gap-5 md:grid-cols-2">
+                          <RichTextField
                             id={fieldDomId(activeModule.moduleCode, 'finding')}
                             label="Finding"
                             value={activeModule.finding || ''}
@@ -1210,10 +1276,11 @@ export default function AdvisoryDetail() {
                             showError={shouldShowFieldError(
                               activeModule.moduleCode,
                               'finding',
-                              activeModule.finding || '',
+                              isRichTextFilled(activeModule.finding) ? 'ok' : '',
                             )}
+                            placeholder="Describe the key finding..."
                           />
-                          <FieldText
+                          <RichTextField
                             id={fieldDomId(activeModule.moduleCode, 'evidenceSummary')}
                             label="Supporting evidence / limitation"
                             value={activeModule.evidenceSummary || ''}
@@ -1221,24 +1288,33 @@ export default function AdvisoryDetail() {
                             onChange={(v) =>
                               patchModule(activeModule.moduleCode, { evidenceSummary: v })
                             }
+                            placeholder="Evidence reviewed or limitation noted..."
                           />
-                          <FieldText
+                          <BusinessConsequenceSelector
                             id={fieldDomId(activeModule.moduleCode, 'businessConsequence')}
-                            label="Business consequence"
-                            value={activeModule.businessConsequence || ''}
                             disabled={locked || busy || savingModule}
-                            onChange={(v) =>
-                              patchModule(activeModule.moduleCode, { businessConsequence: v })
+                            value={{
+                              codes: moduleConsequenceCodes(activeModule),
+                              otherText: activeModule.otherBusinessConsequence || '',
+                              detail: activeModule.businessConsequenceDetail || '',
+                            }}
+                            onChange={(next) =>
+                              patchModule(activeModule.moduleCode, {
+                                businessConsequences: next.codes,
+                                otherBusinessConsequence: next.otherText,
+                                businessConsequenceDetail: next.detail,
+                              })
                             }
-                            onBlur={() => markFieldTouched(activeModule.moduleCode, 'businessConsequence')}
-                            required
+                            onBlur={() =>
+                              markFieldTouched(activeModule.moduleCode, 'businessConsequence')
+                            }
                             showError={shouldShowFieldError(
                               activeModule.moduleCode,
                               'businessConsequence',
-                              activeModule.businessConsequence || '',
+                              isBusinessConsequenceComplete(activeModule) ? 'ok' : '',
                             )}
                           />
-                          <FieldText
+                          <RichTextField
                             id={fieldDomId(activeModule.moduleCode, 'requiredDecision')}
                             label="Required executive decision"
                             value={activeModule.requiredDecision || ''}
@@ -1246,13 +1322,16 @@ export default function AdvisoryDetail() {
                             onChange={(v) =>
                               patchModule(activeModule.moduleCode, { requiredDecision: v })
                             }
-                            onBlur={() => markFieldTouched(activeModule.moduleCode, 'requiredDecision')}
+                            onBlur={() =>
+                              markFieldTouched(activeModule.moduleCode, 'requiredDecision')
+                            }
                             required
                             showError={shouldShowFieldError(
                               activeModule.moduleCode,
                               'requiredDecision',
-                              activeModule.requiredDecision || '',
+                              isRichTextFilled(activeModule.requiredDecision) ? 'ok' : '',
                             )}
+                            placeholder="What decision is required from executives?"
                           />
                           <div className="space-y-1.5">
                             <Label>Accountable executive</Label>
@@ -1269,15 +1348,31 @@ export default function AdvisoryDetail() {
                           </div>
                           <div className="space-y-1.5">
                             <Label>Recommended next product</Label>
+                            {isLegacyShield360ProductCode(activeModule.recommendedProduct) ? (
+                              <Alert variant="destructive" className="mb-2">
+                                <AlertTitle>Legacy recommendation — Shield 360</AlertTitle>
+                                <AlertDescription>
+                                  {SHIELD360_DRAFT_CORRECTION_MESSAGE}
+                                </AlertDescription>
+                              </Alert>
+                            ) : null}
                             <FilterSelect
-                              value={activeModule.recommendedProduct || ''}
+                              value={
+                                isLegacyShield360ProductCode(activeModule.recommendedProduct)
+                                  ? ''
+                                  : activeModule.recommendedProduct || ''
+                              }
                               disabled={locked || busy || savingModule}
                               onChange={(next) =>
                                 patchModule(activeModule.moduleCode, {
                                   recommendedProduct: next || null,
                                 })
                               }
-                              placeholder="No focused product selected"
+                              placeholder={
+                                isLegacyShield360ProductCode(activeModule.recommendedProduct)
+                                  ? 'Select a replacement or no recommendation'
+                                  : 'No focused product selected'
+                              }
                               triggerClassName="h-10 w-full min-w-0"
                               options={ROUTES.filter(([k]) => k).map(([k, v]) => ({
                                 value: k,
@@ -1285,18 +1380,17 @@ export default function AdvisoryDetail() {
                               }))}
                             />
                           </div>
-                          <div className="space-y-1.5 md:col-span-2">
-                            <Label>Consultant note</Label>
-                            <Textarea
-                              rows={4}
-                              className="min-h-[100px] resize-y"
-                              disabled={locked || busy || savingModule}
-                              value={activeModule.analystNote || ''}
-                              onChange={(e) =>
-                                patchModule(activeModule.moduleCode, { analystNote: e.target.value })
-                              }
-                            />
-                          </div>
+                          <RichTextField
+                            id={fieldDomId(activeModule.moduleCode, 'analystNote')}
+                            className="md:col-span-2"
+                            label="Consultant note"
+                            value={activeModule.analystNote || ''}
+                            disabled={locked || busy || savingModule}
+                            onChange={(v) =>
+                              patchModule(activeModule.moduleCode, { analystNote: v })
+                            }
+                            placeholder="Internal consultant notes..."
+                          />
                         </div>
                       </CardContent>
                     </Card>
@@ -1417,7 +1511,7 @@ export default function AdvisoryDetail() {
                 {isDiagnostic
                   ? locked
                     ? 'Diagnostic is complete. Open the outcome page for commercial handoff and Level 3 engagement creation.'
-                    : 'Generate the Executive Advisory Brief, then complete the diagnostic.'
+                    : 'Complete the diagnostic when modules and routing are ready. Generating the Executive Advisory Brief PDF is optional.'
                   : 'Mark the engagement complete once every module is finished.'}
               </DialogDescription>
             </DialogHeader>
@@ -1507,56 +1601,5 @@ export default function AdvisoryDetail() {
         </Dialog>
       </Shell>
     </AuthGate>
-  );
-}
-
-function FieldText({
-  id,
-  label,
-  value,
-  disabled,
-  onChange,
-  onBlur,
-  required,
-  showError,
-}: {
-  id?: string;
-  label: string;
-  value: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-  onBlur?: () => void;
-  required?: boolean;
-  showError?: boolean;
-}) {
-  const errorId = id ? `${id}-error` : undefined;
-  const invalid = Boolean(showError && required && !value.trim());
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>
-        {label}
-        {required ? <span className="text-[#c41230]"> *</span> : null}
-      </Label>
-      <Textarea
-        id={id}
-        rows={4}
-        className={cn(
-          'min-h-[110px] resize-y',
-          invalid && 'border-amber-400 focus-visible:ring-amber-400',
-        )}
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        aria-invalid={invalid || undefined}
-        aria-describedby={invalid ? errorId : undefined}
-      />
-      {invalid ? (
-        <p id={errorId} className="m-0 inline-flex items-center gap-1 text-xs font-medium text-amber-800">
-          <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
-          {label} is required.
-        </p>
-      ) : null}
-    </div>
   );
 }

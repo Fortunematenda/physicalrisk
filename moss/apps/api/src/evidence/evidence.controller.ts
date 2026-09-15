@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EvidenceStatus } from '@prisma/client';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
@@ -15,6 +15,7 @@ class EvidenceUploadDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() evidencePeriod?: string;
   @IsOptional() @IsString() evidenceSource?: string;
+  @IsOptional() @IsString() moduleCode?: string;
 }
 
 class EvidenceReviewDto {
@@ -40,8 +41,12 @@ export class EvidenceController {
   }
 
   @Get('assessment/:assessmentId')
-  list(@Param('assessmentId') assessmentId: string, @CurrentUser() user: AuthUser) {
-    return this.service.list(assessmentId, user);
+  list(
+    @Param('assessmentId') assessmentId: string,
+    @Query('moduleCode') moduleCode: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.list(assessmentId, user, moduleCode);
   }
 
   @Patch(':id/status')
@@ -52,5 +57,10 @@ export class EvidenceController {
   @Get(':id/download')
   download(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.downloadUrl(id, user);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.remove(id, user);
   }
 }

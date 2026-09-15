@@ -201,7 +201,7 @@ There is **no** validation that the actor is the assigned `PRIMARY_ANALYST`. Ass
 | `VENDOR_PERFORMANCE_ASSURANCE` | Vendor Performance Assurance Review | `VPA-YYYY-xxxxxx` |
 | `GOVERNANCE_EXECUTIVE_ASSURANCE` | Security Governance & Executive Assurance Review | `SGEA-YYYY-xxxxxx` |
 | `CYBER_PHYSICAL_DEPENDENCY` | Cyber-Physical Dependency Review | `CPD-YYYY-xxxxxx` |
-| `SHIELD360` | Shield 360 | `SH360-YYYY-xxxxxx` |
+| `SHIELD360` | Shield 360 | `SH360-YYYY-xxxxxx` | **RETIRED** — not selectable for new work; enum retained for historical rows only |
 
 Source: `moss/packages/shared/src/product-architecture.ts`, `moss/apps/api/src/common/assessment-reference.ts`, `advisory/[id]/page.tsx` `ROUTES`.
 

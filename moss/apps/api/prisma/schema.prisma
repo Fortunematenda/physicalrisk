@@ -195,6 +195,7 @@ enum ProductCode {
   VENDOR_PERFORMANCE_ASSURANCE
   GOVERNANCE_EXECUTIVE_ASSURANCE
   CYBER_PHYSICAL_DEPENDENCY
+  /// LEGACY ONLY — retired from active Physical Risk portfolio. Kept for historical rows.
   SHIELD360
   MOSS
 }
@@ -312,6 +313,12 @@ enum AdvisoryRoutePriority {
   HIGH
   RECOMMENDED
   OPTIONAL
+}
+
+enum EadTemplateVersionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
 }
 
 enum SiteStatus {
@@ -649,6 +656,9 @@ model AssessmentSession {
   reports                Report[]
   advisoryModuleReviews  AdvisoryModuleReview[]
   diagnosticOutcome      AdvisoryDiagnosticOutcome?
+  eadTemplateVersionId   String?
+  eadTemplateVersion     EadDiagnosticTemplateVersion? @relation(fields: [eadTemplateVersionId], references: [id], onDelete: SetNull)
+  eadDiagnosticQuestions EadAssessmentDiagnosticQuestion[]
   spawnedFromRoute       AdvisoryConfirmedRoute? @relation("RouteSpawnedAssessment")
   crmSyncRecords         CrmSyncRecord[]
   assignments            AssessmentAssignment[]
@@ -905,6 +915,8 @@ model EvidenceDocument {
   assessmentId       String
   questionId         String?
   questionCode       String?
+  /// Optional EAD / product module link (e.g. CONSEQUENCE) for module-scoped evidence.
+  moduleCode         String?
   inputDefinitionId  String?
   findingId          String?
   /// Additive MOSS link; existing SCLI rows remain null.
@@ -931,6 +943,7 @@ model EvidenceDocument {
   mossControlAssessment MossControlAssessment? @relation(fields: [mossControlAssessmentId], references: [id], onDelete: SetNull)
   reviewer           User? @relation("EvidenceReviewer", fields: [reviewerId], references: [id])
   @@index([assessmentId, status])
+  @@index([assessmentId, moduleCode])
   @@index([mossControlAssessmentId])
 }
 
@@ -1115,10 +1128,21 @@ model AdvisoryModuleReview {
   moduleCode           String
   moduleName           String
   principalQuestion    String
+  /// Legacy exposure mirror (higher = greater concern). When diagnosticResponses
+  /// exist, this is derived as 100 − calculated assurance score.
   exposureRating       Int?
+  /// Structured diagnostic answers + auditable criterion scores (JSON).
+  diagnosticResponses  Json?
   finding              String?
   evidenceSummary      String?
+  /// Legacy free-text consequence (also synced from structured selections for report compat).
   businessConsequence  String?
+  /// Structured consequence category codes (JSON string array).
+  businessConsequences Json?
+  /// Optional consultant narrative explaining selected consequences.
+  businessConsequenceDetail String?
+  /// Required when OTHER is among businessConsequences.
+  otherBusinessConsequence  String?
   accountableExecutive String?
   requiredDecision     String?
   recommendedProduct   ProductCode?
@@ -1129,6 +1153,72 @@ model AdvisoryModuleReview {
 
   @@unique([assessmentId, moduleCode])
   @@index([assessmentId])
+}
+
+/// Published / draft / archived versions of the Executive Advisory diagnostic question template.
+model EadDiagnosticTemplateVersion {
+  id            String                   @id @default(cuid())
+  versionNumber Int                      @unique
+  status        EadTemplateVersionStatus @default(DRAFT)
+  label         String?
+  changeNote    String?
+  publishedAt   DateTime?
+  publishedById String?
+  createdById   String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  questions     EadDiagnosticTemplateQuestion[]
+  assessments   AssessmentSession[]
+
+  @@index([status])
+}
+
+/// Master template questions for a specific template version (future assessments only).
+model EadDiagnosticTemplateQuestion {
+  id                String   @id @default(cuid())
+  templateVersionId String
+  moduleCode        String
+  questionCode      String
+  title             String
+  questionText      String
+  helpText          String?
+  displayOrder      Int
+  allowNa           Boolean  @default(false)
+  isRequired        Boolean  @default(true)
+  /// Soft-archive within the version (excluded from new snapshots when false).
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  templateVersion   EadDiagnosticTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([templateVersionId, moduleCode, questionCode])
+  @@index([templateVersionId, moduleCode, displayOrder])
+}
+
+/// Assessment-specific diagnostic question snapshot (immutable vs master template).
+model EadAssessmentDiagnosticQuestion {
+  id                       String    @id @default(cuid())
+  assessmentId             String
+  moduleCode               String
+  questionCode             String
+  title                    String
+  questionText             String
+  helpText                 String?
+  displayOrder             Int
+  allowNa                  Boolean   @default(false)
+  isRequired               Boolean   @default(true)
+  /// Soft-remove from active calculation; answer history retained in diagnosticResponses.
+  isActive                 Boolean   @default(true)
+  removedAt                DateTime?
+  removedById              String?
+  sourceTemplateQuestionId String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  assessment               AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, moduleCode, questionCode])
+  @@index([assessmentId, moduleCode, displayOrder])
+  @@index([assessmentId, isActive])
 }
 
 /// Immutable snapshot when an EAD is completed and Level 3 routing is confirmed.

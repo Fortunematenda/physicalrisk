@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AdvisoryRoutePriority,
   AssignmentRole,
@@ -13,7 +13,25 @@ import {
   EAD_ROUTING_PRODUCT_CODES,
   EXECUTIVE_ADVISORY_MODULES,
   FOCUSED_ASSURANCE_MODULES,
-  PHYSICAL_RISK_PRODUCTS,
+  PRODUCT_LABELS,
+  SHIELD360_RETIRED_MESSAGE,
+  buildEadDiagnosticSnapshot,
+  formatBusinessConsequencesForLegacyReport,
+  hasValidBusinessConsequences,
+  isEadBusinessConsequenceCode,
+  isEadDiagnosticModuleCode,
+  isEadLikertValue,
+  isLegacyShield360ProductCode,
+  isRichTextFilled,
+  normalizeOtherBusinessConsequence,
+  parseBusinessConsequenceCodes,
+  parseDiagnosticResponses,
+  richTextToPlainText,
+  sanitizeRichText,
+  scoreEadDiagnostic,
+  scoreEadDiagnosticCriteria,
+  type EadDiagnosticAnswers,
+  type EadLikertValue,
 } from '@moss/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -24,13 +42,21 @@ import { assertManualLevel3CreationAllowed, resolveManualCreatePolicy } from '..
 import { INTERNAL_ROLES } from '../common/roles';
 import { StorageService } from '../evidence/storage.service';
 import { renderAdvisoryPdf } from './advisory-report-pdf';
-
-const ADVISORY_PRODUCTS = new Set<ProductCode>([
+import { EadDiagnosticQuestionsService } from './ead-diagnostic-questions.service';
+import { resolveSclReportBrandConfig } from '../reports/scl-report-branding';
+import { ConfigService } from '@nestjs/config';
+/** Active advisory products that may be created / recommended. */
+const ADVISORY_PRODUCTS_ACTIVE = new Set<ProductCode>([
   ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
   ProductCode.CONTRACT_SLA_ASSURANCE,
   ProductCode.VENDOR_PERFORMANCE_ASSURANCE,
   ProductCode.GOVERNANCE_EXECUTIVE_ASSURANCE,
   ProductCode.CYBER_PHYSICAL_DEPENDENCY,
+]);
+
+/** Includes retired Shield 360 so historical engagements remain readable. */
+const ADVISORY_PRODUCTS = new Set<ProductCode>([
+  ...ADVISORY_PRODUCTS_ACTIVE,
   ProductCode.SHIELD360,
 ]);
 
@@ -46,10 +72,6 @@ const L3_COMMERCIAL_ACTIONS = new Set([
   'CANCELLED',
   'SAVE_NOTES',
 ]);
-
-const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(PHYSICAL_RISK_PRODUCTS).map(([code, value]) => [code, value.name]),
-);
 
 const ENGAGEMENT_FINISHED_STATUSES = new Set<AssessmentStatus>([
   AssessmentStatus.SUBMITTED,
@@ -79,6 +101,8 @@ export class AdvisoryService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    private readonly eadQuestions: EadDiagnosticQuestionsService,
+    private readonly config: ConfigService,
   ) {}
 
   private assertConsultant(user: AuthUser) {
@@ -112,26 +136,62 @@ export class AdvisoryService {
     }
   }
 
-  private validateModulesComplete(
-    modules: Array<{ moduleName: string; finding?: string | null; businessConsequence?: string | null; requiredDecision?: string | null; evidenceSummary?: string | null }>,
+  private async validateModulesComplete(
+    modules: Array<{
+      moduleCode?: string;
+      moduleName: string;
+      finding?: string | null;
+      businessConsequence?: string | null;
+      businessConsequences?: unknown;
+      otherBusinessConsequence?: string | null;
+      requiredDecision?: string | null;
+      evidenceSummary?: string | null;
+      diagnosticResponses?: unknown;
+      assessmentId?: string;
+    }>,
+    assessmentId?: string,
   ) {
-    const incomplete = modules.filter(
-      (m) => !m.finding?.trim() || !m.businessConsequence?.trim() || !m.requiredDecision?.trim(),
+    const missingCore = modules.filter(
+      (m) => !isRichTextFilled(m.finding) || !isRichTextFilled(m.requiredDecision),
     );
-    if (incomplete.length) {
+    if (missingCore.length) {
       throw new BadRequestException(
-        `Complete finding, business consequence and required decision for all product modules. Missing: ${incomplete
-          .map((m) => m.moduleName)
-          .join(', ')}`,
+        `Complete finding, business consequence, and required decision for: ${missingCore.map((m) => m.moduleName).join(', ')}`,
       );
     }
-    const missingEvidence = modules.filter((m) => !m.evidenceSummary?.trim());
+    const missingConsequences = modules.filter((m) => {
+      const codes = parseBusinessConsequenceCodes(m.businessConsequences);
+      if (codes.length) {
+        return !hasValidBusinessConsequences(codes, m.otherBusinessConsequence);
+      }
+      return true;
+    });
+    if (missingConsequences.length) {
+      throw new BadRequestException(
+        `Select at least one business consequence for: ${missingConsequences.map((m) => m.moduleName).join(', ')}`,
+      );
+    }
+    const missingEvidence = modules.filter((m) => !isRichTextFilled(m.evidenceSummary));
     if (missingEvidence.length) {
       throw new BadRequestException(
-        `Record supporting evidence or an explicit limitation for every module. Missing: ${missingEvidence
-          .map((m) => m.moduleName)
-          .join(', ')}`,
+        `Record supporting evidence or an explicit limitation for: ${missingEvidence.map((m) => m.moduleName).join(', ')}`,
       );
+    }
+    const aid = assessmentId || modules[0]?.assessmentId;
+    for (const m of modules) {
+      if (!m.moduleCode || !isEadDiagnosticModuleCode(m.moduleCode)) continue;
+      const snap = parseDiagnosticResponses(m.diagnosticResponses);
+      const criteria = aid
+        ? await this.eadQuestions.listActiveCriteriaForModule(aid, m.moduleCode)
+        : null;
+      const scored = criteria?.length
+        ? scoreEadDiagnosticCriteria(criteria, snap?.answers || {})
+        : scoreEadDiagnostic(m.moduleCode, snap?.answers || {});
+      if (!scored.allRequiredAnswered) {
+        throw new BadRequestException(
+          `Complete all diagnostic criteria for: ${m.moduleName}`,
+        );
+      }
     }
   }
 
@@ -155,8 +215,8 @@ export class AdvisoryService {
       const priority: AdvisoryRoutePriority =
         Number.isFinite(exposure) && exposure >= 70 ? AdvisoryRoutePriority.HIGH : AdvisoryRoutePriority.RECOMMENDED;
       const rationale =
-        String(m.analystNote || '').trim() ||
-        String(m.finding || '').trim().slice(0, 280) ||
+        richTextToPlainText(String(m.analystNote || '')).trim() ||
+        richTextToPlainText(String(m.finding || '')).trim().slice(0, 280) ||
         undefined;
       if (!existing) {
         byProduct.set(code, {
@@ -217,7 +277,12 @@ export class AdvisoryService {
     },
     user: AuthUser,
   ) {
-    if (!ADVISORY_PRODUCTS.has(input.productCode)) throw new BadRequestException('Unsupported advisory product.');
+    if (!ADVISORY_PRODUCTS_ACTIVE.has(input.productCode)) {
+      if (isLegacyShield360ProductCode(input.productCode)) {
+        throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+      }
+      throw new BadRequestException('Unsupported advisory product.');
+    }
     this.assertConsultant(user);
     const organisation = await this.prisma.organisation.findUnique({ where: { id: input.organisationId } });
     if (!organisation) throw new BadRequestException('Organisation not found.');
@@ -264,6 +329,10 @@ export class AdvisoryService {
       }
       return row;
     });
+
+    if (input.productCode === ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC) {
+      await this.eadQuestions.snapshotTemplateOntoAssessment(created.id, user.id);
+    }
 
     await this.audit.record({
       userId: user.id,
@@ -351,6 +420,10 @@ export class AdvisoryService {
         organisation: true,
         parentAssessment: { select: { id: true, reference: true, productCode: true } },
         advisoryModuleReviews: { orderBy: { moduleCode: 'asc' } },
+        eadTemplateVersion: { select: { id: true, versionNumber: true, label: true, status: true } },
+        eadDiagnosticQuestions: {
+          orderBy: [{ moduleCode: 'asc' }, { displayOrder: 'asc' }],
+        },
         diagnosticOutcome: {
           include: {
             confirmedBy: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -375,6 +448,18 @@ export class AdvisoryService {
       },
     });
     if (!engagement) throw new NotFoundException('Advisory engagement not found.');
+
+    let eadDiagnosticQuestions = engagement.eadDiagnosticQuestions;
+    if (
+      engagement.productCode === ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC &&
+      !eadDiagnosticQuestions.length
+    ) {
+      eadDiagnosticQuestions = await this.eadQuestions.snapshotTemplateOntoAssessment(
+        engagement.id,
+        user.id,
+      );
+    }
+
     let parentTriageSubmissionId: string | null = null;
     if (engagement.parentAssessmentId) {
       const parentLead = await this.prisma.publicLead.findFirst({
@@ -394,6 +479,7 @@ export class AdvisoryService {
         : [];
     return {
       ...engagement,
+      eadDiagnosticQuestions,
       parentAssessment: engagement.parentAssessment
         ? {
             ...engagement.parentAssessment,
@@ -426,6 +512,7 @@ export class AdvisoryService {
         submittedAt: engagement.submittedAt,
         reports: engagement.reports,
         parentAssessment: engagement.parentAssessment,
+        advisoryModuleReviews: engagement.advisoryModuleReviews,
       },
       outcome: engagement.diagnosticOutcome,
       permissions: {
@@ -442,29 +529,177 @@ export class AdvisoryService {
     if (!session || !ADVISORY_PRODUCTS.has(session.productCode)) {
       throw new BadRequestException('Module review is unavailable for this product.');
     }
-    const rating =
-      input.exposureRating == null || input.exposureRating === ''
-        ? null
-        : Math.max(0, Math.min(100, Number(input.exposureRating)));
+
+    const existing = await this.prisma.advisoryModuleReview.findUnique({
+      where: { assessmentId_moduleCode: { assessmentId: id, moduleCode } },
+    });
+    if (!existing) throw new NotFoundException('Module review not found.');
+
+    const data: Record<string, unknown> = {
+      finding:
+        input.finding !== undefined ? sanitizeRichText(String(input.finding ?? '')) || null : undefined,
+      evidenceSummary:
+        input.evidenceSummary !== undefined
+          ? sanitizeRichText(String(input.evidenceSummary ?? '')) || null
+          : undefined,
+      accountableExecutive: input.accountableExecutive ?? undefined,
+      requiredDecision:
+        input.requiredDecision !== undefined
+          ? sanitizeRichText(String(input.requiredDecision ?? '')) || null
+          : undefined,
+      recommendedProduct: input.recommendedProduct || null,
+      analystNote:
+        input.analystNote !== undefined
+          ? sanitizeRichText(String(input.analystNote ?? '')) || null
+          : undefined,
+    };
+
+    if (input.recommendedProduct !== undefined && input.recommendedProduct) {
+      const code = String(input.recommendedProduct).trim();
+      if (isLegacyShield360ProductCode(code) || !L3_ROUTING_PRODUCTS.has(code)) {
+        if (isLegacyShield360ProductCode(code)) {
+          throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+        }
+        throw new BadRequestException(`Unsupported Level 3 product: ${code}`);
+      }
+      data.recommendedProduct = code as ProductCode;
+    }
+
+    let consequenceAudit:
+      | {
+          from: string[];
+          to: string[];
+          detailChanged: boolean;
+        }
+      | undefined;
+
+    if (input.businessConsequences !== undefined) {
+      if (!Array.isArray(input.businessConsequences)) {
+        throw new BadRequestException('businessConsequences must be an array of consequence codes.');
+      }
+      const invalid = (input.businessConsequences as unknown[]).filter(
+        (item) => typeof item !== 'string' || !isEadBusinessConsequenceCode(item),
+      );
+      if (invalid.length) {
+        throw new BadRequestException(
+          `Invalid business consequence value(s): ${invalid.map(String).join(', ')}`,
+        );
+      }
+      const codes = parseBusinessConsequenceCodes(input.businessConsequences);
+      const otherRaw =
+        input.otherBusinessConsequence !== undefined
+          ? input.otherBusinessConsequence
+          : existing.otherBusinessConsequence;
+
+      const otherNormalized = normalizeOtherBusinessConsequence(codes, otherRaw);
+      let detail =
+        input.businessConsequenceDetail !== undefined
+          ? sanitizeRichText(String(input.businessConsequenceDetail ?? '')) || null
+          : existing.businessConsequenceDetail;
+
+      const existingCodes = parseBusinessConsequenceCodes(existing.businessConsequences);
+      // Prefer migrating legacy free text into detail once structured selection starts.
+      if (
+        codes.length &&
+        !existingCodes.length &&
+        !detail &&
+        existing.businessConsequence?.trim()
+      ) {
+        detail = sanitizeRichText(existing.businessConsequence.trim()) || existing.businessConsequence.trim();
+      }
+
+      data.businessConsequences = codes;
+      data.otherBusinessConsequence = otherNormalized;
+      data.businessConsequenceDetail = detail;
+      data.businessConsequence = codes.length
+        ? formatBusinessConsequencesForLegacyReport(codes, otherNormalized)
+        : existing.businessConsequence;
+
+      consequenceAudit = {
+        from: existingCodes.map((c) =>
+          c === 'OTHER' && existing.otherBusinessConsequence
+            ? `Other: ${existing.otherBusinessConsequence}`
+            : formatBusinessConsequencesForLegacyReport([c]),
+        ),
+        to: codes.map((c) =>
+          c === 'OTHER' && otherNormalized
+            ? `Other: ${otherNormalized}`
+            : formatBusinessConsequencesForLegacyReport([c]),
+        ),
+        detailChanged:
+          String(existing.businessConsequenceDetail || '') !== String(detail || ''),
+      };
+    } else {
+      // Legacy clients still posting free-text only.
+      if (input.businessConsequence !== undefined) {
+        data.businessConsequence = input.businessConsequence ?? undefined;
+      }
+      if (input.businessConsequenceDetail !== undefined) {
+        data.businessConsequenceDetail =
+          sanitizeRichText(String(input.businessConsequenceDetail ?? '')) || null;
+      }
+      if (input.otherBusinessConsequence !== undefined) {
+        data.otherBusinessConsequence =
+          String(input.otherBusinessConsequence ?? '').trim() || null;
+      }
+    }
+
+    // Structured diagnostic modules: answers calculate assurance; exposureRating is derived.
+    if (isEadDiagnosticModuleCode(moduleCode) && input.diagnosticAnswers !== undefined) {
+      const answers: EadDiagnosticAnswers = {};
+      const raw = input.diagnosticAnswers && typeof input.diagnosticAnswers === 'object'
+        ? (input.diagnosticAnswers as Record<string, unknown>)
+        : {};
+      for (const [key, value] of Object.entries(raw)) {
+        if (value == null || value === '') {
+          answers[key] = null;
+          continue;
+        }
+        if (!isEadLikertValue(value)) {
+          throw new BadRequestException(`Invalid diagnostic answer for ${key}.`);
+        }
+        answers[key] = value as EadLikertValue;
+      }
+      const criteria = await this.eadQuestions.listActiveCriteriaForModule(id, moduleCode);
+      const snapshot = buildEadDiagnosticSnapshot(moduleCode, answers, new Date(), criteria);
+      data.diagnosticResponses = snapshot;
+      data.exposureRating =
+        snapshot.calculatedExposureIndicator == null
+          ? null
+          : Math.round(snapshot.calculatedExposureIndicator);
+    } else if (input.exposureRating !== undefined && !isEadDiagnosticModuleCode(moduleCode)) {
+      const rating =
+        input.exposureRating == null || input.exposureRating === ''
+          ? null
+          : Math.max(0, Math.min(100, Number(input.exposureRating)));
+      data.exposureRating = Number.isFinite(rating as number) ? Math.round(rating as number) : null;
+    } else if (input.exposureRating !== undefined && isEadDiagnosticModuleCode(moduleCode)) {
+      // Ignore manual exposure overrides once structured scoring is in place.
+      // Legacy assessments without diagnosticAnswers keep their existing exposureRating.
+    }
+
     const row = await this.prisma.advisoryModuleReview.update({
       where: { assessmentId_moduleCode: { assessmentId: id, moduleCode } },
-      data: {
-        exposureRating: Number.isFinite(rating as number) ? Math.round(rating as number) : null,
-        finding: input.finding ?? undefined,
-        evidenceSummary: input.evidenceSummary ?? undefined,
-        businessConsequence: input.businessConsequence ?? undefined,
-        accountableExecutive: input.accountableExecutive ?? undefined,
-        requiredDecision: input.requiredDecision ?? undefined,
-        recommendedProduct: input.recommendedProduct || null,
-        analystNote: input.analystNote ?? undefined,
-      },
+      data,
     });
     await this.audit.record({
       userId: user.id,
       action: 'ADVISORY_MODULE_UPDATED',
       entityType: 'AdvisoryModuleReview',
       entityId: row.id,
-      metadata: { assessmentId: id, moduleCode },
+      metadata: {
+        assessmentId: id,
+        moduleCode,
+        diagnosticCalculated: Boolean(data.diagnosticResponses),
+        exposureRating: row.exposureRating,
+        ...(consequenceAudit
+          ? {
+              businessConsequencesFrom: consequenceAudit.from,
+              businessConsequencesTo: consequenceAudit.to,
+              businessConsequenceDetailChanged: consequenceAudit.detailChanged,
+            }
+          : {}),
+      },
     });
     return row;
   }
@@ -530,7 +765,7 @@ export class AdvisoryService {
   }
 
   /**
-   * PublicLead.assignedAnalystId is the single source of truth for the triage → Level 2(+)/3 chain.
+   * PublicLead.assignedAnalystId is the single source of truth for the triage â†’ Level 2(+)/3 chain.
    * Keep the converted lead in sync whenever a primary consultant is set on an engagement.
    */
   private async syncConvertedLeadAnalyst(assessmentId: string, analystId: string) {
@@ -565,7 +800,7 @@ export class AdvisoryService {
     if (!engagement.advisoryModuleReviews?.length) {
       throw new BadRequestException('No approved product modules are configured for this engagement.');
     }
-    this.validateModulesComplete(engagement.advisoryModuleReviews);
+    await this.validateModulesComplete(engagement.advisoryModuleReviews, id);
     const primary = engagement.assignments.find((a: any) => a.role === 'PRIMARY_ANALYST' && a.status !== 'CANCELLED');
     const consultant = primary?.user ? `${primary.user.firstName} ${primary.user.lastName}`.trim() : null;
     const reportType =
@@ -574,15 +809,30 @@ export class AdvisoryService {
         : engagement.productCode === ProductCode.GOVERNANCE_EXECUTIVE_ASSURANCE
           ? ReportType.COMMITTEE_ASSURANCE_REPORT
           : ReportType.FOCUSED_ASSURANCE_REPORT;
-    const pdf = await renderAdvisoryPdf({
-      reference: engagement.reference,
-      title: engagement.title,
-      organisation: engagement.organisation.name,
-      productLabel: engagement.productLabel,
-      status: engagement.status,
-      consultant,
-      modules: engagement.advisoryModuleReviews,
-    });
+
+    const brand = resolveSclReportBrandConfig(this.config);
+    const routes =
+      engagement.diagnosticOutcome?.routes?.map((r: any) => ({
+        productCode: r.productCode,
+        priority: r.priority,
+        rationale: r.rationale,
+      })) || [];
+    const evidence = (engagement.evidence || []).map((e: any) => ({
+      id: e.id,
+      fileName: e.fileName,
+      title: e.title || e.fileName,
+      moduleCode: e.moduleCode || null,
+    }));
+    const questions = (engagement.eadDiagnosticQuestions || []).map((q: any) => ({
+      moduleCode: q.moduleCode,
+      questionCode: q.questionCode,
+      title: q.title,
+      questionText: q.questionText,
+      displayOrder: q.displayOrder,
+      isActive: q.isActive,
+      allowNa: q.allowNa,
+    }));
+
     const existing = await this.prisma.report.findFirst({
       where: {
         assessmentId: id,
@@ -591,54 +841,116 @@ export class AdvisoryService {
       },
       orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
     });
-    const version = existing?.version ?? (await this.prisma.report.count({ where: { assessmentId: id, reportType } })) + 1;
-    const safeRef = engagement.reference.replace(/[^A-Za-z0-9_-]/g, '_');
-    const fileName = `${safeRef}-${reportType.toLowerCase()}-v${version}.pdf`;
-    const storageKey = existing?.storageKey || `reports/advisory/${id}/${Date.now()}-${fileName}`;
-    await this.storage.put(storageKey, pdf, 'application/pdf');
 
-    await this.prisma.report.updateMany({
-      where: {
-        assessmentId: id,
-        reportType,
-        status: { not: ReportStatus.SUPERSEDED },
-        ...(existing ? { id: { not: existing.id } } : {}),
-      },
-      data: { status: ReportStatus.SUPERSEDED },
+    // Protect issued snapshots: never overwrite an ISSUED report file in place.
+    const replaceExisting =
+      existing &&
+      existing.status !== ReportStatus.ISSUED &&
+      existing.status !== ReportStatus.APPROVED;
+
+    const version = replaceExisting
+      ? existing!.version
+      : existing
+        ? existing.version + 1
+        : (await this.prisma.report.count({ where: { assessmentId: id, reportType } })) + 1;
+
+    const pdf = await renderAdvisoryPdf({
+      reference: engagement.reference,
+      title: engagement.title,
+      organisation: engagement.organisation.name,
+      productLabel: engagement.productLabel,
+      status: engagement.status,
+      consultant,
+      reportVersion: version,
+      templateLabel: engagement.eadTemplateVersion
+        ? engagement.eadTemplateVersion.label ||
+          `v${engagement.eadTemplateVersion.versionNumber}`
+        : null,
+      generatedAt: new Date(),
+      salesEmail: brand.email,
+      modules: engagement.advisoryModuleReviews,
+      evidence,
+      routes,
+      questions,
     });
 
-    const report = existing
-      ? await this.prisma.report.update({
-          where: { id: existing.id },
-          data: {
-            title: `${engagement.productLabel} — ${engagement.organisation.name}`,
-            status: ReportStatus.GENERATED,
-            storageKey,
-            fileName,
-            generatedById: user.id,
-            generatedAt: new Date(),
-            issuedAt: null,
-          },
-        })
-      : await this.prisma.report.create({
-          data: {
-            assessmentId: id,
-            reportType,
-            version,
-            status: ReportStatus.GENERATED,
-            title: `${engagement.productLabel} — ${engagement.organisation.name}`,
-            storageKey,
-            fileName,
-            generatedById: user.id,
-            generatedAt: new Date(),
-          },
-        });
+    const safeRef = engagement.reference.replace(/[^A-Za-z0-9_-]/g, '_');
+    const fileName = `${safeRef}-${reportType.toLowerCase()}-v${version}.pdf`;
+    const storageKey =
+      replaceExisting && existing?.storageKey
+        ? existing.storageKey
+        : `reports/advisory/${id}/${Date.now()}-${fileName}`;
+    await this.storage.put(storageKey, pdf, 'application/pdf');
+
+    if (replaceExisting && existing) {
+      await this.prisma.report.updateMany({
+        where: {
+          assessmentId: id,
+          reportType,
+          status: { not: ReportStatus.SUPERSEDED },
+          id: { not: existing.id },
+        },
+        data: { status: ReportStatus.SUPERSEDED },
+      });
+      const report = await this.prisma.report.update({
+        where: { id: existing.id },
+        data: {
+          title: `${engagement.productLabel} — ${engagement.organisation.name}`,
+          status: ReportStatus.GENERATED,
+          storageKey,
+          fileName,
+          generatedById: user.id,
+          generatedAt: new Date(),
+          issuedAt: null,
+        },
+      });
+      await this.audit.record({
+        userId: user.id,
+        action: 'ADVISORY_REPORT_REPLACED',
+        entityType: 'Report',
+        entityId: report.id,
+        metadata: { assessmentId: id, reportType, fileName, replaced: true },
+      });
+      return { ...report, downloadUrl: await this.storage.signedDownloadUrl(storageKey, 900, fileName) };
+    }
+
+    if (existing && (existing.status === ReportStatus.ISSUED || existing.status === ReportStatus.APPROVED)) {
+      // Leave issued/approved snapshot immutable; new file becomes the active GENERATED version.
+    } else {
+      await this.prisma.report.updateMany({
+        where: {
+          assessmentId: id,
+          reportType,
+          status: { notIn: [ReportStatus.SUPERSEDED, ReportStatus.ISSUED, ReportStatus.APPROVED] },
+        },
+        data: { status: ReportStatus.SUPERSEDED },
+      });
+    }
+
+    const report = await this.prisma.report.create({
+      data: {
+        assessmentId: id,
+        reportType,
+        version,
+        status: ReportStatus.GENERATED,
+        title: `${engagement.productLabel} — ${engagement.organisation.name}`,
+        storageKey,
+        fileName,
+        generatedById: user.id,
+        generatedAt: new Date(),
+      },
+    });
     await this.audit.record({
       userId: user.id,
-      action: existing ? 'ADVISORY_REPORT_REPLACED' : 'ADVISORY_REPORT_GENERATED',
+      action: 'ADVISORY_REPORT_GENERATED',
       entityType: 'Report',
       entityId: report.id,
-      metadata: { assessmentId: id, reportType, fileName, replaced: Boolean(existing) },
+      metadata: {
+        assessmentId: id,
+        reportType,
+        fileName,
+        preservedIssued: existing?.status === ReportStatus.ISSUED,
+      },
     });
     return { ...report, downloadUrl: await this.storage.signedDownloadUrl(storageKey, 900, fileName) };
   }
@@ -666,20 +978,7 @@ export class AdvisoryService {
       };
     }
 
-    this.validateModulesComplete(engagement.advisoryModuleReviews);
-
-    const reportCount = await this.prisma.report.count({
-      where: {
-        assessmentId: id,
-        reportType: ReportType.EXECUTIVE_ADVISORY_BRIEF,
-        status: ReportStatus.GENERATED,
-      },
-    });
-    if (reportCount === 0) {
-      throw new BadRequestException(
-        'Generate the Executive Advisory Brief PDF before completing the diagnostic.',
-      );
-    }
+    await this.validateModulesComplete(engagement.advisoryModuleReviews, id);
 
     const routesInput =
       input?.routes?.length ? input.routes : this.suggestRoutesFromModules(engagement.advisoryModuleReviews);
@@ -690,6 +989,9 @@ export class AdvisoryService {
     }
 
     for (const route of routesInput) {
+      if (isLegacyShield360ProductCode(route.productCode)) {
+        throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+      }
       if (!L3_ROUTING_PRODUCTS.has(String(route.productCode))) {
         throw new BadRequestException(`Unsupported Level 3 product: ${route.productCode}`);
       }
@@ -751,7 +1053,7 @@ export class AdvisoryService {
     modules: Array<{ moduleName: string; finding?: string | null; businessConsequence?: string | null; requiredDecision?: string | null; evidenceSummary?: string | null }>,
     user: AuthUser,
   ) {
-    this.validateModulesComplete(modules);
+    await this.validateModulesComplete(modules, id);
     const existing = await this.prisma.assessmentSession.findUnique({ where: { id }, select: { status: true, submittedAt: true } });
     if (existing?.status === AssessmentStatus.SUBMITTED && existing.submittedAt) {
       return { ok: true, alreadyCompleted: true, status: 'SUBMITTED' };
@@ -926,6 +1228,13 @@ export class AdvisoryService {
     }
 
     const productCode = route.productCode;
+    if (isLegacyShield360ProductCode(productCode)) {
+      throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+    }
+    if (!ADVISORY_PRODUCTS_ACTIVE.has(productCode) && productCode !== ProductCode.SCLI_COST_LEAKAGE) {
+      throw new BadRequestException(`Unsupported Level 3 product: ${productCode}`);
+    }
+
     const orgId = engagement.organisationId;
     const title = `${engagement.organisation.name} ${PRODUCT_LABELS[productCode] || productCode}`;
 

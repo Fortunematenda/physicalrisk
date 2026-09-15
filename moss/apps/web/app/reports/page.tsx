@@ -165,6 +165,7 @@ function engagementHref(row: ReportRow) {
       'VENDOR_PERFORMANCE_ASSURANCE',
       'GOVERNANCE_EXECUTIVE_ASSURANCE',
       'CYBER_PHYSICAL_DEPENDENCY',
+      // Legacy product code — retained so historical Shield 360 reports remain navigable.
       'SHIELD360',
     ].includes(code)
   ) {
@@ -229,6 +230,7 @@ function isAdvisoryReport(row: ReportRow) {
     'VENDOR_PERFORMANCE_ASSURANCE',
     'GOVERNANCE_EXECUTIVE_ASSURANCE',
     'CYBER_PHYSICAL_DEPENDENCY',
+    // Legacy — historical Shield 360 reports still classify as advisory.
     'SHIELD360',
   ].includes(code);
 }

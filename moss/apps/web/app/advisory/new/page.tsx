@@ -18,7 +18,6 @@ const PRODUCTS = [
   ['VENDOR_PERFORMANCE_ASSURANCE', 'Level 3 — Vendor Performance Assurance Review'],
   ['GOVERNANCE_EXECUTIVE_ASSURANCE', 'Level 3 — Security Governance & Executive Assurance Review'],
   ['CYBER_PHYSICAL_DEPENDENCY', 'Level 3 — Cyber-Physical Dependency Review'],
-  ['SHIELD360', 'Sustainable solution — Shield 360'],
 ] as const;
 
 export default function NewAdvisory() {

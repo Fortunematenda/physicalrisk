@@ -33,6 +33,7 @@ const ADVISORY_REPORT_PRODUCTS = new Set<ProductCode>([
   ProductCode.VENDOR_PERFORMANCE_ASSURANCE,
   ProductCode.GOVERNANCE_EXECUTIVE_ASSURANCE,
   ProductCode.CYBER_PHYSICAL_DEPENDENCY,
+  // LEGACY ONLY — keep readable for historical Shield 360 assessments; not creatable.
   ProductCode.SHIELD360,
 ]);
 

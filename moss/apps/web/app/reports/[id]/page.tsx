@@ -14,6 +14,7 @@ const ADVISORY_PRODUCTS = new Set([
   'VENDOR_PERFORMANCE_ASSURANCE',
   'GOVERNANCE_EXECUTIVE_ASSURANCE',
   'CYBER_PHYSICAL_DEPENDENCY',
+  // LEGACY ONLY — historical Shield 360 reports remain navigable.
   'SHIELD360',
 ]);
 

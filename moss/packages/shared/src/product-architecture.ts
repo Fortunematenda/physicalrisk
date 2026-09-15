@@ -1,5 +1,17 @@
 export type PhysicalRiskLevel = 1 | 2 | 3;
 
+export type PhysicalRiskProductDefinition = {
+  level: PhysicalRiskLevel;
+  name: string;
+  kind: string;
+  paid: boolean;
+  purpose?: string;
+  /** When false, product is retired — not selectable for new work. */
+  active?: boolean;
+  /** Legacy-only product retained for historical records. */
+  legacy?: boolean;
+};
+
 export const PHYSICAL_RISK_PRODUCTS = {
   EXECUTIVE_GOVERNANCE_TRIAGE: {
     level: 1 as PhysicalRiskLevel,
@@ -7,6 +19,7 @@ export const PHYSICAL_RISK_PRODUCTS = {
     kind: 'questionnaire',
     paid: false,
     purpose: 'Complimentary executive questionnaire for lead qualification, warning indicators and product routing.',
+    active: true,
   },
   EXECUTIVE_ADVISORY_DIAGNOSTIC: {
     level: 2 as PhysicalRiskLevel,
@@ -14,44 +27,96 @@ export const PHYSICAL_RISK_PRODUCTS = {
     kind: 'diagnostic',
     paid: true,
     purpose: 'Consultant-led, evidence-based diagnostic that establishes governance, financial, contractual, reporting and operational exposure.',
+    active: true,
   },
   SCLI_COST_LEAKAGE: {
     level: 3 as PhysicalRiskLevel,
     name: 'Security Cost Leakage Assessment™',
     kind: 'focused-assurance',
     paid: true,
+    active: true,
   },
   CONTRACT_SLA_ASSURANCE: {
     level: 3 as PhysicalRiskLevel,
     name: 'Contract and Service-Level Agreement Assurance Review',
     kind: 'focused-assurance',
     paid: true,
+    active: true,
   },
   VENDOR_PERFORMANCE_ASSURANCE: {
     level: 3 as PhysicalRiskLevel,
     name: 'Vendor Performance Assurance Review',
     kind: 'focused-assurance',
     paid: true,
+    active: true,
   },
   GOVERNANCE_EXECUTIVE_ASSURANCE: {
     level: 3 as PhysicalRiskLevel,
     name: 'Security Governance and Executive Assurance Review',
     kind: 'focused-assurance',
     paid: true,
+    active: true,
   },
   CYBER_PHYSICAL_DEPENDENCY: {
     level: 3 as PhysicalRiskLevel,
     name: 'Cyber-Physical Dependency Review',
     kind: 'focused-assurance',
     paid: true,
+    active: true,
   },
+  /**
+   * LEGACY ONLY — retired from the Physical Risk portfolio.
+   * Kept for historical assessments / references. Never selectable for new work.
+   */
   SHIELD360: {
     level: 3 as PhysicalRiskLevel,
     name: 'Shield 360',
     kind: 'sustainable-solution',
     paid: true,
+    active: false,
+    legacy: true,
   },
-} as const;
+} as const satisfies Record<string, PhysicalRiskProductDefinition>;
+
+export type PhysicalRiskProductCode = keyof typeof PHYSICAL_RISK_PRODUCTS;
+
+export const LEGACY_SHIELD360_PRODUCT_CODE = 'SHIELD360' as const;
+
+export const SHIELD360_RETIRED_MESSAGE =
+  'Shield 360 is not an active Physical Risk product.';
+
+export const SHIELD360_DRAFT_CORRECTION_MESSAGE =
+  'Shield 360 is no longer available within Physical Risk. Please select another approved product or choose no recommendation.';
+
+export function isPhysicalRiskProductCode(code: string): code is PhysicalRiskProductCode {
+  return Object.prototype.hasOwnProperty.call(PHYSICAL_RISK_PRODUCTS, code);
+}
+
+export function isActivePhysicalRiskProductCode(code: string): boolean {
+  if (!isPhysicalRiskProductCode(code)) return false;
+  const def = PHYSICAL_RISK_PRODUCTS[code];
+  return def.active !== false;
+}
+
+export function isLegacyShield360ProductCode(code: string | null | undefined): boolean {
+  return String(code || '').trim() === LEGACY_SHIELD360_PRODUCT_CODE;
+}
+
+/** Active catalogue codes for new assessments, recommendations, proposals, and dropdowns. */
+export const ACTIVE_PHYSICAL_RISK_PRODUCT_CODES = (
+  Object.keys(PHYSICAL_RISK_PRODUCTS) as PhysicalRiskProductCode[]
+).filter((code) => isActivePhysicalRiskProductCode(code));
+
+export function getActivePhysicalRiskProducts() {
+  return ACTIVE_PHYSICAL_RISK_PRODUCT_CODES.map((code) => ({
+    code,
+    ...PHYSICAL_RISK_PRODUCTS[code],
+  }));
+}
+
+export const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(PHYSICAL_RISK_PRODUCTS).map(([code, value]) => [code, value.name]),
+);
 
 export const EXECUTIVE_ADVISORY_MODULES = [
   { code: 'GOVERNANCE', name: 'Governance and accountability', principalQuestion: 'Is responsibility assigned, exercised and independently tested?' },
@@ -62,6 +127,7 @@ export const EXECUTIVE_ADVISORY_MODULES = [
   { code: 'CONSEQUENCE', name: 'Consequence management', principalQuestion: 'Do failures lead to correction, recovery, penalties or escalation?' },
 ] as const;
 
+/** Active Level 3 focused assurance products (excludes retired Shield 360). */
 export const FOCUSED_ASSURANCE_PRODUCTS = [
   { code: 'SCLI_COST_LEAKAGE', name: PHYSICAL_RISK_PRODUCTS.SCLI_COST_LEAKAGE.name, buyer: 'Chief Financial Officer' },
   { code: 'CONTRACT_SLA_ASSURANCE', name: PHYSICAL_RISK_PRODUCTS.CONTRACT_SLA_ASSURANCE.name, buyer: 'Procurement / Risk / Legal / Operations' },
@@ -103,12 +169,18 @@ export const FOCUSED_ASSURANCE_MODULES: Record<string, ReadonlyArray<{code:strin
     { code:'PROVIDERS', name:'Maintenance and provider dependencies', principalQuestion:'Could provider failure create a material single point of failure?' },
     { code:'PROCESS', name:'Operational process resilience', principalQuestion:'Are fallback operating processes defined, tested and owned?' },
   ],
-  SHIELD360: [
-    { code:'DEPLOYMENT', name:'Deployment verification', principalQuestion:'Are personnel and supervisors verifiably present at required locations?' },
-    { code:'PATROLS', name:'Patrol and activity verification', principalQuestion:'Are patrols independently evidenced using location and checkpoint records?' },
-    { code:'EVIDENCE', name:'Operational evidence', principalQuestion:'Are time, location, image and activity records retained as decision-grade evidence?' },
-    { code:'SLA', name:'SLA consequence automation', principalQuestion:'Can verified service failures drive defensible penalties or service credits?' },
-    { code:'INVOICE', name:'Invoice reconciliation', principalQuestion:'Can verified performance be reconciled to vendor invoicing?' },
-    { code:'GOVERNANCE', name:'Executive oversight', principalQuestion:'Does continuous evidence support governance, audit and management oversight?' },
-  ],
 };
+
+/**
+ * Legacy Shield 360 module definitions retained only so historical engagements
+ * that used this product code can still render module structure if needed.
+ * Not used for new assessments.
+ */
+export const LEGACY_SHIELD360_MODULES: ReadonlyArray<{code:string;name:string;principalQuestion:string}> = [
+  { code:'DEPLOYMENT', name:'Deployment verification', principalQuestion:'Are personnel and supervisors verifiably present at required locations?' },
+  { code:'PATROLS', name:'Patrol and activity verification', principalQuestion:'Are patrols independently evidenced using location and checkpoint records?' },
+  { code:'EVIDENCE', name:'Operational evidence', principalQuestion:'Are time, location, image and activity records retained as decision-grade evidence?' },
+  { code:'SLA', name:'SLA consequence automation', principalQuestion:'Can verified service failures drive defensible penalties or service credits?' },
+  { code:'INVOICE', name:'Invoice reconciliation', principalQuestion:'Can verified performance be reconciled to vendor invoicing?' },
+  { code:'GOVERNANCE', name:'Executive oversight', principalQuestion:'Does continuous evidence support governance, audit and management oversight?' },
+];

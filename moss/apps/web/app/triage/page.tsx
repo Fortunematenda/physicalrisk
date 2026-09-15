@@ -24,6 +24,7 @@ import {
 import { StatCard } from '@/components/dashboard/stat-card';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { AnalystFilterSelect } from '@/components/triage/AnalystFilterSelect';
+import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { FilterSelect } from '@/components/ui/filter-select';
@@ -298,9 +299,9 @@ function scoreColor(score: number) {
   return '#c41230';
 }
 
-function ScoreRing({ value }: { value: number | null }) {
-  const size = 42;
-  const stroke = 3.5;
+function ScoreRing({ value, label }: { value: number | null; label: string }) {
+  const size = 46;
+  const stroke = 4;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const clamped = value === null || Number.isNaN(value) ? 0 : Math.max(0, Math.min(100, value));
@@ -309,8 +310,8 @@ function ScoreRing({ value }: { value: number | null }) {
 
   return (
     <div
-      className="assess2-ring triage-score-ring"
-      title={value === null ? 'Assurance: —' : `Assurance: ${clamped} / 100`}
+      className="assess2-ring"
+      title={value === null ? `${label}: —` : `${label}: ${clamped} / 100`}
     >
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
         <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e5e7eb" strokeWidth={stroke} />
@@ -336,6 +337,7 @@ function ScoreRing({ value }: { value: number | null }) {
           {value === null ? '—' : clamped.toFixed(0)}
         </text>
       </svg>
+      <span>{label}</span>
     </div>
   );
 }
@@ -1017,14 +1019,18 @@ export default function TriageSubmissionsPage() {
                           </div>
                         </td>
                         <td>
-                          <div className="assess2-scores assess2-scores-stack triage-assurance-cell">
-                            <ScoreRing value={score} />
-                            <span
-                              className="triage-assurance-short"
-                              title={score != null ? `${score} / 100` : undefined}
-                            >
-                              {bandLabel || (row.completedAt ? 'Recorded' : 'Pending')}
-                            </span>
+                          <div className="assess2-scores assess2-scores-stack">
+                            <ScoreRing value={score} label="EGT" />
+                            {bandLabel ? (
+                              <EgtAssuranceBandBadge
+                                label={bandLabel}
+                                visual={assurancePresentation?.visual}
+                              />
+                            ) : (
+                              <span className="muted small">
+                                {row.completedAt ? 'Recorded' : 'Pending'}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td>

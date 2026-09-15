@@ -8,7 +8,7 @@ const PREFIX_BY_PRODUCT: Record<string, string> = {
   VENDOR_PERFORMANCE_ASSURANCE: 'VPA',
   GOVERNANCE_EXECUTIVE_ASSURANCE: 'SGEA',
   CYBER_PHYSICAL_DEPENDENCY: 'CPD',
-  SHIELD360: 'SH360',
+  SHIELD360: 'SH360', // LEGACY ONLY — retired product; prefix retained for historical references
   MOSS: 'MOSS',
 };
 

@@ -8,6 +8,7 @@ import {
 } from '@moss/shared';
 import { CheckCircle2, ChevronRight, FileText, Lock, NotebookPen } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
+import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
 import { Shell } from '@/components/Shell';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -346,6 +347,13 @@ export default function AdvisoryOutcomePage() {
               </div>
             </CardContent>
           </Card>
+
+          {Array.isArray(engagement.advisoryModuleReviews) && engagement.advisoryModuleReviews.length ? (
+            <AdvisoryReportSummaryPreview
+              modules={engagement.advisoryModuleReviews}
+              salesEmail="sales@physicalrisk.com"
+            />
+          ) : null}
 
           {/* Completion summary */}
           {completed ? (

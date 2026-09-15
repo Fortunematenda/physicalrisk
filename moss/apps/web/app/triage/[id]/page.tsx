@@ -111,13 +111,13 @@ function humanizeStatus(value?: string | null) {
     CLOSED: 'Closed',
     NOT_REQUESTED: 'Not requested',
     REQUESTED: 'Requested',
-    IN_PREPARATION: 'In preparation',
+    IN_PREPARATION: 'Prepare proposal',
     SENT: 'Sent',
     ACCEPTED: 'Accepted',
     DECLINED: 'Declined',
     EXPIRED: 'Expired',
     PROPOSAL_REQUESTED: 'Proposal requested',
-    PROPOSAL_IN_PREPARATION: 'In preparation',
+    PROPOSAL_IN_PREPARATION: 'Prepare proposal',
     PROPOSAL_SENT: 'Proposal sent',
     PROPOSAL_ACCEPTED: 'Proposal accepted',
     PROPOSAL_DECLINED: 'Proposal declined',
@@ -265,13 +265,12 @@ function JourneyStage({
   tone: 'success' | 'info' | 'warning' | 'neutral';
 }) {
   const done = tone === 'success';
-  const active = tone === 'info' || tone === 'warning';
   return (
     <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-3">
       <div className="flex items-start gap-2.5">
         {done ? (
           <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
-        ) : active ? (
+        ) : tone === 'info' || tone === 'warning' ? (
           <span
             className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2 border-moss-red bg-moss-red/10"
             aria-hidden="true"
@@ -284,15 +283,18 @@ function JourneyStage({
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{level}</p>
           <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">{title}</p>
-          <p
+          <span
             className={cn(
-              'mt-1 text-xs font-medium',
-              done ? 'text-emerald-700' : active ? 'text-slate-700' : 'text-slate-500',
+              'mt-1.5 inline-flex max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-semibold',
+              done && 'bg-emerald-50 text-emerald-800',
+              tone === 'info' && 'bg-violet-50 text-violet-800',
+              tone === 'warning' && 'bg-amber-50 text-amber-900',
+              tone === 'neutral' && 'bg-slate-100 text-slate-600',
             )}
           >
             {status}
-          </p>
-          {detail ? <p className="mt-0.5 text-[11px] text-slate-400">{detail}</p> : null}
+          </span>
+          {detail ? <p className="mt-1 text-[11px] text-slate-400">{detail}</p> : null}
         </div>
       </div>
     </div>
@@ -768,16 +770,15 @@ export default function TriageSubmissionDetailPage() {
 
   const l2Status = (() => {
     if (isConverted && item?.convertedEngagement) {
-      const st = String(item.convertedEngagement.status || '');
-      if (['REPORT_ISSUED', 'REPORT_GENERATED', 'CLOSED', 'APPROVED', 'SUBMITTED'].includes(st)) {
-        return { label: humanizeStatus(st), tone: 'success' as const };
-      }
-      return { label: humanizeStatus(st) || 'In progress', tone: 'info' as const };
+      return { label: 'Converted to Level 2', tone: 'success' as const };
     }
-    if (['IN_PREPARATION', 'REQUESTED', 'SENT', 'ACCEPTED'].includes(proposalStatus)) {
-      return { label: 'In preparation', tone: 'warning' as const };
+    if (proposalStatus === 'SENT') return { label: 'Proposal sent', tone: 'info' as const };
+    if (proposalStatus === 'ACCEPTED') return { label: 'Proposal accepted', tone: 'success' as const };
+    if (proposalStatus === 'DECLINED') return { label: 'Proposal declined', tone: 'neutral' as const };
+    if (proposalStatus === 'IN_PREPARATION' || proposalStatus === 'REQUESTED') {
+      return { label: 'Prepare proposal', tone: 'warning' as const };
     }
-    if (item?.diagnosticRequestedAt) return { label: 'In preparation', tone: 'warning' as const };
+    if (item?.diagnosticRequestedAt) return { label: 'Prepare proposal', tone: 'warning' as const };
     return { label: 'Not started', tone: 'neutral' as const };
   })();
 
@@ -1006,15 +1007,13 @@ export default function TriageSubmissionDetailPage() {
   const lastActivityAt = item.updatedAt || item.lastProgressAt || item.createdAt;
 
   const l1Detail = item.completedAt ? fmtDate(item.completedAt) : null;
+  // Keep proposal reference alone — do not append status under PRP-… numbers.
   const l2Detail = item.convertedEngagement
     ? [item.convertedEngagement.reference, item.convertedAt ? fmtDate(item.convertedAt) : null]
         .filter(Boolean)
         .join(' · ')
     : item.proposalReference
-      ? `${item.proposalReference} · ${humanizeStatus(proposalStatus)}`
-      : item.diagnosticRequestedAt
-        ? `Requested ${fmtDate(item.diagnosticRequestedAt)}`
-        : null;
+      || (item.diagnosticRequestedAt ? `Requested ${fmtDate(item.diagnosticRequestedAt)}` : null);
   // Level 3 is recommended off the back of Level 2, but is not yet an active workstream.
   const l3StatusLabel = l3Status.label === 'Recommended' ? 'Recommended · Not started' : l3Status.label;
 

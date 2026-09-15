@@ -10,6 +10,10 @@ export * from './scl-money-ranges';
 export * from './scl-public-triage';
 export * from './egt-assurance-scoring';
 export * from './egt-qualification-fields';
+export * from './ead-diagnostic-scoring';
+export * from './ead-business-consequences';
+export * from './ead-rich-text';
+export * from './ead-report-summary';
 
 export * from './product-architecture';
 export * from './ead-routing';

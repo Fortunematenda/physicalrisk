@@ -8,14 +8,13 @@ export const ADVISORY_ROUTE_PRIORITY_LABELS: Record<AdvisoryRoutePriority, strin
   OPTIONAL: 'Optional',
 };
 
-/** Level 3 products selectable from EAD routing (excludes EAD itself). */
+/** Level 3 products selectable from EAD routing (excludes EAD itself and retired products). */
 export const EAD_ROUTING_PRODUCT_CODES = [
   'SCLI_COST_LEAKAGE',
   'CONTRACT_SLA_ASSURANCE',
   'VENDOR_PERFORMANCE_ASSURANCE',
   'GOVERNANCE_EXECUTIVE_ASSURANCE',
   'CYBER_PHYSICAL_DEPENDENCY',
-  'SHIELD360',
 ] as const;
 
 export type EadRoutingProductCode = (typeof EAD_ROUTING_PRODUCT_CODES)[number];
