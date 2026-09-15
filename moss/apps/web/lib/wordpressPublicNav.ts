@@ -34,8 +34,8 @@ export function defaultWordpressPublicNav(base = wordpressBaseUrl()): WordpressP
     tagline: 'Independent, Accredited & Experienced Security Risk Professionals',
     phoneLabel: '+27 82 410 9305',
     phoneHref: 'tel:+27824109305',
-    emailLabel: 'info@physicalrisk.com',
-    emailHref: 'mailto:info@physicalrisk.com',
+    emailLabel: 'sales@physicalrisk.com',
+    emailHref: 'mailto:sales@physicalrisk.com',
   };
 }
 

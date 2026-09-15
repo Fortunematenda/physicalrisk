@@ -13,6 +13,7 @@ import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { apiFetch } from '@/lib/api';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
+import { useToast } from '@/components/ui/toast';
 
 const LABELS: Record<string, string> = {
   EXECUTIVE_ADVISORY_DIAGNOSTIC: 'Executive Advisory Diagnostic',
@@ -51,8 +52,8 @@ type AdvisoryRow = {
 
 export default function AdvisoryPage() {
   const confirm = useConfirm();
+  const { toast } = useToast();
   const [items, setItems] = useState<AdvisoryRow[]>([]);
-  const [error, setError] = useState('');
   const [filter, setFilter] = useState('ALL');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -61,10 +62,14 @@ export default function AdvisoryPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
 
+  const showError = (description: string, title = 'Unable to continue') => {
+    toast({ title, description, variant: 'error' });
+  };
+
   const load = () =>
     apiFetch<AdvisoryRow[]>('/advisory')
       .then(setItems)
-      .catch((e: Error) => setError(e.message));
+      .catch((e: Error) => showError(e.message, 'Unable to load engagements'));
 
   useEffect(() => {
     void load();
@@ -86,11 +91,10 @@ export default function AdvisoryPage() {
     if (!editing) return;
     const title = editTitle.trim();
     if (title.length < 2) {
-      setError('Engagement title must be at least 2 characters.');
+      showError('Engagement title must be at least 2 characters.', 'Invalid title');
       return;
     }
     setSavingEdit(true);
-    setError('');
     try {
       await apiFetch(`/advisory/${editing.id}`, {
         method: 'PATCH',
@@ -98,8 +102,9 @@ export default function AdvisoryPage() {
       });
       setItems((prev) => prev.map((item) => (item.id === editing.id ? { ...item, title } : item)));
       setEditing(null);
+      toast({ title: 'Engagement updated', variant: 'success' });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unable to update engagement.');
+      showError(err instanceof Error ? err.message : 'Unable to update engagement.');
     } finally {
       setSavingEdit(false);
     }
@@ -115,13 +120,13 @@ export default function AdvisoryPage() {
     if (!ok) return;
     setMenuOpenId(null);
     setBusyId(row.id);
-    setError('');
     try {
       await apiFetch(`/advisory/${row.id}`, { method: 'DELETE' });
       setItems((prev) => prev.filter((item) => item.id !== row.id));
       if (editing?.id === row.id) setEditing(null);
+      toast({ title: 'Engagement deleted', variant: 'success' });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Unable to delete engagement.');
+      showError(err instanceof Error ? err.message : 'Unable to delete engagement.', 'Delete failed');
     } finally {
       setBusyId(null);
     }
@@ -141,7 +146,6 @@ export default function AdvisoryPage() {
             <Link href="/advisory/new">+ New engagement</Link>
           </Button>
         </div>
-        {error ? <p className="error">{error}</p> : null}
 
         {editing ? (
           <Card className="mb-4 max-w-2xl rounded-xl border-slate-200 shadow-sm">

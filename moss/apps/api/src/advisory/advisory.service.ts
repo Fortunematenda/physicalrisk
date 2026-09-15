@@ -1337,25 +1337,35 @@ export class AdvisoryService {
           select: {
             routes: {
               where: { createdAssessmentId: { not: null } },
-              select: { createdAssessmentId: true },
+              select: {
+                createdAssessmentId: true,
+                createdAssessment: { select: { reference: true, productCode: true } },
+              },
             },
           },
         },
-        reassessments: { select: { id: true } },
+        reassessments: { select: { id: true, reference: true, productCode: true } },
       },
     });
     if (!existing || !ADVISORY_PRODUCTS.has(existing.productCode)) {
       throw new NotFoundException('Advisory engagement not found.');
     }
-    if (existing.reassessments.length > 0) {
-      throw new BadRequestException('Cannot delete an engagement that has linked follow-on work.');
-    }
-    const spawned = existing.diagnosticOutcome?.routes?.length || 0;
-    if (spawned > 0) {
-      throw new BadRequestException('Cannot delete an engagement after Level 3 work has been created from it.');
+
+    const spawned = existing.diagnosticOutcome?.routes || [];
+    if (spawned.length > 0) {
+      const refs = spawned
+        .map((r) => r.createdAssessment?.reference)
+        .filter(Boolean)
+        .join(', ');
+      throw new BadRequestException(
+        refs
+          ? `Cannot delete this engagement because Level 3 work was created from it (${refs}). Delete or archive those engagements first.`
+          : 'Cannot delete an engagement after Level 3 work has been created from it.',
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {
+      // Soft-detach any child sessions that only pointed at this parent.
       await tx.assessmentSession.updateMany({
         where: { parentAssessmentId: id },
         data: { parentAssessmentId: null },
@@ -1376,7 +1386,11 @@ export class AdvisoryService {
       action: 'DELETE',
       entityType: 'AssessmentSession',
       entityId: id,
-      metadata: { reference: existing.reference, productCode: existing.productCode },
+      metadata: {
+        reference: existing.reference,
+        productCode: existing.productCode,
+        unlinkedChildren: existing.reassessments.map((r) => r.reference),
+      },
     });
 
     return {

@@ -204,7 +204,7 @@
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
-      CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-info@physicalrisk.com}
+      CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-sales@physicalrisk.com}
       CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
       CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}
       CONTACT_ALLOWED_ORIGINS: ${CONTACT_ALLOWED_ORIGINS:-https://test.physicalrisk.com,https://physicalrisk.com,https://www.physicalrisk.com}

@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 
 const PRODUCTS = [
@@ -22,11 +23,11 @@ const PRODUCTS = [
 
 export default function NewAdvisory() {
   const router = useRouter();
+  const { toast } = useToast();
   const [orgs, setOrgs] = useState<any[]>([]);
   const [organisationId, setOrg] = useState('');
   const [productCode, setProduct] = useState('EXECUTIVE_ADVISORY_DIAGNOSTIC');
   const [title, setTitle] = useState('');
-  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -35,12 +36,17 @@ export default function NewAdvisory() {
         setOrgs(x);
         if (x[0]) setOrg(x[0].id);
       })
-      .catch((e) => setError(e.message));
-  }, []);
+      .catch((e: Error) =>
+        toast({
+          title: 'Unable to load organisations',
+          description: e.message,
+          variant: 'error',
+        }),
+      );
+  }, [toast]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setError('');
     setBusy(true);
     try {
       if (productCode === 'SCLI_COST_LEAKAGE') {
@@ -57,7 +63,11 @@ export default function NewAdvisory() {
       });
       router.push(`/advisory/${a.id}`);
     } catch (err: any) {
-      setError(err.message);
+      toast({
+        title: 'Unable to create engagement',
+        description: err.message || 'Please try again.',
+        variant: 'error',
+      });
     } finally {
       setBusy(false);
     }
@@ -66,7 +76,6 @@ export default function NewAdvisory() {
   return (
     <AuthGate>
       <Shell title="New advisory engagement">
-        {error ? <p className="error">{error}</p> : null}
         <Card className="max-w-3xl rounded-xl border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle>Product journey</CardTitle>

@@ -164,7 +164,7 @@ export class ContactService {
     programmeInterest: string; description: string; source: string; createdAt: Date;
   }, leadId: string | null): Promise<string> {
     const job = await this.email.enqueue({
-      recipient: this.config.get<string>('CONTACT_NOTIFICATION_TO') || 'info@physicalrisk.com',
+      recipient: this.config.get<string>('CONTACT_NOTIFICATION_TO') || 'sales@physicalrisk.com',
       subject: `New MOSS assessment enquiry – ${row.organisation}`,
       template: 'website_contact_enquiry', relatedType: 'ContactSubmission', relatedId: row.id,
       payload: {

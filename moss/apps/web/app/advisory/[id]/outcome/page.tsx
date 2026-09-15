@@ -10,13 +10,13 @@ import { CheckCircle2, ChevronRight, FileText, Lock, NotebookPen } from 'lucide-
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
 import { Shell } from '@/components/Shell';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -128,10 +128,10 @@ function RationaleBlock({ text }: { text: string }) {
 
 export default function AdvisoryOutcomePage() {
   const { id } = useParams<{ id: string }>();
+  const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [notes, setNotes] = useState('');
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -142,22 +142,37 @@ export default function AdvisoryOutcomePage() {
   }, [id]);
 
   useEffect(() => {
-    void load().catch((e) => setError(e.message));
-  }, [load]);
+    void load()
+      .then(() => setLoadFailed(false))
+      .catch((e: Error) => {
+        setLoadFailed(true);
+        toast({
+          title: 'Unable to load outcome',
+          description: e.message,
+          variant: 'error',
+        });
+      });
+  }, [load, toast]);
 
   async function commercialAction(action: string) {
     setBusy(true);
-    setError('');
-    setNotice('');
     try {
       await apiFetch(`/advisory/${id}/commercial-proposal`, {
         method: 'POST',
         body: JSON.stringify({ action, commercialAdminNotes: notes }),
       });
-      setNotice(`Commercial status updated (${action.toLowerCase()}).`);
+      toast({
+        title: 'Commercial status updated',
+        description: `Action: ${action.toLowerCase()}.`,
+        variant: 'success',
+      });
       await load();
     } catch (e: any) {
-      setError(e.message);
+      toast({
+        title: 'Unable to update commercial status',
+        description: e.message,
+        variant: 'error',
+      });
     } finally {
       setBusy(false);
     }
@@ -165,18 +180,22 @@ export default function AdvisoryOutcomePage() {
 
   async function createEngagement(routeId: string) {
     setBusy(true);
-    setError('');
-    setNotice('');
     try {
       const r = await apiFetch<any>(`/advisory/${id}/routes/${routeId}/create-engagement`, { method: 'POST' });
-      setNotice(
-        r.created
-          ? `Level 3 engagement ${r.engagement.reference} created.`
-          : `Engagement ${r.engagement.reference} already exists.`,
-      );
+      toast({
+        title: r.created ? 'Level 3 engagement created' : 'Engagement already exists',
+        description: r.engagement?.reference
+          ? `Reference ${r.engagement.reference}.`
+          : undefined,
+        variant: 'success',
+      });
       await load();
     } catch (e: any) {
-      setError(e.message);
+      toast({
+        title: 'Unable to create engagement',
+        description: e.message,
+        variant: 'error',
+      });
     } finally {
       setBusy(false);
     }
@@ -193,11 +212,18 @@ export default function AdvisoryOutcomePage() {
     return (
       <AuthGate>
         <Shell title="Diagnostic outcome">
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to load outcome</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          {loadFailed ? (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardHeader>
+                <CardTitle>Unable to load outcome</CardTitle>
+                <CardDescription>Check the toast notification for details, then retry.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button type="button" variant="outline" onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
             <div className="space-y-3">
               <Skeleton className="h-28 w-full rounded-xl" />
@@ -230,19 +256,6 @@ export default function AdvisoryOutcomePage() {
     <AuthGate>
       <Shell title={`Diagnostic outcome · ${engagement.reference}`} hideSearch>
         <div className="outcome-workspace space-y-4 pb-8">
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to continue</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
-          {notice ? (
-            <Alert className="border-emerald-200 bg-emerald-50 text-emerald-950">
-              <AlertTitle>Updated</AlertTitle>
-              <AlertDescription>{notice}</AlertDescription>
-            </Alert>
-          ) : null}
-
           {/* 1. Page header — completed treatment from persisted status */}
           <Card
             className={cn(

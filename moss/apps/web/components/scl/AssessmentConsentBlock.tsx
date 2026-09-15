@@ -37,7 +37,7 @@ export function AssessmentConsentBlock({
       </label>
       <p className="scl-exec-consent-note">
         Your information is used for the stated purposes. You may request access, correction or deletion
-        by emailing info@physicalrisk.com.
+        by emailing sales@physicalrisk.com.
       </p>
     </div>
   );

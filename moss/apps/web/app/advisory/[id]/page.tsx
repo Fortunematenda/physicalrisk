@@ -292,7 +292,7 @@ export default function AdvisoryDetail() {
   const [modules, setModules] = useState<ModuleReview[]>([]);
   const [confirmedRoutes, setConfirmedRoutes] = useState<ConfirmedRoute[]>([]);
   const [analysts, setAnalysts] = useState<any[]>([]);
-  const [error, setError] = useState('');
+  const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingModule, setSavingModule] = useState(false);
   const [activeCode, setActiveCode] = useState<string>('');
@@ -355,9 +355,18 @@ export default function AdvisoryDetail() {
   }, [id]);
 
   useEffect(() => {
-    void load().catch((e) => setError(e.message));
+    void load()
+      .then(() => setLoadFailed(false))
+      .catch((e: Error) => {
+        setLoadFailed(true);
+        toast({
+          title: 'Unable to load engagement',
+          description: e.message,
+          variant: 'error',
+        });
+      });
     apiFetch<any[]>('/admin/users/analysts').then(setAnalysts).catch(() => []);
-  }, [load]);
+  }, [load, toast]);
 
   useEffect(() => {
     return () => {
@@ -575,7 +584,6 @@ export default function AdvisoryDetail() {
   }
 
   async function saveModule(moduleCode: string) {
-    setError('');
     try {
       await persistSingleModule(moduleCode);
       toast({
@@ -651,7 +659,6 @@ export default function AdvisoryDetail() {
   }
 
   async function saveAllModules() {
-    setError('');
     setBusy(true);
     setSavingModule(true);
     try {
@@ -717,7 +724,6 @@ export default function AdvisoryDetail() {
 
   async function assign(userId: string) {
     if (!userId) return;
-    setError('');
     setAssigning(true);
     try {
       await apiFetch(`/advisory/${id}/assign`, {
@@ -746,7 +752,6 @@ export default function AdvisoryDetail() {
   }
 
   async function runComplete() {
-    setError('');
     setBusy(true);
     try {
       if (locked) {
@@ -835,7 +840,6 @@ export default function AdvisoryDetail() {
   }
 
   async function generateReport() {
-    setError('');
     setBusy(true);
     try {
       if (!locked) {
@@ -884,11 +888,18 @@ export default function AdvisoryDetail() {
     return (
       <AuthGate>
         <Shell title="Advisory engagement">
-          {error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to load</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          {loadFailed ? (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardHeader>
+                <CardTitle>Unable to load engagement</CardTitle>
+                <CardDescription>Check the toast notification for details, then retry.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button type="button" variant="outline" onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
             <div className="space-y-3 p-4">
               <Skeleton className="h-24 w-full rounded-xl" />
@@ -1075,13 +1086,6 @@ export default function AdvisoryDetail() {
               </div>
             </div>
           </div>
-
-          {error ? (
-            <Alert variant="destructive" className="mb-4">
-              <AlertTitle>Unable to continue</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
 
           {!modules.length ? (
             <Card className="rounded-xl border-slate-200 shadow-sm">

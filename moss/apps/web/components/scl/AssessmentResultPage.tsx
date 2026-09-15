@@ -80,7 +80,7 @@ export function AssessmentResultPage({ result, onEmailHint }: Props) {
               <small>
                 Independent Executive Security Advisory
                 <br />
-                physicalrisk.com · info@physicalrisk.com
+                physicalrisk.com · sales@physicalrisk.com
               </small>
             </div>
           </div>
