@@ -37,7 +37,6 @@ import { RichTextField } from '@/components/advisory/RichTextField';
 import { flushAllRichTextEditors } from '@/components/ui/rich-text-editor';
 import { useConfirm } from '@/components/confirm-dialog';
 import { Shell } from '@/components/Shell';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1352,14 +1351,6 @@ export default function AdvisoryDetail() {
                           </div>
                           <div className="space-y-1.5">
                             <Label>Recommended next product</Label>
-                            {isLegacyShield360ProductCode(activeModule.recommendedProduct) ? (
-                              <Alert variant="destructive" className="mb-2">
-                                <AlertTitle>Legacy recommendation — Shield 360</AlertTitle>
-                                <AlertDescription>
-                                  {SHIELD360_DRAFT_CORRECTION_MESSAGE}
-                                </AlertDescription>
-                              </Alert>
-                            ) : null}
                             <FilterSelect
                               value={
                                 isLegacyShield360ProductCode(activeModule.recommendedProduct)
