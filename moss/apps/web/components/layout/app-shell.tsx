@@ -18,8 +18,12 @@ export type AppShellProps = {
   children: React.ReactNode;
   /** Optional page controls shown in the header before utilities (not a replacement for the top nav) */
   actions?: React.ReactNode;
+  /** Optional left-side header content (breadcrumb) — replaces title when set. */
+  headerLeading?: React.ReactNode;
   searchPlaceholder?: string;
   hideSearch?: boolean;
+  /** Omit title/subtitle from the top nav — use an in-page header instead. */
+  hideTitle?: boolean;
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
@@ -41,8 +45,10 @@ export function AppShellFrame({
   subtitle,
   children,
   actions,
+  headerLeading,
   searchPlaceholder = 'Search…',
   hideSearch = false,
+  hideTitle = false,
   onSearch,
   searchValue,
   notificationCount,
@@ -104,8 +110,10 @@ export function AppShellFrame({
           title={title}
           subtitle={subtitle}
           actions={actions}
+          headerLeading={headerLeading}
           searchPlaceholder={searchPlaceholder}
           hideSearch={hideSearch}
+          hideTitle={hideTitle}
           onSearch={onSearch}
           searchValue={searchValue}
           onMenuClick={() => setMobileOpen(true)}
@@ -132,8 +140,10 @@ export function AppShell({
   subtitle,
   children,
   actions,
+  headerLeading,
   searchPlaceholder = 'Search…',
   hideSearch = false,
+  hideTitle = false,
   onSearch,
   searchValue,
   notificationCount,
@@ -148,8 +158,10 @@ export function AppShell({
       title,
       subtitle,
       actions,
+      headerLeading,
       searchPlaceholder,
       hideSearch,
+      hideTitle,
       onSearch,
       searchValue,
       notificationCount,
@@ -160,8 +172,10 @@ export function AppShell({
     title,
     subtitle,
     actions,
+    headerLeading,
     searchPlaceholder,
     hideSearch,
+    hideTitle,
     onSearch,
     searchValue,
     notificationCount,
@@ -177,8 +191,10 @@ export function AppShell({
       title={title}
       subtitle={subtitle}
       actions={actions}
+      headerLeading={headerLeading}
       searchPlaceholder={searchPlaceholder}
       hideSearch={hideSearch}
+      hideTitle={hideTitle}
       onSearch={onSearch}
       searchValue={searchValue}
       notificationCount={notificationCount}

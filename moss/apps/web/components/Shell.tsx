@@ -12,10 +12,12 @@ export function Shell({
   subtitle,
   children,
   actions,
+  headerLeading,
   hideEyebrow: _hideEyebrow,
   eyebrow: _eyebrow,
   searchPlaceholder,
   hideSearch,
+  hideTitle,
   onSearch,
   searchValue,
   notificationCount,
@@ -25,10 +27,12 @@ export function Shell({
   subtitle?: string;
   children: React.ReactNode;
   actions?: React.ReactNode;
+  headerLeading?: React.ReactNode;
   hideEyebrow?: boolean;
   eyebrow?: string;
   searchPlaceholder?: string;
   hideSearch?: boolean;
+  hideTitle?: boolean;
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
@@ -39,7 +43,9 @@ export function Shell({
       title={title}
       subtitle={subtitle}
       actions={actions}
+      headerLeading={headerLeading}
       hideSearch={hideSearch}
+      hideTitle={hideTitle}
       searchPlaceholder={searchPlaceholder}
       onSearch={onSearch}
       searchValue={searchValue}

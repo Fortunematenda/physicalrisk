@@ -29,6 +29,13 @@ type StatCardProps = {
   loading?: boolean;
   error?: string;
   onRetry?: () => void;
+  /** Allow title/description to wrap instead of truncating with ellipsis */
+  textWrap?: boolean;
+  /**
+   * stack — title full width on top, then icon + value side by side (no description).
+   * default — icon left, title/value/description stacked on the right.
+   */
+  layout?: 'default' | 'stack';
   className?: string;
 };
 
@@ -62,6 +69,8 @@ export function StatCard({
   loading = false,
   error,
   onRetry,
+  textWrap = false,
+  layout = 'default',
   className,
 }: StatCardProps) {
   if (error) {
@@ -90,6 +99,46 @@ export function StatCard({
     typeof value === 'string' &&
     !/^\d[\d,]*(?:\.\d+)?%?$/.test(value.trim());
 
+  if (layout === 'stack') {
+    return (
+      <Card className={cn('h-full min-h-[96px] min-w-0 rounded-xl border-slate-200 bg-white shadow-sm', className)}>
+        <CardContent className="flex h-full min-h-[96px] flex-col justify-center gap-3 p-4">
+          <p
+            className={cn(
+              'w-full text-[13px] font-medium text-slate-500',
+              textWrap ? 'leading-snug' : 'truncate',
+            )}
+          >
+            {title}
+          </p>
+          <div className="flex items-center gap-3">
+            <div
+              className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-xl',
+                toneStyle.wrap,
+                toneStyle.icon,
+              )}
+            >
+              <Icon className="size-5" aria-hidden="true" />
+            </div>
+            {loading ? (
+              <Skeleton className="h-8 w-14" />
+            ) : (
+              <p
+                className={cn(
+                  'font-bold tracking-tight text-slate-900',
+                  compactValue ? 'text-base leading-snug' : 'text-[1.75rem] leading-none',
+                )}
+              >
+                {value}
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className={cn('h-full min-h-[108px] min-w-0 rounded-xl border-slate-200 bg-white shadow-sm', className)}>
       <CardContent className="flex h-full min-h-[108px] items-center gap-3.5 p-4 sm:p-5">
@@ -104,7 +153,14 @@ export function StatCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-slate-500">{title}</p>
+          <p
+            className={cn(
+              'text-[13px] font-medium text-slate-500',
+              textWrap ? 'leading-snug' : 'truncate',
+            )}
+          >
+            {title}
+          </p>
 
           {loading ? (
             <Skeleton className="mt-1 h-7 w-16" />
@@ -114,7 +170,8 @@ export function StatCard({
                 'mt-0.5 font-bold tracking-tight text-slate-900',
                 compactValue
                   ? 'text-sm leading-snug sm:text-base'
-                  : 'truncate text-[1.75rem] leading-none',
+                  : 'text-[1.75rem] leading-none',
+                !textWrap && !compactValue && 'truncate',
               )}
             >
               {value}
@@ -137,8 +194,9 @@ export function StatCard({
           ) : description ? (
             <p
               className={cn(
-                'mt-2.5 truncate text-xs font-medium',
+                'mt-2.5 text-xs font-medium leading-snug',
                 trendTone === 'down' ? 'text-[#dc2626]' : 'text-slate-400',
+                !textWrap && 'truncate',
               )}
             >
               {description}

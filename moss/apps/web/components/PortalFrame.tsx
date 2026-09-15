@@ -23,7 +23,9 @@ function PersistentShell({ children }: { children: React.ReactNode }) {
       title={chrome?.title || 'Physical Risk'}
       subtitle={chrome?.subtitle}
       actions={chrome?.actions}
+      headerLeading={chrome?.headerLeading}
       hideSearch={chrome?.hideSearch}
+      hideTitle={chrome?.hideTitle}
       searchPlaceholder={chrome?.searchPlaceholder}
       onSearch={chrome?.onSearch}
       searchValue={chrome?.searchValue}

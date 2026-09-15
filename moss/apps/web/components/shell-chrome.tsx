@@ -13,8 +13,12 @@ export type ShellChromeState = {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  /** Optional left-side header content (e.g. breadcrumb) replacing the page title. */
+  headerLeading?: ReactNode;
   searchPlaceholder?: string;
   hideSearch?: boolean;
+  /** When true, page title/subtitle are omitted from the top nav (render them in page content instead). */
+  hideTitle?: boolean;
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
@@ -32,6 +36,7 @@ const DEFAULT_CHROME: ShellChromeState = {
   title: 'Physical Risk',
   subtitle: undefined,
   hideSearch: false,
+  hideTitle: false,
   searchPlaceholder: 'Search…',
 };
 
@@ -42,11 +47,13 @@ export function ShellChromeProvider({ children }: { children: ReactNode }) {
     setChromeState((prev) => ({
       ...prev,
       actions: undefined,
+      headerLeading: undefined,
       onSearch: undefined,
       searchValue: undefined,
       notificationCount: undefined,
       mailCount: undefined,
       hideSearch: false,
+      hideTitle: false,
       searchPlaceholder: 'Search…',
       subtitle: undefined,
       ...patch,

@@ -7,14 +7,20 @@ import { isSclActiveTriageQuestionCode, SCL_ACTIVE_TRIAGE_QUESTION_CODES, derive
 import {
   AlertCircle,
   ArrowRight,
-  Bell,
+  Briefcase,
+  Building2,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Circle,
-  Loader2,
+  Crosshair,
+  Factory,
+  FileText,
   Mail,
+  MapPin,
   Phone,
+  User,
+  type LucideIcon,
 } from 'lucide-react';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
 import { IconMoreVertical } from '@/components/NavIcons';
@@ -50,9 +56,29 @@ function parseTabId(value: string | null): TabId {
 
 const TOTAL_TRIAGE_QUESTIONS = SCL_ACTIVE_TRIAGE_QUESTION_CODES.length;
 
+/**
+ * Canonical questionnaire order. The active set skips Q7, Q14, Q16, Q18 and Q19 —
+ * those codes are retired by design (see SCL_RETIRED_TRIAGE_QUESTION_CODES) and are
+ * kept in the database for history only. A missing Q7 row here is not a data bug.
+ */
+const TRIAGE_QUESTION_ORDER = new Map<string, number>(
+  SCL_ACTIVE_TRIAGE_QUESTION_CODES.map((code, index) => [code, index]),
+);
+
+function triageQuestionRank(code?: string | null) {
+  const rank = TRIAGE_QUESTION_ORDER.get(String(code || ''));
+  return rank == null ? Number.MAX_SAFE_INTEGER : rank;
+}
+
 function fmt(value?: string | null) {
   if (!value) return '—';
   return new Date(value).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** Date-only variant for the compact journey stepper captions. */
+function fmtDate(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('en-ZA', { dateStyle: 'medium' });
 }
 
 /** Prospect-facing assurance presentation from stored exposure snapshot. */
@@ -117,6 +143,8 @@ function normalizePrimaryCta(
   activeProposal?: { documentStorageKey?: string | null } | null,
 ) {
   if (!cta || cta.kind === 'none') return null;
+  // Header CTA wording is fixed for the Level 2 hand-off regardless of the API label.
+  if (cta.kind === 'open_level2') return { ...cta, label: 'Open Level 2 Diagnostic' };
   if (cta.kind === 'open_proposal' || cta.kind === 'prepare_proposal' || cta.kind === 'upload_proposal') {
     if (activeProposal?.documentStorageKey) {
       return { kind: 'send_proposal', label: 'Send proposal' };
@@ -164,11 +192,23 @@ function CategoryBars({ items }: { items: Array<{ category: string; score: numbe
   );
 }
 
-function Kv({ label, children }: { label: string; children: ReactNode }) {
+/** Compact icon + label + value row used by the Overview "Key information" rail card. */
+function InfoRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="grid gap-1 border-b border-slate-100 py-2 last:border-0 sm:grid-cols-[140px_1fr] sm:gap-4">
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="text-sm text-slate-900">{children}</dd>
+    <div className="flex items-start gap-2.5">
+      <Icon className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+        <div className="mt-0.5 break-words text-sm font-medium text-slate-800">{children}</div>
+      </div>
     </div>
   );
 }
@@ -215,27 +255,108 @@ function JourneyStage({
   level,
   title,
   status,
+  detail,
   tone,
 }: {
   level: string;
   title: string;
   status: string;
+  detail?: string | null;
   tone: 'success' | 'info' | 'warning' | 'neutral';
 }) {
+  const done = tone === 'success';
+  const active = tone === 'info' || tone === 'warning';
   return (
-    <div className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{level}</p>
-      <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">{title}</p>
-      <Badge
-        variant={
-          tone === 'success' ? 'success' : tone === 'info' ? 'info' : tone === 'warning' ? 'warning' : 'secondary'
-        }
-        className="mt-1.5 shrink-0 whitespace-nowrap"
-      >
-        {status}
-      </Badge>
+    <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-3">
+      <div className="flex items-start gap-2.5">
+        {done ? (
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden="true" />
+        ) : active ? (
+          <span
+            className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2 border-moss-red bg-moss-red/10"
+            aria-hidden="true"
+          >
+            <span className="size-1.5 rounded-full bg-moss-red" />
+          </span>
+        ) : (
+          <Circle className="mt-0.5 size-4 shrink-0 text-slate-300" aria-hidden="true" />
+        )}
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{level}</p>
+          <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">{title}</p>
+          <p
+            className={cn(
+              'mt-1 text-xs font-medium',
+              done ? 'text-emerald-700' : active ? 'text-slate-700' : 'text-slate-500',
+            )}
+          >
+            {status}
+          </p>
+          {detail ? <p className="mt-0.5 text-[11px] text-slate-400">{detail}</p> : null}
+        </div>
+      </div>
     </div>
   );
+}
+
+function OrgAvatar({ name }: { name: string }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() || '')
+    .join('') || 'OR';
+  return (
+    <span
+      className="inline-flex size-14 shrink-0 items-center justify-center rounded-full bg-sky-100 text-base font-bold tracking-wide text-sky-700"
+      aria-hidden="true"
+    >
+      {initials}
+    </span>
+  );
+}
+
+function relativeActivity(value?: string | null) {
+  if (!value) return '—';
+  const diff = Date.now() - new Date(value).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${Math.max(mins, 1)}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return fmt(value);
+}
+
+function primaryEmailOnly(raw?: string | null) {
+  if (!raw) return '';
+  return raw.split(/[,;]+/).map((p) => p.trim()).filter(Boolean)[0] || raw.trim();
+}
+
+/** Single state-aware "next recommended action" shown on the Overview tab. */
+type NextAction = {
+  title: string;
+  body: string;
+  badge?: { label: string; variant: 'success' | 'warning' | 'info' | 'secondary' };
+  href?: string;
+  actionLabel?: string;
+  onClickKind?: 'create_level2' | 'commercial' | 'communications' | 'assign';
+};
+
+function assuranceInterpretation(bandCode?: string | null, bandLabel?: string | null) {
+  const map: Record<string, string> = {
+    STRONG_ASSURANCE:
+      'Strong assurance — governance foundations appear sound across the Level 1 dimensions, with limited material gaps indicated.',
+    MODERATE_ASSURANCE:
+      'Moderate assurance — governance foundations exist, but material verification gaps remain.',
+    SIGNIFICANT_IMPROVEMENT_REQUIRED:
+      'Improvement required — several governance dimensions indicate material gaps that warrant follow-up.',
+    REQUIRES_PRIORITY_INTERVENTION:
+      'Priority intervention — Level 1 indication suggests urgent follow-up on critical governance gaps.',
+  };
+  if (bandCode && map[bandCode]) return map[bandCode];
+  if (bandLabel) return `${bandLabel} — review the dimension breakdown for follow-up priorities.`;
+  return 'Complete the questionnaire to generate a Level 1 assurance indication.';
 }
 
 export default function TriageSubmissionDetailPage() {
@@ -255,6 +376,17 @@ export default function TriageSubmissionDetailPage() {
   const [commercialOwners, setCommercialOwners] = useState<any[]>([]);
   const [leadMenuOpen, setLeadMenuOpen] = useState(false);
   const proposalFileRef = useRef<HTMLInputElement>(null);
+  const analystFieldRef = useRef<HTMLDivElement>(null);
+
+  const focusAnalystField = useCallback(() => {
+    const el = analystFieldRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('rounded-lg', 'ring-2', 'ring-moss-red', 'ring-offset-2');
+    window.setTimeout(() => {
+      el.classList.remove('rounded-lg', 'ring-2', 'ring-moss-red', 'ring-offset-2');
+    }, 2200);
+  }, []);
 
   // Keep local tab in sync when URL changes externally (back/forward, deep links).
   useEffect(() => {
@@ -604,7 +736,9 @@ export default function TriageSubmissionDetailPage() {
     Boolean(item) && (proposalStatus !== 'NOT_REQUESTED' || Boolean(item?.diagnosticRequestedAt));
 
   const responseRows = useMemo(() => {
-    return (item?.responses || []).filter((row: any) => isSclActiveTriageQuestionCode(row.question?.code));
+    return (item?.responses || [])
+      .filter((row: any) => isSclActiveTriageQuestionCode(row.question?.code))
+      .sort((a: any, b: any) => triageQuestionRank(a.question?.code) - triageQuestionRank(b.question?.code));
   }, [item]);
 
   const filteredResponses = useMemo(() => {
@@ -656,57 +790,130 @@ export default function TriageSubmissionDetailPage() {
     return { label: 'Not started', tone: 'neutral' as const };
   })();
 
-  const recommendedAction = (() => {
+  const recommendedAction: NextAction | null = (() => {
     if (!item) return null;
+
     if (item.closedAt && !isConverted) {
       return {
         title: 'Lead closed',
         body: 'This triage lead is closed. Use Reopen lead in the ⋮ menu if you want to continue.',
         badge: { label: 'Closed', variant: 'secondary' as const },
-      };
+      } satisfies NextAction;
     }
-    if (isConverted && item.convertedEngagement?.id) {
+
+    const engagementId = item.convertedEngagement?.id as string | undefined;
+    const engagementStatus = String(item.convertedEngagement?.status || '').toUpperCase();
+
+    if (isConverted && engagementId) {
       if (!analystName) {
         return {
-          title: 'Executive Advisory Diagnostic',
-          body: 'Level 2 has been created. Assign a consultant before continuing the diagnostic.',
+          title: 'Assign a consultant',
+          body: 'Level 2 has been created. Assign an analyst before continuing the diagnostic.',
           badge: { label: 'Assign consultant', variant: 'warning' as const },
-        };
+          onClickKind: 'assign',
+          actionLabel: 'Assign analyst',
+        } satisfies NextAction;
+      }
+      if (['SUBMITTED', 'AWAITING_REVIEW'].includes(engagementStatus)) {
+        return {
+          title: 'Review Executive Advisory Diagnostic',
+          body: 'Level 2 diagnostic submitted and ready for analyst review.',
+          badge: { label: 'Submitted', variant: 'success' as const },
+          href: `/advisory/${engagementId}`,
+          actionLabel: 'View Level 2 Diagnostic',
+        } satisfies NextAction;
+      }
+      if (['UNDER_REVIEW', 'IN_REVIEW', 'REVIEW'].includes(engagementStatus)) {
+        return {
+          title: 'Complete analyst review',
+          body: 'Finish the analyst review of the Level 2 diagnostic.',
+          badge: { label: humanizeStatus(engagementStatus), variant: 'warning' as const },
+          href: `/advisory/${engagementId}`,
+          actionLabel: 'Review Level 2 Diagnostic',
+        } satisfies NextAction;
+      }
+      if (['COMPLETED', 'APPROVED', 'REPORT_GENERATED', 'REPORT_ISSUED', 'CLOSED'].includes(engagementStatus)) {
+        return {
+          title: 'Determine Level 3 assurance pathway',
+          body: 'Level 2 is complete. Review outcomes and decide the Level 3 assurance route.',
+          badge: { label: humanizeStatus(engagementStatus), variant: 'success' as const },
+          href: `/advisory/${engagementId}`,
+          actionLabel: 'View Level 2 Diagnostic',
+        } satisfies NextAction;
       }
       return {
-        title: 'Executive Advisory Diagnostic',
-        body: `${analystName} is assigned. Continue the Level 2 diagnostic from the header action.`,
-        badge: { label: l2Status.label, variant: l2Status.tone },
-      };
+        title: 'Continue Executive Advisory Diagnostic',
+        body: `${analystName} is assigned. Continue the Level 2 diagnostic.`,
+        badge: { label: l2Status.label, variant: l2Status.tone === 'neutral' ? 'secondary' : l2Status.tone },
+        href: `/advisory/${engagementId}`,
+        actionLabel: 'View Level 2 Diagnostic',
+      } satisfies NextAction;
     }
+
+    if (proposalStatus === 'ACCEPTED' && !isConverted && !item.closedAt) {
+      return {
+        title: 'Create Executive Advisory Diagnostic',
+        body: 'Proposal accepted. Create the Level 2 diagnostic to continue the client journey.',
+        badge: { label: 'Ready for Level 2', variant: 'success' as const },
+        onClickKind: 'create_level2',
+        actionLabel: 'Create Level 2 Diagnostic',
+      } satisfies NextAction;
+    }
+
+    if (['SENT', 'IN_PREPARATION', 'REQUESTED'].includes(proposalStatus) && !isConverted) {
+      return {
+        title:
+          proposalStatus === 'SENT'
+            ? 'Await client decision'
+            : proposalStatus === 'IN_PREPARATION'
+              ? 'Prepare commercial proposal'
+              : 'Respond to proposal request',
+        body:
+          proposalStatus === 'SENT'
+            ? 'Proposal has been sent. Follow up if the client has not responded.'
+            : 'Continue commercial preparation from the Commercial tab.',
+        badge: { label: humanizeStatus(proposalStatus), variant: 'warning' as const },
+        onClickKind: 'commercial',
+        actionLabel: 'View commercial record',
+      } satisfies NextAction;
+    }
+
     if (level1Complete && !item.contactedAt && !item.closedAt) {
       return {
         title: 'Initial outreach',
         body: 'Confirm contact with the organisation before Level 2 preparation.',
         badge: { label: 'Contact pending', variant: 'warning' as const },
-      };
+        onClickKind: 'communications',
+        actionLabel: 'Open communications',
+      } satisfies NextAction;
     }
+
     if (level1Complete && !item.reviewedAt && !item.closedAt) {
       return {
         title: 'Review triage indication',
         body: 'Confirm the Level 1 indication has been reviewed before Level 2 preparation.',
         badge: { label: 'Review pending', variant: 'warning' as const },
-      };
+      } satisfies NextAction;
     }
+
     if (level1Complete && !isConverted && !item.closedAt) {
       return {
-        title: 'Executive Advisory Diagnostic',
-        body: 'This triage has been reviewed and is ready for Level 2 preparation.',
+        title: 'Start commercial progression',
+        body: 'Level 1 is complete. Open the Commercial tab to prepare or request a proposal.',
         badge: { label: 'Ready for Level 2', variant: 'success' as const },
-      };
+        onClickKind: 'commercial',
+        actionLabel: 'View commercial record',
+      } satisfies NextAction;
     }
+
     if (!level1Complete) {
       return {
         title: 'Awaiting questionnaire completion',
         body: 'Level 1 triage is still in progress.',
         badge: { label: 'In progress', variant: 'warning' as const },
-      };
+      } satisfies NextAction;
     }
+
     return null;
   })();
 
@@ -741,10 +948,33 @@ export default function TriageSubmissionDetailPage() {
   if (!item) {
     return (
       <AuthGate>
-        <Shell title="Triage submission" hideSearch>
+        <Shell
+          title="Triage submission"
+          hideSearch
+          hideTitle
+          headerLeading={(
+            <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+              <Link
+                href="/triage"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Back to triage submissions"
+              >
+                <ChevronLeft className="size-4" aria-hidden="true" />
+              </Link>
+              <Link href="/triage" className="font-medium text-slate-500 transition-colors hover:text-slate-800">
+                Executive Triage
+              </Link>
+              <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+              <Link href="/triage" className="font-medium text-slate-500 transition-colors hover:text-slate-800">
+                Triage submissions
+              </Link>
+              <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+              <span className="truncate font-semibold text-slate-900">…</span>
+            </nav>
+          )}
+        >
           <div className="triage-detail-workspace space-y-4 pb-8">
               <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                <Skeleton className="h-4 w-48" />
                 <Skeleton className="h-8 w-72 max-w-full" />
                 <Skeleton className="h-4 w-56" />
                 <div className="flex justify-between gap-3 pt-2">
@@ -767,10 +997,261 @@ export default function TriageSubmissionDetailPage() {
     ['REQUESTED', 'IN_PREPARATION', 'SENT'].includes(proposalStatus) && !item.convertedAt && !item.closedAt;
 
   const displayCta = normalizePrimaryCta(item.primaryCta, item.activeProposal);
+  const contactName = [item.firstName, item.lastName].filter(Boolean).join(' ').trim();
+  const jobTitle = item.qualification?.jobTitle || '';
+  const country = item.qualification?.country || '';
+  const primaryEmail = primaryEmailOnly(item.email);
+  const phone = String(item.phone || '').trim();
+  const headerMeta = [assessment?.reference, item.industry].filter(Boolean).join(' | ');
+  const lastActivityAt = item.updatedAt || item.lastProgressAt || item.createdAt;
+
+  const l1Detail = item.completedAt ? fmtDate(item.completedAt) : null;
+  const l2Detail = item.convertedEngagement
+    ? [item.convertedEngagement.reference, item.convertedAt ? fmtDate(item.convertedAt) : null]
+        .filter(Boolean)
+        .join(' · ')
+    : item.proposalReference
+      ? `${item.proposalReference} · ${humanizeStatus(proposalStatus)}`
+      : item.diagnosticRequestedAt
+        ? `Requested ${fmtDate(item.diagnosticRequestedAt)}`
+        : null;
+  // Level 3 is recommended off the back of Level 2, but is not yet an active workstream.
+  const l3StatusLabel = l3Status.label === 'Recommended' ? 'Recommended · Not started' : l3Status.label;
+
+  /** One-line commercial progression summary for the Overview card. */
+  const commercialProgressLine = (() => {
+    if (isConverted) return 'Proposal accepted → Level 2 created';
+    if (proposalStatus === 'ACCEPTED') return 'Proposal accepted → Level 2 pending';
+    if (proposalStatus === 'SENT') return 'Proposal sent → awaiting client decision';
+    if (proposalStatus === 'IN_PREPARATION') return 'Proposal requested → in preparation';
+    if (proposalStatus === 'REQUESTED') return 'Proposal requested';
+    return item.diagnosticRequestedAt ? 'Diagnostic requested' : null;
+  })();
+
+  /** Wire the Next-action card's secondary link to the right destination. */
+  function runNextAction(kind: 'create_level2' | 'commercial' | 'communications' | 'assign') {
+    switch (kind) {
+      case 'create_level2':
+        void convert(false);
+        break;
+      case 'commercial':
+        setTab('commercial');
+        break;
+      case 'communications':
+        setTab('communications');
+        break;
+      case 'assign':
+        focusAnalystField();
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** The rail is contextual — each tab gets the summary that matters for that tab. */
+  const sidebarContent = (() => {
+    if (tab === 'overview') {
+      return (
+        <>
+          <Card className="rounded-xl border-slate-200 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Key information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3.5">
+              <InfoRow icon={Building2} label="Organisation">
+                {item.organisationName}
+              </InfoRow>
+              <InfoRow icon={User} label="Contact">
+                {contactName || '—'}
+                {jobTitle ? (
+                  <span className="mt-0.5 block text-xs font-normal text-slate-500">{jobTitle}</span>
+                ) : null}
+              </InfoRow>
+              <InfoRow icon={Mail} label="Email">
+                {primaryEmail ? (
+                  <a
+                    href={`mailto:${primaryEmail}`}
+                    className="break-all text-moss-info transition-colors hover:underline"
+                  >
+                    {primaryEmail}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </InfoRow>
+              <InfoRow icon={Phone} label="Phone">
+                {phone ? (
+                  <a href={`tel:${phone}`} className="text-moss-info transition-colors hover:underline">
+                    {phone}
+                  </a>
+                ) : (
+                  '—'
+                )}
+              </InfoRow>
+              <InfoRow icon={Factory} label="Industry">
+                {item.industry || '—'}
+              </InfoRow>
+              <InfoRow icon={MapPin} label="Region">
+                {country || '—'}
+              </InfoRow>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-xl border-slate-200 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Journey progress</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <ol className="m-0 list-none space-y-0 p-0">
+                {workflowSteps.map((step) => (
+                  <WorkflowStep key={step.label} state={step.state} label={step.label} />
+                ))}
+              </ol>
+              <button
+                type="button"
+                className="text-sm font-semibold text-moss-info transition-colors hover:underline"
+                onClick={() => setTab('journey')}
+              >
+                View full audit trail →
+              </button>
+            </CardContent>
+          </Card>
+        </>
+      );
+    }
+
+    if (tab === 'scores') {
+      return (
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Indication summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="m-0 text-2xl font-bold tracking-tight text-slate-900">
+              {score != null ? `${score} / 100` : '—'}
+            </p>
+            {band ? (
+              <EgtAssuranceBandBadge label={band} visual={assurancePresentation?.visual} />
+            ) : null}
+            <p className="m-0 text-xs leading-relaxed text-slate-600">
+              {assuranceInterpretation(assurancePresentation?.assuranceBand.code, band)}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (tab === 'responses') {
+      return (
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Questionnaire</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="m-0 text-2xl font-bold tracking-tight text-slate-900">
+              {answeredQuestions} / {TOTAL_TRIAGE_QUESTIONS}
+            </p>
+            <p className="m-0 text-xs text-slate-500">
+              Questions answered{item.completedAt ? ` · completed ${fmtDate(item.completedAt)}` : ''}
+            </p>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-moss-success"
+                style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (tab === 'commercial') {
+      return (
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Proposal status</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Badge
+              variant={proposalBadgeVariant(isConverted ? 'CONVERTED' : proposalStatus)}
+              className="whitespace-nowrap"
+            >
+              {isConverted ? 'Converted' : humanizeStatus(proposalStatus)}
+            </Badge>
+            <p className="m-0 text-sm font-medium text-slate-900">
+              {item.proposalReference || 'No proposal reference yet'}
+            </p>
+            <p className="m-0 text-xs text-slate-500">
+              Requested {fmt(item.proposalRequestedAt || item.diagnosticRequestedAt)}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (tab === 'communications') {
+      return (
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Inbox</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="m-0 text-2xl font-bold tracking-tight text-slate-900">{unreadCommCount}</p>
+            <p className="m-0 text-xs text-slate-500">
+              {unreadCommCount === 1 ? 'Unread client reply' : 'Unread client replies'}
+            </p>
+            <p className="m-0 text-xs text-slate-500">Last activity {relativeActivity(lastActivityAt)}</p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    if (tab === 'notes') {
+      return (
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Internal only</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="m-0 text-xs leading-relaxed text-slate-600">
+              Notes are private to Physical Risk staff and are never shown to the client. Every add, edit and
+              delete is recorded in the audit trail.
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return null;
+  })();
 
   return (
     <AuthGate>
-      <Shell title={`Triage · ${assessment?.reference || item.organisationName}`} hideSearch>
+      <Shell
+        title={`Triage · ${assessment?.reference || item.organisationName}`}
+        hideSearch
+        hideTitle
+        headerLeading={(
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+            <Link
+              href="/triage"
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+              aria-label="Back to triage submissions"
+            >
+              <ChevronLeft className="size-4" aria-hidden="true" />
+            </Link>
+            <Link href="/triage" className="font-medium text-slate-500 transition-colors hover:text-slate-800">
+              Executive Triage
+            </Link>
+            <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+            <Link href="/triage" className="font-medium text-slate-500 transition-colors hover:text-slate-800">
+              Triage submissions
+            </Link>
+            <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+            <span className="truncate font-semibold text-slate-900">{assessment?.reference || '—'}</span>
+          </nav>
+        )}
+      >
         <input
           ref={proposalFileRef}
           type="file"
@@ -787,58 +1268,80 @@ export default function TriageSubmissionDetailPage() {
           <Card className="rounded-xl border-slate-200 shadow-sm">
             <CardContent className="space-y-4 p-5 sm:p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm">
-                    <Link
-                      href="/triage"
-                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-                      aria-label="Back to triage list"
-                    >
-                      <ChevronLeft className="size-4" aria-hidden="true" />
-                    </Link>
-                    <Link
-                      href="/triage"
-                      className="font-medium text-slate-500 transition-colors hover:text-slate-800"
-                    >
-                      Executive Triage
-                    </Link>
-                    <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-                    <span className="font-medium text-slate-900">{assessment?.reference || '—'}</span>
-                  </nav>
-                  <h1 className="text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
-                    {item.organisationName}
-                  </h1>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {level1Complete ? (
-                      <Badge variant="success" className="shrink-0 gap-1 whitespace-nowrap">
-                        <CheckCircle2 className="size-3.5" aria-hidden="true" />
-                        Level 1 complete
-                      </Badge>
-                    ) : (
-                      <Badge variant="warning" className="shrink-0 whitespace-nowrap">
-                        Level 1 in progress
-                      </Badge>
-                    )}
-                    {isConverted ? (
-                      <Badge variant="info" className="shrink-0 whitespace-nowrap">
-                        Converted
-                      </Badge>
-                    ) : null}
-                    {band ? (
-                      <EgtAssuranceBandBadge
-                        label={band}
-                        visual={assurancePresentation?.visual}
-                        className="shrink-0"
-                      />
-                    ) : null}
+                <div className="flex min-w-0 flex-1 items-start gap-4">
+                  <OrgAvatar name={item.organisationName} />
+                  <div className="min-w-0 space-y-2">
+                    <h1 className="m-0 text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
+                      {item.organisationName}
+                    </h1>
+                    {headerMeta ? <p className="m-0 text-sm text-slate-500">{headerMeta}</p> : null}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                      {contactName ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <User className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                          {contactName}
+                        </span>
+                      ) : null}
+                      {jobTitle ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Briefcase className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                          {jobTitle}
+                        </span>
+                      ) : null}
+                      {country ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <MapPin className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                          {country}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {level1Complete ? (
+                        <Badge variant="success" className="shrink-0 gap-1 whitespace-nowrap">
+                          <CheckCircle2 className="size-3.5" aria-hidden="true" />
+                          Level 1 complete
+                        </Badge>
+                      ) : (
+                        <Badge variant="warning" className="shrink-0 whitespace-nowrap">
+                          Level 1 in progress
+                        </Badge>
+                      )}
+                      {score != null ? (
+                        <EgtAssuranceBandBadge
+                          label={band ? `${score} / 100 · ${band}` : `${score} / 100`}
+                          visual={assurancePresentation?.visual}
+                          className="shrink-0"
+                        />
+                      ) : null}
+                      {isConverted ? (
+                        <Badge variant="success" className="shrink-0 gap-1 whitespace-nowrap">
+                          <CheckCircle2 className="size-3.5" aria-hidden="true" />
+                          Converted to Level 2
+                        </Badge>
+                      ) : null}
+                    </div>
                   </div>
-                  <p className="text-sm text-slate-600">
-                    {[item.firstName, item.lastName].filter(Boolean).join(' ')}
-                    {item.email ? ` · ${item.email}` : ''}
-                  </p>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2 sm:items-start">
+                <div className="flex w-full shrink-0 flex-wrap items-end justify-start gap-2 sm:w-auto sm:justify-end">
+                  <div ref={analystFieldRef} className="min-w-[200px] flex-1 sm:flex-none">
+                    <p className="mb-1 text-xs font-medium text-slate-500">Assigned analyst</p>
+                    <FilterSelect
+                      value={item.assignedAnalystId || ''}
+                      onChange={(v) => void assignAnalyst(v)}
+                      disabled={busy || !analysts.length}
+                      placeholder="Not assigned"
+                      includeAll
+                      emptyValue=""
+                      aria-label="Assigned analyst"
+                      triggerClassName="h-10 w-full min-w-[200px]"
+                      options={analysts.map((a) => ({
+                        value: a.id,
+                        label: `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || a.id,
+                      }))}
+                    />
+                  </div>
+
                   {displayCta?.kind === 'awaiting_decision' || displayCta?.kind === 'closed' ? (
                     <Badge variant="secondary" className="shrink-0 whitespace-nowrap px-3 py-1.5 text-sm">
                       {displayCta.label}
@@ -859,6 +1362,7 @@ export default function TriageSubmissionDetailPage() {
                       </Button>
                     )
                   ) : null}
+
                   <RowActionsMenu
                     open={leadMenuOpen}
                     onClose={() => setLeadMenuOpen(false)}
@@ -866,7 +1370,7 @@ export default function TriageSubmissionDetailPage() {
                     trigger={
                       <button
                         type="button"
-                        className="org2-menu-btn"
+                        className="org2-menu-btn shrink-0"
                         aria-label="Lead actions"
                         disabled={busy}
                         onClick={() => setLeadMenuOpen((open) => !open)}
@@ -875,6 +1379,48 @@ export default function TriageSubmissionDetailPage() {
                       </button>
                     }
                   >
+                    <button
+                      type="button"
+                      disabled={busy || !primaryEmail}
+                      title={primaryEmail ? 'Email client' : 'No email address on this submission'}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        setTab('communications', { action: 'compose' });
+                      }}
+                    >
+                      Send email
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        setTab('communications');
+                      }}
+                    >
+                      View communications
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        setTab('notes');
+                      }}
+                    >
+                      Add note
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || !item.organisationId}
+                      title={item.organisationId ? 'Open organisation record' : 'No organisation record linked yet'}
+                      onClick={() => {
+                        setLeadMenuOpen(false);
+                        if (item.organisationId) router.push(`/organisations/${item.organisationId}`);
+                      }}
+                    >
+                      View organisation
+                    </button>
                     {!item.closedAt && !item.convertedAt ? (
                       <button
                         type="button"
@@ -912,91 +1458,45 @@ export default function TriageSubmissionDetailPage() {
                   </RowActionsMenu>
                 </div>
               </div>
-
-              <div className="flex flex-wrap items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1.5 px-2 text-slate-600"
-                    disabled={!item.email?.trim()}
-                    title={item.email?.trim() ? 'Email client' : 'No email address on this submission'}
-                    onClick={() => setTab('communications', { action: 'compose' })}
-                  >
-                    <Mail className="size-3.5" aria-hidden="true" />
-                    Email client
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 gap-1.5 px-2 text-slate-600"
-                    disabled={!item.phone?.trim()}
-                    title={item.phone?.trim() ? `Call ${item.phone}` : 'No telephone number on this submission'}
-                    onClick={() => {
-                      if (item.phone?.trim()) window.location.href = `tel:${item.phone.trim()}`;
-                    }}
-                  >
-                    <Phone className="size-3.5" aria-hidden="true" />
-                    {item.phone?.trim() || 'No number'}
-                  </Button>
-                </div>
-
-                <div className="ml-auto w-full max-w-[280px] sm:w-auto">
-                  <p className="mb-1 text-xs font-medium text-slate-500">Assigned analyst</p>
-                  <FilterSelect
-                    value={item.assignedAnalystId || ''}
-                    onChange={(v) => void assignAnalyst(v)}
-                    disabled={busy || !analysts.length}
-                    placeholder="Not assigned"
-                    includeAll
-                    emptyValue=""
-                    aria-label="Assigned analyst"
-                    triggerClassName="h-9 w-full min-w-[200px]"
-                    options={analysts.map((a) => ({
-                      value: a.id,
-                      label: `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email || a.id,
-                    }))}
-                  />
-                </div>
-              </div>
             </CardContent>
           </Card>
 
           {/* Tabs directly below information card */}
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className={cn('grid gap-4', sidebarContent && 'lg:grid-cols-[minmax(0,1fr)_280px]')}>
             <div className="min-w-0">
               <Tabs value={tab} onValueChange={(v) => setTab(parseTabId(v))}>
-                <TabsList className="mb-4 h-auto w-full flex-wrap justify-start gap-1 overflow-x-auto bg-slate-100 p-1">
-                  <TabsTrigger value="overview" className="shrink-0 whitespace-nowrap">
+                <TabsList className="triage-detail-tabs">
+                  <TabsTrigger value="overview" className="triage-detail-tab">
                     Overview
                   </TabsTrigger>
-                  <TabsTrigger value="scores" className="shrink-0 whitespace-nowrap">
-                    Scores & indication
+                  <TabsTrigger value="scores" className="triage-detail-tab">
+                    Scores &amp; indication
                   </TabsTrigger>
-                  <TabsTrigger value="responses" className="shrink-0 gap-2 whitespace-nowrap">
+                  <TabsTrigger value="responses" className="triage-detail-tab">
                     Responses
                     <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5">
                       {responseRows.length}
                     </Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="commercial" className="shrink-0 gap-2 whitespace-nowrap">
+                  <TabsTrigger value="commercial" className="triage-detail-tab">
                     Commercial
                     {commercialNeedsAction ? (
-                      <span className="inline-flex shrink-0" title="Needs attention">
-                        <Bell
-                          className="size-3.5 text-amber-600"
-                          aria-label="Needs attention"
-                        />
-                      </span>
+                      <span
+                        className="triage-detail-tab-dot triage-detail-tab-dot--attention"
+                        title="Needs attention"
+                        role="img"
+                        aria-label="Needs attention"
+                      />
                     ) : proposalStatus !== 'NOT_REQUESTED' ? (
-                      <Badge variant="info" className="h-5 whitespace-nowrap px-1.5">
-                        Active
-                      </Badge>
+                      <span
+                        className="triage-detail-tab-dot triage-detail-tab-dot--active"
+                        title="Commercial record active"
+                        role="img"
+                        aria-label="Commercial record active"
+                      />
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="communications" className="shrink-0 gap-2 whitespace-nowrap">
+                  <TabsTrigger value="communications" className="triage-detail-tab">
                     Communications
                     {unreadCommCount > 0 ? (
                       <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5">
@@ -1004,22 +1504,26 @@ export default function TriageSubmissionDetailPage() {
                       </Badge>
                     ) : null}
                   </TabsTrigger>
-                  <TabsTrigger value="journey" className="shrink-0 whitespace-nowrap">
-                    Journey & audit
+                  <TabsTrigger value="journey" className="triage-detail-tab">
+                    Journey &amp; audit
                   </TabsTrigger>
-                  <TabsTrigger value="notes" className="shrink-0 whitespace-nowrap">
+                  <TabsTrigger value="notes" className="triage-detail-tab">
                     Notes
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="overview" className="mt-0 space-y-4">
-                  {/* Product journey */}
+                  {/* Client journey */}
                   <Card className="rounded-xl border-slate-200 shadow-sm">
-                    <CardContent className="flex flex-col gap-2 p-4 sm:flex-row sm:items-stretch sm:gap-3 sm:p-5">
+                    <CardHeader className="p-4 pb-3 sm:p-5 sm:pb-3">
+                      <CardTitle className="text-base">Client journey</CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-2 px-4 pb-4 pt-0 sm:flex-row sm:items-stretch sm:gap-3 sm:px-5 sm:pb-5">
                       <JourneyStage
                         level="Level 1"
-                        title="Triage"
+                        title="Executive Triage"
                         status={level1Complete ? 'Completed' : 'In progress'}
+                        detail={l1Detail}
                         tone={level1Complete ? 'success' : 'warning'}
                       />
                       <div className="hidden items-center sm:flex" aria-hidden="true">
@@ -1029,142 +1533,106 @@ export default function TriageSubmissionDetailPage() {
                         level="Level 2"
                         title="Executive Advisory Diagnostic"
                         status={l2Status.label}
+                        detail={l2Detail}
                         tone={l2Status.tone}
                       />
                       <div className="hidden items-center sm:flex" aria-hidden="true">
                         <ArrowRight className="size-4 text-slate-300" />
                       </div>
-                      <JourneyStage level="Level 3" title="Assurance" status={l3Status.label} tone={l3Status.tone} />
+                      <JourneyStage
+                        level="Level 3"
+                        title="Assurance"
+                        status={l3StatusLabel}
+                        tone={l3Status.tone}
+                      />
                     </CardContent>
                   </Card>
 
                   {recommendedAction ? (
-                    <Card className="rounded-xl border-moss-info/30 bg-moss-info/[0.04] shadow-sm">
-                      <CardContent className="space-y-2 p-4 sm:p-5">
-                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-info">
-                          Next recommended action
-                        </p>
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <p className="m-0 text-sm font-semibold text-slate-900">{recommendedAction.title}</p>
-                            <p className="m-0 text-sm text-slate-600">{recommendedAction.body}</p>
-                          </div>
-                          {recommendedAction.badge ? (
-                            <Badge
-                              variant={
-                                recommendedAction.badge.variant === 'success'
-                                  ? 'success'
-                                  : recommendedAction.badge.variant === 'warning'
-                                    ? 'warning'
-                                    : recommendedAction.badge.variant === 'info'
-                                      ? 'info'
-                                      : 'secondary'
-                              }
-                              className="shrink-0 whitespace-nowrap"
-                            >
-                              {recommendedAction.badge.label}
-                            </Badge>
-                          ) : null}
+                    <Card className="rounded-xl border-rose-200 bg-rose-50/60 shadow-sm">
+                      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+                        <span
+                          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-moss-red"
+                          aria-hidden="true"
+                        >
+                          <Crosshair className="size-5" />
+                        </span>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-moss-red">
+                            Next recommended action
+                          </p>
+                          <p className="m-0 text-sm font-semibold text-slate-900">{recommendedAction.title}</p>
+                          <p className="m-0 text-sm text-slate-600">{recommendedAction.body}</p>
                         </div>
+                        {/* Secondary outline action — the single primary CTA lives in the header. */}
+                        {recommendedAction.actionLabel && recommendedAction.href ? (
+                          <Button
+                            asChild
+                            variant="outline"
+                            className="h-10 shrink-0 whitespace-nowrap border-rose-200 bg-white px-4 font-semibold text-slate-800 hover:bg-white hover:text-moss-red"
+                          >
+                            <Link href={recommendedAction.href}>{recommendedAction.actionLabel}</Link>
+                          </Button>
+                        ) : recommendedAction.actionLabel && recommendedAction.onClickKind ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 shrink-0 whitespace-nowrap border-rose-200 bg-white px-4 font-semibold text-slate-800 hover:bg-white hover:text-moss-red"
+                            disabled={busy}
+                            onClick={() => {
+                              if (recommendedAction.onClickKind) runNextAction(recommendedAction.onClickKind);
+                            }}
+                          >
+                            {recommendedAction.actionLabel}
+                          </Button>
+                        ) : null}
                       </CardContent>
                     </Card>
                   ) : null}
 
                   {hasCommercial ? (
-                    <Card
-                      className={cn(
-                        'rounded-xl shadow-sm',
-                        commercialNeedsAction
-                          ? 'border-amber-200 bg-amber-50/50'
-                          : isConverted
-                            ? 'border-moss-success/30 bg-moss-success/[0.03]'
-                            : 'border-slate-200',
-                      )}
-                    >
-                      <CardContent className="flex flex-wrap items-start justify-between gap-3 p-4 sm:p-5">
-                        <div className="min-w-0 space-y-1.5">
+                    <Card className="rounded-xl border-sky-200 bg-sky-50/40 shadow-sm">
+                      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
+                        <span
+                          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700"
+                          aria-hidden="true"
+                        >
+                          <FileText className="size-5" />
+                        </span>
+                        <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="m-0 text-sm font-semibold text-slate-900">Commercial handoff</p>
+                            <p className="m-0 text-sm font-semibold text-slate-900">Commercial progression</p>
                             <Badge
                               variant={proposalBadgeVariant(isConverted ? 'CONVERTED' : proposalStatus)}
                               className="shrink-0 whitespace-nowrap"
                             >
                               {isConverted ? 'Converted' : humanizeStatus(proposalStatus)}
                             </Badge>
+                            {item.proposalReference ? (
+                              <span className="text-xs font-semibold text-slate-500">
+                                {item.proposalReference}
+                              </span>
+                            ) : null}
                           </div>
-                          <p className="m-0 text-sm font-medium text-slate-800">
-                            {item.proposalReference || 'No proposal reference'}
-                          </p>
-                          <p className="m-0 text-sm text-slate-600">Executive Advisory Diagnostic</p>
+                          <p className="m-0 text-sm text-slate-700">Executive Advisory Diagnostic</p>
+                          {commercialProgressLine ? (
+                            <p className="m-0 text-sm text-slate-600">{commercialProgressLine}</p>
+                          ) : null}
                           <p className="m-0 text-xs text-slate-500">
                             Requested {fmt(item.proposalRequestedAt || item.diagnosticRequestedAt)}
                           </p>
                         </div>
                         <Button
+                          type="button"
                           variant="outline"
-                          className="h-10 shrink-0 whitespace-nowrap px-4"
+                          className="h-10 shrink-0 whitespace-nowrap border-sky-200 bg-white px-4 font-semibold text-slate-800 hover:bg-white hover:text-sky-700"
                           onClick={() => setTab('commercial')}
                         >
-                          Open commercial record
+                          View commercial record
                         </Button>
                       </CardContent>
                     </Card>
                   ) : null}
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">Organisation & contact</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <dl>
-                          <Kv label="Organisation">{item.organisationName}</Kv>
-                          <Kv label="Industry">{item.industry || '—'}</Kv>
-                          <Kv label="Job title">{item.qualification?.jobTitle || '—'}</Kv>
-                          <Kv label="Country / region">{item.qualification?.country || '—'}</Kv>
-                          <Kv label="Operational sites">
-                            {item.qualification?.operationalSitesLabel || '—'}
-                          </Kv>
-                          <Kv label="Annual security expenditure">
-                            {item.qualification?.securityExpenditureLabel || '—'}
-                          </Kv>
-                          <Kv label="Primary concern">
-                            {item.qualification?.primaryConcern || '—'}
-                          </Kv>
-                          <Kv label="Contact">
-                            {item.firstName} {item.lastName}
-                          </Kv>
-                          <Kv label="Email">{item.email}</Kv>
-                          <Kv label="Phone">{item.phone || '—'}</Kv>
-                          <Kv label="Source">{item.source || 'Public website'}</Kv>
-                        </dl>
-                      </CardContent>
-                    </Card>
-                    <Card className="rounded-xl border-slate-200 shadow-sm">
-                      <CardHeader>
-                        <CardTitle className="text-base">Triage submission</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <dl>
-                          <Kv label="Reference">{assessment?.reference || '—'}</Kv>
-                          <Kv label="Stage">{humanizeStatus(item.displayStatus)}</Kv>
-                          <Kv label="Assurance score">
-                            {score != null ? `${score} / 100` : '—'}
-                            {band ? ` · ${band}` : ''}
-                          </Kv>
-                          <Kv label="Progress">{item.completedAt ? 'Complete' : `${progress}%`}</Kv>
-                          <Kv label="Created">{fmt(item.createdAt)}</Kv>
-                          <Kv label="Completed">{fmt(item.completedAt)}</Kv>
-                          <Kv label="Contacted">{fmt(item.contactedAt)}</Kv>
-                          <Kv label="Level 2 route">
-                            {item.convertedEngagement
-                              ? `${item.convertedEngagement.reference} · ${humanizeStatus(item.convertedEngagement.status)}`
-                              : 'Not yet converted'}
-                          </Kv>
-                        </dl>
-                      </CardContent>
-                    </Card>
-                  </div>
                 </TabsContent>
 
                 <TabsContent value="scores" className="mt-0 space-y-4">
@@ -1214,7 +1682,7 @@ export default function TriageSubmissionDetailPage() {
                           label="Governance"
                           value={
                             assessment?.maturityScore != null
-                              ? Number(assessment.maturityScore).toFixed(1)
+                              ? `${Number(assessment.maturityScore).toFixed(1)} / 100`
                               : '—'
                           }
                           hint="Maturity index"
@@ -1232,12 +1700,29 @@ export default function TriageSubmissionDetailPage() {
                           label="Opportunity"
                           value={
                             assessment?.opportunityScore != null
-                              ? Number(assessment.opportunityScore).toFixed(1)
+                              ? `${Number(assessment.opportunityScore).toFixed(1)} / 100`
                               : '—'
                           }
                           hint="Follow-up potential"
                         />
                       </div>
+                      <Card className="rounded-xl border-slate-200 shadow-sm">
+                        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                          <CardTitle className="text-base">Interpretation</CardTitle>
+                          {band ? (
+                            <EgtAssuranceBandBadge
+                              label={band}
+                              visual={assurancePresentation?.visual}
+                              className="shrink-0"
+                            />
+                          ) : null}
+                        </CardHeader>
+                        <CardContent>
+                          <p className="m-0 text-sm leading-relaxed text-slate-700">
+                            {assuranceInterpretation(assurancePresentation?.assuranceBand.code, band)}
+                          </p>
+                        </CardContent>
+                      </Card>
                       <Card className="rounded-xl border-slate-200 shadow-sm">
                         <CardHeader>
                           <CardTitle className="text-base">Assurance dimensions</CardTitle>
@@ -1246,18 +1731,14 @@ export default function TriageSubmissionDetailPage() {
                           <CategoryBars items={categories} />
                         </CardContent>
                       </Card>
-                      <Card className="rounded-xl border-slate-200 shadow-sm">
-                        <CardHeader>
-                          <CardTitle className="text-base">Basis of interpretation</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-sm leading-relaxed text-muted-foreground">
-                            This is Level 1 Executive Governance Triage — questionnaire-based decision support
-                            only. It is not an assessment, audit, assurance opinion, or Security Cost Leakage
-                            Assessment™.
-                          </p>
-                        </CardContent>
-                      </Card>
+                      <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3">
+                        <AlertCircle className="mt-0.5 size-4 shrink-0 text-slate-400" aria-hidden="true" />
+                        <p className="m-0 text-xs leading-relaxed text-slate-500">
+                          <span className="font-semibold text-slate-600">Basis of interpretation:</span> Level 1
+                          Executive Governance Triage is questionnaire-based decision support only. It is not an
+                          assessment, audit, assurance opinion, or Security Cost Leakage Assessment™.
+                        </p>
+                      </div>
                     </>
                   )}
                 </TabsContent>
@@ -1392,21 +1873,9 @@ export default function TriageSubmissionDetailPage() {
               </Tabs>
             </div>
 
-            <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
-              <Card className="rounded-xl border-slate-200 shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Executive Triage</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ol className="m-0 list-none space-y-0 p-0">
-                    {workflowSteps.map((step) => (
-                      <WorkflowStep key={step.label} state={step.state} label={step.label} />
-                    ))}
-                  </ol>
-                </CardContent>
-              </Card>
-
-            </aside>
+            {sidebarContent ? (
+              <aside className="space-y-4 lg:sticky lg:top-[7rem] lg:self-start">{sidebarContent}</aside>
+            ) : null}
           </div>
         </div>
       </Shell>

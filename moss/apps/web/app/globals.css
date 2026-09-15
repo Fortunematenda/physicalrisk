@@ -1905,7 +1905,91 @@ input.email-composer-subject:focus-visible {
   width:100%; text-align:left; cursor:pointer; display:block;
 }
 .triage2-kpi-btn:focus-visible {
-  outline:2px solid #c41230; outline-offset:3px; border-radius:14px;
+  outline:2px solid #94a3b8; outline-offset:2px; border-radius:14px;
+}
+.triage2-kpi-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+/* One calendar glyph for the range; hide native per-input picker icons. */
+.triage-date-range input[type="date"] {
+  position: relative;
+  min-width: 0;
+}
+.triage-date-range input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+.triage-list-table thead th {
+  height:44px;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:0.02em;
+  text-transform:none;
+  color:#64748b;
+  background:#F8FAFC;
+  border-bottom:1px solid #e2e8f0;
+  white-space:nowrap;
+}
+.triage-list-table tbody td {
+  padding-top:12px;
+  padding-bottom:12px;
+  vertical-align:middle;
+  border-bottom:1px solid #f1f5f9;
+}
+.triage-list-table tbody tr:last-child td {
+  border-bottom:0;
+}
+.triage-list-row {
+  min-height:82px;
+}
+.triage-list-row--action > td:first-child {
+  box-shadow: inset 3px 0 0 #c41230;
+}
+.triage-score-ring {
+  gap: 0;
+}
+.triage-assurance-cell {
+  align-items: center;
+  gap: 4px;
+  min-width: 88px;
+}
+.triage-assurance-short {
+  display: block;
+  max-width: 8.5rem;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.25;
+  font-weight: 600;
+  color: #64748b;
+}
+.triage-assign-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  max-width: 140px;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+.triage-assign-link:hover {
+  color: #c41230;
+}
+button.triage-assign-link {
+  display: inline;
+}
+@media (max-width: 1100px) {
+  .triage-list-table .triage-col-submission,
+  .triage-list-table .triage-col-analyst {
+    display: none;
+  }
 }
 .assess2-filters .triage2-analyst-trigger {
   height:40px;
@@ -3331,6 +3415,44 @@ input.email-composer-subject:focus-visible {
 .triage-detail-timeline>div{display:flex;gap:12px;position:relative;padding:0 0 15px}.triage-detail-dot{width:9px;height:9px;border-radius:999px;background:#be123c;margin-top:5px;flex:0 0 auto}.triage-detail-timeline strong{display:block;font-size:13px;color:#334155}.triage-detail-timeline small{display:block;margin-top:3px;color:#94a3b8}
 @media(max-width:1200px){.triage-admin-stats{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.triage-admin-page{padding:16px}.triage-admin-stats{grid-template-columns:1fr 1fr}.triage-detail-grid{grid-template-columns:1fr}.triage-detail-hero,.triage-detail-intent-banner{flex-direction:column}.triage-detail-actions{justify-content:flex-start}.triage-detail-card dl>div{grid-template-columns:1fr;gap:4px}}
+
+/* Executive Triage submission detail — underline tab bar */
+.triage-detail-tabs{
+  display:flex;align-items:stretch;justify-content:flex-start;gap:2px;
+  width:100%;height:auto;
+  margin:0 0 1rem;padding:0;
+  overflow-x:auto;overflow-y:hidden;
+  border-radius:0;border-bottom:1px solid #e2e8f0;
+  background:var(--moss-card);
+  scrollbar-width:thin;
+}
+.triage-detail-tabs::-webkit-scrollbar{height:4px}
+.triage-detail-tabs::-webkit-scrollbar-thumb{background:#e2e8f0;border-radius:999px}
+.triage-detail-tab{
+  position:relative;flex:0 0 auto;
+  display:inline-flex;align-items:center;gap:.5rem;
+  margin-bottom:-1px;padding:.75rem 1rem;
+  border:0;border-bottom:2px solid transparent;border-radius:0;
+  background:transparent;box-shadow:none;
+  font-size:.875rem;font-weight:600;line-height:1.25rem;color:var(--moss-muted);
+  white-space:nowrap;
+  transition:color .15s ease,border-color .15s ease,background-color .15s ease;
+}
+.triage-detail-tab:hover{color:var(--moss-text);background:#f8fafc}
+.triage-detail-tab[data-state="active"]{
+  color:var(--moss-red);
+  border-bottom-color:var(--moss-red);
+  background:transparent;box-shadow:none;
+}
+.triage-detail-tab-dot{
+  width:.5rem;height:.5rem;border-radius:999px;flex:0 0 auto;
+}
+.triage-detail-tab-dot--active{background:var(--moss-success)}
+.triage-detail-tab-dot--attention{background:var(--moss-warning)}
+/* Only pin the bar where the app header is guaranteed to be a single 66px row. */
+@media(min-width:1024px){
+  .triage-detail-tabs{position:sticky;top:66px;z-index:20}
+}
 
 /* Proposal rich-text editor (TipTap) */
 .ProseMirror p.is-editor-empty:first-child::before {

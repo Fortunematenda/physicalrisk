@@ -245,7 +245,8 @@ export function TriageNotesPanel({ submissionId, initialNotes = [], onNotesChang
             <CardTitle className="text-base">Internal notes</CardTitle>
             <CardDescription>Private to Physical Risk staff. Not shown to the client.</CardDescription>
           </div>
-          {!composerOpen ? (
+          {/* With no notes the centred empty state owns the only call to action. */}
+          {!composerOpen && notes.length ? (
             <Button
               type="button"
               variant="outline"
@@ -254,7 +255,7 @@ export function TriageNotesPanel({ submissionId, initialNotes = [], onNotesChang
               onClick={() => setComposerOpen(true)}
             >
               <Plus className="size-4" />
-              {notes.length ? 'Add note' : 'Add first note'}
+              Add note
             </Button>
           ) : null}
         </CardHeader>
@@ -311,7 +312,8 @@ export function TriageNotesPanel({ submissionId, initialNotes = [], onNotesChang
         <Card className="rounded-xl border-dashed border-slate-200 bg-slate-50/40 shadow-none">
           <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
             <p className="m-0 text-sm text-slate-600">No internal notes yet.</p>
-            <Button type="button" className="h-9" onClick={() => setComposerOpen(true)}>
+            <Button type="button" className="h-9 gap-1.5" disabled={busy} onClick={() => setComposerOpen(true)}>
+              <Plus className="size-4" />
               Add first note
             </Button>
           </CardContent>

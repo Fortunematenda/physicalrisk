@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import {
   Bell,
   Building2,
+  ChevronDown,
+  CircleHelp,
   ClipboardList,
   FileText,
   LogOut,
@@ -47,10 +49,14 @@ type AppHeaderProps = {
   subtitle?: string;
   /** Optional page-specific controls (filters, export) — rendered before utilities, never replaces them */
   actions?: React.ReactNode;
+  /** Optional left-side content (breadcrumb) — shown instead of the page title when set. */
+  headerLeading?: React.ReactNode;
   searchPlaceholder?: string;
   onSearch?: (value: string) => void;
   searchValue?: string;
   hideSearch?: boolean;
+  /** When true, omit the page title/subtitle from the top nav. */
+  hideTitle?: boolean;
   onMenuClick?: () => void;
   onLogout?: () => void;
   notificationCount?: number;
@@ -118,10 +124,12 @@ export function AppHeader({
   title,
   subtitle,
   actions,
+  headerLeading,
   searchPlaceholder = 'Search…',
   onSearch,
   searchValue = '',
   hideSearch = false,
+  hideTitle = false,
   onMenuClick,
   onLogout,
   notificationCount = 0,
@@ -400,16 +408,22 @@ export function AppHeader({
           <Menu className="size-5" />
         </Button>
 
-        <div className="min-w-0 flex-1 basis-[12rem]">
-          <h1 className="truncate text-[1.35rem] font-bold leading-tight text-moss-text sm:text-[1.75rem]">
-            {title}
-          </h1>
-          {subtitle && (
-            <p className="mt-0.5 truncate text-sm font-normal text-moss-muted">{subtitle}</p>
-          )}
-        </div>
+        {headerLeading ? (
+          <div className="min-w-0 flex-1 basis-[12rem]">{headerLeading}</div>
+        ) : !hideTitle ? (
+          <div className="min-w-0 flex-1 basis-[12rem]">
+            <h1 className="truncate text-[1.35rem] font-bold leading-tight text-moss-text sm:text-[1.75rem]">
+              {title}
+            </h1>
+            {subtitle && (
+              <p className="mt-0.5 truncate text-sm font-normal text-moss-muted">{subtitle}</p>
+            )}
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1" aria-hidden="true" />
+        )}
 
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:flex-none">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:flex-none">
           {!hideSearch && (
             <div
               ref={searchWrapRef}
@@ -511,6 +525,20 @@ export function AppHeader({
             type="button"
             variant="ghost"
             size="icon"
+            className="shrink-0 text-moss-muted hover:text-moss-text"
+            aria-label="Help"
+            title="Help"
+            asChild
+          >
+            <Link href="/settings">
+              <CircleHelp className="size-5" />
+            </Link>
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
             className="relative shrink-0 text-moss-muted hover:text-moss-text"
             aria-label={notificationTitle}
             title={notificationTitle}
@@ -555,14 +583,25 @@ export function AppHeader({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-moss-border bg-moss-page text-xs font-semibold text-moss-red outline-none ring-offset-white focus-visible:ring-2 focus-visible:ring-moss-red"
+                className="inline-flex max-w-[14rem] shrink-0 items-center gap-2 rounded-full border border-moss-border bg-white py-1 pl-1 pr-2.5 text-left outline-none ring-offset-white hover:bg-moss-page focus-visible:ring-2 focus-visible:ring-moss-red"
                 aria-label="Account menu"
               >
-                <Avatar className="size-9">
-                  <AvatarFallback className="bg-moss-red/10 text-xs font-semibold text-moss-red">
+                <Avatar className="size-8">
+                  <AvatarFallback className="bg-moss-red/10 text-[11px] font-semibold text-moss-red">
                     {userInitials(displayName)}
                   </AvatarFallback>
                 </Avatar>
+                <span className="hidden min-w-0 sm:block">
+                  <span className="block truncate text-xs font-semibold leading-tight text-moss-text">
+                    {displayName || 'Account'}
+                  </span>
+                  {roleLabel ? (
+                    <span className="block truncate text-[11px] leading-tight text-moss-muted">
+                      {roleLabel}
+                    </span>
+                  ) : null}
+                </span>
+                <ChevronDown className="hidden size-4 shrink-0 text-moss-muted sm:block" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
