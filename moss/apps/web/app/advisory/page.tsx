@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/AuthGate';
 import { useConfirm } from '@/components/confirm-dialog';
 import { IconMoreVertical } from '@/components/NavIcons';
@@ -51,6 +52,7 @@ type AdvisoryRow = {
 };
 
 export default function AdvisoryPage() {
+  const router = useRouter();
   const confirm = useConfirm();
   const { toast } = useToast();
   const [items, setItems] = useState<AdvisoryRow[]>([]);
@@ -223,11 +225,22 @@ export default function AdvisoryPage() {
                     const hasOutcome = Boolean(x.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(x.status);
                     const reportCount = x._count?.reports || 0;
                     return (
-                      <tr key={x.id} className="border-t border-slate-100">
+                      <tr
+                        key={x.id}
+                        className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50/80"
+                        onClick={() => router.push(`/advisory/${x.id}`)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            router.push(`/advisory/${x.id}`);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="link"
+                        aria-label={`Open engagement ${x.reference}`}
+                      >
                         <td className="px-3 py-2">
-                          <Link href={`/advisory/${x.id}`}>
-                            <strong>{x.reference}</strong>
-                          </Link>
+                          <strong>{x.reference}</strong>
                         </td>
                         <td className="px-3 py-2">{x.organisation?.name}</td>
                         <td className="px-3 py-2">{LABELS[x.productCode] || x.productCode}</td>

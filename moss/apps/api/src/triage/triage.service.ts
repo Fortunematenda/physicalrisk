@@ -1121,29 +1121,6 @@ export class TriageService {
     this.assertInternal(user);
     const lead = await this.resolveLead(id);
 
-    if (lead.convertedAssessmentId) {
-      const converted = await this.prisma.assessmentSession.findUnique({
-        where: { id: lead.convertedAssessmentId },
-        select: { id: true, reference: true },
-      });
-      if (converted) {
-        throw new BadRequestException(
-          'Cannot delete a triage submission that has been converted to a Level 2 engagement.',
-        );
-      }
-    }
-
-    if (lead.assessmentId) {
-      const childCount = await this.prisma.assessmentSession.count({
-        where: { parentAssessmentId: lead.assessmentId },
-      });
-      if (childCount > 0) {
-        throw new BadRequestException(
-          'Cannot delete a triage submission linked to follow-on advisory work.',
-        );
-      }
-    }
-
     const bundle = await this.commercial.loadCommercialBundle(lead.id);
     const storageKeys = new Set<string>();
     for (const proposal of bundle.proposals) {
@@ -1160,10 +1137,26 @@ export class TriageService {
     }
 
     const assessmentId = lead.assessmentId;
+    const convertedAssessmentId = lead.convertedAssessmentId;
     await this.prisma.$transaction(async (tx) => {
+      // Soft-detach Level 2+ that only pointed at this triage (do not cascade-delete them).
+      if (assessmentId) {
+        await tx.assessmentSession.updateMany({
+          where: { parentAssessmentId: assessmentId },
+          data: { parentAssessmentId: null },
+        });
+      }
+      await tx.communicationThread.updateMany({
+        where: { publicLeadId: lead.id },
+        data: { level2AssessmentId: null },
+      });
       await tx.publicLead.update({
         where: { id: lead.id },
-        data: { acceptedProposalId: null },
+        data: {
+          acceptedProposalId: null,
+          convertedAssessmentId: null,
+          convertedAt: null,
+        },
       });
       if (assessmentId) {
         await tx.publicLead.updateMany({
@@ -1188,6 +1181,7 @@ export class TriageService {
         organisationName: lead.organisationName,
         email: lead.email,
         assessmentId,
+        convertedAssessmentId,
         proposalReference: lead.proposalReference,
       },
     });
