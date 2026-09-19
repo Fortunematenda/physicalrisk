@@ -1360,17 +1360,6 @@ export default function AdvisoryDetail() {
                     </div>
                   )}
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  className="h-11 shrink-0 whitespace-nowrap px-4"
-                  disabled={busy || locked}
-                  onClick={() => void saveAllModules()}
-                >
-                  <Save className="size-4" />
-                  Save assessment
-                </Button>
               </div>
             </div>
           </div>
