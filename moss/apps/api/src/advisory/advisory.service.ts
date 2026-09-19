@@ -1530,6 +1530,7 @@ export class AdvisoryService {
       evidence,
       routes,
       questions,
+      scoredDiagnostic: engagement.productCode === ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
     });
 
     const safeRef = engagement.reference.replace(/[^A-Za-z0-9_-]/g, '_');

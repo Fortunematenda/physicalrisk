@@ -39,6 +39,11 @@ export type AdvisoryPdfInput = {
   evidence?: EadReportEvidenceInput[];
   routes?: EadReportRouteInput[] | null;
   questions?: EadReportQuestionInput[];
+  /**
+   * Level 2 EAD uses scored diagnostic modules. Level 3 focused assurance is
+   * evidence-led and must not render empty scorecards / “Not scored” tables.
+   */
+  scoredDiagnostic?: boolean;
 };
 
 function leftX(doc: PDFKit.PDFDocument) {
@@ -201,18 +206,43 @@ export function renderAdvisoryPdf(input: AdvisoryPdfInput): Promise<Buffer> {
     }
     doc.moveDown(0.8);
 
+    const hasAnyScore = summary.moduleScores.some((r) => r.assuranceScore != null);
+    const useScores = input.scoredDiagnostic ?? hasAnyScore;
+
     // ── Executive summary ────────────────────────────────────────────
-    drawExecutiveSummary(doc, summary, { pageW, ink, muted, red, ensureSpace, sectionTitle });
+    if (useScores) {
+      drawExecutiveSummary(doc, summary, { pageW, ink, muted, red, ensureSpace, sectionTitle });
+    } else {
+      sectionTitle('Executive summary');
+      doc
+        .fillColor(ink)
+        .font('Helvetica')
+        .fontSize(10)
+        .text(
+          'This Level 3 focused assurance report is evidence-led. It records findings, evidence limitations, business consequences and required executive decisions by working-paper module. It does not apply an overall diagnostic assurance score.',
+          { width: pageW, lineGap: 2 },
+        );
+      doc.moveDown(0.8);
+      resetCursor(doc);
+    }
 
-    // ── Module scorecard + chart ─────────────────────────────────────
-    drawModuleScorecard(doc, summary, { pageW, margin, ink, muted, red, ensureSpace, sectionTitle });
-    drawHorizontalBarChart(doc, summary, { pageW, margin, ink, muted, ensureSpace, sectionTitle });
+    // ── Module scorecard + chart (Level 2 diagnostic only) ───────────
+    if (useScores) {
+      drawModuleScorecard(doc, summary, { pageW, margin, ink, muted, red, ensureSpace, sectionTitle });
+      drawHorizontalBarChart(doc, summary, { pageW, margin, ink, muted, ensureSpace, sectionTitle });
+      drawPriorityAreas(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
+    }
 
-    // ── Priority attention ───────────────────────────────────────────
-    drawPriorityAreas(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
-
-    // ── Key findings (priority modules) ──────────────────────────────
-    drawKeyFindings(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle, drawAdvisoryRichText });
+    // ── Key findings ─────────────────────────────────────────────────
+    drawKeyFindings(doc, summary, {
+      pageW,
+      ink,
+      muted,
+      ensureSpace,
+      sectionTitle,
+      drawAdvisoryRichText,
+      allModules: !useScores,
+    });
 
     // ── Business consequences ────────────────────────────────────────
     drawConsequences(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
@@ -227,18 +257,22 @@ export function renderAdvisoryPdf(input: AdvisoryPdfInput): Promise<Buffer> {
       drawAdvisoryRichText,
     });
 
-    // ── Recommendations + CTA ────────────────────────────────────────
-    drawRecommendations(doc, summary, salesEmail, {
-      pageW,
-      ink,
-      muted,
-      red,
-      ensureSpace,
-      sectionTitle,
-    });
+    // ── Recommendations + CTA (diagnostic routing only) ──────────────
+    if (useScores && summary.recommendations.length) {
+      drawRecommendations(doc, summary, salesEmail, {
+        pageW,
+        ink,
+        muted,
+        red,
+        ensureSpace,
+        sectionTitle,
+      });
+    }
 
-    // ── Assurance basis + scale ──────────────────────────────────────
-    drawAssuranceBasis(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
+    // ── Assurance basis + scale (scored diagnostic only) ─────────────
+    if (useScores) {
+      drawAssuranceBasis(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
+    }
 
     // ── Evidence ─────────────────────────────────────────────────────
     drawEvidence(doc, summary, { pageW, ink, muted, ensureSpace, sectionTitle });
@@ -253,9 +287,10 @@ export function renderAdvisoryPdf(input: AdvisoryPdfInput): Promise<Buffer> {
       sectionTitle,
       header,
       drawAdvisoryRichText,
+      showScores: useScores,
     });
 
-    // ── Conclusion (flows naturally — no forced blank page) ──────────
+    // ── Conclusion ───────────────────────────────────────────────────
     ensureSpace(160);
     drawConclusion(doc, summary, salesEmail, {
       pageW,
@@ -264,6 +299,7 @@ export function renderAdvisoryPdf(input: AdvisoryPdfInput): Promise<Buffer> {
       red,
       ensureSpace,
       sectionTitle,
+      showScores: useScores,
     });
 
     doc.end();
@@ -697,12 +733,19 @@ function drawPriorityAreas(doc: PDFKit.PDFDocument, summary: EadReportSummary, c
 function drawKeyFindings(
   doc: PDFKit.PDFDocument,
   summary: EadReportSummary,
-  ctx: DrawCtx & { drawAdvisoryRichText: typeof drawAdvisoryRichText },
+  ctx: DrawCtx & { drawAdvisoryRichText: typeof drawAdvisoryRichText; allModules?: boolean },
 ) {
   const priorityCodes = new Set(summary.priorityAreas.map((p) => p.moduleCode));
-  const rows = summary.moduleScores.filter(
-    (r) => priorityCodes.has(r.moduleCode) || (r.assuranceScore != null && r.assuranceScore < 60),
-  );
+  const rows = ctx.allModules
+    ? summary.moduleScores.filter(
+        (r) =>
+          r.findingPlain ||
+          r.consequenceLabels.length ||
+          r.requiredDecisionPlain,
+      )
+    : summary.moduleScores.filter(
+        (r) => priorityCodes.has(r.moduleCode) || (r.assuranceScore != null && r.assuranceScore < 60),
+      );
   if (!rows.length) return;
 
   ctx.sectionTitle('Key findings summary');
@@ -716,7 +759,7 @@ function drawKeyFindings(
       { key: 'consequences', header: 'CONSEQUENCES', width: w * 0.22 },
       { key: 'decision', header: 'REQUIRED DECISION', width: w * 0.26 },
     ],
-    rows.slice(0, 4).map((row) => ({
+    rows.slice(0, ctx.allModules ? 8 : 4).map((row) => ({
       fill: row.visual?.panelHex || '#ffffff',
       accent: row.visual?.colourHex,
       cells: {
@@ -963,6 +1006,7 @@ function drawModuleDetails(
   ctx: DrawCtx & {
     header: (compact?: boolean) => void;
     drawAdvisoryRichText: typeof drawAdvisoryRichText;
+    showScores?: boolean;
   },
 ) {
   summary.moduleScores.forEach((row, i) => {
@@ -983,19 +1027,23 @@ function drawModuleDetails(
       .text(source?.principalQuestion || row.moduleName, { width: ctx.pageW });
     resetCursor(doc);
     doc.moveDown(0.25);
-    if (row.assuranceScore != null && row.band) {
-      doc
-        .fillColor(row.visual?.colourHex || ctx.ink)
-        .font('Helvetica')
-        .fontSize(9)
-        .text(`Assurance score: ${row.assuranceScore}/100 — ${row.band.displayLabel}`, {
-          width: ctx.pageW,
-        });
+    if (ctx.showScores !== false) {
+      if (row.assuranceScore != null && row.band) {
+        doc
+          .fillColor(row.visual?.colourHex || ctx.ink)
+          .font('Helvetica')
+          .fontSize(9)
+          .text(`Assurance score: ${row.assuranceScore}/100 — ${row.band.displayLabel}`, {
+            width: ctx.pageW,
+          });
+      } else {
+        doc.fillColor(ctx.muted).font('Helvetica').fontSize(9).text('Assurance score: Not scored');
+      }
+      resetCursor(doc);
+      doc.moveDown(0.65);
     } else {
-      doc.fillColor(ctx.muted).font('Helvetica').fontSize(9).text('Assurance score: Not scored');
+      doc.moveDown(0.35);
     }
-    resetCursor(doc);
-    doc.moveDown(0.65);
 
     const questions = questionsByModule.get(row.moduleCode) || [];
     const answers = row.diagnostic?.answers || {};
@@ -1093,10 +1141,32 @@ function drawConclusion(
   doc: PDFKit.PDFDocument,
   summary: EadReportSummary,
   salesEmail: string,
-  ctx: DrawCtx,
+  ctx: DrawCtx & { showScores?: boolean },
 ) {
   ctx.ensureSpace(220);
   ctx.sectionTitle('Executive assurance conclusion');
+
+  if (ctx.showScores === false) {
+    doc
+      .fillColor(ctx.ink)
+      .font('Helvetica')
+      .fontSize(10)
+      .text(
+        'This focused assurance review concludes on an evidence-led basis. Module findings, limitations and required decisions above should be read together with the referenced evidence. No overall diagnostic assurance score is assigned for this product.',
+        { width: ctx.pageW, lineGap: 2 },
+      );
+    doc.moveDown(0.8);
+    resetCursor(doc);
+    doc
+      .fillColor(ctx.muted)
+      .font('Helvetica')
+      .fontSize(9)
+      .text(
+        `For clarification of findings or next steps, contact ${salesEmail}.`,
+        { width: ctx.pageW },
+      );
+    return;
+  }
 
   if (summary.overallAssuranceScore != null && summary.overallBand) {
     doc
