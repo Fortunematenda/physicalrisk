@@ -274,8 +274,8 @@ export default function AdvisoryOutcomePage() {
 
           {/* 2. Executive Outcome | Commercial next step */}
           {modules.length ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
-              <Card className="rounded-xl border-slate-200 shadow-sm">
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
+              <Card className="rounded-xl border-slate-200 shadow-sm self-start">
                 <CardContent className="p-5 sm:p-6">
                   <AdvisoryReportSummaryPreview
                     modules={modules}
@@ -295,20 +295,21 @@ export default function AdvisoryOutcomePage() {
                   onChanged={() => load()}
                   variant="commercial"
                 />
-                {/* Stage 13 — only after the commercial proposal is accepted */}
-                {proposal?.status === 'ACCEPTED' && proposal?.id ? (
-                  <CreateLevel3EngagementsCard
-                    proposalId={String(proposal.id)}
-                    proposalNumber={proposal.proposalNumber}
-                    proposalStatus={proposal.status}
-                    organisationName={engagement.organisation?.name}
-                    items={data.comprehensiveProposal?.deliveryEngagements || []}
-                    canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
-                    onChanged={() => load()}
-                  />
-                ) : null}
               </div>
             </div>
+          ) : null}
+
+          {/* Stage 13 — full width under the outcome row so the score card does not stretch */}
+          {proposal?.status === 'ACCEPTED' && proposal?.id ? (
+            <CreateLevel3EngagementsCard
+              proposalId={String(proposal.id)}
+              proposalNumber={proposal.proposalNumber}
+              proposalStatus={proposal.status}
+              organisationName={engagement.organisation?.name}
+              items={data.comprehensiveProposal?.deliveryEngagements || []}
+              canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
+              onChanged={() => load()}
+            />
           ) : null}
 
           {/* 3. Module scorecard */}
