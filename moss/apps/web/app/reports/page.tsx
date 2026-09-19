@@ -24,7 +24,10 @@ import {
 } from '../../components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { apiFetch } from '../../lib/api';
-import { advisoryWorkspaceHref } from '../../lib/advisory-report';
+import {
+  advisoryWorkspaceHref,
+  isExecutiveAdvisoryDiagnostic,
+} from '../../lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '../../lib/auth-user';
 
 type ReportsView = 'scl' | 'advisory';
@@ -159,9 +162,18 @@ function engagementHref(row: ReportRow) {
   }
   const id = row.assessment?.id;
   if (!id) return null;
-  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
-    // Reports imply a completed diagnostic — open outcome (report + recommendations), not the editor list/workspace.
-    return advisoryWorkspaceHref({ assessmentId: id, productCode: code, hasOutcome: true });
+  if (
+    isExecutiveAdvisoryDiagnostic({
+      productCode: code,
+      reference: row.assessment?.reference,
+    })
+  ) {
+    return advisoryWorkspaceHref({
+      assessmentId: id,
+      productCode: code,
+      reference: row.assessment?.reference,
+      hasOutcome: true,
+    });
   }
   if (
     [
@@ -180,12 +192,18 @@ function engagementHref(row: ReportRow) {
 
 /** Primary click for advisory report rows: EAD → Diagnostic outcome; others → report PDF. */
 function advisoryPrimaryHref(row: ReportRow) {
-  const code = row.assessment?.productCode || '';
   const assessmentId = row.assessment?.id;
-  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && assessmentId) {
+  if (
+    assessmentId &&
+    isExecutiveAdvisoryDiagnostic({
+      productCode: row.assessment?.productCode,
+      reference: row.assessment?.reference,
+    })
+  ) {
     return advisoryWorkspaceHref({
       assessmentId,
-      productCode: code,
+      productCode: row.assessment?.productCode,
+      reference: row.assessment?.reference,
       hasOutcome: true,
     });
   }
@@ -193,7 +211,7 @@ function advisoryPrimaryHref(row: ReportRow) {
 }
 
 function reportDetailHref(reportId: string, scope: 'advisory' | 'scl' = 'scl') {
-  if (scope === 'advisory') return `/reports/${reportId}?view=advisory`;
+  if (scope === 'advisory') return `/reports/${reportId}?view=advisory&pdf=1`;
   return `/reports/${reportId}`;
 }
 
@@ -717,16 +735,33 @@ export default function ReportsIndexPage() {
                       const href = engagementHref(r);
                       const detailHref = reportDetailHref(r.id, 'advisory');
                       const primaryHref = advisoryPrimaryHref(r);
-                      const isEad = r.assessment?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+                      const isEad = isExecutiveAdvisoryDiagnostic({
+                        productCode: r.assessment?.productCode,
+                        reference: r.assessment?.reference,
+                      });
                       return (
-                        <tr key={r.id}>
+                        <tr
+                          key={r.id}
+                          className={isEad ? 'cursor-pointer' : undefined}
+                          onClick={
+                            isEad
+                              ? () => {
+                                  window.location.href = primaryHref;
+                                }
+                              : undefined
+                          }
+                        >
                           <td>
-                            <Link href={primaryHref}><strong>{r.reference}</strong></Link>
+                            <Link href={primaryHref} onClick={(e) => e.stopPropagation()}>
+                              <strong>{r.reference}</strong>
+                            </Link>
                           </td>
                           <td>
                             <div className="assess2-ref-cell">
                               {href ? (
-                                <Link href={href}><strong>{r.assessment?.reference}</strong></Link>
+                                <Link href={href} onClick={(e) => e.stopPropagation()}>
+                                  <strong>{r.assessment?.reference}</strong>
+                                </Link>
                               ) : (
                                 <strong>{r.assessment?.reference || '—'}</strong>
                               )}
@@ -750,7 +785,10 @@ export default function ReportsIndexPage() {
                             ) : <span className="muted">—</span>}
                           </td>
                           <td className="muted small">{formatDateTime(r.generatedAt || r.createdAt)}</td>
-                          <td className="org2-actions-cell">
+                          <td
+                            className="org2-actions-cell"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="reports2-actions">
                               <RowActionsMenu
                                 open={menuOpenId === r.id}

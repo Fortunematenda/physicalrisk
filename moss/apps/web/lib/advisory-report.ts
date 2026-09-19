@@ -34,19 +34,34 @@ export function isAdvisoryReportReady(report?: LatestAdvisoryReport | null): boo
 }
 
 export function advisoryReportHref(reportId: string): string {
-  return `/reports/${reportId}?view=advisory`;
+  // Explicit PDF surface — EAD default navigation is Diagnostic outcome (see reports pages).
+  return `/reports/${reportId}?view=advisory&pdf=1`;
+}
+
+/** True when this report/engagement belongs to an Executive Advisory Diagnostic. */
+export function isExecutiveAdvisoryDiagnostic(input: {
+  productCode?: string | null;
+  reference?: string | null;
+}): boolean {
+  const code = String(input.productCode || '');
+  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') return true;
+  return String(input.reference || '').toUpperCase().startsWith('EAD-');
 }
 
 /** EAD completed diagnostics open the outcome screen; other advisory work opens the engagement. */
 export function advisoryWorkspaceHref(input: {
   assessmentId: string;
   productCode?: string | null;
+  reference?: string | null;
   hasOutcome?: boolean;
 }): string {
   const id = String(input.assessmentId || '').trim();
   if (!id) return '/advisory';
-  const code = String(input.productCode || '');
-  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && input.hasOutcome) {
+  const isEad = isExecutiveAdvisoryDiagnostic({
+    productCode: input.productCode,
+    reference: input.reference,
+  });
+  if (isEad && input.hasOutcome !== false) {
     return `/advisory/${id}/outcome`;
   }
   return `/advisory/${id}`;

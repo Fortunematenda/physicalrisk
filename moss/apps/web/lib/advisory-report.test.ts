@@ -5,6 +5,7 @@ import {
   canGenerateAdvisoryReport,
   formatAdvisoryReportVersion,
   isAdvisoryReportReady,
+  isExecutiveAdvisoryDiagnostic,
   pickLatestAdvisoryReport,
 } from './advisory-report';
 
@@ -17,8 +18,16 @@ describe('advisory-report (Stage 11)', () => {
     expect(isAdvisoryReportReady(null)).toBe(false);
   });
 
-  it('builds preview href with advisory view', () => {
-    expect(advisoryReportHref('rep_1')).toBe('/reports/rep_1?view=advisory');
+  it('builds preview href with advisory view and pdf flag', () => {
+    expect(advisoryReportHref('rep_1')).toBe('/reports/rep_1?view=advisory&pdf=1');
+  });
+
+  it('detects EAD by product code or EAD- reference', () => {
+    expect(
+      isExecutiveAdvisoryDiagnostic({ productCode: 'EXECUTIVE_ADVISORY_DIAGNOSTIC' }),
+    ).toBe(true);
+    expect(isExecutiveAdvisoryDiagnostic({ reference: 'EAD-2026-000001' })).toBe(true);
+    expect(isExecutiveAdvisoryDiagnostic({ productCode: 'SCLI_COST_LEAKAGE' })).toBe(false);
   });
 
   it('routes completed EAD to diagnostic outcome', () => {
@@ -27,6 +36,12 @@ describe('advisory-report (Stage 11)', () => {
         assessmentId: 'ead_1',
         productCode: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
         hasOutcome: true,
+      }),
+    ).toBe('/advisory/ead_1/outcome');
+    expect(
+      advisoryWorkspaceHref({
+        assessmentId: 'ead_1',
+        reference: 'EAD-2026-000002',
       }),
     ).toBe('/advisory/ead_1/outcome');
     expect(

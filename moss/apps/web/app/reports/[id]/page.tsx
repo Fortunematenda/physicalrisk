@@ -9,7 +9,7 @@ import { StatusBadge } from '../../../components/Ui';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
 import { Button } from '@/components/ui/button';
 import { apiFetch } from '../../../lib/api';
-import { formatAdvisoryReportVersion, advisoryWorkspaceHref } from '@/lib/advisory-report';
+import { formatAdvisoryReportVersion, advisoryWorkspaceHref, isExecutiveAdvisoryDiagnostic } from '@/lib/advisory-report';
 
 const ADVISORY_PRODUCTS = new Set([
   'EXECUTIVE_GOVERNANCE_TRIAGE',
@@ -22,17 +22,20 @@ const ADVISORY_PRODUCTS = new Set([
   'SHIELD360',
 ]);
 
-function engagementHref(productCode?: string, assessmentId?: string, triageSubmissionId?: string | null) {
+function engagementHref(productCode?: string, assessmentId?: string, triageSubmissionId?: string | null, reference?: string | null) {
   if (productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
     const triageId = triageSubmissionId || assessmentId;
     return triageId ? `/triage/${triageId}` : null;
   }
   if (!assessmentId) return null;
   if (productCode === 'SCLI_COST_LEAKAGE') return `/assessments/${assessmentId}`;
-  if (productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+  if (
+    isExecutiveAdvisoryDiagnostic({ productCode, reference })
+  ) {
     return advisoryWorkspaceHref({
       assessmentId,
       productCode,
+      reference,
       hasOutcome: true,
     });
   }
@@ -45,6 +48,7 @@ export default function ReportPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const viewParam = searchParams.get('view');
+  const forcePdf = searchParams.get('pdf') === '1';
   const [report, setReport] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -56,13 +60,18 @@ export default function ReportPage() {
   const [previewError, setPreviewError] = useState('');
 
   const productCode = String(report?.assessment?.productCode || '');
+  const assessmentRef = String(report?.assessment?.reference || '');
   const isTriageReport = productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
+  const isEadReport = isExecutiveAdvisoryDiagnostic({
+    productCode,
+    reference: assessmentRef,
+  });
   const isAdvisoryReport = useMemo(() => {
     if (viewParam === 'advisory') return true;
     if (viewParam === 'scl') return false;
     if (isTriageReport) return false;
-    return ADVISORY_PRODUCTS.has(productCode);
-  }, [viewParam, productCode, isTriageReport]);
+    return ADVISORY_PRODUCTS.has(productCode) || isEadReport;
+  }, [viewParam, productCode, isTriageReport, isEadReport]);
 
   useEffect(() => {
     apiFetch(`/reports/${id}`)
@@ -76,21 +85,38 @@ export default function ReportPage() {
         if (suggested) setEmail(suggested);
 
         const code = String(data.assessment?.productCode || '');
+        const ref = String(data.assessment?.reference || '');
         // Triage indications live on Triage submissions — don't keep a separate reports surface.
         if (code === 'EXECUTIVE_GOVERNANCE_TRIAGE') {
           const triageId = data.triageSubmissionId || data.assessment?.id;
           router.replace(triageId ? `/triage/${triageId}` : '/triage');
           return;
         }
-        if (ADVISORY_PRODUCTS.has(code) && viewParam !== 'advisory') {
-          router.replace(`/reports/${id}?view=advisory`);
+        // EAD reports open Diagnostic outcome by default (PDF via ?pdf=1).
+        if (
+          isExecutiveAdvisoryDiagnostic({ productCode: code, reference: ref }) &&
+          data.assessment?.id &&
+          !forcePdf
+        ) {
+          router.replace(
+            advisoryWorkspaceHref({
+              assessmentId: data.assessment.id,
+              productCode: code,
+              reference: ref,
+              hasOutcome: true,
+            }),
+          );
+          return;
+        }
+        if ((ADVISORY_PRODUCTS.has(code) || isExecutiveAdvisoryDiagnostic({ productCode: code, reference: ref })) && viewParam !== 'advisory') {
+          router.replace(`/reports/${id}?view=advisory${forcePdf ? '&pdf=1' : ''}`);
         }
       })
       .catch((e) => setError(e.message));
-  }, [id, router, viewParam]);
+  }, [id, router, viewParam, forcePdf]);
 
   useEffect(() => {
-    if (!isAdvisoryReport || !report?.downloadUrl) {
+    if (!isAdvisoryReport || !forcePdf || !report?.downloadUrl) {
       setPreviewBytes(null);
       setPreviewOpen(false);
       return;
@@ -118,7 +144,7 @@ export default function ReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAdvisoryReport, report?.downloadUrl]);
+  }, [isAdvisoryReport, forcePdf, report?.downloadUrl]);
 
   async function issue(event: FormEvent) {
     event.preventDefault();
@@ -139,7 +165,12 @@ export default function ReportPage() {
 
   const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
   const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
-  const workHref = engagementHref(productCode, report?.assessment?.id, report?.triageSubmissionId);
+  const workHref = engagementHref(
+    productCode,
+    report?.assessment?.id,
+    report?.triageSubmissionId,
+    assessmentRef,
+  );
 
   return (
     <AuthGate>
