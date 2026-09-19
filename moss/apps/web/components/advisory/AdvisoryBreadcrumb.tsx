@@ -29,8 +29,6 @@ export function AdvisoryBreadcrumb({
   if (root) {
     return (
       <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
-        <span className="font-medium text-slate-500">Executive Advisory</span>
-        <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
         <span className="truncate font-semibold text-slate-900">{current}</span>
       </nav>
     );

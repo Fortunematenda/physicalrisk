@@ -18,7 +18,10 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     expect(triage?.items.map((i) => i.href)).not.toContain('/reports#executive-triage-reports');
     expect(advisory?.label).toBe('Executive Advisory');
     expect(advisory?.items.map((i) => i.href)).toEqual(
-      expect.arrayContaining(['/advisory']),
+      expect.arrayContaining(['/advisory', '/admin/ead-diagnostic-template']),
+    );
+    expect(advisory?.items.find((i) => i.id === 'advisory-diagnostic-template')?.label).toBe(
+      'Diagnostic questionnaire',
     );
     expect(advisory?.items.map((i) => i.href)).not.toContain('/reports#executive-advisory-reports');
     expect(advisory?.items.map((i) => i.id)).not.toContain('advisory-reports');

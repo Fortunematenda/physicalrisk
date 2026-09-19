@@ -74,7 +74,7 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
       { id: 'advisory-engagements', label: 'Diagnostics & assurance', href: '/advisory', icon: IconShieldCheck, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
       {
         id: 'advisory-diagnostic-template',
-        label: 'Diagnostic templates',
+        label: 'Diagnostic questionnaire',
         href: '/admin/ead-diagnostic-template',
         icon: IconSlidersHorizontal,
         roles: ['ADMIN'],

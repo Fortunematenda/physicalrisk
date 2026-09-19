@@ -193,6 +193,11 @@ export default function AdvisoryPage() {
           <Button asChild>
             <Link href="/advisory/new">+ New engagement</Link>
           </Button>
+          {isAdmin ? (
+            <Button asChild variant="outline">
+              <Link href="/admin/ead-diagnostic-template">Diagnostic questionnaire</Link>
+            </Button>
+          ) : null}
         </div>
 
         {editing ? (
