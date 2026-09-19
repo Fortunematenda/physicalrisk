@@ -33,6 +33,7 @@ import {
   type LatestAdvisoryReport,
 } from '@/lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
+import { formatDate } from '@/lib/format';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
@@ -96,6 +97,81 @@ function isEad(row: AdvisoryRow) {
 
 function isLevel3(row: AdvisoryRow) {
   return !isEad(row) && row.productCode !== 'SHIELD360';
+}
+
+function formatEngagementStatus(status: string) {
+  return String(status || '')
+    .trim()
+    .replaceAll('_', ' ')
+    .toUpperCase() || '—';
+}
+
+/** Presentation-only deliverable cell for the engagements table. */
+function DeliverableCell({
+  ead,
+  outcomeReady,
+  reportReady,
+  reportVersion,
+  status,
+  viewHref,
+}: {
+  ead: boolean;
+  outcomeReady: boolean;
+  reportReady: boolean;
+  reportVersion?: number | null;
+  status: string;
+  viewHref: string;
+}) {
+  if (ead && outcomeReady) {
+    return (
+      <div className="leading-snug">
+        <p className="m-0 flex items-center gap-1.5 text-sm font-medium text-slate-900">
+          <ClipboardList className="size-3.5 shrink-0 text-slate-500" aria-hidden />
+          Assessment outcome
+        </p>
+        <p className="m-0 mt-0.5 text-xs text-slate-500">
+          Ready
+          <span className="text-slate-300"> · </span>
+          <Link
+            href={viewHref}
+            className="font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+          >
+            View
+          </Link>
+        </p>
+      </div>
+    );
+  }
+
+  if (reportReady) {
+    return (
+      <div className="leading-snug">
+        <p className="m-0 flex items-center gap-1.5 text-sm font-medium text-slate-900">
+          <FileText className="size-3.5 shrink-0 text-slate-500" aria-hidden />
+          Assurance report
+        </p>
+        <p className="m-0 mt-0.5 text-xs text-slate-500">
+          {formatAdvisoryReportVersion(reportVersion)}
+          <span className="text-slate-300"> · </span>
+          <Link
+            href={viewHref}
+            className="font-medium text-slate-700 underline-offset-2 hover:text-slate-900 hover:underline"
+          >
+            View
+          </Link>
+        </p>
+      </div>
+    );
+  }
+
+  const draftLike = IN_PROGRESS_STATUSES.has(String(status || '').toUpperCase()) ||
+    String(status || '').toUpperCase() === 'DRAFT';
+
+  return (
+    <span className="text-xs text-slate-400">
+      {draftLike ? 'Not generated' : 'Not available yet'}
+    </span>
+  );
 }
 
 function primaryAnalyst(row: AdvisoryRow) {
@@ -364,7 +440,7 @@ export default function AdvisoryPage() {
                     icon={FileCheck}
                     title="Outcome ready"
                     value={summary.outcomeReady}
-                    description="Completed diagnostics"
+                    description="Executive Advisory outcomes"
                     tone="violet"
                     loading={loading && !items.length}
                     textWrap
@@ -390,7 +466,7 @@ export default function AdvisoryPage() {
                     icon={FileText}
                     title="Report ready"
                     value={summary.reportReady}
-                    description="PDF available"
+                    description="Level 3 assurance PDFs"
                     tone="green"
                     loading={loading && !items.length}
                     textWrap
@@ -513,6 +589,8 @@ export default function AdvisoryPage() {
             <CardDescription>
               {rows.length} record{rows.length === 1 ? '' : 's'}
               {hasActiveFilters ? ' (filtered)' : ''}
+              {' · '}
+              Level 2 produces an Assessment Outcome; Level 3 produces an Assurance Report.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -525,7 +603,7 @@ export default function AdvisoryPage() {
                     <th className="px-3 py-2">Product</th>
                     <th className="px-3 py-2">Consultant</th>
                     <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Report</th>
+                    <th className="px-3 py-2">Deliverable</th>
                     <th className="px-3 py-2">Updated</th>
                     <th className="px-3 py-2 text-right">Actions</th>
                   </tr>
@@ -575,53 +653,33 @@ export default function AdvisoryPage() {
                           {a ? `${a.user.firstName} ${a.user.lastName}` : 'Unassigned'}
                         </td>
                         <td className="px-3 py-2">
-                          <div className="leading-snug">
-                            <span>{x.status}</span>
-                            {reportReady ? (
-                              <span className="mt-0.5 block text-xs text-moss-success">Report ready</span>
-                            ) : outcomeReady && ead ? (
-                              <span className="mt-0.5 block text-xs text-moss-success">Outcome ready</span>
-                            ) : outcomeReady ? (
-                              <span className="mt-0.5 block text-xs text-slate-500">No report yet</span>
-                            ) : null}
-                          </div>
+                          <span className="text-sm text-slate-800">
+                            {formatEngagementStatus(x.status)}
+                          </span>
                         </td>
                         <td
                           className="px-3 py-2"
                           onClick={(e) => e.stopPropagation()}
                           onKeyDown={(e) => e.stopPropagation()}
                         >
-                          {reportReady && x.latestReport ? (
-                            <div className="leading-snug">
-                              <span className="font-medium text-slate-900">
-                                {formatAdvisoryReportVersion(x.latestReport.version)}
-                              </span>
-                              <Link
-                                href={
-                                  ead && outcomeReady
-                                    ? workspaceHref
-                                    : advisoryReportHref(x.latestReport.id)
-                                }
-                                className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
-                              >
-                                View
-                              </Link>
-                            </div>
-                          ) : outcomeReady && ead ? (
-                            <div className="leading-snug">
-                              <span className="font-medium text-slate-900">Outcome</span>
-                              <Link
-                                href={workspaceHref}
-                                className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
-                              >
-                                View
-                              </Link>
-                            </div>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
+                          <DeliverableCell
+                            ead={ead}
+                            outcomeReady={outcomeReady}
+                            reportReady={reportReady}
+                            reportVersion={x.latestReport?.version}
+                            status={x.status}
+                            viewHref={
+                              ead && outcomeReady
+                                ? workspaceHref
+                                : reportReady && x.latestReport
+                                  ? advisoryReportHref(x.latestReport.id)
+                                  : workspaceHref
+                            }
+                          />
                         </td>
-                        <td className="px-3 py-2">{new Date(x.updatedAt).toLocaleDateString('en-ZA')}</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {formatDate(x.updatedAt)}
+                        </td>
                         <td
                           className="org2-actions-cell px-3 py-2"
                           onClick={(e) => e.stopPropagation()}
@@ -652,18 +710,6 @@ export default function AdvisoryPage() {
                                 onClick={() => setMenuOpenId(null)}
                               >
                                 Open working papers
-                              </Link>
-                            ) : null}
-                            {reportReady && x.latestReport ? (
-                              <Link
-                                href={
-                                  ead && outcomeReady
-                                    ? workspaceHref
-                                    : advisoryReportHref(x.latestReport.id)
-                                }
-                                onClick={() => setMenuOpenId(null)}
-                              >
-                                View PDF report
                               </Link>
                             ) : null}
                             {showGenerate ? (
