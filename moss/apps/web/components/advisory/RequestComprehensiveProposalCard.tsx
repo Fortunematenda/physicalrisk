@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PHYSICAL_RISK_PRODUCTS, isLegacyShield360ProductCode } from '@moss/shared';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -33,6 +34,9 @@ export type ComprehensiveProposalSummary = {
   status: string;
   workspaceHref: string;
   selectedProductCodes?: string[];
+  createdAt?: string | null;
+  sentAt?: string | null;
+  acceptedAt?: string | null;
 } | null;
 
 type Props = {
@@ -42,6 +46,8 @@ type Props = {
   canRequest: boolean;
   canOpenWorkspace: boolean;
   onChanged: () => Promise<void> | void;
+  /** Compact commercial panel for the outcome top column. */
+  variant?: 'full' | 'commercial' | 'recommendations';
 };
 
 function humanizeProposalStatus(status?: string | null) {
@@ -63,6 +69,11 @@ function productLabel(code: string, fallback?: string) {
   return fallback || PHYSICAL_RISK_PRODUCTS[code as keyof typeof PHYSICAL_RISK_PRODUCTS]?.name || code;
 }
 
+function fmtDate(value?: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 export function RequestComprehensiveProposalCard({
   assessmentId,
   recommendations,
@@ -70,6 +81,7 @@ export function RequestComprehensiveProposalCard({
   canRequest,
   canOpenWorkspace,
   onChanged,
+  variant = 'full',
 }: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -77,6 +89,7 @@ export function RequestComprehensiveProposalCard({
   const [forceNew, setForceNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [requestNote, setRequestNote] = useState('');
+  const [expandedRationale, setExpandedRationale] = useState<string | null>(null);
   const selectable = useMemo(
     () =>
       recommendations.filter(
@@ -157,112 +170,8 @@ export function RequestComprehensiveProposalCard({
     return null;
   }
 
-  return (
+  const dialogs = (
     <>
-      <Card className="rounded-xl border-slate-200 shadow-sm">
-        <CardHeader className="space-y-1 p-5 sm:p-6">
-          <CardTitle className="text-base sm:text-lg">Recommended next engagements</CardTitle>
-          <CardDescription>
-            These recommendations arise from the Executive Advisory Diagnostic findings.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4 p-5 pt-0 sm:p-6 sm:pt-0">
-          <ul className="space-y-3">
-            {selectable.map((r) => {
-              const modules = (r.sourceModules || [])
-                .map((m) => m.moduleName || m.moduleCode)
-                .filter(Boolean)
-                .join(', ');
-              const included = Boolean(r.includedInActiveProposal);
-              return (
-                <li
-                  key={r.productCode}
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-3"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="m-0 text-sm font-semibold text-slate-900">
-                        {productLabel(r.productCode, r.label)}
-                      </p>
-                      {modules ? (
-                        <p className="m-0 mt-1 text-xs text-slate-500">
-                          Recommended from: {modules}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Badge variant="info">Recommended</Badge>
-                      {comprehensiveProposal ? (
-                        included ? (
-                          <Badge variant="success">In proposal</Badge>
-                        ) : (
-                          <Badge variant="secondary">Not included in this proposal</Badge>
-                        )
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-
-          {comprehensiveProposal ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3">
-              <div className="min-w-0 space-y-0.5">
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Proposal
-                </p>
-                <p className="m-0 text-sm font-semibold text-slate-900">
-                  {comprehensiveProposal.proposalNumber}
-                  <span className="ml-2 font-normal text-slate-600">
-                    · {humanizeProposalStatus(comprehensiveProposal.status)}
-                  </span>
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {canOpenWorkspace ? (
-                  <Button asChild className="h-10 px-4">
-                    <Link href={comprehensiveProposal.workspaceHref}>Open proposal workspace</Link>
-                  </Button>
-                ) : (
-                  <p className="m-0 self-center text-sm text-slate-600">
-                    Physical Risk is preparing your proposal.
-                  </p>
-                )}
-                {canRequest ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 px-4"
-                    disabled={busy}
-                    onClick={() => openRequestDialog(true)}
-                  >
-                    Request another
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ) : canRequest ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-              <div className="min-w-0">
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Proposal
-                </p>
-                <p className="m-0 text-sm text-slate-700">Not requested</p>
-              </div>
-              <Button
-                type="button"
-                className="h-10 px-4"
-                disabled={busy}
-                onClick={() => openRequestDialog(false)}
-              >
-                Request comprehensive proposal
-              </Button>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -307,9 +216,6 @@ export function RequestComprehensiveProposalCard({
                 placeholder="e.g. Please include an option for an onsite workshop and implementation support."
                 rows={3}
               />
-              <p className="text-xs text-slate-500">
-                For proposal preparation only — not automatically included in the client-facing proposal.
-              </p>
             </div>
           </div>
           <DialogFooter>
@@ -367,5 +273,255 @@ export function RequestComprehensiveProposalCard({
         </DialogContent>
       </Dialog>
     </>
+  );
+
+  if (variant === 'commercial') {
+    return (
+      <>
+        <CommercialNextStepPanel
+          recommendationCount={selectable.length}
+          comprehensiveProposal={comprehensiveProposal}
+          canRequest={canRequest}
+          canOpenWorkspace={canOpenWorkspace}
+          busy={busy}
+          onRequest={() => openRequestDialog(false)}
+        />
+        {dialogs}
+      </>
+    );
+  }
+
+  if (variant === 'recommendations') {
+    return (
+      <>
+        <RecommendationsGrid
+          selectable={selectable}
+          comprehensiveProposal={comprehensiveProposal}
+          expandedRationale={expandedRationale}
+          setExpandedRationale={setExpandedRationale}
+        />
+        {dialogs}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        <RecommendationsGrid
+          selectable={selectable}
+          comprehensiveProposal={comprehensiveProposal}
+          expandedRationale={expandedRationale}
+          setExpandedRationale={setExpandedRationale}
+        />
+        <CommercialNextStepPanel
+          recommendationCount={selectable.length}
+          comprehensiveProposal={comprehensiveProposal}
+          canRequest={canRequest}
+          canOpenWorkspace={canOpenWorkspace}
+          busy={busy}
+          onRequest={() => openRequestDialog(false)}
+        />
+      </div>
+      {dialogs}
+    </>
+  );
+}
+
+function RecommendationsGrid({
+  selectable,
+  comprehensiveProposal,
+  expandedRationale,
+  setExpandedRationale,
+}: {
+  selectable: EadRecommendationOption[];
+  comprehensiveProposal: ComprehensiveProposalSummary;
+  expandedRationale: string | null;
+  setExpandedRationale: (code: string | null) => void;
+}) {
+  if (!selectable.length) return null;
+  return (
+    <Card className="rounded-xl border-slate-200 shadow-sm">
+      <CardHeader className="space-y-1 p-5 sm:p-6">
+        <CardTitle className="text-base sm:text-lg">Recommended next engagements</CardTitle>
+        <CardDescription>
+          Focused assurance products arising from the diagnostic findings.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-5 pt-0 sm:p-6 sm:pt-0">
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {selectable.map((r) => {
+            const modules = (r.sourceModules || [])
+              .map((m) => m.moduleName || m.moduleCode)
+              .filter(Boolean) as string[];
+            const open = expandedRationale === r.productCode;
+            const included = Boolean(r.includedInActiveProposal);
+            return (
+              <li
+                key={r.productCode}
+                className="rounded-xl border border-slate-200 bg-white p-4"
+              >
+                <p className="m-0 text-sm font-semibold leading-snug text-slate-900">
+                  {productLabel(r.productCode, r.label)}
+                </p>
+                <p className="m-0 mt-2 text-xs text-slate-600">
+                  Triggered by {modules.length || 1} diagnostic area
+                  {modules.length === 1 ? '' : 's'}
+                </p>
+                {comprehensiveProposal ? (
+                  included ? (
+                    <Badge variant="success" className="mt-2">
+                      In proposal
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="mt-2">
+                      Not in this proposal
+                    </Badge>
+                  )
+                ) : null}
+                {modules.length ? (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#c41230] underline-offset-2 hover:underline"
+                      onClick={() => setExpandedRationale(open ? null : r.productCode)}
+                    >
+                      View rationale
+                      {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                    </button>
+                    {open ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-slate-600">
+                        {modules.map((name) => (
+                          <li key={name}>{name}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommercialNextStepPanel({
+  recommendationCount,
+  comprehensiveProposal,
+  canRequest,
+  canOpenWorkspace,
+  busy,
+  onRequest,
+}: {
+  recommendationCount: number;
+  comprehensiveProposal: ComprehensiveProposalSummary;
+  canRequest: boolean;
+  canOpenWorkspace: boolean;
+  busy: boolean;
+  onRequest: () => void;
+}) {
+  const status = String(comprehensiveProposal?.status || '');
+  const selectedCount = comprehensiveProposal?.selectedProductCodes?.length || recommendationCount;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {comprehensiveProposal ? 'Commercial proposal' : 'Commercial next step'}
+      </p>
+
+      {!comprehensiveProposal ? (
+        <div className="mt-3 space-y-3">
+          <p className="m-0 text-sm text-slate-700">
+            <span className="font-semibold text-slate-900">{recommendationCount}</span>
+            {' '}
+            recommendation{recommendationCount === 1 ? '' : 's'}
+          </p>
+          <div>
+            <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Proposal
+            </p>
+            <p className="m-0 text-sm font-medium text-slate-900">Not requested</p>
+          </div>
+          {recommendationCount > 0 ? (
+            <p className="m-0 text-sm text-slate-600">
+              {recommendationCount} recommended engagement{recommendationCount === 1 ? '' : 's'}{' '}
+              available for proposal.
+            </p>
+          ) : null}
+          {canRequest ? (
+            <Button type="button" className="h-10 w-full sm:w-auto" disabled={busy} onClick={onRequest}>
+              Request comprehensive proposal
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <p className="m-0 text-base font-semibold text-slate-900">
+            {comprehensiveProposal.proposalNumber}
+          </p>
+          <dl className="grid gap-2 text-sm">
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Status
+              </dt>
+              <dd className="m-0 font-medium text-slate-900">
+                {humanizeProposalStatus(status)}
+              </dd>
+            </div>
+            {fmtDate(comprehensiveProposal.createdAt) ? (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Requested
+                </dt>
+                <dd className="m-0 font-medium text-slate-900">
+                  {fmtDate(comprehensiveProposal.createdAt)}
+                </dd>
+              </div>
+            ) : null}
+            {fmtDate(comprehensiveProposal.sentAt) ? (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Sent
+                </dt>
+                <dd className="m-0 font-medium text-slate-900">
+                  {fmtDate(comprehensiveProposal.sentAt)}
+                </dd>
+              </div>
+            ) : null}
+            {fmtDate(comprehensiveProposal.acceptedAt) ? (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Accepted
+                </dt>
+                <dd className="m-0 font-medium text-slate-900">
+                  {fmtDate(comprehensiveProposal.acceptedAt)}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Selected engagements
+              </dt>
+              <dd className="m-0 font-medium text-slate-900">{selectedCount}</dd>
+            </div>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            {canOpenWorkspace ? (
+              <Button asChild className="h-10 px-4">
+                <Link href={comprehensiveProposal.workspaceHref}>
+                  {status === 'SENT' || status === 'VIEWED' || status === 'ACCEPTED'
+                    ? 'View proposal'
+                    : 'Open proposal workspace'}
+                </Link>
+              </Button>
+            ) : (
+              <p className="m-0 text-sm text-slate-600">Physical Risk is preparing your proposal.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

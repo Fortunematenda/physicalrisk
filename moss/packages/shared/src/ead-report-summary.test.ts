@@ -206,9 +206,10 @@ describe('ead-report-summary (Stage 6 + Stage 9)', () => {
 
   it('executive narrative is generated from actual scores', () => {
     const summary = buildEadReportSummary({ modules: sampleModules });
-    expect(summary.executiveNarrative).toMatch(/assurance score 55\.3\/100/i);
+    expect(summary.executiveNarrative).toMatch(/diagnostic indicates/i);
     expect(summary.executiveNarrative).toMatch(/Consequence Management/i);
     expect(summary.executiveNarrative).not.toMatch(/Shield 360/i);
+    expect(summary.executiveNarrative).not.toMatch(/The diagnostic identified requires/i);
   });
 
   it('renders Not aware distinctly and notes knowledge gaps when present', () => {

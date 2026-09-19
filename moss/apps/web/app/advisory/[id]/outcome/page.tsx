@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import {
-  PHYSICAL_RISK_PRODUCTS,
-} from '@moss/shared';
-import { CheckCircle2, ChevronRight, FileText, Loader2, Lock, NotebookPen } from 'lucide-react';
+import { CheckCircle2, FileText, Loader2, Lock, NotebookPen } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
@@ -17,7 +14,6 @@ import { Shell } from '@/components/Shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -28,111 +24,20 @@ import {
   type LatestAdvisoryReport,
 } from '@/lib/advisory-report';
 import { cn } from '@/lib/utils';
-
-const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
-  Object.entries(PHYSICAL_RISK_PRODUCTS).map(([code, v]) => [code, v.name]),
-);
+import { isLegacyShield360ProductCode } from '@moss/shared';
 
 function fmt(value?: string | null) {
   if (!value) return '—';
   return new Date(value).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-function engagementHref(productCode: string, id: string) {
-  return productCode === 'SCLI_COST_LEAKAGE' ? `/assessments/${id}` : `/advisory/${id}`;
-}
-
-function humanizeStatus(value?: string | null) {
-  if (!value) return '—';
-  const map: Record<string, string> = {
-    DRAFT: 'Draft',
-    IN_PROGRESS: 'In progress',
-    SUBMITTED: 'Submitted',
-    AWAITING_REVIEW: 'Awaiting review',
-    REVIEWED: 'Reviewed',
-    APPROVED: 'Approved',
-    REPORT_GENERATED: 'Report generated',
-    REPORT_ISSUED: 'Report issued',
-    CLOSED: 'Closed',
-    NOT_REQUESTED: 'Not requested',
-    REQUESTED: 'Requested',
-    IN_PREPARATION: 'In preparation',
-    SENT: 'Sent',
-    ACCEPTED: 'Accepted',
-    DECLINED: 'Declined',
-    EXPIRED: 'Expired',
-    CANCELLED: 'Cancelled',
-  };
-  return map[value] || value.replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/** Persisted completion: outcome confirmed and/or terminal engagement status. */
-function isDiagnosticCompleted(engagement: { status?: string | null }, outcome: { confirmedAt?: string | null }) {
+function isDiagnosticCompleted(
+  engagement: { status?: string | null },
+  outcome: { confirmedAt?: string | null },
+) {
   if (outcome?.confirmedAt) return true;
   const status = String(engagement?.status || '');
   return ['REPORT_ISSUED', 'REPORT_GENERATED', 'CLOSED', 'APPROVED'].includes(status);
-}
-
-function MetricTile({
-  value,
-  label,
-  tone = 'default',
-}: {
-  value: ReactNode;
-  label: string;
-  tone?: 'default' | 'success' | 'neutral';
-}) {
-  return (
-    <Card
-      className={cn(
-        'min-w-0 rounded-xl shadow-sm',
-        tone === 'success' && 'border-moss-success/30 bg-moss-success/[0.04]',
-        tone === 'neutral' && 'border-slate-300 bg-slate-50/80',
-        tone === 'default' && 'border-slate-200',
-      )}
-    >
-      <CardContent className="space-y-1 p-4 sm:p-5">
-        <p
-          className={cn(
-            'truncate text-2xl font-bold tracking-tight',
-            tone === 'success' && 'text-moss-success',
-            tone === 'neutral' && 'text-slate-700',
-            tone === 'default' && 'text-slate-900',
-          )}
-        >
-          {value}
-        </p>
-        <p className="text-xs font-medium text-slate-500">{label}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function RationaleBlock({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const long = text.length > 180 || text.split(/\n/).length > 3;
-  return (
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Diagnostic rationale</p>
-      <p
-        className={cn(
-          'text-sm leading-relaxed text-slate-700',
-          !expanded && long && '[display:-webkit-box] [-webkit-line-clamp:3] [-webkit-box-orient:vertical] overflow-hidden',
-        )}
-      >
-        {text}
-      </p>
-      {long ? (
-        <button
-          type="button"
-          className="text-xs font-semibold text-[#c41230] underline-offset-2 hover:underline"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      ) : null}
-    </div>
-  );
 }
 
 export default function AdvisoryOutcomePage() {
@@ -141,6 +46,7 @@ export default function AdvisoryOutcomePage() {
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [notes, setNotes] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -152,6 +58,7 @@ export default function AdvisoryOutcomePage() {
     const row = await apiFetch<any>(`/advisory/${id}/outcome`);
     setData(row);
     setNotes(row.outcome?.commercialAdminNotes || '');
+    if (row.outcome?.commercialAdminNotes) setNotesOpen(false);
     return row;
   }, [id]);
 
@@ -160,7 +67,6 @@ export default function AdvisoryOutcomePage() {
       .then(() => setLoadFailed(false))
       .catch((e: Error) => {
         const msg = String(e.message || '');
-        // Incomplete diagnostic — send consultant back to working papers.
         if (/not been confirmed|only available for Executive Advisory/i.test(msg)) {
           router.replace(`/advisory/${id}`);
           return;
@@ -198,23 +104,20 @@ export default function AdvisoryOutcomePage() {
     }
   }
 
-  async function commercialAction(action: string) {
+  async function saveNotes() {
     setBusy(true);
     try {
       await apiFetch(`/advisory/${id}/commercial-proposal`, {
         method: 'POST',
-        body: JSON.stringify({ action, commercialAdminNotes: notes }),
+        body: JSON.stringify({ action: 'SAVE_NOTES', commercialAdminNotes: notes }),
       });
-      toast({
-        title: 'Commercial status updated',
-        description: `Action: ${action.toLowerCase()}.`,
-        variant: 'success',
-      });
+      toast({ title: 'Internal note saved', variant: 'success' });
       await load();
-    } catch (e: any) {
+      setNotesOpen(false);
+    } catch (e: unknown) {
       toast({
-        title: 'Unable to update commercial status',
-        description: e.message,
+        title: 'Unable to save note',
+        description: e instanceof Error ? e.message : 'Please try again.',
         variant: 'error',
       });
     } finally {
@@ -222,35 +125,13 @@ export default function AdvisoryOutcomePage() {
     }
   }
 
-  async function createEngagement(routeId: string) {
-    setBusy(true);
-    try {
-      const r = await apiFetch<any>(`/advisory/${id}/routes/${routeId}/create-engagement`, { method: 'POST' });
-      toast({
-        title: r.created ? 'Level 3 engagement created' : 'Engagement already exists',
-        description: r.engagement?.reference
-          ? `Reference ${r.engagement.reference}.`
-          : undefined,
-        variant: 'success',
-      });
-      await load();
-    } catch (e: any) {
-      toast({
-        title: 'Unable to create engagement',
-        description: e.message,
-        variant: 'error',
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const routes = useMemo(() => (data?.outcome?.routes || []) as any[], [data]);
-  const papersReady = useMemo(
-    () => routes.filter((r) => Boolean(r.createdAssessment?.id)).length,
-    [routes],
-  );
-  const awaitingSetup = useMemo(() => routes.length - papersReady, [routes, papersReady]);
+  const recommendationCount = useMemo(() => {
+    const list = Array.isArray(data?.recommendations) ? data.recommendations : [];
+    return list.filter(
+      (r: { productCode?: string }) =>
+        r.productCode && !isLegacyShield360ProductCode(r.productCode),
+    ).length;
+  }, [data]);
 
   if (!data) {
     return (
@@ -274,14 +155,9 @@ export default function AdvisoryOutcomePage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
+            <div className="mx-auto max-w-[1440px] space-y-3 px-1">
               <Skeleton className="h-28 w-full rounded-xl" />
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Skeleton className="h-20 rounded-xl" />
-                <Skeleton className="h-20 rounded-xl" />
-                <Skeleton className="h-20 rounded-xl" />
-                <Skeleton className="h-20 rounded-xl" />
-              </div>
+              <Skeleton className="h-40 w-full rounded-xl" />
               <Skeleton className="h-48 w-full rounded-xl" />
             </div>
           )}
@@ -291,8 +167,6 @@ export default function AdvisoryOutcomePage() {
   }
 
   const { engagement, outcome } = data;
-  const commercialStatus = String(outcome.commercialStatus || 'NOT_REQUESTED');
-  const accepted = commercialStatus === 'ACCEPTED';
   const canManageCommercial = Boolean(data.permissions?.canManageCommercial);
   const confirmedByName = [outcome.confirmedBy?.firstName, outcome.confirmedBy?.lastName]
     .filter(Boolean)
@@ -303,6 +177,10 @@ export default function AdvisoryOutcomePage() {
   const latestReport = pickLatestAdvisoryReport(
     (engagement.reports || []) as LatestAdvisoryReport[],
   );
+  const proposal = data.comprehensiveProposal || null;
+  const modules = Array.isArray(engagement.advisoryModuleReviews)
+    ? engagement.advisoryModuleReviews
+    : [];
 
   return (
     <AuthGate>
@@ -312,74 +190,52 @@ export default function AdvisoryOutcomePage() {
         hideTitle
         headerLeading={<AdvisoryBreadcrumb current={engagement.reference || 'Outcome'} />}
       >
-        <div className="outcome-workspace space-y-4 pb-8">
-          {/* 1. Page header — completed treatment from persisted status */}
-          <Card
-            className={cn(
-              'overflow-hidden rounded-xl shadow-sm',
-              completed
-                ? 'border-moss-success/35 bg-gradient-to-br from-moss-success/[0.06] via-white to-white'
-                : 'border-slate-200',
-            )}
-          >
-            {completed ? (
-              <div className="h-1 w-full bg-moss-success" aria-hidden="true" />
-            ) : null}
+        <div className="outcome-workspace mx-auto max-w-[1440px] space-y-5 px-1 pb-10">
+          {/* 1. Header */}
+          <Card className="rounded-xl border-slate-200 shadow-sm">
             <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
-              <div className="min-w-0 flex-1 space-y-3">
-                {completed ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-moss-success">
-                      <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
-                      Completed
-                    </span>
-                    <Badge
-                      variant="success"
-                      className="shrink-0 gap-1 whitespace-nowrap px-2.5 py-1 text-xs"
-                    >
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {completed ? (
+                    <Badge variant="success" className="gap-1 px-2.5 py-1 text-xs">
                       <CheckCircle2 className="size-3.5" aria-hidden="true" />
-                      <span>Completed</span>
+                      Completed
                     </Badge>
-                  </div>
-                ) : (
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Diagnostic outcome
-                  </p>
-                )}
-
-                <div className="space-y-1">
-                  <h1 className="max-w-3xl text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
+                  ) : null}
+                  {completed ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-xs font-medium text-slate-500"
+                      title="This routing outcome was confirmed when the diagnostic was completed."
+                    >
+                      <Lock className="size-3.5" aria-hidden="true" />
+                      Outcome confirmed
+                    </span>
+                  ) : null}
+                </div>
+                <div className="space-y-0.5">
+                  <h1 className="m-0 text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
                     {diagnosticName}
                   </h1>
-                  <p className="text-sm font-semibold tracking-wide text-slate-500">
+                  <p className="m-0 text-sm font-semibold tracking-wide text-slate-500">
                     {engagement.reference}
                   </p>
                 </div>
-
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
-                  <span>{engagement.organisation?.name || 'Organisation'}</span>
-                  <span className="text-slate-300" aria-hidden="true">
-                    ·
-                  </span>
-                  <span>{humanizeStatus(engagement.status)}</span>
-                </div>
-
+                <p className="m-0 text-sm text-slate-700">
+                  {engagement.organisation?.name || 'Organisation'}
+                </p>
                 {completed ? (
-                  <div className="space-y-0.5 text-sm text-slate-700">
-                    <p>
-                      <span className="font-medium">Completed</span>{' '}
-                      <time dateTime={outcome.confirmedAt || undefined}>{fmt(outcome.confirmedAt)}</time>
-                    </p>
-                    <p className="text-slate-600">
-                      Confirmed by {confirmedByName || '—'}
-                      {outcome.confirmedBy?.email ? (
-                        <span className="text-slate-400"> · {outcome.confirmedBy.email}</span>
-                      ) : null}
-                    </p>
-                  </div>
+                  <p className="m-0 text-sm text-slate-600">
+                    Completed{' '}
+                    <time dateTime={outcome.confirmedAt || undefined}>{fmt(outcome.confirmedAt)}</time>
+                    {confirmedByName ? (
+                      <>
+                        {' · '}
+                        {confirmedByName}
+                      </>
+                    ) : null}
+                  </p>
                 ) : null}
               </div>
-
               <div className="flex flex-wrap gap-2">
                 {latestReport?.id ? (
                   <Button
@@ -397,11 +253,7 @@ export default function AdvisoryOutcomePage() {
                     View report
                   </Button>
                 ) : (
-                  <Button
-                    size="lg"
-                    asChild
-                    className="h-11 shrink-0 whitespace-nowrap px-4"
-                  >
+                  <Button size="lg" asChild className="h-11 shrink-0 whitespace-nowrap px-4">
                     <Link href={advisoryWorkingPapersHref(String(id))}>Generate report</Link>
                   </Button>
                 )}
@@ -420,377 +272,194 @@ export default function AdvisoryOutcomePage() {
             </CardContent>
           </Card>
 
-          {Array.isArray(engagement.advisoryModuleReviews) && engagement.advisoryModuleReviews.length ? (
-            <AdvisoryReportSummaryPreview
-              modules={engagement.advisoryModuleReviews}
-              salesEmail="sales@physicalrisk.com"
-            />
+          {/* 2. Executive Outcome | Commercial next step */}
+          {modules.length ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
+              <Card className="rounded-xl border-slate-200 shadow-sm">
+                <CardContent className="p-5 sm:p-6">
+                  <AdvisoryReportSummaryPreview
+                    modules={modules}
+                    recommendationCount={recommendationCount}
+                    variant="hero"
+                  />
+                </CardContent>
+              </Card>
+              <RequestComprehensiveProposalCard
+                assessmentId={String(id)}
+                recommendations={Array.isArray(data.recommendations) ? data.recommendations : []}
+                comprehensiveProposal={proposal}
+                canRequest={Boolean(data.permissions?.canRequestComprehensiveProposal)}
+                canOpenWorkspace={Boolean(data.permissions?.canOpenProposalWorkspace)}
+                onChanged={() => load()}
+                variant="commercial"
+              />
+            </div>
           ) : null}
 
+          {/* 3. Module scorecard */}
+          {modules.length ? (
+            <AdvisoryReportSummaryPreview modules={modules} variant="scorecard" />
+          ) : null}
+
+          {/* 4. Priority executive attention */}
+          {modules.length ? (
+            <div className="max-w-2xl">
+              <AdvisoryReportSummaryPreview modules={modules} variant="priority" />
+            </div>
+          ) : null}
+
+          {/* 5. Recommended next engagements */}
           <RequestComprehensiveProposalCard
             assessmentId={String(id)}
             recommendations={Array.isArray(data.recommendations) ? data.recommendations : []}
-            comprehensiveProposal={data.comprehensiveProposal || null}
+            comprehensiveProposal={proposal}
             canRequest={Boolean(data.permissions?.canRequestComprehensiveProposal)}
             canOpenWorkspace={Boolean(data.permissions?.canOpenProposalWorkspace)}
             onChanged={() => load()}
+            variant="recommendations"
           />
 
-          {data.comprehensiveProposal?.status === 'ACCEPTED' && data.comprehensiveProposal?.id ? (
+          {/* Stage 13 — after proposal accepted */}
+          {proposal?.status === 'ACCEPTED' && proposal?.id ? (
             <CreateLevel3EngagementsCard
-              proposalId={String(data.comprehensiveProposal.id)}
-              proposalNumber={data.comprehensiveProposal.proposalNumber}
-              proposalStatus={data.comprehensiveProposal.status}
+              proposalId={String(proposal.id)}
+              proposalNumber={proposal.proposalNumber}
+              proposalStatus={proposal.status}
               organisationName={engagement.organisation?.name}
-              items={data.comprehensiveProposal.deliveryEngagements || []}
+              items={data.comprehensiveProposal?.deliveryEngagements || []}
               canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
               onChanged={() => load()}
             />
           ) : null}
 
-          {/* Completion summary */}
-          {completed ? (
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-              <Card className="rounded-xl border-moss-success/30 bg-moss-success/[0.04] shadow-sm">
-                <CardContent className="flex gap-3 p-4 sm:p-5">
-                  <CheckCircle2
-                    className="mt-0.5 size-5 shrink-0 text-moss-success"
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 space-y-2">
-                    <p className="m-0 text-sm font-semibold text-moss-success">Diagnostic completed</p>
-                    <p className="m-0 text-sm text-slate-700">
-                      The diagnostic has been confirmed and the Level 3 routing outcome has been locked.
-                    </p>
-                    <dl className="grid gap-2 pt-1 text-sm sm:grid-cols-2">
-                      <div>
-                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Confirmed
-                        </dt>
-                        <dd className="m-0 font-medium text-slate-900">
-                          <time dateTime={outcome.confirmedAt || undefined}>{fmt(outcome.confirmedAt)}</time>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Confirmed by
-                        </dt>
-                        <dd className="m-0 font-medium text-slate-900">{confirmedByName || '—'}</dd>
-                      </div>
-                    </dl>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-xl border-slate-300 bg-slate-50/90 shadow-sm">
-                <CardContent className="flex gap-3 p-4 sm:p-5">
-                  <Lock className="mt-0.5 size-5 shrink-0 text-slate-600" aria-hidden="true" />
-                  <div className="min-w-0 space-y-1">
-                    <p className="m-0 text-sm font-semibold text-slate-800">Outcome locked</p>
-                    <p className="m-0 text-sm text-slate-600">
-                      This routing outcome was confirmed when the diagnostic was completed and can no
-                      longer be changed.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          ) : null}
-
-          {/* 2. Outcome summary metrics */}
-          <div
-            className={cn(
-              'grid grid-cols-2 gap-3',
-              completed ? 'lg:grid-cols-5' : 'lg:grid-cols-4',
-            )}
-          >
-            {completed ? (
-              <MetricTile
-                tone="success"
-                value={
-                  <span className="inline-flex items-center gap-1.5" aria-label="Diagnostic completed">
-                    <CheckCircle2 className="size-7 shrink-0" aria-hidden="true" />
-                    <span className="text-base font-bold">Yes</span>
-                  </span>
-                }
-                label="Diagnostic completed"
-              />
-            ) : null}
-            <MetricTile value={routes.length} label="Level 3 recommendations" />
-            <MetricTile value={papersReady} label="Working papers created" />
-            <MetricTile value={awaitingSetup} label="Awaiting setup" />
-            <MetricTile
-              tone="neutral"
-              value={
-                <span className="inline-flex items-center gap-1.5" aria-label="Routing locked">
-                  <Lock className="size-6 shrink-0" aria-hidden="true" />
-                  <span className="text-base font-bold text-slate-700">Locked</span>
-                </span>
-              }
-              label="Routing locked"
-            />
-          </div>
-
-          {/* 3–8. Confirmed routing + recommendation cards */}
-          <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardHeader className="space-y-3 p-5 pb-3 sm:p-6 sm:pb-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <CardTitle className="text-base sm:text-lg">Confirmed Level 3 routing</CardTitle>
-                  <CardDescription>
-                    {routes.length} recommended product{routes.length === 1 ? '' : 's'} · {papersReady}{' '}
-                    working paper{papersReady === 1 ? '' : 's'} created
-                  </CardDescription>
-                  <p className="text-sm text-slate-600">
-                    Routing was locked when the diagnostic was completed.
-                  </p>
-                </div>
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 gap-1.5 border border-slate-300 bg-slate-100 whitespace-nowrap text-slate-700"
-                >
-                  <Lock className="size-3.5" aria-hidden="true" />
-                  Outcome locked
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3 p-5 pt-2 sm:p-6 sm:pt-2">
-              {routes.map((route: any) => {
-                const productName = PRODUCT_LABELS[route.productCode] || route.productCode;
-                const paper = route.createdAssessment;
-                const hasPaper = Boolean(paper?.id);
-
-                return (
-                  <article
-                    key={route.id}
-                    className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5"
+          {/* Internal commercial note (admins) */}
+          {canManageCommercial ? (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="p-4 sm:p-5">
+                {!notesOpen && !(outcome.commercialAdminNotes || '').trim() ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10"
+                    onClick={() => setNotesOpen(true)}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <h3 className="min-w-0 max-w-2xl text-base font-semibold leading-snug text-slate-900">
-                        {productName}
-                      </h3>
-                      <div className="flex flex-wrap gap-1.5" aria-label="Recommendation status">
-                        <Badge variant="info" className="shrink-0 whitespace-nowrap">
-                          Recommended
-                        </Badge>
-                        <Badge
-                          variant={hasPaper ? 'success' : 'warning'}
-                          className="shrink-0 whitespace-nowrap"
-                        >
-                          {hasPaper ? 'Working paper ready' : 'Awaiting creation'}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Triggered by
-                        </p>
-                        <p className="text-sm text-slate-800">
-                          {route.sourceModuleName || route.sourceModuleCode || 'Diagnostic confirmation'}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Working paper
-                        </p>
-                        {hasPaper ? (
-                          <p className="text-sm font-medium text-slate-900">{paper.reference}</p>
-                        ) : (
-                          <p className="text-sm text-slate-500">Not created yet</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {route.rationale ? (
-                      <div className="mt-3">
-                        <RationaleBlock text={String(route.rationale)} />
-                      </div>
-                    ) : null}
-
-                    <Separator className="my-3" />
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {hasPaper ? (
-                        <Button
-                          variant="outline"
-                          asChild
-                          className="h-10 shrink-0 whitespace-nowrap px-4"
-                        >
-                          <Link href={engagementHref(paper.productCode, paper.id)}>
-                            Open working paper
-                            <ChevronRight className="size-4" />
-                          </Link>
-                        </Button>
-                      ) : canManageCommercial && accepted ? (
-                        <Button
-                          className="h-10 shrink-0 whitespace-nowrap px-4"
-                          disabled={busy}
-                          onClick={() => void createEngagement(route.id)}
-                        >
-                          Create Level 3 engagement
-                        </Button>
-                      ) : (
-                        <p className="m-0 text-xs text-slate-500">
-                          {accepted
-                            ? 'Your consultant will create the Level 3 engagement after commercial acceptance.'
-                            : canManageCommercial
-                              ? 'Available after commercial acceptance'
-                              : 'Level 3 engagement will be created by your consultant after commercial acceptance.'}
-                        </p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-
-              {!routes.length ? (
-                <p className="text-sm text-muted-foreground">
-                  No Level 3 products were confirmed at completion.
-                </p>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          {/* Commercial handoff (existing workflow preserved) */}
-          <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardHeader className="p-5 sm:p-6">
-              <CardTitle className="text-base sm:text-lg">Level 3 commercial proposal</CardTitle>
-              <CardDescription>
-                {canManageCommercial
-                  ? 'Prepare and obtain client acceptance before creating focused assurance engagements.'
-                  : 'Commercial proposal status for your Level 3 focused assurance work.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 p-5 pt-0 sm:p-6 sm:pt-0">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Commercial reference
-                  </div>
-                  <strong className="text-sm">{outcome.commercialReference || 'Not initiated'}</strong>
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</div>
-                  <strong className="text-sm">{humanizeStatus(commercialStatus)}</strong>
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Requested</div>
-                  <strong className="text-sm">{fmt(outcome.commercialRequestedAt)}</strong>
-                </div>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Accepted</div>
-                  <strong className="text-sm">{fmt(outcome.commercialAcceptedAt)}</strong>
-                </div>
-              </div>
-
-              {canManageCommercial ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    {commercialStatus === 'NOT_REQUESTED' ? (
-                      <Button
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void commercialAction('INITIATE')}
-                      >
-                        Initiate Level 3 proposal
-                      </Button>
-                    ) : null}
-                    {commercialStatus === 'REQUESTED' ? (
-                      <Button
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void commercialAction('PREPARE')}
-                      >
-                        Start preparing proposal
-                      </Button>
-                    ) : null}
-                    {['REQUESTED', 'IN_PREPARATION'].includes(commercialStatus) ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void commercialAction('SENT')}
-                      >
-                        Mark proposal sent
-                      </Button>
-                    ) : null}
-                    {['SENT', 'IN_PREPARATION'].includes(commercialStatus) ? (
-                      <Button
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void commercialAction('ACCEPTED')}
-                      >
-                        Mark accepted
-                      </Button>
-                    ) : null}
-                    {['REQUESTED', 'IN_PREPARATION', 'SENT'].includes(commercialStatus) ? (
-                      <Button
-                        variant="outline"
-                        className="h-10 shrink-0 whitespace-nowrap px-4"
-                        disabled={busy}
-                        onClick={() => void commercialAction('DECLINED')}
-                      >
-                        Mark declined
-                      </Button>
-                    ) : null}
-                  </div>
+                    + Add internal commercial note
+                  </Button>
+                ) : !notesOpen && (outcome.commercialAdminNotes || '').trim() ? (
                   <div className="space-y-2">
-                    <p className="text-sm font-medium">Commercial admin notes</p>
+                    <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Internal commercial note
+                    </p>
+                    <p className="m-0 whitespace-pre-wrap text-sm text-slate-700">
+                      {outcome.commercialAdminNotes}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setNotesOpen(true)}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="m-0 text-sm font-medium text-slate-800">Internal commercial note</p>
                     <Textarea
-                      rows={4}
-                      className="min-h-[100px] resize-y"
+                      rows={3}
                       value={notes}
                       disabled={busy}
                       onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Internal only — not shown to clients."
                     />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        className="h-9"
+                        disabled={busy || notes === (outcome.commercialAdminNotes || '')}
+                        onClick={() => void saveNotes()}
+                      >
+                        Save note
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9"
+                        disabled={busy}
+                        onClick={() => {
+                          setNotes(outcome.commercialAdminNotes || '');
+                          setNotesOpen(false);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    className="h-10 shrink-0 whitespace-nowrap px-4"
-                    disabled={busy || notes === (outcome.commercialAdminNotes || '')}
-                    onClick={() => void commercialAction('SAVE_NOTES')}
-                  >
-                    Save notes
-                  </Button>
-                </>
-              ) : outcome.commercialAdminNotes ? (
-                <p className="text-sm text-muted-foreground">{outcome.commercialAdminNotes}</p>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          {engagement.parentAssessment?.reference ? (
-            <Card className="rounded-xl border-slate-200 shadow-sm">
-              <CardHeader className="p-5 sm:p-6">
-                <CardTitle className="text-base">Product journey</CardTitle>
-              </CardHeader>
-              <CardContent className="p-5 pt-0 sm:p-6 sm:pt-0">
-                <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                  <Link
-                    href={`/triage/${engagement.parentAssessment.triageSubmissionId || engagement.parentAssessment.id}`}
-                    className="font-medium text-slate-800 underline-offset-2 hover:underline"
-                  >
-                    Level 1 triage {engagement.parentAssessment.reference}
-                  </Link>
-                  <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-                  <span>Level 2 {engagement.reference}</span>
-                  <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-                  <span>Level 3 commercial {outcome.commercialReference || '(pending)'}</span>
-                  <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-                  <span>Focused assurance engagement(s)</span>
-                </p>
-                {papersReady > 0 ? (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700">
-                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
-                    {papersReady} working paper{papersReady === 1 ? '' : 's'} linked from this outcome
-                  </p>
-                ) : null}
+                )}
               </CardContent>
             </Card>
           ) : null}
+
+          {/* 7. Product journey */}
+          <Card className="rounded-xl border-slate-200 shadow-sm">
+            <CardHeader className="p-4 pb-2 sm:p-5 sm:pb-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Product journey
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2 sm:p-5 sm:pt-2">
+              <ol className="m-0 flex list-none flex-col gap-3 p-0 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
+                <JourneyStep
+                  done
+                  level="Level 1"
+                  title="Executive Triage"
+                  detail={
+                    engagement.parentAssessment?.reference ? (
+                      <Link
+                        href={`/triage/${engagement.parentAssessment.triageSubmissionId || engagement.parentAssessment.id}`}
+                        className="font-medium text-slate-800 underline-offset-2 hover:underline"
+                      >
+                        {engagement.parentAssessment.reference}
+                      </Link>
+                    ) : (
+                      '—'
+                    )
+                  }
+                />
+                <JourneyConnector />
+                <JourneyStep
+                  done
+                  level="Level 2"
+                  title="Executive Advisory"
+                  detail={engagement.reference}
+                />
+                <JourneyConnector />
+                <JourneyStep
+                  done={Boolean(proposal)}
+                  level="Commercial"
+                  title="Proposal"
+                  detail={
+                    proposal
+                      ? `${proposal.proposalNumber}`
+                      : 'Pending'
+                  }
+                />
+                <JourneyConnector />
+                <JourneyStep
+                  done={proposal?.status === 'ACCEPTED'}
+                  level="Level 3"
+                  title="Focused assurance"
+                  detail={
+                    proposal?.status === 'ACCEPTED'
+                      ? 'Create engagements'
+                      : 'Awaiting acceptance'
+                  }
+                />
+              </ol>
+            </CardContent>
+          </Card>
         </div>
+
         <PdfPreviewDialog
           open={previewOpen && Boolean(previewBytes)}
           onOpenChange={(open) => {
@@ -809,5 +478,48 @@ export default function AdvisoryOutcomePage() {
         />
       </Shell>
     </AuthGate>
+  );
+}
+
+function JourneyStep({
+  done,
+  level,
+  title,
+  detail,
+}: {
+  done: boolean;
+  level: string;
+  title: string;
+  detail: ReactNode;
+}) {
+  return (
+    <li
+      className={cn(
+        'min-w-0 flex-1 rounded-lg border px-3 py-2.5',
+        done ? 'border-moss-success/30 bg-moss-success/[0.04]' : 'border-slate-200 bg-white',
+      )}
+    >
+      <p className="m-0 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {done ? (
+          <CheckCircle2 className="size-3.5 text-moss-success" aria-hidden="true" />
+        ) : (
+          <span className="inline-block size-3.5 rounded-full border-2 border-slate-300" aria-hidden="true" />
+        )}
+        {level}
+      </p>
+      <p className="m-0 mt-1 text-sm font-semibold text-slate-900">{title}</p>
+      <p className="m-0 mt-0.5 text-xs text-slate-600">{detail}</p>
+    </li>
+  );
+}
+
+function JourneyConnector() {
+  return (
+    <li
+      className="hidden items-center px-0.5 text-slate-300 sm:flex"
+      aria-hidden="true"
+    >
+      →
+    </li>
   );
 }

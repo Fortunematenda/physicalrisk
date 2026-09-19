@@ -253,6 +253,7 @@ export function buildEadExecutiveNarrative(
   rows: EadModuleScoreRow[],
   overall: number | null,
   notAwareCount = 0,
+  options?: { includeNotAware?: boolean },
 ): string {
   if (overall == null || !rows.length) {
     return 'Insufficient diagnostic scores were available to form an overall assurance conclusion.';
@@ -270,20 +271,35 @@ export function buildEadExecutiveNarrative(
     .slice(0, 3)
     .map((r) => r.moduleName);
 
-  let text = `The diagnostic identified ${band.displayLabel.toLowerCase()} overall (assurance score ${overall}/100)`;
+  const conclusion = executiveConclusionPhrase(band);
+  let text = `The diagnostic indicates that ${conclusion} overall`;
   if (weakNames.length) {
-    text += `, with notable weaknesses in ${joinNames(weakNames)}`;
-  }
-  if (strongNames.length) {
-    text += weakNames.length
-      ? `. ${joinNames(strongNames)} showed comparatively stronger control maturity`
-      : `, with comparatively stronger control maturity in ${joinNames(strongNames)}`;
+    text += `, with the most significant assurance weaknesses identified in ${joinNames(weakNames)}`;
+  } else if (strongNames.length) {
+    text += `, with comparatively stronger control maturity in ${joinNames(strongNames)}`;
   }
   text += '.';
-  if (notAwareCount > 0) {
+  const includeNotAware = options?.includeNotAware !== false;
+  if (includeNotAware && notAwareCount > 0) {
     text += ` ${notAwareCount} diagnostic criterion${notAwareCount === 1 ? ' was' : ' were'} marked “Not aware”, indicating areas where control operation could not be confirmed.`;
   }
   return text;
+}
+
+/** Natural-language conclusion for executive narrative (presentation only). */
+function executiveConclusionPhrase(band: AssuranceBand): string {
+  switch (band.code) {
+    case 'REQUIRES_PRIORITY_INTERVENTION':
+      return 'priority intervention is required';
+    case 'SIGNIFICANT_IMPROVEMENT_REQUIRED':
+      return 'significant improvement is required';
+    case 'MODERATE_ASSURANCE':
+      return 'moderate assurance is indicated';
+    case 'STRONG_ASSURANCE':
+      return 'strong assurance is indicated';
+    default:
+      return `${band.displayLabel.toLowerCase()}`;
+  }
 }
 
 export function countEadNotAwareAcrossModules(rows: EadModuleScoreRow[]): number {
