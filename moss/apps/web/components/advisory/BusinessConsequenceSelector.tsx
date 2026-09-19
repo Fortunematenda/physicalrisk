@@ -93,14 +93,14 @@ export function BusinessConsequenceSelector({
 
   return (
     <div className="space-y-5 md:col-span-2">
-      <div className="space-y-2">
-        <Label id={`${fieldId}-label`}>
+      <div className="flex flex-col items-start gap-2">
+        <Label id={`${fieldId}-label`} className="block">
           Business consequences
           <span className="text-[#c41230]"> *</span>
         </Label>
 
         {local.codes.length ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2">
             {local.codes.map((code) => (
               <span
                 key={code}
