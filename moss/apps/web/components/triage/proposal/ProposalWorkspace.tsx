@@ -10,7 +10,6 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import {
-  Briefcase,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -20,7 +19,6 @@ import {
   Plus,
   Trash2,
   Upload,
-  User,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -34,7 +32,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -88,33 +85,6 @@ const WORKSPACE_TABS = new Set([
   'team',
   'terms',
 ]);
-
-function OrgAvatar({ name }: { name: string }) {
-  const initials =
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((p) => p[0]?.toUpperCase() || '')
-      .join('') || 'OR';
-  return (
-    <span
-      className="inline-flex size-14 shrink-0 items-center justify-center rounded-full bg-sky-100 text-base font-bold tracking-wide text-sky-700"
-      aria-hidden="true"
-    >
-      {initials}
-    </span>
-  );
-}
-
-function formatProposalStatus(status?: string | null) {
-  const raw = String(status || '').trim();
-  if (!raw) return 'Draft';
-  return raw
-    .replaceAll('_', ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 function draftFingerprint(draft: ProposalWorkspaceDraft): string {
   return JSON.stringify(draftToPayload(draft, clientFeeTotals(draft)));
@@ -846,17 +816,6 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     String(workspace?.status || ''),
   );
   const backHref = `/triage/${submissionId}?tab=commercial`;
-  const orgName = String(draft?.organisationName || workspace?.organisationName || 'Client').trim() || 'Client';
-  const contactName = String(draft?.addressedTo || workspace?.addressedTo || '').trim();
-  const jobTitle = String(draft?.jobTitle || workspace?.jobTitle || '').trim();
-  const headerMeta = [
-    workspace?.triageReference,
-    workspace?.versionLabel ? `Version ${workspace.versionLabel}` : null,
-    'Physical Risk landscape proposal',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const statusLabel = formatProposalStatus(workspace?.status);
 
   const headerLeading = (
     <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
@@ -891,10 +850,10 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   );
 
   const actionButtons = (
-    <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" className="h-10" disabled={isBusy}>
+          <Button type="button" variant="outline" size="sm" className="h-9" disabled={isBusy}>
             More
             <ChevronDown className="size-4 opacity-70" />
           </Button>
@@ -905,7 +864,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
             Download PDF
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={isBusy || proposalSent}
+            disabled={isBusy || proposalSent || loading || !draft}
             onSelect={() => fileRef.current?.click()}
           >
             <Upload className="size-4" />
@@ -916,7 +875,8 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
       <Button
         type="button"
         variant="outline"
-        className="h-10"
+        size="sm"
+        className="h-9"
         disabled={isBusy || !isDirty}
         onClick={() => void save()}
       >
@@ -930,12 +890,18 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
         )}
       </Button>
       {proposalSent ? (
-        <Button type="button" className="h-10" disabled={isBusy} onClick={() => void downloadPdf()}>
+        <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
           <Eye className="size-4" />
           View proposal
         </Button>
       ) : (
-        <Button type="button" className="h-10" disabled={isBusy} onClick={() => void previewProposal()}>
+        <Button
+          type="button"
+          size="sm"
+          className="h-9"
+          disabled={isBusy || loading || !draft}
+          onClick={() => void previewProposal()}
+        >
           {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
           Preview
         </Button>
@@ -954,7 +920,13 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   }
 
   return (
-    <Shell title="Proposal workspace" hideSearch hideTitle headerLeading={headerLeading}>
+    <Shell
+      title="Proposal workspace"
+      hideSearch
+      hideTitle
+      headerLeading={headerLeading}
+      actions={actionButtons}
+    >
       <div className="triage-detail-workspace space-y-4 pb-8">
         <input
           ref={fileRef}
@@ -967,54 +939,6 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
             e.target.value = '';
           }}
         />
-
-        <Card className="rounded-xl border-slate-200 shadow-sm">
-          <CardContent className="space-y-4 p-5 sm:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex min-w-0 flex-1 items-start gap-4">
-                <OrgAvatar name={orgName} />
-                <div className="min-w-0 space-y-2">
-                  <h1 className="m-0 text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
-                    {orgName}
-                  </h1>
-                  {headerMeta ? <p className="m-0 text-sm text-slate-500">{headerMeta}</p> : null}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
-                    {contactName ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <User className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-                        {contactName}
-                      </span>
-                    ) : null}
-                    {jobTitle ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <Briefcase className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
-                        {jobTitle}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
-                      {statusLabel}
-                    </Badge>
-                    {workspace?.assuranceScore != null ? (
-                      <Badge variant="outline" className="shrink-0 whitespace-nowrap">
-                        {workspace.assuranceScore}/100
-                        {workspace.assuranceBandLabel ? ` · ${workspace.assuranceBandLabel}` : ''}
-                      </Badge>
-                    ) : null}
-                    {isDirty ? (
-                      <Badge variant="warning" className="shrink-0 whitespace-nowrap">
-                        Unsaved changes
-                      </Badge>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-
-              {actionButtons}
-            </div>
-          </CardContent>
-        </Card>
 
         <Tabs
           value={tab}
