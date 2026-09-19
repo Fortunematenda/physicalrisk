@@ -15,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { FilterSelect } from '@/components/ui/filter-select';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
@@ -33,6 +35,7 @@ export type ComprehensiveProposalSummary = {
   proposalNumber: string;
   status: string;
   workspaceHref: string;
+  publicLeadId?: string | null;
   selectedProductCodes?: string[];
   createdAt?: string | null;
   sentAt?: string | null;
@@ -48,6 +51,7 @@ type Props = {
   onChanged: () => Promise<void> | void;
   /** Compact commercial panel for the outcome top column. */
   variant?: 'full' | 'commercial' | 'recommendations';
+  organisationName?: string | null;
 };
 
 function humanizeProposalStatus(status?: string | null) {
@@ -74,6 +78,11 @@ function fmtDate(value?: string | null) {
   return new Date(value).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** EAD commercial path — accept without returning to Level 1 triage. */
+function canMarkAccepted(status: string) {
+  return ['DRAFT', 'INTERNAL_REVIEW', 'APPROVED', 'SENT', 'VIEWED'].includes(status);
+}
+
 export function RequestComprehensiveProposalCard({
   assessmentId,
   recommendations,
@@ -82,6 +91,7 @@ export function RequestComprehensiveProposalCard({
   canOpenWorkspace,
   onChanged,
   variant = 'full',
+  organisationName,
 }: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -90,6 +100,14 @@ export function RequestComprehensiveProposalCard({
   const [busy, setBusy] = useState(false);
   const [requestNote, setRequestNote] = useState('');
   const [expandedRationale, setExpandedRationale] = useState<string | null>(null);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [signedFile, setSignedFile] = useState<File | null>(null);
+  const [acceptDraft, setAcceptDraft] = useState({
+    acceptanceDate: new Date().toISOString().slice(0, 10),
+    acceptedByName: '',
+    acceptanceMethod: 'SIGNED_PROPOSAL_RECEIVED',
+    acceptanceNotes: '',
+  });
   const selectable = useMemo(
     () =>
       recommendations.filter(
@@ -98,6 +116,124 @@ export function RequestComprehensiveProposalCard({
     [recommendations],
   );
   const [selected, setSelected] = useState<string[]>([]);
+
+  async function submitAcceptance() {
+    const proposal = comprehensiveProposal;
+    if (!proposal?.id || !proposal.publicLeadId) {
+      toast({
+        variant: 'error',
+        title: 'Unable to accept',
+        description: 'Proposal commercial record is missing.',
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('acceptanceDate', acceptDraft.acceptanceDate);
+      form.append('acceptedByName', acceptDraft.acceptedByName);
+      form.append('acceptanceMethod', acceptDraft.acceptanceMethod);
+      form.append('acceptanceNotes', acceptDraft.acceptanceNotes);
+      if (signedFile) form.append('signedFile', signedFile);
+      await apiFetch(
+        `/triage/submissions/${proposal.publicLeadId}/proposals/${proposal.id}/accept`,
+        { method: 'POST', body: form },
+      );
+      setAcceptOpen(false);
+      setSignedFile(null);
+      toast({ variant: 'success', title: 'Proposal accepted' });
+      await onChanged();
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Acceptance failed',
+        description: e instanceof Error ? e.message : 'Could not mark the proposal accepted.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAcceptDialog() {
+    setAcceptDraft((d) => ({
+      ...d,
+      acceptedByName: d.acceptedByName || organisationName || '',
+      acceptanceDate: new Date().toISOString().slice(0, 10),
+    }));
+    setAcceptOpen(true);
+  }
+
+  const acceptDialog = (
+    <Dialog open={acceptOpen} onOpenChange={setAcceptOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Mark proposal as accepted</DialogTitle>
+          <DialogDescription>
+            Record client acceptance on this Executive Advisory proposal. After acceptance you can
+            create Level 3 focused assurance engagements — without returning to triage.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 py-1">
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700">Acceptance date</span>
+            <Input
+              type="date"
+              value={acceptDraft.acceptanceDate}
+              onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceDate: e.target.value }))}
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700">Accepted by</span>
+            <Input
+              value={acceptDraft.acceptedByName}
+              onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptedByName: e.target.value }))}
+              placeholder="Client signatory name"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700">Acceptance method</span>
+            <FilterSelect
+              value={acceptDraft.acceptanceMethod}
+              onChange={(v) => setAcceptDraft((d) => ({ ...d, acceptanceMethod: v }))}
+              placeholder="Select method"
+              includeAll={false}
+              options={[
+                { value: 'SIGNED_PROPOSAL_RECEIVED', label: 'Signed proposal received' },
+                { value: 'EMAIL_CONFIRMATION', label: 'Email confirmation' },
+                { value: 'MANUAL_CONFIRMATION', label: 'Manual confirmation' },
+                { value: 'OTHER', label: 'Other' },
+              ]}
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700">Notes</span>
+            <Textarea
+              value={acceptDraft.acceptanceNotes}
+              onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceNotes: e.target.value }))}
+              rows={3}
+              placeholder="Optional notes"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium text-slate-700">Signed proposal attachment (PDF)</span>
+            <Input
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={(e) => setSignedFile(e.target.files?.[0] || null)}
+            />
+          </label>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => setAcceptOpen(false)}>
+            Cancel
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => void submitAcceptance()}>
+            {busy ? 'Saving…' : 'Mark accepted'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 
   function openRequestDialog(nextForceNew = false) {
     if (comprehensiveProposal && !nextForceNew) {
@@ -272,6 +408,7 @@ export function RequestComprehensiveProposalCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {acceptDialog}
     </>
   );
 
@@ -285,6 +422,7 @@ export function RequestComprehensiveProposalCard({
           canOpenWorkspace={canOpenWorkspace}
           busy={busy}
           onRequest={() => openRequestDialog(false)}
+          onAccept={canOpenWorkspace ? openAcceptDialog : undefined}
         />
         {dialogs}
       </>
@@ -321,6 +459,7 @@ export function RequestComprehensiveProposalCard({
           canOpenWorkspace={canOpenWorkspace}
           busy={busy}
           onRequest={() => openRequestDialog(false)}
+          onAccept={canOpenWorkspace ? openAcceptDialog : undefined}
         />
       </div>
       {dialogs}
@@ -414,6 +553,7 @@ function CommercialNextStepPanel({
   canOpenWorkspace,
   busy,
   onRequest,
+  onAccept,
 }: {
   recommendationCount: number;
   comprehensiveProposal: ComprehensiveProposalSummary;
@@ -421,9 +561,15 @@ function CommercialNextStepPanel({
   canOpenWorkspace: boolean;
   busy: boolean;
   onRequest: () => void;
+  onAccept?: () => void;
 }) {
   const status = String(comprehensiveProposal?.status || '');
   const selectedCount = comprehensiveProposal?.selectedProductCodes?.length || recommendationCount;
+  const showAccept =
+    Boolean(onAccept) &&
+    Boolean(comprehensiveProposal?.id) &&
+    Boolean(comprehensiveProposal?.publicLeadId) &&
+    canMarkAccepted(status);
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -509,7 +655,7 @@ function CommercialNextStepPanel({
           </dl>
           <div className="flex flex-wrap gap-2">
             {canOpenWorkspace ? (
-              <Button asChild className="h-10 px-4">
+              <Button asChild variant="outline" className="h-10 px-4">
                 <Link href={comprehensiveProposal.workspaceHref}>
                   {status === 'SENT' || status === 'VIEWED' || status === 'ACCEPTED'
                     ? 'View proposal'
@@ -519,7 +665,21 @@ function CommercialNextStepPanel({
             ) : (
               <p className="m-0 text-sm text-slate-600">Physical Risk is preparing your proposal.</p>
             )}
+            {showAccept ? (
+              <Button type="button" className="h-10 px-4" disabled={busy} onClick={onAccept}>
+                Mark accepted
+              </Button>
+            ) : null}
           </div>
+          {status === 'ACCEPTED' ? (
+            <p className="m-0 text-sm text-emerald-800">
+              Proposal accepted. Create Level 3 engagements below when ready.
+            </p>
+          ) : showAccept ? (
+            <p className="m-0 text-xs text-slate-500">
+              Stay on Diagnostics &amp; assurance — mark accepted here to unlock Level 3.
+            </p>
+          ) : null}
         </div>
       )}
     </div>

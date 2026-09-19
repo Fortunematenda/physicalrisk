@@ -611,6 +611,8 @@ export class AdvisoryService {
         status: true,
         title: true,
         createdAt: true,
+        sentAt: true,
+        acceptedAt: true,
         publicLeadId: true,
         contextSnapshot: true,
         sourceReportId: true,
@@ -694,6 +696,8 @@ export class AdvisoryService {
             status: activeFollowOn.status,
             title: activeFollowOn.title,
             createdAt: activeFollowOn.createdAt,
+            sentAt: activeFollowOn.sentAt,
+            acceptedAt: activeFollowOn.acceptedAt,
             publicLeadId: activeFollowOn.publicLeadId,
             workspaceHref: eadProposalWorkspaceHref(
               engagement.id,
@@ -742,7 +746,9 @@ export class AdvisoryService {
         canManageCommercial: INTERNAL_ROLES.has(user.role),
         canRequestComprehensiveProposal: true,
         canOpenProposalWorkspace: INTERNAL_ROLES.has(user.role),
-        canCreateLevel3Engagements: INTERNAL_ROLES.has(user.role),
+        canCreateLevel3Engagements:
+          INTERNAL_ROLES.has(user.role) &&
+          activeFollowOn?.status === TriageProposalStatus.ACCEPTED,
       },
     };
   }

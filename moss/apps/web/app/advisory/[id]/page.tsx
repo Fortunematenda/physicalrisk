@@ -1873,7 +1873,7 @@ export default function AdvisoryDetail() {
               <DialogDescription>
                 {isDiagnostic
                   ? locked
-                    ? 'Diagnostic is complete. Open the outcome page for commercial handoff and Level 3 engagement creation.'
+                    ? 'Diagnostic is complete. Open the outcome page for the commercial proposal next step.'
                     : 'Complete the diagnostic when modules and routing are ready. Generating the Executive Advisory Brief PDF is optional.'
                   : 'Mark the engagement complete once every module is finished.'}
               </DialogDescription>

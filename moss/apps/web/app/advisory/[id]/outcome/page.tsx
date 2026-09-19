@@ -284,15 +284,30 @@ export default function AdvisoryOutcomePage() {
                   />
                 </CardContent>
               </Card>
-              <RequestComprehensiveProposalCard
-                assessmentId={String(id)}
-                recommendations={Array.isArray(data.recommendations) ? data.recommendations : []}
-                comprehensiveProposal={proposal}
-                canRequest={Boolean(data.permissions?.canRequestComprehensiveProposal)}
-                canOpenWorkspace={Boolean(data.permissions?.canOpenProposalWorkspace)}
-                onChanged={() => load()}
-                variant="commercial"
-              />
+              <div className="space-y-4">
+                <RequestComprehensiveProposalCard
+                  assessmentId={String(id)}
+                  recommendations={Array.isArray(data.recommendations) ? data.recommendations : []}
+                  comprehensiveProposal={proposal}
+                  canRequest={Boolean(data.permissions?.canRequestComprehensiveProposal)}
+                  canOpenWorkspace={Boolean(data.permissions?.canOpenProposalWorkspace)}
+                  organisationName={engagement.organisation?.name}
+                  onChanged={() => load()}
+                  variant="commercial"
+                />
+                {/* Stage 13 — only after the commercial proposal is accepted */}
+                {proposal?.status === 'ACCEPTED' && proposal?.id ? (
+                  <CreateLevel3EngagementsCard
+                    proposalId={String(proposal.id)}
+                    proposalNumber={proposal.proposalNumber}
+                    proposalStatus={proposal.status}
+                    organisationName={engagement.organisation?.name}
+                    items={data.comprehensiveProposal?.deliveryEngagements || []}
+                    canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
+                    onChanged={() => load()}
+                  />
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -318,19 +333,6 @@ export default function AdvisoryOutcomePage() {
             onChanged={() => load()}
             variant="recommendations"
           />
-
-          {/* Stage 13 — after proposal accepted */}
-          {proposal?.status === 'ACCEPTED' && proposal?.id ? (
-            <CreateLevel3EngagementsCard
-              proposalId={String(proposal.id)}
-              proposalNumber={proposal.proposalNumber}
-              proposalStatus={proposal.status}
-              organisationName={engagement.organisation?.name}
-              items={data.comprehensiveProposal?.deliveryEngagements || []}
-              canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
-              onChanged={() => load()}
-            />
-          ) : null}
 
           {/* Internal commercial note (admins) */}
           {canManageCommercial ? (
@@ -446,13 +448,24 @@ export default function AdvisoryOutcomePage() {
                 />
                 <JourneyConnector />
                 <JourneyStep
-                  done={proposal?.status === 'ACCEPTED'}
+                  done={Boolean(
+                    proposal?.status === 'ACCEPTED' &&
+                      (data.comprehensiveProposal?.deliveryEngagements || []).some(
+                        (d: { engagement?: unknown }) => d.engagement,
+                      ),
+                  )}
                   level="Level 3"
                   title="Focused assurance"
                   detail={
                     proposal?.status === 'ACCEPTED'
-                      ? 'Create engagements'
-                      : 'Awaiting acceptance'
+                      ? (data.comprehensiveProposal?.deliveryEngagements || []).some(
+                          (d: { engagement?: unknown }) => d.engagement,
+                        )
+                        ? 'In delivery'
+                        : 'Authorised — create when ready'
+                      : proposal
+                        ? 'After proposal acceptance'
+                        : 'After commercial'
                   }
                 />
               </ol>
