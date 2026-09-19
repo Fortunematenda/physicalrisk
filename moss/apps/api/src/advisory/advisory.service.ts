@@ -60,6 +60,7 @@ import {
 } from './ead-comprehensive-proposal';
 import {
   buildLevel3SourceContext,
+  eadProposalWorkspaceHref,
   level3EngagementHref,
   level3ProductLabel,
   validateLevel3DeliveryProductCodes,
@@ -694,7 +695,11 @@ export class AdvisoryService {
             title: activeFollowOn.title,
             createdAt: activeFollowOn.createdAt,
             publicLeadId: activeFollowOn.publicLeadId,
-            workspaceHref: `/triage/${activeFollowOn.publicLeadId}/proposal?proposalId=${activeFollowOn.id}`,
+            workspaceHref: eadProposalWorkspaceHref(
+              engagement.id,
+              activeFollowOn.id,
+              activeFollowOn.publicLeadId,
+            ),
             selectedProductCodes,
             sourceReportId: activeFollowOn.sourceReportId,
             canCreateLevel3: activeFollowOn.status === TriageProposalStatus.ACCEPTED,
@@ -729,7 +734,7 @@ export class AdvisoryService {
           status: p.status,
           createdAt: p.createdAt,
           publicLeadId: p.publicLeadId,
-          workspaceHref: `/triage/${p.publicLeadId}/proposal?proposalId=${p.id}`,
+          workspaceHref: eadProposalWorkspaceHref(id, p.id, p.publicLeadId),
           selectedProductCodes: codes,
         };
       }),
@@ -800,7 +805,7 @@ export class AdvisoryService {
         proposalNumber: existing.proposalNumber,
         status: existing.status,
         publicLeadId: existing.publicLeadId,
-        workspaceHref: `/triage/${existing.publicLeadId}/proposal?proposalId=${existing.id}`,
+        workspaceHref: eadProposalWorkspaceHref(id, existing.id, existing.publicLeadId),
         message: 'A proposal already exists for this Executive Advisory Diagnostic.',
       };
     }
@@ -1023,6 +1028,7 @@ export class AdvisoryService {
       lead,
       organisationName: engagement.organisation.name,
       eadReference: engagement.reference,
+      eadAssessmentId: engagement.id,
       proposalNumber: created.proposalNumber,
       selectedLabels,
       requestedByName: user.email || 'User',
@@ -1037,7 +1043,7 @@ export class AdvisoryService {
       proposalNumber: created.proposalNumber,
       status: created.status,
       publicLeadId: lead.id,
-      workspaceHref: `/triage/${lead.id}/proposal?proposalId=${created.id}`,
+      workspaceHref: eadProposalWorkspaceHref(id, created.id, lead.id),
       selectedProductCodes: validated.codes,
     };
   }
@@ -1046,6 +1052,7 @@ export class AdvisoryService {
     lead: { email: string; firstName: string; lastName?: string | null; organisationId?: string | null };
     organisationName: string;
     eadReference: string;
+    eadAssessmentId: string;
     proposalNumber: string;
     selectedLabels: string[];
     requestedByName: string;
@@ -1060,7 +1067,11 @@ export class AdvisoryService {
       ''
     ).replace(/\/$/, '');
     const adminLink = adminUrlBase
-      ? `${adminUrlBase}/triage/${input.publicLeadId}/proposal?proposalId=${input.proposalId}`
+      ? `${adminUrlBase}${eadProposalWorkspaceHref(
+          input.eadAssessmentId,
+          input.proposalId,
+          input.publicLeadId,
+        )}`
       : null;
     const notify =
       this.config.get<string>('LEAD_NOTIFY_EMAIL') || this.config.get<string>('SEED_ADMIN_EMAIL');

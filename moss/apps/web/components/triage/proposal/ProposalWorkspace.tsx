@@ -206,12 +206,27 @@ type Props = {
   submissionId: string;
   onSaved?: () => Promise<void> | void;
   busy?: boolean;
+  /**
+   * When opened from Diagnostics & assurance, keep nav/back on the EAD outcome —
+   * never send the user into the Level 1 triage commercial workspace.
+   */
+  eadContext?: {
+    assessmentId: string;
+    reference?: string | null;
+    proposalId?: string;
+  } | null;
 };
 
-export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props) {
+export function ProposalWorkspace({
+  submissionId,
+  onSaved,
+  busy = false,
+  eadContext = null,
+}: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const proposalIdParam = searchParams.get('proposalId') || '';
+  const proposalIdParam =
+    searchParams.get('proposalId') || eadContext?.proposalId || '';
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
@@ -826,13 +841,18 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   const proposalSent = ['SENT', 'VIEWED', 'ACCEPTED', 'DECLINED'].includes(
     String(workspace?.status || ''),
   );
-  const isEadProposal = workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
-  const eadAssessmentId = workspace?.proposalSource?.eadAssessmentId || null;
-  const eadReference = workspace?.proposalSource?.eadReference || null;
+  const isEadProposal =
+    Boolean(eadContext?.assessmentId) ||
+    workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+  const eadAssessmentId =
+    eadContext?.assessmentId || workspace?.proposalSource?.eadAssessmentId || null;
+  const eadReference =
+    eadContext?.reference || workspace?.proposalSource?.eadReference || null;
   /** Keep triage and EAD commercial paths separate — never mix breadcrumbs or leave targets. */
-  const leaveHref = isEadProposal && eadAssessmentId
-    ? `/advisory/${eadAssessmentId}/outcome`
-    : `/triage/${submissionId}?tab=commercial`;
+  const leaveHref =
+    isEadProposal && eadAssessmentId
+      ? `/advisory/${eadAssessmentId}/outcome`
+      : `/triage/${submissionId}?tab=commercial`;
 
   const guardDirtyNav = (e: MouseEvent) => {
     if (isDirtyRef.current) {
@@ -977,9 +997,9 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
       hideSearch
       hideTitle
       headerLeading={headerLeading}
-      actions={actionButtons}
     >
       <div className="triage-detail-workspace space-y-4 pb-8">
+        <div className="flex flex-wrap items-center justify-end gap-2">{actionButtons}</div>
         <input
           ref={fileRef}
           type="file"

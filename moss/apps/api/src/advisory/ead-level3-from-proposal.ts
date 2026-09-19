@@ -48,6 +48,19 @@ export function level3EngagementHref(productCode: string, assessmentId: string):
   return `/advisory/${assessmentId}`;
 }
 
+/** EAD comprehensive proposal workspace — stays under Diagnostics & assurance, not triage. */
+export function eadProposalWorkspaceHref(
+  eadAssessmentId: string,
+  proposalId: string,
+  publicLeadId: string,
+): string {
+  const q = new URLSearchParams({
+    proposalId,
+    leadId: publicLeadId,
+  });
+  return `/advisory/${eadAssessmentId}/proposal?${q.toString()}`;
+}
+
 export function level3ProductLabel(code: string): string {
   return PRODUCT_LABELS[code] || code.replaceAll('_', ' ');
 }

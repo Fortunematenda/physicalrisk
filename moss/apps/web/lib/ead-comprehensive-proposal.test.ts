@@ -7,11 +7,13 @@ describe('Stage 12 comprehensive proposal UI guards', () => {
     expect(isLegacyShield360ProductCode('SCLI_COST_LEAKAGE')).toBe(false);
   });
 
-  it('builds workspace href with proposalId for follow-on proposals', () => {
+  it('builds workspace href under advisory for follow-on proposals', () => {
+    const eadId = 'ead_1';
     const leadId = 'lead_1';
     const proposalId = 'prp_1';
-    const href = `/triage/${leadId}/proposal?proposalId=${proposalId}`;
+    const href = `/advisory/${eadId}/proposal?proposalId=${proposalId}&leadId=${leadId}`;
     expect(href).toContain('proposalId=prp_1');
-    expect(href).not.toContain('/advisory/');
+    expect(href).toContain('/advisory/');
+    expect(href).not.toContain('/triage/');
   });
 });

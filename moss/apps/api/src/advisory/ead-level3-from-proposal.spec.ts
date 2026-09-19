@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildLevel3SourceContext,
+  eadProposalWorkspaceHref,
   level3EngagementHref,
   validateLevel3DeliveryProductCodes,
 } from './ead-level3-from-proposal';
@@ -30,6 +31,12 @@ describe('ead-level3-from-proposal (Stage 13)', () => {
   it('routes SCL to assessments and others to advisory', () => {
     expect(level3EngagementHref('SCLI_COST_LEAKAGE', 'a1')).toBe('/assessments/a1');
     expect(level3EngagementHref('VENDOR_PERFORMANCE_ASSURANCE', 'a2')).toBe('/advisory/a2');
+  });
+
+  it('keeps EAD proposal workspace under advisory, not triage', () => {
+    const href = eadProposalWorkspaceHref('ead1', 'prp1', 'lead1');
+    expect(href).toBe('/advisory/ead1/proposal?proposalId=prp1&leadId=lead1');
+    expect(href).not.toContain('/triage/');
   });
 
   it('builds source context without internal consultant notes', () => {

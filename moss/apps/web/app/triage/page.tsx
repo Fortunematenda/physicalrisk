@@ -666,7 +666,16 @@ export default function TriageSubmissionsPage() {
 
   return (
     <AuthGate>
-      <Shell title="Executive Governance Triage" hideSearch>
+      <Shell
+        title="Executive Governance Triage"
+        hideSearch
+        hideTitle
+        headerLeading={(
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+            <span className="truncate font-semibold text-slate-900">Executive Governance Triage</span>
+          </nav>
+        )}
+      >
         {error && <p className="error">{error}</p>}
 
         <div className="mb-5 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
