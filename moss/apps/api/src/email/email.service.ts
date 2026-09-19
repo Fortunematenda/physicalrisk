@@ -609,6 +609,32 @@ export class EmailService {
         lines.push(`<p><strong>Requested service:</strong> ${escapeHtml(payload.recommendedProduct || 'Executive Advisory Diagnostic')}</p>`);
         lines.push('<p>A member of the advisory team will contact you.</p>');
         break;
+      case 'ead_comprehensive_proposal_requested':
+        lines.push('<h2>New proposal request</h2>');
+        lines.push(`<p><strong>Organisation:</strong> ${escapeHtml(payload.organisationName)}</p>`);
+        lines.push(
+          `<p><strong>Source:</strong> Executive Advisory Diagnostic ${escapeHtml(payload.eadReference || '')}</p>`,
+        );
+        lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        if (payload.requestedEngagements) {
+          lines.push('<p><strong>Requested engagements:</strong></p>');
+          lines.push(
+            `<p>${escapeHtml(String(payload.requestedEngagements)).replace(/\n/g, '<br>')}</p>`,
+          );
+        }
+        lines.push(`<p><strong>Requested by:</strong> ${escapeHtml(payload.requestedBy || '')}</p>`);
+        if (payload.adminLink) {
+          lines.push(`<p><a href="${escapeHtml(payload.adminLink)}">Open proposal request</a></p>`);
+        }
+        break;
+      case 'ead_comprehensive_proposal_acknowledgement':
+        lines.push('<h2>Proposal request received</h2>');
+        lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
+        lines.push(
+          '<p>Thank you. Your proposal request has been received and Physical Risk will prepare a comprehensive proposal based on the selected recommendations.</p>',
+        );
+        lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        break;
       case 'triage_proposal_sent':
         lines.push('<h2>Your Executive Advisory Proposal</h2>');
         lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);

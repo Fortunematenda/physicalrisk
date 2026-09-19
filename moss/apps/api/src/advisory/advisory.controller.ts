@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdvisoryRoutePriority, AssignmentRole, ProductCode } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -39,6 +39,20 @@ class CommercialProposalDto {
   @IsOptional() @IsString() commercialAdminNotes?: string;
 }
 
+class ComprehensiveProposalRequestDto {
+  @IsArray()
+  @IsString({ each: true })
+  productCodes!: string[];
+
+  @IsOptional()
+  @IsString()
+  requestNote?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forceNew?: boolean;
+}
+
 class UpdateAdvisoryDto {
   @IsString() @MinLength(2) title!: string;
 }
@@ -65,6 +79,20 @@ export class AdvisoryController {
     @Query('productCode') productCode: string,
   ) {
     return this.service.getManualCreatePolicy(organisationId, productCode, user);
+  }
+
+  @Get('proposals/:proposalId/level3-engagements')
+  listLevel3FromProposal(@Param('proposalId') proposalId: string, @CurrentUser() user: AuthUser) {
+    return this.service.listLevel3EngagementsForProposal(proposalId, user);
+  }
+
+  @Post('proposals/:proposalId/level3-engagements')
+  createLevel3FromProposal(
+    @Param('proposalId') proposalId: string,
+    @Body() body: { productCodes?: string[]; primaryAnalystId?: string },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.createLevel3EngagementsFromAcceptedProposal(proposalId, body || {}, user);
   }
 
   @Get(':id')
@@ -121,6 +149,15 @@ export class AdvisoryController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.updateCommercialProposal(id, body, user);
+  }
+
+  @Post(':id/comprehensive-proposal')
+  requestComprehensiveProposal(
+    @Param('id') id: string,
+    @Body() body: ComprehensiveProposalRequestDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.requestComprehensiveProposal(id, body, user);
   }
 
   @Post(':id/routes/:routeId/create-engagement')

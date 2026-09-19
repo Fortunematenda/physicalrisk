@@ -217,6 +217,7 @@ class ProposalTemplateDto {
   @IsObject()
   contentSnapshot?: Record<string, unknown>;
   @IsOptional() expectedGrandTotal?: number | null;
+  @IsOptional() @IsString() proposalId?: string;
 }
 
 class UploadProposalDto {
@@ -347,8 +348,12 @@ export class TriageController {
   }
 
   @Get('submissions/:id/proposal-workspace')
-  getProposalWorkspace(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.commercial.getProposalWorkspace(id, user);
+  getProposalWorkspace(
+    @Param('id') id: string,
+    @Query('proposalId') proposalId: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.commercial.getProposalWorkspace(id, user, proposalId || null);
   }
 
   @Patch('submissions/:id/proposal-template')
@@ -367,16 +372,23 @@ export class TriageController {
     @Body() body: ProposalTemplateDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.commercial.saveProposalTemplate(id, body, user).then(() => this.commercial.getProposalWorkspace(id, user));
+    return this.commercial
+      .saveProposalTemplate(id, body, user)
+      .then(() => this.commercial.getProposalWorkspace(id, user, body.proposalId || null));
   }
 
   @Get('submissions/:id/proposal-preview')
   async previewProposal(
     @Param('id') id: string,
+    @Query('proposalId') proposalId: string | undefined,
     @CurrentUser() user: AuthUser,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { buffer, fileName, contentType } = await this.commercial.previewProposalPdf(id, user);
+    const { buffer, fileName, contentType } = await this.commercial.previewProposalPdf(
+      id,
+      user,
+      proposalId || null,
+    );
     res.set({
       'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${fileName}"`,
@@ -386,8 +398,14 @@ export class TriageController {
   }
 
   @Post('submissions/:id/proposal-generate')
-  generateProposal(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.commercial.generateProposalPdf(id, user).then(() => this.service.get(id, user));
+  generateProposal(
+    @Param('id') id: string,
+    @Query('proposalId') proposalId: string | undefined,
+    @Body() body: { proposalId?: string } | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const pid = proposalId || body?.proposalId || null;
+    return this.commercial.generateProposalPdf(id, user, pid).then(() => this.service.get(id, user));
   }
 
   @Post('submissions/:id/proposal-send')

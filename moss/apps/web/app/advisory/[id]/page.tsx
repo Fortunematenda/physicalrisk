@@ -33,6 +33,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Circle,
+  Download,
+  FileText,
   Loader2,
   Menu,
   Save,
@@ -72,6 +74,13 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
+import {
+  advisoryReportHref,
+  formatAdvisoryReportVersion,
+  isAdvisoryReportReady,
+  pickLatestAdvisoryReport,
+  type LatestAdvisoryReport,
+} from '@/lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 import { cn } from '@/lib/utils';
 
@@ -1011,19 +1020,45 @@ export default function AdvisoryDetail() {
           );
         }
       }
-      const r = await apiFetch<any>(`/advisory/${id}/generate-report`, { method: 'POST' });
+      const r = await apiFetch<{ id?: string }>(`/advisory/${id}/generate-report`, { method: 'POST' });
       toast({
         variant: 'success',
-        title: locked ? 'Report regenerated' : 'Report generated',
-        description: 'The PDF is ready to open.',
+        title: 'Report generated successfully',
+        description: 'Opening the on-screen report preview.',
       });
-      if (r.downloadUrl) window.open(r.downloadUrl, '_blank', 'noopener,noreferrer');
       await load();
+      if (r?.id) {
+        router.push(advisoryReportHref(r.id));
+        return;
+      }
     } catch (e: any) {
       toast({
         variant: 'error',
         title: 'Report generation failed',
         description: e.message || 'Unable to generate the report.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadLatestReport() {
+    const report = pickLatestAdvisoryReport(
+      (x?.reports || []) as LatestAdvisoryReport[],
+    );
+    if (!report?.id) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ downloadUrl?: string }>(`/reports/${report.id}`);
+      if (!data?.downloadUrl) {
+        throw new Error('Download link is not available for this report.');
+      }
+      window.open(data.downloadUrl, '_blank', 'noopener,noreferrer');
+    } catch (e: any) {
+      toast({
+        variant: 'error',
+        title: 'Download failed',
+        description: e.message || 'Unable to download the report PDF.',
       });
     } finally {
       setBusy(false);
@@ -1111,7 +1146,7 @@ export default function AdvisoryDetail() {
             disabled={busy}
             onClick={() => void generateReport()}
           >
-            Generate PDF report
+            Generate report
           </Button>
         </div>
       </div>
@@ -1136,10 +1171,15 @@ export default function AdvisoryDetail() {
         disabled={busy}
         onClick={() => void generateReport()}
       >
-        {locked ? 'Regenerate PDF report' : 'Generate PDF report'}
+        {locked ? 'Regenerate report' : 'Generate report'}
       </Button>
     </div>
     );
+
+  const latestReport = pickLatestAdvisoryReport(
+    (x?.reports || []) as LatestAdvisoryReport[],
+  );
+  const reportReady = isAdvisoryReportReady(latestReport);
 
   const moduleNav = (
     <nav className="space-y-1" aria-label="Assessment modules">
@@ -1281,6 +1321,74 @@ export default function AdvisoryDetail() {
               </div>
             </div>
           </div>
+
+          {(locked || reportReady) ? (
+            <Card className="mb-4 rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="flex flex-wrap items-start justify-between gap-4 p-4 sm:p-5">
+                <div className="min-w-0 space-y-1">
+                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Report
+                  </p>
+                  <p className="m-0 text-base font-semibold text-slate-900">
+                    Executive Advisory Diagnostic Report
+                  </p>
+                  {reportReady && latestReport ? (
+                    <p className="m-0 text-sm text-slate-600">
+                      {formatAdvisoryReportVersion(latestReport.version)}
+                      {latestReport.generatedAt
+                        ? ` · Generated ${new Date(latestReport.generatedAt).toLocaleString('en-ZA')}`
+                        : ''}
+                    </p>
+                  ) : (
+                    <p className="m-0 text-sm text-slate-600">
+                      Assessment submitted — no client report generated yet.
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {reportReady && latestReport ? (
+                    <>
+                      <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
+                        <Link href={advisoryReportHref(latestReport.id)}>
+                          <FileText className="size-4" />
+                          View report
+                        </Link>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0 whitespace-nowrap px-4"
+                        disabled={busy}
+                        onClick={() => void downloadLatestReport()}
+                      >
+                        <Download className="size-4" />
+                        Download PDF
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0 whitespace-nowrap px-4"
+                        disabled={busy}
+                        onClick={() => void generateReport()}
+                      >
+                        Regenerate report
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      className="h-10 shrink-0 whitespace-nowrap px-4"
+                      disabled={busy}
+                      onClick={() => void generateReport()}
+                    >
+                      <FileText className="size-4" />
+                      Generate report
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {!modules.length ? (
             <Card className="rounded-xl border-slate-200 shadow-sm">

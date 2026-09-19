@@ -7,6 +7,7 @@ import {
   CommercialStage,
 } from '@prisma/client';
 import {
+  PRODUCT_LABELS,
   operationalSitesLabelFromStored,
   securityExpenditureLabelFromStored,
 } from '@moss/shared';
@@ -556,7 +557,10 @@ export class TriageService {
       contactActivities: commercialView.contactActivities,
       proposals: commercialView.proposals,
       activeProposal: commercialView.activeProposal,
-      commercialJourney: this.commercialJourney(lead, commercialView.commercialStage),
+      commercialJourney: [
+        ...this.commercialJourney(lead, commercialView.commercialStage),
+        ...(await this.level3DeliveryJourneySteps(commercialView.activeProposal)),
+      ],
       responses,
       qualification,
       audit,
@@ -781,6 +785,45 @@ export class TriageService {
       { key: 'CONVERTED', label: 'Converted to Level 2', at: lead.convertedAt },
       { key: 'CLOSED', label: 'Lead Closed', at: lead.closedAt },
     ];
+  }
+
+  private async level3DeliveryJourneySteps(activeProposal: { id?: string; status?: string; proposalNumber?: string } | null) {
+    if (!activeProposal?.id) return [];
+    const rows = await this.prisma.assessmentSession.findMany({
+      where: { sourceProposalId: activeProposal.id },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        reference: true,
+        productCode: true,
+        status: true,
+        createdAt: true,
+        title: true,
+      },
+    });
+    if (!rows.length) {
+      if (String(activeProposal.status || '') === 'ACCEPTED') {
+        return [
+          {
+            key: 'LEVEL3_PENDING',
+            label: 'Level 3 delivery (not created yet)',
+            at: null,
+            active: true,
+            detail: activeProposal.proposalNumber || null,
+          },
+        ];
+      }
+      return [];
+    }
+    return rows.map((row) => ({
+      key: `LEVEL3_${row.productCode}`,
+      label: `${PRODUCT_LABELS[row.productCode] || row.productCode} · ${row.reference}`,
+      at: row.createdAt,
+      active: row.status === 'DRAFT' || row.status === 'IN_PROGRESS',
+      detail: row.status === 'DRAFT' ? 'Not started' : String(row.status).replaceAll('_', ' '),
+      engagementId: row.id,
+      productCode: row.productCode,
+    }));
   }
 
   async update(

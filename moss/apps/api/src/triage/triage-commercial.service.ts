@@ -975,22 +975,36 @@ export class TriageCommercialService {
     });
   }
 
-  private async loadProposalWithRelations(publicLeadId: string, user: AuthUser) {
-    let proposal = await this.prisma.triageProposal.findFirst({
-      where: { publicLeadId },
-      orderBy: { createdAt: 'asc' },
-      include: { template: true, organisation: true },
-    });
-    if (!proposal) {
+  private async loadProposalWithRelations(
+    publicLeadId: string,
+    user: AuthUser,
+    proposalId?: string | null,
+  ) {
+    const include = { template: true, organisation: true } as const;
+    let proposal = proposalId
+      ? await this.prisma.triageProposal.findFirst({
+          where: { id: proposalId, publicLeadId },
+          include,
+        })
+      : await this.prisma.triageProposal.findFirst({
+          where: { publicLeadId },
+          orderBy: { createdAt: 'asc' },
+          include,
+        });
+    if (!proposal && !proposalId) {
       await this.ensureAdminProposalDraft(publicLeadId, user);
       proposal = await this.prisma.triageProposal.findFirst({
         where: { publicLeadId },
         orderBy: { createdAt: 'asc' },
-        include: { template: true, organisation: true },
+        include,
       });
     }
     if (!proposal) {
-      throw new NotFoundException('Proposal workspace could not be initialized.');
+      throw new NotFoundException(
+        proposalId
+          ? 'Proposal not found for this triage submission.'
+          : 'Proposal workspace could not be initialized.',
+      );
     }
     return this.hydrateProposalWorkspace(publicLeadId, proposal);
   }
@@ -1087,12 +1101,12 @@ export class TriageCommercialService {
     });
   }
 
-  async getProposalWorkspace(publicLeadId: string, user: AuthUser) {
+  async getProposalWorkspace(publicLeadId: string, user: AuthUser, proposalId?: string | null) {
     this.assertCommercialWrite(user);
-    const templateView = await this.getProposalTemplate(publicLeadId, user);
+    const templateView = await this.getProposalTemplate(publicLeadId, user, proposalId);
     const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
     if (!lead) throw new NotFoundException('Triage submission not found.');
-    const proposal = await this.loadProposalWithRelations(publicLeadId, user);
+    const proposal = await this.loadProposalWithRelations(publicLeadId, user, proposalId);
     const content = readContentSnapshot(proposal.contentSnapshot);
     const feeLineItems = recalculateAllLineItems(content.feeLineItems);
     const feeTotals = calculateProposalFees({
@@ -1108,10 +1122,20 @@ export class TriageCommercialService {
         proposal: { ...proposal, contentSnapshot: { ...content, feeLineItems } } as Record<string, unknown>,
       }),
     );
+    const snap =
+      proposal.contextSnapshot && typeof proposal.contextSnapshot === 'object'
+        ? (proposal.contextSnapshot as Record<string, unknown>)
+        : null;
+    const isEadFollowOn = snap?.source === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+    const selectedProductCodes = Array.isArray(snap?.selectedProductCodes)
+      ? (snap!.selectedProductCodes as string[])
+      : [];
     return {
       ...templateView,
       productCode: proposal.productCode,
       subtitle: proposal.subtitle,
+      title: proposal.title,
+      proposalNumber: proposal.proposalNumber,
       // Prefer columns on the proposal row so Scope tab edits always win over triage fallbacks.
       clientObjective: proposal.objectives?.trim()
         ? proposal.objectives
@@ -1170,10 +1194,69 @@ export class TriageCommercialService {
       sendCount: (proposal as { sendCount?: number }).sendCount || 0,
       lastSendType: (proposal as { lastSendType?: string | null }).lastSendType || null,
       proposalId: proposal.id,
+      proposalSource: isEadFollowOn
+        ? {
+            type: 'EXECUTIVE_ADVISORY_DIAGNOSTIC' as const,
+            eadReference: typeof snap?.eadReference === 'string' ? snap.eadReference : null,
+            eadAssessmentId: typeof snap?.eadAssessmentId === 'string' ? snap.eadAssessmentId : null,
+            reportId: typeof snap?.reportId === 'string' ? snap.reportId : null,
+            reportVersion: typeof snap?.reportVersion === 'number' ? snap.reportVersion : null,
+            selectedProductCodes,
+            selectedCount: selectedProductCodes.length,
+            requestNote: typeof snap?.requestNote === 'string' ? snap.requestNote : null,
+            sourceReportHref:
+              typeof snap?.eadAssessmentId === 'string'
+                ? `/advisory/${snap.eadAssessmentId}/outcome`
+                : null,
+          }
+        : {
+            type: 'TRIAGE' as const,
+            eadReference: null,
+            eadAssessmentId: null,
+            reportId: null,
+            reportVersion: null,
+            selectedProductCodes: [] as string[],
+            selectedCount: 0,
+            requestNote: null,
+            sourceReportHref: null,
+          },
+      deliveryEngagements: await this.loadDeliveryEngagementsForProposal(proposal.id, selectedProductCodes),
     };
   }
 
-  async getProposalTemplate(publicLeadId: string, user: AuthUser) {
+  private async loadDeliveryEngagementsForProposal(
+    proposalId: string,
+    selectedProductCodes: string[],
+  ) {
+    const rows = await this.prisma.assessmentSession.findMany({
+      where: { sourceProposalId: proposalId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, reference: true, productCode: true, status: true, title: true },
+    });
+    const byProduct = new Map(rows.map((r) => [r.productCode, r]));
+    const codes = selectedProductCodes.length
+      ? selectedProductCodes
+      : rows.map((r) => String(r.productCode));
+    return codes.map((code) => {
+      const eng = byProduct.get(code as import('@prisma/client').ProductCode) || null;
+      return {
+        productCode: code,
+        label: code.replaceAll('_', ' '),
+        engagement: eng
+          ? {
+              id: eng.id,
+              reference: eng.reference,
+              status: eng.status,
+              title: eng.title,
+              workspaceHref:
+                code === 'SCLI_COST_LEAKAGE' ? `/assessments/${eng.id}` : `/advisory/${eng.id}`,
+            }
+          : null,
+      };
+    });
+  }
+
+  async getProposalTemplate(publicLeadId: string, user: AuthUser, proposalId?: string | null) {
     this.assertCommercialWrite(user);
     const lead = await this.prisma.publicLead.findUnique({
       where: { id: publicLeadId },
@@ -1182,10 +1265,14 @@ export class TriageCommercialService {
       },
     });
     if (!lead) throw new NotFoundException('Triage submission not found.');
-    const proposal = await this.prisma.triageProposal.findFirst({
-      where: { publicLeadId },
-      orderBy: { createdAt: 'asc' },
-    });
+    const proposal = proposalId
+      ? await this.prisma.triageProposal.findFirst({
+          where: { id: proposalId, publicLeadId },
+        })
+      : await this.prisma.triageProposal.findFirst({
+          where: { publicLeadId },
+          orderBy: { createdAt: 'asc' },
+        });
     let assessmentReference: string | null = null;
     if (lead.assessmentId) {
       assessmentReference =
@@ -1239,6 +1326,7 @@ export class TriageCommercialService {
       title?: string;
       contentSnapshot?: ProposalContentSnapshot | Record<string, unknown>;
       expectedGrandTotal?: number | null;
+      proposalId?: string | null;
     },
     user: AuthUser,
   ) {
@@ -1246,12 +1334,20 @@ export class TriageCommercialService {
     const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
     if (!lead) throw new NotFoundException('Triage submission not found.');
 
-    let proposal = await this.prisma.triageProposal.findFirst({
-      where: { publicLeadId },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!proposal) {
+    const preferredId = input.proposalId || null;
+    let proposal = preferredId
+      ? await this.prisma.triageProposal.findFirst({
+          where: { id: preferredId, publicLeadId },
+        })
+      : await this.prisma.triageProposal.findFirst({
+          where: { publicLeadId },
+          orderBy: { createdAt: 'asc' },
+        });
+    if (!proposal && !preferredId) {
       proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
+    }
+    if (!proposal) {
+      throw new NotFoundException('Proposal not found for this triage submission.');
     }
 
     const existingContent = readContentSnapshot(proposal.contentSnapshot);
@@ -1503,29 +1599,34 @@ export class TriageCommercialService {
       metadata: { proposalNumber: proposal.proposalNumber, publicLeadId },
     });
 
-    return this.getProposalTemplate(publicLeadId, user);
+    return this.getProposalTemplate(publicLeadId, user, preferredId);
   }
 
-  async previewProposalPdf(publicLeadId: string, user: AuthUser) {
+  async previewProposalPdf(publicLeadId: string, user: AuthUser, proposalId?: string | null) {
     this.assertCommercialWrite(user);
-    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user);
+    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user, proposalId);
     return { buffer, fileName, contentType: 'application/pdf' };
   }
 
-  async generateProposalPdf(publicLeadId: string, user: AuthUser) {
+  async generateProposalPdf(publicLeadId: string, user: AuthUser, proposalId?: string | null) {
     this.assertCommercialWrite(user);
     const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
     if (!lead) throw new NotFoundException('Triage submission not found.');
 
-    let proposal = await this.prisma.triageProposal.findFirst({
-      where: { publicLeadId },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!proposal) {
+    let proposal = proposalId
+      ? await this.prisma.triageProposal.findFirst({
+          where: { id: proposalId, publicLeadId },
+        })
+      : await this.prisma.triageProposal.findFirst({
+          where: { publicLeadId },
+          orderBy: { createdAt: 'asc' },
+        });
+    if (!proposal && !proposalId) {
       proposal = await this.ensureAdminProposalDraft(publicLeadId, user);
     }
+    if (!proposal) throw new NotFoundException('Proposal not found for this triage submission.');
 
-    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user);
+    const { buffer, fileName } = await this.renderProposalBuffer(publicLeadId, user, proposal.id);
     const storageKey = `triage/${publicLeadId}/proposals/${Date.now()}-${fileName}`;
     await this.storage.put(storageKey, buffer, 'application/pdf');
 
@@ -2021,12 +2122,16 @@ export class TriageCommercialService {
     };
   }
 
-  private async renderProposalBuffer(publicLeadId: string, user: AuthUser) {
+  private async renderProposalBuffer(
+    publicLeadId: string,
+    user: AuthUser,
+    proposalId?: string | null,
+  ) {
     const lead = await this.prisma.publicLead.findUnique({
       where: { id: publicLeadId },
     });
     if (!lead) throw new NotFoundException('Triage submission not found.');
-    const proposal = await this.loadProposalWithRelations(publicLeadId, user);
+    const proposal = await this.loadProposalWithRelations(publicLeadId, user, proposalId);
 
     let assessmentReference: string | null = null;
     if (lead.assessmentId) {

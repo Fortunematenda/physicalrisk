@@ -2,10 +2,14 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Download, Loader2 } from 'lucide-react';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
+import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
+import { Button } from '@/components/ui/button';
 import { apiFetch } from '../../../lib/api';
+import { formatAdvisoryReportVersion, advisoryWorkspaceHref } from '@/lib/advisory-report';
 
 const ADVISORY_PRODUCTS = new Set([
   'EXECUTIVE_GOVERNANCE_TRIAGE',
@@ -25,6 +29,13 @@ function engagementHref(productCode?: string, assessmentId?: string, triageSubmi
   }
   if (!assessmentId) return null;
   if (productCode === 'SCLI_COST_LEAKAGE') return `/assessments/${assessmentId}`;
+  if (productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+    return advisoryWorkspaceHref({
+      assessmentId,
+      productCode,
+      hasOutcome: true,
+    });
+  }
   if (productCode && ADVISORY_PRODUCTS.has(productCode)) return `/advisory/${assessmentId}`;
   return `/assessments/${assessmentId}`;
 }
@@ -39,6 +50,10 @@ export default function ReportPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewBytes, setPreviewBytes] = useState<ArrayBuffer | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
 
   const productCode = String(report?.assessment?.productCode || '');
   const isTriageReport = productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
@@ -74,6 +89,37 @@ export default function ReportPage() {
       .catch((e) => setError(e.message));
   }, [id, router, viewParam]);
 
+  useEffect(() => {
+    if (!isAdvisoryReport || !report?.downloadUrl) {
+      setPreviewBytes(null);
+      setPreviewOpen(false);
+      return;
+    }
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError('');
+    fetch(report.downloadUrl)
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Unable to load report PDF for preview.');
+        return res.arrayBuffer();
+      })
+      .then((bytes) => {
+        if (cancelled) return;
+        setPreviewBytes(bytes);
+        setPreviewOpen(true);
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setPreviewError(e.message || 'Unable to preview this report.');
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdvisoryReport, report?.downloadUrl]);
+
   async function issue(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -108,21 +154,39 @@ export default function ReportPage() {
               <p>{report.assessment.organisation.name}</p>
               <p><StatusBadge value={report.status} /></p>
               <p className="muted">
+                {formatAdvisoryReportVersion(report.version)}
+                {' · '}
                 Generated {report.generatedAt ? new Date(report.generatedAt).toLocaleString('en-ZA') : 'Not yet generated'}
               </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+                {isAdvisoryReport ? (
+                  <Button
+                    type="button"
+                    disabled={previewLoading || !report.downloadUrl}
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    {previewLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                    View report
+                  </Button>
+                ) : null}
                 {report.downloadUrl && (
-                  <a className="btn" href={report.downloadUrl} target="_blank" rel="noreferrer">Download PDF</a>
+                  <a className="btn secondary" href={report.downloadUrl} target="_blank" rel="noreferrer">
+                    <Download className="mr-1 inline size-4" />
+                    Download PDF
+                  </a>
                 )}
                 {workHref ? (
                   <Link className="btn secondary" href={workHref}>
-                    Open engagement
+                    {productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                      ? 'Open diagnostic outcome'
+                      : 'Open engagement'}
                   </Link>
                 ) : null}
                 <Link className="btn secondary" href={backHref}>
                   {backLabel}
                 </Link>
               </div>
+              {previewError ? <p className="error" style={{ marginTop: 12 }}>{previewError}</p> : null}
             </section>
             <form className="card" onSubmit={issue}>
               <h2>Issue report</h2>
@@ -150,6 +214,20 @@ export default function ReportPage() {
         ) : (
           <div className="loading-screen">Loading report…</div>
         )}
+
+        <PdfPreviewDialog
+          open={previewOpen && Boolean(previewBytes)}
+          onOpenChange={setPreviewOpen}
+          pdfBytes={previewBytes}
+          title={report?.title || 'Executive Advisory report'}
+          description="On-screen report preview. Use Download PDF if you need a file."
+          downloadLabel="Download PDF"
+          onDownload={() => {
+            if (report?.downloadUrl) {
+              window.open(report.downloadUrl, '_blank', 'noopener,noreferrer');
+            }
+          }}
+        />
       </Shell>
     </AuthGate>
   );

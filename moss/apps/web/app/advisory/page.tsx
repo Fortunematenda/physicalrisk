@@ -13,6 +13,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { apiFetch } from '@/lib/api';
+import {
+  advisoryReportHref,
+  advisoryWorkspaceHref,
+  canGenerateAdvisoryReport,
+  formatAdvisoryReportVersion,
+  isAdvisoryReportReady,
+  type LatestAdvisoryReport,
+} from '@/lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 import { useToast } from '@/components/ui/toast';
 
@@ -48,6 +56,7 @@ type AdvisoryRow = {
     user: { firstName: string; lastName: string };
   }>;
   diagnosticOutcome?: { id: string; confirmedAt?: string | null } | null;
+  latestReport?: LatestAdvisoryReport | null;
   _count?: { evidence?: number; reports?: number };
 };
 
@@ -134,6 +143,32 @@ export default function AdvisoryPage() {
     }
   }
 
+  async function generateReport(row: AdvisoryRow) {
+    setMenuOpenId(null);
+    setBusyId(row.id);
+    try {
+      const report = await apiFetch<{ id: string }>(`/advisory/${row.id}/generate-report`, {
+        method: 'POST',
+      });
+      toast({
+        title: 'Report generated successfully',
+        description: 'Opening the on-screen report preview.',
+        variant: 'success',
+      });
+      await load();
+      if (report?.id) {
+        router.push(advisoryReportHref(report.id));
+      }
+    } catch (err: unknown) {
+      showError(
+        err instanceof Error ? err.message : 'Unable to generate the report.',
+        'Report generation failed',
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <AuthGate>
       <Shell title="Executive Advisory">
@@ -212,7 +247,7 @@ export default function AdvisoryPage() {
                     <th className="px-3 py-2">Product</th>
                     <th className="px-3 py-2">Consultant</th>
                     <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Evidence</th>
+                    <th className="px-3 py-2">Report</th>
                     <th className="px-3 py-2">Updated</th>
                     <th className="px-3 py-2 text-right">Actions</th>
                   </tr>
@@ -222,22 +257,37 @@ export default function AdvisoryPage() {
                     const a = x.assignments?.find(
                       (row) => row.role === 'PRIMARY_ANALYST' && row.status !== 'CANCELLED',
                     );
-                    const hasOutcome = Boolean(x.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(x.status);
-                    const reportCount = x._count?.reports || 0;
+                    const hasOutcome =
+                      Boolean(x.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(x.status);
+                    const reportReady = isAdvisoryReportReady(x.latestReport);
+                    const workspaceHref = advisoryWorkspaceHref({
+                      assessmentId: x.id,
+                      productCode: x.productCode,
+                      hasOutcome,
+                    });
+                    const showGenerate = canGenerateAdvisoryReport({
+                      status: x.status,
+                      hasOutcome,
+                      reportReady,
+                    });
                     return (
                       <tr
                         key={x.id}
                         className="cursor-pointer border-t border-slate-100 transition-colors hover:bg-slate-50/80"
-                        onClick={() => router.push(`/advisory/${x.id}`)}
+                        onClick={() => router.push(workspaceHref)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            router.push(`/advisory/${x.id}`);
+                            router.push(workspaceHref);
                           }
                         }}
                         tabIndex={0}
                         role="link"
-                        aria-label={`Open engagement ${x.reference}`}
+                        aria-label={
+                          hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                            ? `Open diagnostic outcome ${x.reference}`
+                            : `Open engagement ${x.reference}`
+                        }
                       >
                         <td className="px-3 py-2">
                           <strong>{x.reference}</strong>
@@ -247,8 +297,37 @@ export default function AdvisoryPage() {
                         <td className="px-3 py-2">
                           {a ? `${a.user.firstName} ${a.user.lastName}` : 'Unassigned'}
                         </td>
-                        <td className="px-3 py-2">{x.status}</td>
-                        <td className="px-3 py-2">{x._count?.evidence || 0}</td>
+                        <td className="px-3 py-2">
+                          <div className="leading-snug">
+                            <span>{x.status}</span>
+                            {reportReady ? (
+                              <span className="mt-0.5 block text-xs text-moss-success">Report ready</span>
+                            ) : hasOutcome ? (
+                              <span className="mt-0.5 block text-xs text-slate-500">No report yet</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td
+                          className="px-3 py-2"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          {reportReady && x.latestReport ? (
+                            <div className="leading-snug">
+                              <span className="font-medium text-slate-900">
+                                {formatAdvisoryReportVersion(x.latestReport.version)}
+                              </span>
+                              <Link
+                                href={advisoryReportHref(x.latestReport.id)}
+                                className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
+                              >
+                                View
+                              </Link>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2">{new Date(x.updatedAt).toLocaleDateString('en-ZA')}</td>
                         <td
                           className="org2-actions-cell px-3 py-2"
@@ -269,9 +348,33 @@ export default function AdvisoryPage() {
                               </button>
                             )}
                           >
-                            <Link href={`/advisory/${x.id}`} onClick={() => setMenuOpenId(null)}>
-                              Open engagement
+                            <Link href={workspaceHref} onClick={() => setMenuOpenId(null)}>
+                              {hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                                ? 'Open diagnostic outcome'
+                                : 'Open engagement'}
                             </Link>
+                            {hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+                              <Link href={`/advisory/${x.id}`} onClick={() => setMenuOpenId(null)}>
+                                Open engagement workspace
+                              </Link>
+                            ) : null}
+                            {reportReady && x.latestReport ? (
+                              <Link
+                                href={advisoryReportHref(x.latestReport.id)}
+                                onClick={() => setMenuOpenId(null)}
+                              >
+                                View report
+                              </Link>
+                            ) : null}
+                            {showGenerate ? (
+                              <button
+                                type="button"
+                                disabled={busyId === x.id}
+                                onClick={() => void generateReport(x)}
+                              >
+                                {busyId === x.id ? 'Generating…' : 'Generate report'}
+                              </button>
+                            ) : null}
                             {x.organisation?.id ? (
                               <Link
                                 href={`/organisations/${x.organisation.id}`}
@@ -283,16 +386,6 @@ export default function AdvisoryPage() {
                             {!a ? (
                               <Link href={`/advisory/${x.id}`} onClick={() => setMenuOpenId(null)}>
                                 Assign consultant
-                              </Link>
-                            ) : null}
-                            {hasOutcome ? (
-                              <Link href={`/advisory/${x.id}/outcome`} onClick={() => setMenuOpenId(null)}>
-                                View outcome
-                              </Link>
-                            ) : null}
-                            {reportCount > 0 ? (
-                              <Link href="/reports#executive-advisory-reports" onClick={() => setMenuOpenId(null)}>
-                                View reports
                               </Link>
                             ) : null}
                             {isAdmin ? (

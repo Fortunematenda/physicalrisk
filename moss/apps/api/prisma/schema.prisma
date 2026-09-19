@@ -631,6 +631,10 @@ model AssessmentSession {
   unlockReason           String?
   returnReason           String?
   parentAssessmentId     String?
+  /// Accepted TriageProposal that authorised this Level 3 delivery engagement (Stage 13).
+  sourceProposalId       String?
+  /// Internal provenance / EAD findings carried into Level 3 (never client-facing PDF).
+  sourceContext          Json?
   espocrmOpportunityId   String?
   espocrmTaskId          String?
   createdAt              DateTime         @default(now())
@@ -645,6 +649,7 @@ model AssessmentSession {
   unlockedBy             User?            @relation("AssessmentUnlocker", fields: [unlockedById], references: [id])
   parentAssessment       AssessmentSession? @relation("AssessmentReassessments", fields: [parentAssessmentId], references: [id])
   reassessments          AssessmentSession[] @relation("AssessmentReassessments")
+  sourceProposal         TriageProposal?  @relation("TriageProposalSpawnedEngagements", fields: [sourceProposalId], references: [id], onDelete: SetNull)
   inputValues            AssessmentInputValue[]
   responses              AssessmentResponse[]
   scoreSnapshots         ScoreSnapshot[]
@@ -667,6 +672,7 @@ model AssessmentSession {
   actionItems            ActionItem[]
   somodLinkedAssessments SomodAssessment[] @relation("SomodMossLink")
   triageProposalsFromSource TriageProposal[] @relation("TriageProposalSourceAssessment")
+  triageProposalsFromAdvisory TriageProposal[] @relation("TriageProposalSourceAdvisory")
   @@index([status])
   @@index([organisationId])
   @@index([organisationId, status])
@@ -675,6 +681,8 @@ model AssessmentSession {
   @@index([productCode, organisationId])
   @@index([siteId])
   @@index([mossCatalogueVersionId])
+  @@index([sourceProposalId])
+  @@index([sourceProposalId, productCode])
 }
 
 model AssessmentAssignment {
@@ -1118,6 +1126,7 @@ model Report {
   updatedAt      DateTime     @updatedAt
   assessment     AssessmentSession @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   generatedBy    User?        @relation("ReportGenerator", fields: [generatedById], references: [id])
+  triageProposalsFromReport TriageProposal[] @relation("TriageProposalSourceReport")
   @@index([assessmentId])
   @@index([assessmentId, reportType, version])
 }
@@ -1440,6 +1449,10 @@ model TriageProposal {
   organisationId           String?
   /// Source Executive Governance Triage assessment (EGT reference).
   sourceAssessmentId       String?
+  /// Source Executive Advisory Diagnostic assessment (Level 2 follow-on proposals).
+  sourceAdvisoryAssessmentId String?
+  /// Source Executive Advisory report used when requesting a comprehensive proposal.
+  sourceReportId           String?
   productCode              String               @default("EXECUTIVE_ADVISORY_DIAGNOSTIC")
   templateId               String?
   templateVersion          Int?
@@ -1512,13 +1525,18 @@ model TriageProposal {
   publicLead               PublicLead           @relation("TriageLeadProposals", fields: [publicLeadId], references: [id], onDelete: Cascade)
   organisation             Organisation?        @relation(fields: [organisationId], references: [id], onDelete: SetNull)
   sourceAssessment         AssessmentSession?   @relation("TriageProposalSourceAssessment", fields: [sourceAssessmentId], references: [id], onDelete: SetNull)
+  sourceAdvisoryAssessment AssessmentSession?   @relation("TriageProposalSourceAdvisory", fields: [sourceAdvisoryAssessmentId], references: [id], onDelete: SetNull)
+  sourceReport             Report?              @relation("TriageProposalSourceReport", fields: [sourceReportId], references: [id], onDelete: SetNull)
   template                 ProposalTemplate?    @relation(fields: [templateId], references: [id], onDelete: SetNull)
   createdBy                User                 @relation("TriageProposalCreator", fields: [createdById], references: [id], onDelete: Restrict)
   acceptedForLead          PublicLead?          @relation("AcceptedTriageProposal")
+  spawnedEngagements       AssessmentSession[]  @relation("TriageProposalSpawnedEngagements")
 
   @@index([publicLeadId, createdAt])
   @@index([organisationId])
   @@index([sourceAssessmentId])
+  @@index([sourceAdvisoryAssessmentId])
+  @@index([sourceReportId])
   @@index([status])
   @@index([templateId])
 }

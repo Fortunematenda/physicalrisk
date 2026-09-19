@@ -41,6 +41,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
+import { CreateLevel3EngagementsCard } from '@/components/triage/CreateLevel3EngagementsCard';
 import { Shell } from '@/components/Shell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { flushAllRichTextEditors, RichTextEditor } from '@/components/ui/rich-text-editor';
@@ -210,6 +211,7 @@ type Props = {
 export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const proposalIdParam = searchParams.get('proposalId') || '';
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
@@ -243,13 +245,17 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     return draftRef.current;
   }
 
-  const draftStorageKey = `moss-proposal-ws-draft:v6:${submissionId}`;
+  const draftStorageKey = `moss-proposal-ws-draft:v6:${submissionId}:${proposalIdParam || 'default'}`;
+
+  const workspaceQuery = proposalIdParam
+    ? `?proposalId=${encodeURIComponent(proposalIdParam)}`
+    : '';
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
     try {
       const ws = await apiFetch<ProposalWorkspace>(
-        `/triage/submissions/${submissionId}/proposal-workspace`,
+        `/triage/submissions/${submissionId}/proposal-workspace${workspaceQuery}`,
       );
       const nextDraft = workspaceToDraft(ws);
       const serverFingerprint = draftFingerprint(nextDraft);
@@ -301,11 +307,11 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     } finally {
       setLoading(false);
     }
-  }, [submissionId, toast, draftStorageKey]);
+  }, [submissionId, toast, draftStorageKey, workspaceQuery]);
 
   useEffect(() => {
     void loadWorkspace();
-  }, [submissionId, loadWorkspace]);
+  }, [submissionId, loadWorkspace, proposalIdParam]);
 
   // Deep-link from readiness “Complete missing information” (?tab=&field=).
   useEffect(() => {
@@ -627,11 +633,15 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     if (!source) return false;
     const totals = clientFeeTotals(source);
     const localSnapshot = source;
+    const activeProposalId = workspace?.proposalId || proposalIdParam || undefined;
     const saved = await apiFetch<ProposalWorkspace>(
       `/triage/submissions/${submissionId}/proposal-workspace`,
       {
         method: 'PATCH',
-        body: JSON.stringify(draftToPayload(source, totals)),
+        body: JSON.stringify({
+          ...draftToPayload(source, totals),
+          ...(activeProposalId ? { proposalId: activeProposalId } : {}),
+        }),
       },
     );
     const nextDraft = workspaceToDraft(saved);
@@ -669,13 +679,14 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   }
 
   async function generatePdfSilent() {
-    await apiFetch(`/triage/submissions/${submissionId}/proposal-generate`, {
+    const activeProposalId = workspace?.proposalId || proposalIdParam || undefined;
+    await apiFetch(`/triage/submissions/${submissionId}/proposal-generate${workspaceQuery}`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(activeProposalId ? { proposalId: activeProposalId } : {}),
     });
     try {
       const ws = await apiFetch<ProposalWorkspace>(
-        `/triage/submissions/${submissionId}/proposal-workspace`,
+        `/triage/submissions/${submissionId}/proposal-workspace${workspaceQuery}`,
       );
       setWorkspace(ws);
     } catch {
@@ -707,7 +718,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
   }
 
   async function openPreviewPdf() {
-    const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview`);
+    const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview${workspaceQuery}`);
     const bytes = await blob.arrayBuffer();
     setPdfPreview({ bytes, title: 'Proposal preview' });
   }
@@ -737,7 +748,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
         }
       }
       // Fallback: download the freshly rendered preview bytes.
-      const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview`);
+      const blob = await apiFetchBlob(`/triage/submissions/${submissionId}/proposal-preview${workspaceQuery}`);
       const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -939,6 +950,94 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
             e.target.value = '';
           }}
         />
+
+        {(workspace?.organisationName || workspace?.proposalNumber) && (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="m-0 text-lg font-semibold tracking-tight text-slate-900">
+                  {workspace?.organisationName || 'Organisation'}
+                </p>
+                <p className="m-0 text-sm text-slate-600">
+                  <span className="font-medium text-slate-800">
+                    {workspace?.proposalNumber || 'Proposal'}
+                  </span>
+                  {workspace?.subtitle || workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                    ? ` · ${
+                        workspace?.subtitle ||
+                        'Executive Advisory follow-on proposal'
+                      }`
+                    : null}
+                </p>
+                {workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+                  <p className="m-0 text-xs text-slate-500">
+                    Source: {workspace.proposalSource.eadReference || 'Executive Advisory Diagnostic'}
+                    {workspace.proposalSource.selectedCount
+                      ? ` · ${workspace.proposalSource.selectedCount} recommended engagement${
+                          workspace.proposalSource.selectedCount === 1 ? '' : 's'
+                        }`
+                      : null}
+                  </p>
+                ) : workspace?.triageReference ? (
+                  <p className="m-0 text-xs text-slate-500">Source: {workspace.triageReference}</p>
+                ) : null}
+              </div>
+              <Badge variant="secondary" className="shrink-0">
+                {String(workspace?.status || 'DRAFT').replaceAll('_', ' ')}
+              </Badge>
+            </div>
+          </div>
+        )}
+
+        {workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Proposal source
+                </p>
+                <p className="m-0 text-sm text-slate-800">
+                  Executive Advisory Diagnostic
+                  {workspace.proposalSource.eadReference
+                    ? ` · ${workspace.proposalSource.eadReference}`
+                    : ''}
+                </p>
+                {workspace.proposalSource.reportVersion != null ? (
+                  <p className="m-0 text-xs text-slate-500">
+                    Report v{workspace.proposalSource.reportVersion}
+                    {workspace.proposalSource.selectedCount
+                      ? ` · ${workspace.proposalSource.selectedCount} selected`
+                      : null}
+                  </p>
+                ) : null}
+                {workspace.proposalSource.requestNote ? (
+                  <p className="m-0 pt-1 text-xs text-slate-600">
+                    Request note: {workspace.proposalSource.requestNote}
+                  </p>
+                ) : null}
+              </div>
+              {workspace.proposalSource.sourceReportHref ? (
+                <Button asChild variant="outline" size="sm" className="h-9 shrink-0">
+                  <Link href={workspace.proposalSource.sourceReportHref}>View source report</Link>
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {workspace?.proposalId &&
+        workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' &&
+        (workspace.deliveryEngagements?.length || workspace.status === 'ACCEPTED') ? (
+          <CreateLevel3EngagementsCard
+            proposalId={workspace.proposalId}
+            proposalNumber={workspace.proposalNumber}
+            proposalStatus={workspace.status}
+            organisationName={workspace.organisationName || draft.organisationName}
+            items={workspace.deliveryEngagements || []}
+            canCreate={true}
+            onChanged={() => loadWorkspace()}
+          />
+        ) : null}
 
         <Tabs
           value={tab}

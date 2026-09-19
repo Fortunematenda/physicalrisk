@@ -9,6 +9,8 @@ import {
 import { CheckCircle2, ChevronRight, FileText, Lock, NotebookPen } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
+import { RequestComprehensiveProposalCard } from '@/components/advisory/RequestComprehensiveProposalCard';
+import { CreateLevel3EngagementsCard } from '@/components/triage/CreateLevel3EngagementsCard';
 import { Shell } from '@/components/Shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +20,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
+import {
+  advisoryReportHref,
+  pickLatestAdvisoryReport,
+  type LatestAdvisoryReport,
+} from '@/lib/advisory-report';
 import { cn } from '@/lib/utils';
 
 const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
@@ -251,6 +258,9 @@ export default function AdvisoryOutcomePage() {
     .trim();
   const diagnosticName = engagement.productLabel || engagement.title || 'Executive Advisory Diagnostic';
   const completed = isDiagnosticCompleted(engagement, outcome);
+  const latestReport = pickLatestAdvisoryReport(
+    (engagement.reports || []) as LatestAdvisoryReport[],
+  );
 
   return (
     <AuthGate>
@@ -324,6 +334,26 @@ export default function AdvisoryOutcomePage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
+                {latestReport?.id ? (
+                  <Button
+                    size="lg"
+                    asChild
+                    className="h-11 shrink-0 whitespace-nowrap px-4"
+                  >
+                    <Link href={advisoryReportHref(latestReport.id)}>
+                      <FileText className="size-4" />
+                      View report
+                    </Link>
+                  </Button>
+                ) : (
+                  <Button
+                    size="lg"
+                    asChild
+                    className="h-11 shrink-0 whitespace-nowrap px-4"
+                  >
+                    <Link href={`/advisory/${id}`}>Generate report</Link>
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="lg"
@@ -335,28 +365,6 @@ export default function AdvisoryOutcomePage() {
                     Open working papers
                   </Link>
                 </Button>
-                {engagement.reports?.[0]?.id ? (
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    asChild
-                    className="h-11 shrink-0 whitespace-nowrap px-4"
-                  >
-                    <Link href={`/reports/${engagement.reports[0].id}?view=advisory`}>
-                      <FileText className="size-4" />
-                      View diagnostic report
-                    </Link>
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    asChild
-                    className="h-11 shrink-0 whitespace-nowrap px-4"
-                  >
-                    <Link href={`/advisory/${id}`}>Generate report</Link>
-                  </Button>
-                )}
               </div>
             </CardContent>
           </Card>
@@ -365,6 +373,27 @@ export default function AdvisoryOutcomePage() {
             <AdvisoryReportSummaryPreview
               modules={engagement.advisoryModuleReviews}
               salesEmail="sales@physicalrisk.com"
+            />
+          ) : null}
+
+          <RequestComprehensiveProposalCard
+            assessmentId={String(id)}
+            recommendations={Array.isArray(data.recommendations) ? data.recommendations : []}
+            comprehensiveProposal={data.comprehensiveProposal || null}
+            canRequest={Boolean(data.permissions?.canRequestComprehensiveProposal)}
+            canOpenWorkspace={Boolean(data.permissions?.canOpenProposalWorkspace)}
+            onChanged={() => load()}
+          />
+
+          {data.comprehensiveProposal?.status === 'ACCEPTED' && data.comprehensiveProposal?.id ? (
+            <CreateLevel3EngagementsCard
+              proposalId={String(data.comprehensiveProposal.id)}
+              proposalNumber={data.comprehensiveProposal.proposalNumber}
+              proposalStatus={data.comprehensiveProposal.status}
+              organisationName={engagement.organisation?.name}
+              items={data.comprehensiveProposal.deliveryEngagements || []}
+              canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
+              onChanged={() => load()}
             />
           ) : null}
 

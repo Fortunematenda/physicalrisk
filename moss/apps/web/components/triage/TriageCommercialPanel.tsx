@@ -35,6 +35,10 @@ import { deriveEgtAssurancePresentation } from '@moss/shared';
 import type { ProposalValidationIssue, ProposalWorkspace } from '@/components/triage/proposal/proposal-workspace-types';
 import { proposalValidationTarget } from '@/components/triage/proposal/proposal-workspace-types';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
+import {
+  CreateLevel3EngagementsCard,
+  type DeliveryEngagementItem,
+} from '@/components/triage/CreateLevel3EngagementsCard';
 
 const CONTACT_METHODS = [
   { value: 'CALL', label: 'Call' },
@@ -130,17 +134,6 @@ export function TriageCommercialPanel({
   const router = useRouter();
   const { toast } = useToast();
   const [contactOpen, setContactOpen] = useState(false);
-
-  function openProposalWorkspace(opts?: { validationField?: string | null }) {
-    const field = String(opts?.validationField || '').trim();
-    if (field) {
-      const target = proposalValidationTarget(field);
-      const qs = new URLSearchParams({ tab: target.tab, field });
-      router.push(`/triage/${submissionId}/proposal?${qs.toString()}`);
-      return;
-    }
-    router.push(`/triage/${submissionId}/proposal`);
-  }
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
   const [pdfPreview, setPdfPreview] = useState<{ bytes: ArrayBuffer; title: string } | null>(null);
@@ -179,6 +172,19 @@ export function TriageCommercialPanel({
   const activeProposal = item.activeProposal;
   const isBusy = busy || localBusy;
   const [resendRecipient, setResendRecipient] = useState('');
+
+  function openProposalWorkspace(opts?: { validationField?: string | null }) {
+    const field = String(opts?.validationField || '').trim();
+    const qs = new URLSearchParams();
+    if (activeProposal?.id) qs.set('proposalId', String(activeProposal.id));
+    if (field) {
+      const target = proposalValidationTarget(field);
+      qs.set('tab', target.tab);
+      qs.set('field', field);
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    router.push(`/triage/${submissionId}/proposal${suffix}`);
+  }
 
   const defaultResendRecipient = useMemo(
     () =>
@@ -517,6 +523,20 @@ export function TriageCommercialPanel({
                   : 'Not yet requested'}
                 {lastUpdated ? ` · Last updated ${fmt(lastUpdated)}` : ''}
               </p>
+              {(() => {
+                const snap =
+                  activeProposal?.contextSnapshot &&
+                  typeof activeProposal.contextSnapshot === 'object'
+                    ? (activeProposal.contextSnapshot as Record<string, unknown>)
+                    : null;
+                if (snap?.source !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC') return null;
+                return (
+                  <p className="m-0 text-xs text-slate-500">
+                    Source: Executive Advisory Diagnostic
+                    {typeof snap.eadReference === 'string' ? ` ${snap.eadReference}` : ''}
+                  </p>
+                );
+              })()}
             </div>
             <Badge
               variant={
@@ -851,6 +871,18 @@ export function TriageCommercialPanel({
                   : ''}
               </p>
             </div>
+          ) : null}
+
+          {isAccepted &&
+          activeProposal?.id &&
+          String((activeProposal as { contextSnapshot?: { source?: string } })?.contextSnapshot?.source || '') ===
+            'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+            <CreateLevel3FromAcceptedProposal
+              proposalId={String(activeProposal.id)}
+              proposalNumber={activeProposal.proposalNumber}
+              organisationName={organisation?.name || item.organisationName}
+              onReload={onReload}
+            />
           ) : null}
         </CardContent>
       </Card>
@@ -1237,5 +1269,52 @@ export function TriageCommercialPanel({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function CreateLevel3FromAcceptedProposal({
+  proposalId,
+  proposalNumber,
+  organisationName,
+  onReload,
+}: {
+  proposalId: string;
+  proposalNumber?: string | null;
+  organisationName?: string | null;
+  onReload: () => Promise<void> | void;
+}) {
+  const [items, setItems] = useState<DeliveryEngagementItem[]>([]);
+  const [status, setStatus] = useState('ACCEPTED');
+  const [number, setNumber] = useState(proposalNumber || '');
+
+  async function load() {
+    const data = await apiFetch<{
+      proposalNumber?: string;
+      status?: string;
+      items?: DeliveryEngagementItem[];
+    }>(`/advisory/proposals/${proposalId}/level3-engagements`);
+    setItems(data.items || []);
+    setStatus(data.status || 'ACCEPTED');
+    setNumber(data.proposalNumber || proposalNumber || '');
+  }
+
+  useEffect(() => {
+    void load().catch(() => setItems([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposalId]);
+
+  return (
+    <CreateLevel3EngagementsCard
+      proposalId={proposalId}
+      proposalNumber={number}
+      proposalStatus={status}
+      organisationName={organisationName}
+      items={items}
+      canCreate
+      onChanged={async () => {
+        await load();
+        await onReload();
+      }}
+    />
   );
 }

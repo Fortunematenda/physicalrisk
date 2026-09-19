@@ -8,6 +8,8 @@ import {
   ReportStatus,
   ReportType,
   SystemRole,
+  TriageProposalSource,
+  TriageProposalStatus,
 } from '@prisma/client';
 import {
   EAD_ROUTING_PRODUCT_CODES,
@@ -16,6 +18,7 @@ import {
   PRODUCT_LABELS,
   SHIELD360_RETIRED_MESSAGE,
   buildEadDiagnosticSnapshot,
+  buildEadReportSummary,
   formatBusinessConsequencesForLegacyReport,
   formatEadMissingRequirementLabel,
   formatRecommendedProductLabels,
@@ -42,10 +45,26 @@ import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { generateAssessmentReference } from '../common/assessment-reference';
 import { generateL3ProposalReference } from '../common/l3-proposal-reference';
+import { generateProposalReference } from '../common/proposal-reference';
 import { assertManualLevel3CreationAllowed, resolveManualCreatePolicy } from '../common/l3-governance';
 import { INTERNAL_ROLES } from '../common/roles';
 import { StorageService } from '../evidence/storage.service';
+import { EmailService } from '../email/email.service';
+import { buildDefaultContentSnapshot, resolveTemplateConfig } from '../triage/proposal/proposal-content-builder';
 import { renderAdvisoryPdf } from './advisory-report-pdf';
+import {
+  buildEadFollowOnFeeLineItems,
+  buildEadFollowOnIndicativeScope,
+  buildEadFollowOnUnderstanding,
+  validateEadProposalProductCodes,
+} from './ead-comprehensive-proposal';
+import {
+  buildLevel3SourceContext,
+  level3EngagementHref,
+  level3ProductLabel,
+  validateLevel3DeliveryProductCodes,
+  type Level3SourceFinding,
+} from './ead-level3-from-proposal';
 import { EadDiagnosticQuestionsService } from './ead-diagnostic-questions.service';
 import { resolveSclReportBrandConfig } from '../reports/scl-report-branding';
 import { ConfigService } from '@nestjs/config';
@@ -107,6 +126,7 @@ export class AdvisoryService {
     private readonly storage: StorageService,
     private readonly eadQuestions: EadDiagnosticQuestionsService,
     private readonly config: ConfigService,
+    private readonly email: EmailService,
   ) {}
 
   private assertConsultant(user: AuthUser) {
@@ -281,19 +301,41 @@ export class AdvisoryService {
       productCode: productCode && ADVISORY_PRODUCTS.has(productCode) ? productCode : { in: [...ADVISORY_PRODUCTS] },
       ...(INTERNAL_ROLES.has(user.role) ? {} : { organisation: { memberships: { some: { userId: user.id } } } }),
     };
-    return this.prisma.assessmentSession.findMany({
-      where,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        organisation: { select: { id: true, name: true, industry: true } },
-        assignments: {
-          include: { user: { select: { id: true, firstName: true, lastName: true, email: true, systemRole: true } } },
+    return this.prisma.assessmentSession
+      .findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          organisation: { select: { id: true, name: true, industry: true } },
+          assignments: {
+            include: { user: { select: { id: true, firstName: true, lastName: true, email: true, systemRole: true } } },
+          },
+          advisoryModuleReviews: true,
+          diagnosticOutcome: {
+            select: { id: true, confirmedAt: true, commercialStatus: true, commercialReference: true },
+          },
+          reports: {
+            where: { status: { not: ReportStatus.SUPERSEDED } },
+            orderBy: [{ version: 'desc' }, { generatedAt: 'desc' }, { createdAt: 'desc' }],
+            take: 1,
+            select: {
+              id: true,
+              version: true,
+              status: true,
+              generatedAt: true,
+              title: true,
+              fileName: true,
+            },
+          },
+          _count: { select: { evidence: true, findings: true, recommendations: true, reports: true } },
         },
-        advisoryModuleReviews: true,
-        diagnosticOutcome: { select: { id: true, confirmedAt: true, commercialStatus: true, commercialReference: true } },
-        _count: { select: { evidence: true, findings: true, recommendations: true, reports: true } },
-      },
-    });
+      })
+      .then((rows) =>
+        rows.map(({ reports, ...row }) => ({
+          ...row,
+          latestReport: reports[0] || null,
+        })),
+      );
   }
 
   async getManualCreatePolicy(organisationId: string, productCode: string, user: AuthUser) {
@@ -537,6 +579,89 @@ export class AdvisoryService {
     if (!engagement.diagnosticOutcome) {
       throw new BadRequestException('Diagnostic routing has not been confirmed yet.');
     }
+
+    const reportSummary = buildEadReportSummary({
+      modules: engagement.advisoryModuleReviews || [],
+      routes: engagement.diagnosticOutcome.routes || [],
+    });
+    const latestReport =
+      (engagement.reports || []).find(
+        (r: { status: string }) =>
+          r.status === ReportStatus.GENERATED ||
+          r.status === ReportStatus.APPROVED ||
+          r.status === ReportStatus.ISSUED,
+      ) || (engagement.reports || [])[0] || null;
+
+    const followOnProposals = await this.prisma.triageProposal.findMany({
+      where: {
+        sourceAdvisoryAssessmentId: id,
+        status: {
+          notIn: [
+            TriageProposalStatus.WITHDRAWN,
+            TriageProposalStatus.DECLINED,
+            TriageProposalStatus.EXPIRED,
+          ],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        proposalNumber: true,
+        status: true,
+        title: true,
+        createdAt: true,
+        publicLeadId: true,
+        contextSnapshot: true,
+        sourceReportId: true,
+      },
+    });
+    const activeFollowOn = followOnProposals[0] || null;
+    const followOnContext =
+      activeFollowOn?.contextSnapshot && typeof activeFollowOn.contextSnapshot === 'object'
+        ? (activeFollowOn.contextSnapshot as Record<string, unknown>)
+        : null;
+    const selectedProductCodes = Array.isArray(followOnContext?.selectedProductCodes)
+      ? (followOnContext!.selectedProductCodes as string[])
+      : [];
+    const selectedSet = new Set(selectedProductCodes);
+    const recommendations = reportSummary.recommendations.map((r) => {
+      let coverageStatus: 'RECOMMENDED' | 'PROPOSAL_REQUESTED' | 'PROPOSED' | 'ACCEPTED' | 'DECLINED' =
+        'RECOMMENDED';
+      if (selectedSet.has(r.productCode) && activeFollowOn) {
+        if (activeFollowOn.status === TriageProposalStatus.ACCEPTED) coverageStatus = 'ACCEPTED';
+        else if (activeFollowOn.status === TriageProposalStatus.DECLINED) coverageStatus = 'DECLINED';
+        else if (
+          activeFollowOn.status === TriageProposalStatus.SENT ||
+          activeFollowOn.status === TriageProposalStatus.VIEWED ||
+          activeFollowOn.status === TriageProposalStatus.APPROVED
+        ) {
+          coverageStatus = 'PROPOSED';
+        } else {
+          coverageStatus = 'PROPOSAL_REQUESTED';
+        }
+      }
+      return {
+        ...r,
+        includedInActiveProposal: selectedSet.has(r.productCode),
+        coverageStatus,
+      };
+    });
+
+    const deliveryEngagements = activeFollowOn
+      ? await this.prisma.assessmentSession.findMany({
+          where: { sourceProposalId: activeFollowOn.id },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            reference: true,
+            productCode: true,
+            status: true,
+            title: true,
+          },
+        })
+      : [];
+    const deliveryByProduct = new Map(deliveryEngagements.map((e) => [e.productCode, e]));
+
     return {
       engagement: {
         id: engagement.id,
@@ -551,10 +676,429 @@ export class AdvisoryService {
         advisoryModuleReviews: engagement.advisoryModuleReviews,
       },
       outcome: engagement.diagnosticOutcome,
+      recommendations,
+      latestReport: latestReport
+        ? {
+            id: latestReport.id,
+            version: latestReport.version,
+            status: latestReport.status,
+            generatedAt: latestReport.generatedAt,
+            title: latestReport.title,
+          }
+        : null,
+      comprehensiveProposal: activeFollowOn
+        ? {
+            id: activeFollowOn.id,
+            proposalNumber: activeFollowOn.proposalNumber,
+            status: activeFollowOn.status,
+            title: activeFollowOn.title,
+            createdAt: activeFollowOn.createdAt,
+            publicLeadId: activeFollowOn.publicLeadId,
+            workspaceHref: `/triage/${activeFollowOn.publicLeadId}/proposal?proposalId=${activeFollowOn.id}`,
+            selectedProductCodes,
+            sourceReportId: activeFollowOn.sourceReportId,
+            canCreateLevel3: activeFollowOn.status === TriageProposalStatus.ACCEPTED,
+            deliveryEngagements: selectedProductCodes.map((code) => {
+              const eng = deliveryByProduct.get(code as ProductCode) || null;
+              return {
+                productCode: code,
+                label: PRODUCT_LABELS[code] || code,
+                engagement: eng
+                  ? {
+                      id: eng.id,
+                      reference: eng.reference,
+                      status: eng.status,
+                      workspaceHref: level3EngagementHref(code, eng.id),
+                    }
+                  : null,
+              };
+            }),
+          }
+        : null,
+      followOnProposals: followOnProposals.map((p) => {
+        const ctx =
+          p.contextSnapshot && typeof p.contextSnapshot === 'object'
+            ? (p.contextSnapshot as Record<string, unknown>)
+            : null;
+        const codes = Array.isArray(ctx?.selectedProductCodes)
+          ? (ctx!.selectedProductCodes as string[])
+          : [];
+        return {
+          id: p.id,
+          proposalNumber: p.proposalNumber,
+          status: p.status,
+          createdAt: p.createdAt,
+          publicLeadId: p.publicLeadId,
+          workspaceHref: `/triage/${p.publicLeadId}/proposal?proposalId=${p.id}`,
+          selectedProductCodes: codes,
+        };
+      }),
       permissions: {
         canManageCommercial: INTERNAL_ROLES.has(user.role),
+        canRequestComprehensiveProposal: true,
+        canOpenProposalWorkspace: INTERNAL_ROLES.has(user.role),
+        canCreateLevel3Engagements: INTERNAL_ROLES.has(user.role),
       },
     };
+  }
+
+  /**
+   * Stage 12 — deliberate request for a consolidated Level 3 proposal from EAD recommendations.
+   * Creates a TriageProposal (PRP-*) linked to the parent triage lead; opens via Proposal Workspace.
+   */
+  async requestComprehensiveProposal(
+    id: string,
+    input: { productCodes: string[]; requestNote?: string; forceNew?: boolean },
+    user: AuthUser,
+  ) {
+    await this.assertAccess(id, user);
+
+    const validated = validateEadProposalProductCodes(input.productCodes);
+    if (!validated.ok) throw new BadRequestException(validated.error);
+
+    const engagement = await this.prisma.assessmentSession.findUnique({
+      where: { id },
+      include: {
+        organisation: true,
+        diagnosticOutcome: { include: { routes: { orderBy: { sortOrder: 'asc' } } } },
+        advisoryModuleReviews: true,
+        reports: {
+          where: { status: { not: ReportStatus.SUPERSEDED } },
+          orderBy: [{ version: 'desc' }, { generatedAt: 'desc' }],
+          take: 1,
+        },
+        parentAssessment: { select: { id: true, reference: true, productCode: true } },
+      },
+    });
+    if (!engagement) throw new NotFoundException('Advisory engagement not found.');
+    if (engagement.productCode !== ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC) {
+      throw new BadRequestException(
+        'Comprehensive proposals are only available from Executive Advisory Diagnostics.',
+      );
+    }
+    if (!engagement.diagnosticOutcome) {
+      throw new BadRequestException('Complete the diagnostic before requesting a comprehensive proposal.');
+    }
+
+    const existing = await this.prisma.triageProposal.findFirst({
+      where: {
+        sourceAdvisoryAssessmentId: id,
+        status: {
+          notIn: [
+            TriageProposalStatus.WITHDRAWN,
+            TriageProposalStatus.DECLINED,
+            TriageProposalStatus.EXPIRED,
+          ],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing && !input.forceNew) {
+      return {
+        alreadyExists: true,
+        proposalId: existing.id,
+        proposalNumber: existing.proposalNumber,
+        status: existing.status,
+        publicLeadId: existing.publicLeadId,
+        workspaceHref: `/triage/${existing.publicLeadId}/proposal?proposalId=${existing.id}`,
+        message: 'A proposal already exists for this Executive Advisory Diagnostic.',
+      };
+    }
+
+    let publicLeadId: string | null = null;
+    if (engagement.parentAssessmentId) {
+      const lead = await this.prisma.publicLead.findFirst({
+        where: { assessmentId: engagement.parentAssessmentId },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      });
+      publicLeadId = lead?.id || null;
+    }
+    if (!publicLeadId && engagement.organisationId) {
+      const lead = await this.prisma.publicLead.findFirst({
+        where: {
+          organisationId: engagement.organisationId,
+          OR: [
+            { convertedAssessmentId: engagement.id },
+            { assessmentId: engagement.parentAssessmentId || undefined },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      });
+      publicLeadId = lead?.id || null;
+    }
+    if (!publicLeadId && engagement.organisationId) {
+      const lead = await this.prisma.publicLead.findFirst({
+        where: { organisationId: engagement.organisationId },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true },
+      });
+      publicLeadId = lead?.id || null;
+    }
+    if (!publicLeadId) {
+      throw new BadRequestException(
+        'No triage commercial record is linked to this engagement. Convert from Level 1 triage (or link an organisation triage lead) before requesting a comprehensive proposal.',
+      );
+    }
+
+    const lead = await this.prisma.publicLead.findUnique({ where: { id: publicLeadId } });
+    if (!lead) throw new NotFoundException('Triage submission not found.');
+
+    const selectedLabels = validated.codes.map((code) => PRODUCT_LABELS[code] || code);
+    const report = engagement.reports[0] || null;
+    const reportSummary = buildEadReportSummary({
+      modules: engagement.advisoryModuleReviews,
+      routes: engagement.diagnosticOutcome.routes,
+    });
+    const selectedRecs = reportSummary.recommendations.filter((r) =>
+      validated.codes.includes(r.productCode as EadRoutingProductCode),
+    );
+
+    const template = resolveTemplateConfig(ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC);
+    const defaultContent = buildDefaultContentSnapshot(
+      ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
+      template,
+    );
+    const feeDefaults = template.feeDefaults || {
+      analystHourlyRate: 985,
+      specialistHourlyRate: 1825,
+      vatRate: 0.15,
+      currency: 'ZAR',
+      paymentTerms: '50% on acceptance, 50% on delivery',
+    };
+
+    const understanding = buildEadFollowOnUnderstanding({
+      organisationName: engagement.organisation.name,
+      eadReference: engagement.reference,
+      selectedLabels,
+    });
+    const indicativeScope = buildEadFollowOnIndicativeScope(validated.codes);
+    const feeLineItems = buildEadFollowOnFeeLineItems(validated.codes);
+    const requestNote = String(input.requestNote || '').trim() || null;
+
+    const contextSnapshot = {
+      capturedAt: new Date().toISOString(),
+      source: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
+      eadReference: engagement.reference,
+      eadAssessmentId: engagement.id,
+      reportId: report?.id || null,
+      reportVersion: report?.version || null,
+      selectedProductCodes: validated.codes,
+      selectedRecommendations: selectedRecs.map((r) => ({
+        productCode: r.productCode,
+        label: r.label,
+        sourceModules: r.sourceModules,
+      })),
+      requestNote,
+      requestedById: user.id,
+      requestedByName: user.email,
+      triageReference: engagement.parentAssessment?.reference || null,
+      triageAssessmentId: engagement.parentAssessmentId || null,
+      recommendedProduct: 'Focused assurance engagements',
+      recommendedProductCode: validated.codes[0] || 'SCLI_COST_LEAKAGE',
+      prospect: {
+        firstName: lead.firstName,
+        lastName: lead.lastName,
+        email: lead.email,
+        phone: lead.phone,
+        jobTitle: null,
+      },
+      organisation: {
+        name: engagement.organisation.name,
+        country: null,
+        industry: engagement.organisation.industry || lead.industry || null,
+        operationalSitesLabel: null,
+        securityExpenditureLabel: null,
+      },
+      proposalAddressee: {
+        organisationName: engagement.organisation.name,
+        addressedTo: [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim() || null,
+        jobTitle: null,
+        email: lead.email,
+        phone: lead.phone,
+      },
+    };
+
+    const contentSnapshot = {
+      ...defaultContent,
+      feeLineItems,
+      feesIntroduction: null,
+      methodologyItems:
+        Array.isArray(defaultContent.methodologyItems) && defaultContent.methodologyItems.length
+          ? defaultContent.methodologyItems
+          : [{ name: 'Methodology', description: 'Methodology to be completed.' }],
+    };
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const proposalNumber = await generateProposalReference(tx);
+      const proposal = await tx.triageProposal.create({
+        data: {
+          proposalNumber,
+          publicLeadId: lead.id,
+          organisationId: engagement.organisationId,
+          sourceAssessmentId: engagement.parentAssessmentId || null,
+          sourceAdvisoryAssessmentId: engagement.id,
+          sourceReportId: report?.id || null,
+          productCode: ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
+          title: `${engagement.organisation.name} — Executive Advisory follow-on proposal`,
+          subtitle: 'Comprehensive proposal for recommended focused assurance engagements',
+          status: TriageProposalStatus.DRAFT,
+          source: TriageProposalSource.PLATFORM,
+          contextSnapshot: contextSnapshot as object,
+          contentSnapshot: contentSnapshot as object,
+          understandingOfNeeds: understanding,
+          scopeSummary: indicativeScope,
+          objectives: indicativeScope,
+          methodology: 'Methodology to be completed.',
+          analystHourlyRate: feeDefaults.analystHourlyRate,
+          specialistHourlyRate: feeDefaults.specialistHourlyRate,
+          vatRate: feeDefaults.vatRate,
+          paymentTerms: feeDefaults.paymentTerms,
+          currency: feeDefaults.currency || 'ZAR',
+          createdById: user.id,
+        },
+      });
+
+      const outcome = engagement.diagnosticOutcome!;
+      if (outcome.commercialStatus === ProposalStatus.NOT_REQUESTED) {
+        await tx.advisoryDiagnosticOutcome.update({
+          where: { id: outcome.id },
+          data: {
+            commercialStatus: ProposalStatus.REQUESTED,
+            commercialRequestedAt: new Date(),
+            commercialReference: proposalNumber,
+          },
+        });
+      } else if (!outcome.commercialReference) {
+        await tx.advisoryDiagnosticOutcome.update({
+          where: { id: outcome.id },
+          data: { commercialReference: proposalNumber },
+        });
+      }
+
+      return proposal;
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_REQUESTED_FROM_ADVISORY',
+      entityType: 'TriageProposal',
+      entityId: created.id,
+      organisationId: engagement.organisationId,
+      metadata: {
+        assessmentId: id,
+        eadReference: engagement.reference,
+        reportId: report?.id || null,
+        proposalNumber: created.proposalNumber,
+        selectedProductCodes: validated.codes,
+        requestNote,
+        publicLeadId: lead.id,
+      },
+    });
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_CREATED',
+      entityType: 'TriageProposal',
+      entityId: created.id,
+      organisationId: engagement.organisationId,
+      metadata: {
+        proposalNumber: created.proposalNumber,
+        source: 'EXECUTIVE_ADVISORY_DIAGNOSTIC',
+        selectedProductCodes: validated.codes,
+      },
+    });
+    for (const code of validated.codes) {
+      await this.audit.record({
+        userId: user.id,
+        action: 'RECOMMENDATION_ADDED_TO_PROPOSAL',
+        entityType: 'TriageProposal',
+        entityId: created.id,
+        organisationId: engagement.organisationId,
+        metadata: { productCode: code, label: PRODUCT_LABELS[code] || code },
+      });
+    }
+
+    await this.notifyComprehensiveProposalRequested({
+      lead,
+      organisationName: engagement.organisation.name,
+      eadReference: engagement.reference,
+      proposalNumber: created.proposalNumber,
+      selectedLabels,
+      requestedByName: user.email || 'User',
+      publicLeadId: lead.id,
+      proposalId: created.id,
+      clientInitiated: !INTERNAL_ROLES.has(user.role),
+    }).catch(() => undefined);
+
+    return {
+      alreadyExists: false,
+      proposalId: created.id,
+      proposalNumber: created.proposalNumber,
+      status: created.status,
+      publicLeadId: lead.id,
+      workspaceHref: `/triage/${lead.id}/proposal?proposalId=${created.id}`,
+      selectedProductCodes: validated.codes,
+    };
+  }
+
+  private async notifyComprehensiveProposalRequested(input: {
+    lead: { email: string; firstName: string; lastName?: string | null; organisationId?: string | null };
+    organisationName: string;
+    eadReference: string;
+    proposalNumber: string;
+    selectedLabels: string[];
+    requestedByName: string;
+    publicLeadId: string;
+    proposalId: string;
+    clientInitiated: boolean;
+  }) {
+    const adminUrlBase = (
+      this.config.get<string>('PUBLIC_URL') ||
+      this.config.get<string>('WEB_URL') ||
+      this.config.get<string>('MOSS_WEB_URL') ||
+      ''
+    ).replace(/\/$/, '');
+    const adminLink = adminUrlBase
+      ? `${adminUrlBase}/triage/${input.publicLeadId}/proposal?proposalId=${input.proposalId}`
+      : null;
+    const notify =
+      this.config.get<string>('LEAD_NOTIFY_EMAIL') || this.config.get<string>('SEED_ADMIN_EMAIL');
+
+    if (notify) {
+      await this.email.enqueue({
+        recipient: notify,
+        subject: `New proposal request — ${input.organisationName} (${input.proposalNumber})`,
+        template: 'ead_comprehensive_proposal_requested',
+        relatedType: 'TriageProposal',
+        relatedId: input.proposalId,
+        organisationId: input.lead.organisationId || undefined,
+        payload: {
+          organisationName: input.organisationName,
+          eadReference: input.eadReference,
+          proposalReference: input.proposalNumber,
+          requestedEngagements: input.selectedLabels.join('\n'),
+          requestedBy: input.requestedByName,
+          adminLink,
+        },
+      });
+    }
+
+    if (input.clientInitiated && input.lead.email) {
+      await this.email.enqueue({
+        recipient: input.lead.email,
+        subject: 'Proposal request received — Physical Risk',
+        template: 'ead_comprehensive_proposal_acknowledgement',
+        relatedType: 'TriageProposal',
+        relatedId: input.proposalId,
+        organisationId: input.lead.organisationId || undefined,
+        payload: {
+          firstName: input.lead.firstName,
+          organisationName: input.organisationName,
+          proposalReference: input.proposalNumber,
+        },
+      });
+    }
   }
 
   async updateModule(id: string, moduleCode: string, input: any, user: AuthUser) {
@@ -1288,6 +1832,438 @@ export class AdvisoryService {
     });
 
     return updated;
+  }
+
+  /**
+   * Stage 13 — create Level 3 delivery engagement(s) from an ACCEPTED EAD follow-on proposal.
+   * One engagement per selected product; idempotent per (proposalId, productCode).
+   */
+  async createLevel3EngagementsFromAcceptedProposal(
+    proposalId: string,
+    input: { productCodes?: string[]; primaryAnalystId?: string },
+    user: AuthUser,
+  ) {
+    this.assertConsultant(user);
+
+    const proposal = await this.prisma.triageProposal.findUnique({
+      where: { id: proposalId },
+      include: {
+        organisation: true,
+        sourceAdvisoryAssessment: {
+          include: {
+            organisation: true,
+            diagnosticOutcome: {
+              include: { routes: { orderBy: { sortOrder: 'asc' } } },
+            },
+            advisoryModuleReviews: true,
+            reports: {
+              where: { status: { not: ReportStatus.SUPERSEDED } },
+              orderBy: [{ version: 'desc' }, { generatedAt: 'desc' }],
+              take: 1,
+            },
+            parentAssessment: { select: { id: true, reference: true } },
+          },
+        },
+        sourceAssessment: { select: { id: true, reference: true } },
+        sourceReport: { select: { id: true, version: true } },
+      },
+    });
+    if (!proposal) throw new NotFoundException('Proposal not found.');
+    if (proposal.status !== TriageProposalStatus.ACCEPTED) {
+      throw new BadRequestException(
+        'Level 3 engagements can only be created after the proposal is accepted.',
+      );
+    }
+
+    const snap =
+      proposal.contextSnapshot && typeof proposal.contextSnapshot === 'object'
+        ? (proposal.contextSnapshot as Record<string, unknown>)
+        : null;
+    if (snap?.source !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+      throw new BadRequestException(
+        'This proposal is not an Executive Advisory follow-on proposal. Convert Level 2 from triage commercial first.',
+      );
+    }
+
+    const ead = proposal.sourceAdvisoryAssessment;
+    if (!ead) {
+      throw new BadRequestException(
+        'Proposal is missing its source Executive Advisory Diagnostic link.',
+      );
+    }
+    await this.assertAccess(ead.id, user);
+
+    const proposalCodes = Array.isArray(snap.selectedProductCodes)
+      ? (snap.selectedProductCodes as string[])
+      : [];
+    const requestedRaw = input.productCodes?.length ? input.productCodes : proposalCodes;
+    const validated = validateLevel3DeliveryProductCodes(requestedRaw);
+    if (!validated.ok) throw new BadRequestException(validated.error);
+
+    // Only allow products that were on the accepted proposal.
+    const allowed = new Set(proposalCodes);
+    const codes = validated.codes.filter((c) => allowed.has(c));
+    if (!codes.length) {
+      throw new BadRequestException(
+        'None of the selected products are included on this accepted proposal.',
+      );
+    }
+
+    const report = proposal.sourceReport || ead.reports[0] || null;
+    const reportSummary = buildEadReportSummary({
+      modules: ead.advisoryModuleReviews || [],
+      routes: ead.diagnosticOutcome?.routes || [],
+    });
+
+    // Align outcome commercial gate so route-based create stays consistent.
+    if (ead.diagnosticOutcome) {
+      if (ead.diagnosticOutcome.commercialStatus !== ProposalStatus.ACCEPTED) {
+        await this.prisma.advisoryDiagnosticOutcome.update({
+          where: { id: ead.diagnosticOutcome.id },
+          data: {
+            commercialStatus: ProposalStatus.ACCEPTED,
+            commercialAcceptedAt: ead.diagnosticOutcome.commercialAcceptedAt || new Date(),
+            commercialReference:
+              ead.diagnosticOutcome.commercialReference || proposal.proposalNumber,
+          },
+        });
+      }
+    }
+
+    const results: Array<{
+      productCode: string;
+      label: string;
+      created: boolean;
+      alreadyExisted: boolean;
+      engagement: { id: string; reference: string; status: string; productCode: string } | null;
+      workspaceHref: string | null;
+      error: string | null;
+    }> = [];
+
+    for (const productCode of codes) {
+      const label = level3ProductLabel(productCode);
+      try {
+        const existing = await this.prisma.assessmentSession.findFirst({
+          where: { sourceProposalId: proposalId, productCode: productCode as ProductCode },
+          select: { id: true, reference: true, status: true, productCode: true },
+        });
+        if (existing) {
+          results.push({
+            productCode,
+            label,
+            created: false,
+            alreadyExisted: true,
+            engagement: existing,
+            workspaceHref: level3EngagementHref(productCode, existing.id),
+            error: null,
+          });
+          continue;
+        }
+
+        // Prefer matching confirmed route; create route if missing from proposal selection.
+        let route = ead.diagnosticOutcome?.routes?.find((r) => r.productCode === productCode);
+        if (!route && ead.diagnosticOutcome) {
+          const rec = reportSummary.recommendations.find((r) => r.productCode === productCode);
+          const sortOrder = (ead.diagnosticOutcome.routes?.length || 0) + 1;
+          route = await this.prisma.advisoryConfirmedRoute.create({
+            data: {
+              outcomeId: ead.diagnosticOutcome.id,
+              productCode,
+              priority: AdvisoryRoutePriority.RECOMMENDED,
+              rationale: rec?.rationale || `Selected on accepted proposal ${proposal.proposalNumber}`,
+              sourceModuleCode: rec?.sourceModules?.[0]?.moduleCode || null,
+              sourceModuleName: rec?.sourceModules?.[0]?.moduleName || null,
+              sortOrder,
+            },
+          });
+        }
+
+        if (route?.createdAssessmentId) {
+          const linked = await this.prisma.assessmentSession.findUnique({
+            where: { id: route.createdAssessmentId },
+            select: { id: true, reference: true, status: true, productCode: true, sourceProposalId: true },
+          });
+          if (linked) {
+            if (!linked.sourceProposalId) {
+              await this.prisma.assessmentSession.update({
+                where: { id: linked.id },
+                data: { sourceProposalId: proposalId },
+              });
+            }
+            results.push({
+              productCode,
+              label,
+              created: false,
+              alreadyExisted: true,
+              engagement: linked,
+              workspaceHref: level3EngagementHref(productCode, linked.id),
+              error: null,
+            });
+            continue;
+          }
+        }
+
+        const rec = reportSummary.recommendations.find((r) => r.productCode === productCode);
+        const sourceModuleCodes = new Set(
+          (rec?.sourceModules || []).map((m) => m.moduleCode).filter(Boolean) as string[],
+        );
+        const findings: Level3SourceFinding[] = (ead.advisoryModuleReviews || [])
+          .filter((m) => sourceModuleCodes.has(m.moduleCode))
+          .map((m) => ({
+            moduleCode: m.moduleCode,
+            moduleName: m.moduleName,
+            finding: richTextToPlainText(String(m.finding || '')).trim() || null,
+            businessConsequences:
+              formatBusinessConsequencesForLegacyReport(
+                parseBusinessConsequenceCodes(m.businessConsequences) as any,
+                (m as { businessConsequenceDetail?: string | null }).businessConsequenceDetail,
+              ) || null,
+            requiredDecision: richTextToPlainText(String(m.requiredDecision || '')).trim() || null,
+          }));
+
+        const sourceContext = buildLevel3SourceContext({
+          proposalId: proposal.id,
+          proposalNumber: proposal.proposalNumber,
+          productCode,
+          ead: { id: ead.id, reference: ead.reference },
+          triageReference: proposal.sourceAssessment?.reference || ead.parentAssessment?.reference || null,
+          report: report ? { id: report.id, version: report.version } : null,
+          sourceModules: rec?.sourceModules || [],
+          findings,
+        });
+
+        const orgId = ead.organisationId;
+        const title = `${ead.organisation.name} ${label}`;
+        let createdRow: { id: string; reference: string; status: AssessmentStatus; productCode: ProductCode };
+
+        if (productCode === ProductCode.SCLI_COST_LEAKAGE) {
+          const questionnaire = await this.prisma.questionnaire.findUnique({
+            where: { code: 'SCLI' },
+            include: {
+              versions: { where: { status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, take: 1 },
+            },
+          });
+          if (!questionnaire?.versions[0]) {
+            results.push({
+              productCode,
+              label,
+              created: false,
+              alreadyExisted: false,
+              engagement: null,
+              workspaceHref: null,
+              error: 'No published SCLI questionnaire version is available.',
+            });
+            await this.audit.record({
+              userId: user.id,
+              action: 'LEVEL3_ENGAGEMENT_CREATION_FAILED',
+              entityType: 'TriageProposal',
+              entityId: proposalId,
+              metadata: { productCode, reason: 'NO_SCLI_QUESTIONNAIRE' },
+            });
+            continue;
+          }
+          createdRow = await this.prisma.$transaction(async (tx) => {
+            const reference = await generateAssessmentReference(tx, ProductCode.SCLI_COST_LEAKAGE);
+            const row = await tx.assessmentSession.create({
+              data: {
+                reference,
+                organisationId: orgId,
+                questionnaireVersionId: questionnaire.versions[0].id,
+                productCode: ProductCode.SCLI_COST_LEAKAGE,
+                createdById: user.id,
+                title,
+                status: AssessmentStatus.DRAFT,
+                parentAssessmentId: ead.id,
+                sourceProposalId: proposalId,
+                sourceContext: sourceContext as object,
+              },
+            });
+            if (route) {
+              await tx.advisoryConfirmedRoute.update({
+                where: { id: route.id },
+                data: { createdAssessmentId: row.id },
+              });
+            }
+            return row;
+          });
+        } else if (ADVISORY_PRODUCTS_ACTIVE.has(productCode as ProductCode)) {
+          // Create with parent + then patch DRAFT + source links (create() uses IN_PROGRESS).
+          const row = await this.create(
+            {
+              organisationId: orgId,
+              productCode: productCode as ProductCode,
+              title,
+              parentAssessmentId: ead.id,
+              primaryAnalystId: input.primaryAnalystId,
+            },
+            user,
+          );
+          createdRow = await this.prisma.assessmentSession.update({
+            where: { id: row.id },
+            data: {
+              status: AssessmentStatus.DRAFT,
+              sourceProposalId: proposalId,
+              sourceContext: sourceContext as object,
+            },
+          });
+          if (route) {
+            await this.prisma.advisoryConfirmedRoute.update({
+              where: { id: route.id },
+              data: { createdAssessmentId: createdRow.id },
+            });
+          }
+        } else {
+          results.push({
+            productCode,
+            label,
+            created: false,
+            alreadyExisted: false,
+            engagement: null,
+            workspaceHref: null,
+            error: `Delivery workflow is not yet configured for ${label}.`,
+          });
+          await this.audit.record({
+            userId: user.id,
+            action: 'LEVEL3_ENGAGEMENT_CREATION_FAILED',
+            entityType: 'TriageProposal',
+            entityId: proposalId,
+            metadata: { productCode, reason: 'WORKFLOW_NOT_CONFIGURED' },
+          });
+          continue;
+        }
+
+        const analystId =
+          input.primaryAnalystId || (await this.resolveLockedTriageAnalystId(createdRow.id, ead.id));
+        if (analystId) {
+          await this.ensureInheritedPrimaryAnalyst(createdRow.id, analystId, user);
+        }
+
+        await this.audit.record({
+          userId: user.id,
+          action: 'LEVEL3_ENGAGEMENT_CREATED',
+          entityType: 'AssessmentSession',
+          entityId: createdRow.id,
+          organisationId: orgId,
+          metadata: {
+            productCode,
+            reference: createdRow.reference,
+            sourceEadId: ead.id,
+            sourceProposalId: proposalId,
+            proposalNumber: proposal.proposalNumber,
+            routeId: route?.id || null,
+            fromAcceptedProposal: true,
+          },
+        });
+
+        results.push({
+          productCode,
+          label,
+          created: true,
+          alreadyExisted: false,
+          engagement: {
+            id: createdRow.id,
+            reference: createdRow.reference,
+            status: createdRow.status,
+            productCode: createdRow.productCode,
+          },
+          workspaceHref: level3EngagementHref(productCode, createdRow.id),
+          error: null,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unable to create engagement.';
+        results.push({
+          productCode,
+          label,
+          created: false,
+          alreadyExisted: false,
+          engagement: null,
+          workspaceHref: null,
+          error: message,
+        });
+        await this.audit.record({
+          userId: user.id,
+          action: 'LEVEL3_ENGAGEMENT_CREATION_FAILED',
+          entityType: 'TriageProposal',
+          entityId: proposalId,
+          metadata: { productCode, reason: message },
+        });
+      }
+    }
+
+    return {
+      proposalId: proposal.id,
+      proposalNumber: proposal.proposalNumber,
+      eadAssessmentId: ead.id,
+      eadReference: ead.reference,
+      results,
+      createdCount: results.filter((r) => r.created).length,
+      existingCount: results.filter((r) => r.alreadyExisted).length,
+      failedCount: results.filter((r) => r.error).length,
+    };
+  }
+
+  async listLevel3EngagementsForProposal(proposalId: string, user: AuthUser) {
+    this.assertConsultant(user);
+    const proposal = await this.prisma.triageProposal.findUnique({
+      where: { id: proposalId },
+      select: {
+        id: true,
+        proposalNumber: true,
+        status: true,
+        contextSnapshot: true,
+        sourceAdvisoryAssessmentId: true,
+      },
+    });
+    if (!proposal) throw new NotFoundException('Proposal not found.');
+
+    const engagements = await this.prisma.assessmentSession.findMany({
+      where: { sourceProposalId: proposalId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        reference: true,
+        productCode: true,
+        status: true,
+        title: true,
+        createdAt: true,
+      },
+    });
+
+    const snap =
+      proposal.contextSnapshot && typeof proposal.contextSnapshot === 'object'
+        ? (proposal.contextSnapshot as Record<string, unknown>)
+        : null;
+    const selectedProductCodes = Array.isArray(snap?.selectedProductCodes)
+      ? (snap!.selectedProductCodes as string[])
+      : [];
+
+    const byProduct = new Map(engagements.map((e) => [e.productCode, e]));
+    const items = selectedProductCodes.map((code) => {
+      const eng = byProduct.get(code as ProductCode) || null;
+      return {
+        productCode: code,
+        label: level3ProductLabel(code),
+        engagement: eng
+          ? {
+              id: eng.id,
+              reference: eng.reference,
+              status: eng.status,
+              title: eng.title,
+              workspaceHref: level3EngagementHref(code, eng.id),
+            }
+          : null,
+      };
+    });
+
+    return {
+      proposalId: proposal.id,
+      proposalNumber: proposal.proposalNumber,
+      status: proposal.status,
+      canCreate: proposal.status === TriageProposalStatus.ACCEPTED,
+      items,
+      pendingCount: items.filter((i) => !i.engagement).length,
+      createdCount: items.filter((i) => i.engagement).length,
+    };
   }
 
   async createLevel3Engagement(id: string, routeId: string, user: AuthUser) {

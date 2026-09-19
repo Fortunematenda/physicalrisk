@@ -24,6 +24,7 @@ import {
 } from '../../components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { apiFetch } from '../../lib/api';
+import { advisoryWorkspaceHref } from '../../lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '../../lib/auth-user';
 
 type ReportsView = 'scl' | 'advisory';
@@ -158,9 +159,12 @@ function engagementHref(row: ReportRow) {
   }
   const id = row.assessment?.id;
   if (!id) return null;
+  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+    // Reports imply a completed diagnostic — open outcome (report + recommendations), not the editor list/workspace.
+    return advisoryWorkspaceHref({ assessmentId: id, productCode: code, hasOutcome: true });
+  }
   if (
     [
-      'EXECUTIVE_ADVISORY_DIAGNOSTIC',
       'CONTRACT_SLA_ASSURANCE',
       'VENDOR_PERFORMANCE_ASSURANCE',
       'GOVERNANCE_EXECUTIVE_ASSURANCE',
@@ -172,6 +176,20 @@ function engagementHref(row: ReportRow) {
     return `/advisory/${id}`;
   }
   return `/assessments/${id}`;
+}
+
+/** Primary click for advisory report rows: EAD → Diagnostic outcome; others → report PDF. */
+function advisoryPrimaryHref(row: ReportRow) {
+  const code = row.assessment?.productCode || '';
+  const assessmentId = row.assessment?.id;
+  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' && assessmentId) {
+    return advisoryWorkspaceHref({
+      assessmentId,
+      productCode: code,
+      hasOutcome: true,
+    });
+  }
+  return reportDetailHref(row.id, 'advisory');
 }
 
 function reportDetailHref(reportId: string, scope: 'advisory' | 'scl' = 'scl') {
@@ -698,10 +716,12 @@ export default function ReportsIndexPage() {
                       const by = displayName(r.generatedBy);
                       const href = engagementHref(r);
                       const detailHref = reportDetailHref(r.id, 'advisory');
+                      const primaryHref = advisoryPrimaryHref(r);
+                      const isEad = r.assessment?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
                       return (
                         <tr key={r.id}>
                           <td>
-                            <Link href={detailHref}><strong>{r.reference}</strong></Link>
+                            <Link href={primaryHref}><strong>{r.reference}</strong></Link>
                           </td>
                           <td>
                             <div className="assess2-ref-cell">
@@ -746,9 +766,22 @@ export default function ReportsIndexPage() {
                                   </button>
                                 )}
                               >
-                                <Link href={detailHref} onClick={() => setMenuOpenId(null)}>Open report</Link>
-                                {href ? (
+                                {isEad && href ? (
+                                  <Link href={href} onClick={() => setMenuOpenId(null)}>
+                                    Open diagnostic outcome
+                                  </Link>
+                                ) : null}
+                                <Link href={detailHref} onClick={() => setMenuOpenId(null)}>View report</Link>
+                                {href && !isEad ? (
                                   <Link href={href} onClick={() => setMenuOpenId(null)}>Open engagement</Link>
+                                ) : null}
+                                {isEad && r.assessment?.id ? (
+                                  <Link
+                                    href={`/advisory/${r.assessment.id}`}
+                                    onClick={() => setMenuOpenId(null)}
+                                  >
+                                    Open engagement workspace
+                                  </Link>
                                 ) : null}
                                 {r.assessment?.organisation?.id ? (
                                   <Link

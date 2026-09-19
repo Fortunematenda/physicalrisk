@@ -249,6 +249,30 @@ export type ProposalWorkspace = {
   /** Present when a stored proposal PDF/upload exists. */
   hasDocument?: boolean;
   proposalId?: string;
+  proposalNumber?: string;
+  title?: string;
+  proposalSource?: {
+    type?: 'EXECUTIVE_ADVISORY_DIAGNOSTIC' | 'TRIAGE' | string;
+    eadReference?: string | null;
+    eadAssessmentId?: string | null;
+    reportId?: string | null;
+    reportVersion?: number | null;
+    selectedProductCodes?: string[];
+    selectedCount?: number;
+    requestNote?: string | null;
+    sourceReportHref?: string | null;
+  };
+  deliveryEngagements?: Array<{
+    productCode: string;
+    label?: string;
+    engagement: {
+      id: string;
+      reference: string;
+      status: string;
+      title?: string;
+      workspaceHref: string;
+    } | null;
+  }>;
 };
 
 export type ProposalWorkspaceDraft = {
