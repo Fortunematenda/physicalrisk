@@ -6,11 +6,12 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   PHYSICAL_RISK_PRODUCTS,
 } from '@moss/shared';
-import { CheckCircle2, ChevronRight, FileText, Lock, NotebookPen } from 'lucide-react';
+import { CheckCircle2, ChevronRight, FileText, Loader2, Lock, NotebookPen } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
 import { RequestComprehensiveProposalCard } from '@/components/advisory/RequestComprehensiveProposalCard';
 import { CreateLevel3EngagementsCard } from '@/components/triage/CreateLevel3EngagementsCard';
+import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
 import { Shell } from '@/components/Shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +22,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import {
-  advisoryReportHref,
   advisoryWorkingPapersHref,
   pickLatestAdvisoryReport,
   type LatestAdvisoryReport,
@@ -142,6 +142,10 @@ export default function AdvisoryOutcomePage() {
   const [notes, setNotes] = useState('');
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewBytes, setPreviewBytes] = useState<ArrayBuffer | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewDownloadUrl, setPreviewDownloadUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const row = await apiFetch<any>(`/advisory/${id}/outcome`);
@@ -168,6 +172,30 @@ export default function AdvisoryOutcomePage() {
         });
       });
   }, [load, toast, router, id]);
+
+  async function openReportPreview(reportId: string) {
+    setPreviewLoading(true);
+    try {
+      const report = await apiFetch<{ downloadUrl?: string; title?: string }>(`/reports/${reportId}`);
+      if (!report?.downloadUrl) {
+        throw new Error('Report file is not available yet.');
+      }
+      const res = await fetch(report.downloadUrl);
+      if (!res.ok) throw new Error('Unable to load report PDF for preview.');
+      const bytes = await res.arrayBuffer();
+      setPreviewBytes(bytes);
+      setPreviewDownloadUrl(report.downloadUrl);
+      setPreviewOpen(true);
+    } catch (e: unknown) {
+      toast({
+        title: 'Unable to open report',
+        description: e instanceof Error ? e.message : 'Preview failed.',
+        variant: 'error',
+      });
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
 
   async function commercialAction(action: string) {
     setBusy(true);
@@ -345,13 +373,17 @@ export default function AdvisoryOutcomePage() {
                 {latestReport?.id ? (
                   <Button
                     size="lg"
-                    asChild
+                    type="button"
                     className="h-11 shrink-0 whitespace-nowrap px-4"
+                    disabled={previewLoading}
+                    onClick={() => void openReportPreview(latestReport.id)}
                   >
-                    <Link href={advisoryReportHref(latestReport.id)}>
+                    {previewLoading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
                       <FileText className="size-4" />
-                      View report
-                    </Link>
+                    )}
+                    View report
                   </Button>
                 ) : (
                   <Button
@@ -748,6 +780,22 @@ export default function AdvisoryOutcomePage() {
             </Card>
           ) : null}
         </div>
+        <PdfPreviewDialog
+          open={previewOpen && Boolean(previewBytes)}
+          onOpenChange={(open) => {
+            setPreviewOpen(open);
+            if (!open) setPreviewBytes(null);
+          }}
+          pdfBytes={previewBytes}
+          title={latestReport?.title || 'Executive Advisory report'}
+          description="On-screen report preview. Closing returns you to this diagnostic outcome."
+          downloadLabel="Download PDF"
+          onDownload={() => {
+            if (previewDownloadUrl) {
+              window.open(previewDownloadUrl, '_blank', 'noopener,noreferrer');
+            }
+          }}
+        />
       </Shell>
     </AuthGate>
   );

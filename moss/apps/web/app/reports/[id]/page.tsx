@@ -248,7 +248,21 @@ export default function ReportPage() {
 
         <PdfPreviewDialog
           open={previewOpen && Boolean(previewBytes)}
-          onOpenChange={setPreviewOpen}
+          onOpenChange={(open) => {
+            setPreviewOpen(open);
+            // Closing an auto-opened PDF preview returns to the EAD outcome — do not leave
+            // the consultant on this issue/send report page.
+            if (!open && forcePdf && isEadReport && report?.assessment?.id) {
+              router.replace(
+                advisoryWorkspaceHref({
+                  assessmentId: report.assessment.id,
+                  productCode,
+                  reference: assessmentRef,
+                  hasOutcome: true,
+                }),
+              );
+            }
+          }}
           pdfBytes={previewBytes}
           title={report?.title || 'Executive Advisory report'}
           description="On-screen report preview. Use Download PDF if you need a file."
