@@ -2,7 +2,7 @@
 
 /**
  * Full-page proposal workspace (no modal).
- * Rich-text editors; changes persist only when the admin clicks Save.
+ * Rich-text editors; changes autosave in the background.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -41,7 +41,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
-import { CreateLevel3EngagementsCard } from '@/components/triage/CreateLevel3EngagementsCard';
 import { Shell } from '@/components/Shell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { flushAllRichTextEditors, RichTextEditor } from '@/components/ui/rich-text-editor';
@@ -87,6 +86,22 @@ const WORKSPACE_TABS = new Set([
   'terms',
 ]);
 
+function humanizeProposalWorkspaceStatus(status?: string | null) {
+  const raw = String(status || 'DRAFT').trim().toUpperCase();
+  const map: Record<string, string> = {
+    DRAFT: 'In preparation',
+    INTERNAL_REVIEW: 'Internal review',
+    APPROVED: 'Approved',
+    SENT: 'Sent',
+    VIEWED: 'Viewed',
+    ACCEPTED: 'Accepted',
+    DECLINED: 'Declined',
+    EXPIRED: 'Expired',
+    WITHDRAWN: 'Withdrawn',
+  };
+  return map[raw] || raw.replaceAll('_', ' ');
+}
+
 function draftFingerprint(draft: ProposalWorkspaceDraft): string {
   return JSON.stringify(draftToPayload(draft, clientFeeTotals(draft)));
 }
@@ -99,7 +114,10 @@ function tabPanelClass(extra?: string) {
 function richTabClass(active: boolean, extra?: string) {
   return cn(
     tabPanelClass(extra),
-    !active && 'hidden proposal-tab-inactive',
+    // forceMount keeps TipTap alive; must not leave inactive panels in normal flow
+    // (otherwise Overview shows a huge empty scroll under Introduction).
+    !active &&
+      'pointer-events-none absolute left-0 right-0 top-0 z-[-1] h-0 overflow-hidden opacity-0 proposal-tab-inactive',
   );
 }
 
@@ -231,6 +249,7 @@ export function ProposalWorkspace({
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [autosaveLabel, setAutosaveLabel] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [tab, setTab] = useState('overview');
   const [focusFieldId, setFocusFieldId] = useState<string | null>(null);
   const [highlightFieldId, setHighlightFieldId] = useState<string | null>(null);
@@ -821,9 +840,24 @@ export function ProposalWorkspace({
   }
 
   async function goBack() {
-    if (isDirty) {
-      setDiscardOpen(true);
-      return;
+    if (isDirtyRef.current) {
+      setAutosaveLabel('saving');
+      setSaving(true);
+      try {
+        const latest = syncEditorsIntoDraft();
+        if (latest) {
+          await persistDraft({ quiet: true, skipParentReload: true, draftOverride: latest });
+        }
+        clearDraftBackup();
+        router.push(leaveHref);
+        return;
+      } catch {
+        setAutosaveLabel('error');
+        setDiscardOpen(true);
+        return;
+      } finally {
+        setSaving(false);
+      }
     }
     clearDraftBackup();
     router.push(leaveHref);
@@ -853,6 +887,29 @@ export function ProposalWorkspace({
     isEadProposal && eadAssessmentId
       ? `/advisory/${eadAssessmentId}/outcome`
       : `/triage/${submissionId}?tab=commercial`;
+
+  // Background autosave while editing (status DRAFT / in preparation is expected until sent or accepted).
+  useEffect(() => {
+    if (!isDirty || loading || proposalSent || !draft) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setAutosaveLabel('saving');
+        setSaving(true);
+        try {
+          const latest = syncEditorsIntoDraft();
+          if (!latest) return;
+          await persistDraft({ quiet: true, skipParentReload: true, draftOverride: latest });
+          setAutosaveLabel('saved');
+        } catch {
+          setAutosaveLabel('error');
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }, 1200);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, loading, proposalSent, savedFingerprint]);
 
   const guardDirtyNav = (e: MouseEvent) => {
     if (isDirtyRef.current) {
@@ -923,6 +980,17 @@ export function ProposalWorkspace({
 
   const actionButtons = (
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <span className="mr-1 text-xs text-slate-500" aria-live="polite">
+        {autosaveLabel === 'saving'
+          ? 'Saving…'
+          : autosaveLabel === 'saved'
+            ? 'Saved'
+            : autosaveLabel === 'error'
+              ? 'Save failed — retrying when you edit'
+              : isDirty
+                ? 'Unsaved changes…'
+                : null}
+      </span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="sm" className="h-9" disabled={isBusy}>
@@ -944,23 +1012,6 @@ export function ProposalWorkspace({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-9"
-        disabled={isBusy || !isDirty}
-        onClick={() => void save()}
-      >
-        {saving ? (
-          <>
-            <Loader2 className="size-4 animate-spin" />
-            Saving…
-          </>
-        ) : (
-          'Save'
-        )}
-      </Button>
       {proposalSent ? (
         <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
           <Eye className="size-4" />
@@ -1012,18 +1063,20 @@ export function ProposalWorkspace({
           }}
         />
 
-        {workspace?.proposalId &&
-        workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' &&
-        workspace.status === 'ACCEPTED' ? (
-          <CreateLevel3EngagementsCard
-            proposalId={workspace.proposalId}
-            proposalNumber={workspace.proposalNumber}
-            proposalStatus={workspace.status}
-            organisationName={workspace.organisationName || draft.organisationName}
-            items={workspace.deliveryEngagements || []}
-            canCreate={true}
-            onChanged={() => loadWorkspace()}
-          />
+        {isEadProposal && workspace?.status === 'ACCEPTED' && eadAssessmentId ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+            <p className="m-0 font-semibold">Proposal accepted</p>
+            <p className="m-0 mt-1 text-emerald-800">
+              Create Level 3 delivery engagements from the{' '}
+              <Link
+                href={`/advisory/${eadAssessmentId}/outcome`}
+                className="font-semibold underline underline-offset-2"
+              >
+                diagnostic outcome
+              </Link>
+              — not from this proposal editor.
+            </p>
+          </div>
         ) : null}
 
         <Tabs
@@ -1046,7 +1099,7 @@ export function ProposalWorkspace({
             <TabsTrigger value="terms">Terms</TabsTrigger>
           </TabsList>
 
-          <div className="pb-24 pt-4">
+          <div className="relative pb-8 pt-4">
             {/* Tab bodies — page scrolls as a whole (no nested overflow trap) */}
             <TabsContent value="overview" className={tabPanelClass()}>
               <div
@@ -1059,8 +1112,14 @@ export function ProposalWorkspace({
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="m-0 text-xs text-slate-500">Status</p>
                   <Badge variant="secondary" className="mt-1">
-                    {workspace?.status?.replaceAll('_', ' ') || 'DRAFT'}
+                    {humanizeProposalWorkspaceStatus(workspace?.status)}
                   </Badge>
+                  {String(workspace?.status || '').toUpperCase() === 'DRAFT' ? (
+                    <p className="m-0 mt-1.5 text-[11px] leading-snug text-slate-500">
+                      Stays in preparation until the proposal is sent or marked accepted on the
+                      diagnostic outcome.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="m-0 text-xs text-slate-500">Version</p>
@@ -1715,7 +1774,8 @@ export function ProposalWorkspace({
             <AlertDialogHeader>
               <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
               <AlertDialogDescription>
-                You have unsaved proposal edits. Leave and discard them, or stay and click Save.
+                Autosave could not finish. Leave and discard unsaved edits, or stay and keep editing
+                (changes will retry saving in the background).
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
