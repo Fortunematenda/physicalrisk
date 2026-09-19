@@ -5,7 +5,7 @@
  * Rich-text editors; changes persist only when the admin clicks Save.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
@@ -811,7 +811,7 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
       return;
     }
     clearDraftBackup();
-    router.push(`/triage/${submissionId}?tab=commercial`);
+    router.push(leaveHref);
   }
 
   function discardAndLeave() {
@@ -819,44 +819,85 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     setDraft(null);
     setSavedFingerprint('');
     clearDraftBackup();
-    router.push(`/triage/${submissionId}?tab=commercial`);
+    router.push(leaveHref);
   }
 
   const isBusy = busy || loading || saving;
   const proposalSent = ['SENT', 'VIEWED', 'ACCEPTED', 'DECLINED'].includes(
     String(workspace?.status || ''),
   );
-  const backHref = `/triage/${submissionId}?tab=commercial`;
+  const isEadProposal = workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+  const eadAssessmentId = workspace?.proposalSource?.eadAssessmentId || null;
+  const eadReference = workspace?.proposalSource?.eadReference || null;
+  /** Keep triage and EAD commercial paths separate — never mix breadcrumbs or leave targets. */
+  const leaveHref = isEadProposal && eadAssessmentId
+    ? `/advisory/${eadAssessmentId}/outcome`
+    : `/triage/${submissionId}?tab=commercial`;
 
-  const headerLeading = (
+  const guardDirtyNav = (e: MouseEvent) => {
+    if (isDirtyRef.current) {
+      e.preventDefault();
+      void goBack();
+    }
+  };
+
+  const headerLeading = isEadProposal ? (
     <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
       <Link
-        href={backHref}
+        href={leaveHref}
         className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
-        aria-label="Back to triage"
-        onClick={(e) => {
-          if (isDirtyRef.current) {
-            e.preventDefault();
-            void goBack();
-          }
-        }}
+        aria-label="Back to diagnostic outcome"
+        onClick={guardDirtyNav}
       >
         <ChevronLeft className="size-4" aria-hidden="true" />
       </Link>
       <Link
-        href={backHref}
+        href="/advisory"
         className="font-medium text-slate-500 transition-colors hover:text-slate-800"
-        onClick={(e) => {
-          if (isDirtyRef.current) {
-            e.preventDefault();
-            void goBack();
-          }
-        }}
       >
-        Back to triage
+        Diagnostics &amp; assurance
       </Link>
       <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
-      <span className="truncate font-semibold text-slate-900">Proposal workspace</span>
+      <Link
+        href={leaveHref}
+        className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+        onClick={guardDirtyNav}
+      >
+        {eadReference || 'Diagnostic outcome'}
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+      <span className="truncate font-semibold text-slate-900">
+        {workspace?.proposalNumber || 'Proposal'}
+      </span>
+    </nav>
+  ) : (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+      <Link
+        href={leaveHref}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+        aria-label="Back to triage submission"
+        onClick={guardDirtyNav}
+      >
+        <ChevronLeft className="size-4" aria-hidden="true" />
+      </Link>
+      <Link
+        href="/triage"
+        className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+      >
+        Executive Triage
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+      <Link
+        href={leaveHref}
+        className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+        onClick={guardDirtyNav}
+      >
+        Triage submissions
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+      <span className="truncate font-semibold text-slate-900">
+        {workspace?.proposalNumber || 'Proposal workspace'}
+      </span>
     </nav>
   );
 
@@ -951,83 +992,9 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
           }}
         />
 
-        {(workspace?.organisationName || workspace?.proposalNumber) && (
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <p className="m-0 text-lg font-semibold tracking-tight text-slate-900">
-                  {workspace?.organisationName || 'Organisation'}
-                </p>
-                <p className="m-0 text-sm text-slate-600">
-                  <span className="font-medium text-slate-800">
-                    {workspace?.proposalNumber || 'Proposal'}
-                  </span>
-                  {workspace?.subtitle || workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
-                    ? ` · ${
-                        workspace?.subtitle ||
-                        'Executive Advisory follow-on proposal'
-                      }`
-                    : null}
-                </p>
-                {workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
-                  <p className="m-0 text-xs text-slate-500">
-                    Source: {workspace.proposalSource.eadReference || 'Executive Advisory Diagnostic'}
-                    {workspace.proposalSource.selectedCount
-                      ? ` · ${workspace.proposalSource.selectedCount} recommended engagement${
-                          workspace.proposalSource.selectedCount === 1 ? '' : 's'
-                        }`
-                      : null}
-                  </p>
-                ) : workspace?.triageReference ? (
-                  <p className="m-0 text-xs text-slate-500">Source: {workspace.triageReference}</p>
-                ) : null}
-              </div>
-              <Badge variant="secondary" className="shrink-0">
-                {String(workspace?.status || 'DRAFT').replaceAll('_', ' ')}
-              </Badge>
-            </div>
-          </div>
-        )}
-
-        {workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Proposal source
-                </p>
-                <p className="m-0 text-sm text-slate-800">
-                  Executive Advisory Diagnostic
-                  {workspace.proposalSource.eadReference
-                    ? ` · ${workspace.proposalSource.eadReference}`
-                    : ''}
-                </p>
-                {workspace.proposalSource.reportVersion != null ? (
-                  <p className="m-0 text-xs text-slate-500">
-                    Report v{workspace.proposalSource.reportVersion}
-                    {workspace.proposalSource.selectedCount
-                      ? ` · ${workspace.proposalSource.selectedCount} selected`
-                      : null}
-                  </p>
-                ) : null}
-                {workspace.proposalSource.requestNote ? (
-                  <p className="m-0 pt-1 text-xs text-slate-600">
-                    Request note: {workspace.proposalSource.requestNote}
-                  </p>
-                ) : null}
-              </div>
-              {workspace.proposalSource.sourceReportHref ? (
-                <Button asChild variant="outline" size="sm" className="h-9 shrink-0">
-                  <Link href={workspace.proposalSource.sourceReportHref}>View source report</Link>
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
         {workspace?.proposalId &&
         workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' &&
-        (workspace.deliveryEngagements?.length || workspace.status === 'ACCEPTED') ? (
+        workspace.status === 'ACCEPTED' ? (
           <CreateLevel3EngagementsCard
             proposalId={workspace.proposalId}
             proposalNumber={workspace.proposalNumber}
