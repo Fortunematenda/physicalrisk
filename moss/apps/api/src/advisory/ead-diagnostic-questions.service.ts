@@ -711,6 +711,63 @@ export class EadDiagnosticQuestionsService {
     return row;
   }
 
+  async restoreTemplateQuestion(versionId: string, questionId: string, user: AuthUser) {
+    this.assertAdmin(user);
+    const version = await this.prisma.eadDiagnosticTemplateVersion.findUnique({
+      where: { id: versionId },
+    });
+    if (!version || version.status !== EadTemplateVersionStatus.DRAFT) {
+      throw new BadRequestException('Only draft template versions can be edited.');
+    }
+    const existing = await this.prisma.eadDiagnosticTemplateQuestion.findFirst({
+      where: { id: questionId, templateVersionId: versionId },
+    });
+    if (!existing) throw new NotFoundException('Template question not found.');
+
+    const row = await this.prisma.eadDiagnosticTemplateQuestion.update({
+      where: { id: questionId },
+      data: { isActive: true },
+    });
+    await this.audit.record({
+      userId: user.id,
+      action: 'DIAGNOSTIC_QUESTION_RESTORED',
+      entityType: 'EadDiagnosticTemplateQuestion',
+      entityId: row.id,
+      metadata: { templateVersionId: versionId, scope: 'TEMPLATE_DRAFT_RESTORE' },
+    });
+    return row;
+  }
+
+  async deleteTemplateQuestion(versionId: string, questionId: string, user: AuthUser) {
+    this.assertAdmin(user);
+    const version = await this.prisma.eadDiagnosticTemplateVersion.findUnique({
+      where: { id: versionId },
+    });
+    if (!version || version.status !== EadTemplateVersionStatus.DRAFT) {
+      throw new BadRequestException('Only draft template versions can be edited.');
+    }
+    const existing = await this.prisma.eadDiagnosticTemplateQuestion.findFirst({
+      where: { id: questionId, templateVersionId: versionId },
+    });
+    if (!existing) throw new NotFoundException('Template question not found.');
+
+    await this.prisma.eadDiagnosticTemplateQuestion.delete({ where: { id: questionId } });
+    await this.audit.record({
+      userId: user.id,
+      action: 'DIAGNOSTIC_QUESTION_DELETED',
+      entityType: 'EadDiagnosticTemplateQuestion',
+      entityId: questionId,
+      metadata: {
+        templateVersionId: versionId,
+        moduleCode: existing.moduleCode,
+        questionCode: existing.questionCode,
+        title: existing.title,
+        scope: 'TEMPLATE_DRAFT_DELETE',
+      },
+    });
+    return { deleted: true, id: questionId };
+  }
+
   async publishDraftTemplate(versionId: string, user: AuthUser, changeNote?: string) {
     this.assertAdmin(user);
     const draft = await this.prisma.eadDiagnosticTemplateVersion.findUnique({

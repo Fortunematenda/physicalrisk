@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { EXECUTIVE_ADVISORY_MODULES } from '@moss/shared';
-import { FileText, Pencil, Plus, Send } from 'lucide-react';
+import { FileText, Pencil, Plus, RotateCcw, Send, Trash2 } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
+import { useConfirm } from '@/components/confirm-dialog';
 import { Shell } from '@/components/Shell';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -68,6 +69,7 @@ function pickPreferredVersion(rows: TemplateVersion[], preferId?: string | null)
 
 export default function EadDiagnosticTemplateAdminPage() {
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [versions, setVersions] = useState<TemplateVersion[]>([]);
   const [active, setActive] = useState<TemplateVersion | null>(null);
   const [moduleCode, setModuleCode] = useState(String(EXECUTIVE_ADVISORY_MODULES[0]?.code || 'CONSEQUENCE'));
@@ -285,11 +287,77 @@ export default function EadDiagnosticTemplateAdminPage() {
         { method: 'POST' },
       );
       await loadVersion(draft.id);
+      toast({ variant: 'success', title: 'Question archived' });
     } catch (e: unknown) {
       toast({
         variant: 'error',
         title: 'Archive failed',
         description: e instanceof Error ? e.message : 'Could not archive.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreQuestion(q: TemplateQuestion) {
+    const draft = await ensureDraft();
+    if (!draft) return;
+    setBusy(true);
+    try {
+      let questionId = q.id;
+      const match = (draft.questions || []).find(
+        (row) =>
+          row.moduleCode === q.moduleCode &&
+          (row.questionCode === q.questionCode || row.id === q.id),
+      );
+      if (match) questionId = match.id;
+      await apiFetch(
+        `/admin/ead-diagnostic-template/versions/${draft.id}/questions/${questionId}/restore`,
+        { method: 'POST' },
+      );
+      await loadVersion(draft.id);
+      toast({ variant: 'success', title: 'Question restored' });
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Restore failed',
+        description: e instanceof Error ? e.message : 'Could not restore.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteQuestion(q: TemplateQuestion) {
+    const ok = await confirm({
+      title: 'Delete question',
+      description: `Permanently delete “${q.title}”? This cannot be undone. Prefer Archive if you may want it back later.`,
+      confirmLabel: 'Delete',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    const draft = await ensureDraft();
+    if (!draft) return;
+    setBusy(true);
+    try {
+      let questionId = q.id;
+      const match = (draft.questions || []).find(
+        (row) =>
+          row.moduleCode === q.moduleCode &&
+          (row.questionCode === q.questionCode || row.id === q.id),
+      );
+      if (match) questionId = match.id;
+      await apiFetch(
+        `/admin/ead-diagnostic-template/versions/${draft.id}/questions/${questionId}/delete`,
+        { method: 'POST' },
+      );
+      await loadVersion(draft.id);
+      toast({ variant: 'success', title: 'Question deleted' });
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Delete failed',
+        description: e instanceof Error ? e.message : 'Could not delete.',
       });
     } finally {
       setBusy(false);
@@ -459,7 +527,7 @@ export default function EadDiagnosticTemplateAdminPage() {
                             <p className="m-0 text-xs text-slate-500">{q.helpText}</p>
                           ) : null}
                         </div>
-                        <div className="flex shrink-0 gap-2">
+                        <div className="flex shrink-0 flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
@@ -480,7 +548,29 @@ export default function EadDiagnosticTemplateAdminPage() {
                             >
                               Archive
                             </Button>
-                          ) : null}
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => void restoreQuestion(q)}
+                            >
+                              <RotateCcw className="size-3.5" />
+                              Restore
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                            disabled={busy}
+                            onClick={() => void deleteQuestion(q)}
+                          >
+                            <Trash2 className="size-3.5" />
+                            Delete
+                          </Button>
                         </div>
                       </div>
                     </div>

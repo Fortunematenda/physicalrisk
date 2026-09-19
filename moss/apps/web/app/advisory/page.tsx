@@ -3,9 +3,18 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  BadgeCheck,
+  ClipboardList,
+  FileCheck,
+  FileText,
+  Send,
+  UserRound,
+} from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { useConfirm } from '@/components/confirm-dialog';
+import { StatCard } from '@/components/dashboard/stat-card';
 import { IconMoreVertical } from '@/components/NavIcons';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
 import { Shell } from '@/components/Shell';
@@ -25,6 +34,7 @@ import {
 } from '@/lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
 import { useToast } from '@/components/ui/toast';
+import { cn } from '@/lib/utils';
 
 const LABELS: Record<string, string> = {
   EXECUTIVE_ADVISORY_DIAGNOSTIC: 'Executive Advisory Diagnostic',
@@ -44,6 +54,13 @@ const OUTCOME_STATUSES = new Set([
   'REPORT_ISSUED',
 ]);
 
+const IN_PROGRESS_STATUSES = new Set([
+  'DRAFT',
+  'IN_PROGRESS',
+  'ASSIGNED',
+  'READY_FOR_REVIEW',
+]);
+
 type AdvisoryRow = {
   id: string;
   reference: string;
@@ -51,23 +68,64 @@ type AdvisoryRow = {
   status: string;
   productCode: string;
   updatedAt: string;
+  createdAt?: string;
   organisation?: { id: string; name: string };
   assignments?: Array<{
     role: string;
     status: string;
-    user: { firstName: string; lastName: string };
+    user: { id?: string; firstName: string; lastName: string };
   }>;
-  diagnosticOutcome?: { id: string; confirmedAt?: string | null } | null;
+  diagnosticOutcome?: {
+    id: string;
+    confirmedAt?: string | null;
+    commercialStatus?: string | null;
+  } | null;
   latestReport?: LatestAdvisoryReport | null;
   _count?: { evidence?: number; reports?: number };
 };
+
+type KpiKey = 'total' | 'in_progress' | 'outcome_ready' | 'report_ready' | 'unassigned' | 'level3';
+
+function hasOutcome(row: AdvisoryRow) {
+  return Boolean(row.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(row.status);
+}
+
+function isEad(row: AdvisoryRow) {
+  return row.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+}
+
+function isLevel3(row: AdvisoryRow) {
+  return !isEad(row) && row.productCode !== 'SHIELD360';
+}
+
+function primaryAnalyst(row: AdvisoryRow) {
+  return row.assignments?.find(
+    (a) => a.role === 'PRIMARY_ANALYST' && a.status !== 'CANCELLED',
+  );
+}
+
+function matchesKpi(row: AdvisoryRow, key: KpiKey | null) {
+  if (!key || key === 'total') return true;
+  if (key === 'in_progress') {
+    return IN_PROGRESS_STATUSES.has(row.status) || (!hasOutcome(row) && row.status !== 'CLOSED');
+  }
+  if (key === 'outcome_ready') return hasOutcome(row) && isEad(row);
+  if (key === 'report_ready') return isAdvisoryReportReady(row.latestReport);
+  if (key === 'unassigned') return !primaryAnalyst(row);
+  if (key === 'level3') return isLevel3(row);
+  return true;
+}
 
 export default function AdvisoryPage() {
   const router = useRouter();
   const confirm = useConfirm();
   const { toast } = useToast();
   const [items, setItems] = useState<AdvisoryRow[]>([]);
-  const [filter, setFilter] = useState('ALL');
+  const [loading, setLoading] = useState(true);
+  const [productFilter, setProductFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [query, setQuery] = useState('');
+  const [selectedKpi, setSelectedKpi] = useState<KpiKey | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
@@ -79,19 +137,83 @@ export default function AdvisoryPage() {
     toast({ title, description, variant: 'error' });
   };
 
-  const load = () =>
-    apiFetch<AdvisoryRow[]>('/advisory')
+  const load = () => {
+    setLoading(true);
+    return apiFetch<AdvisoryRow[]>('/advisory')
       .then(setItems)
-      .catch((e: Error) => showError(e.message, 'Unable to load engagements'));
+      .catch((e: Error) => showError(e.message, 'Unable to load engagements'))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
     void load();
   }, []);
 
-  const rows = useMemo(
-    () => (filter === 'ALL' ? items : items.filter((x) => x.productCode === filter)),
-    [items, filter],
-  );
+  const summary = useMemo(() => {
+    const total = items.length;
+    const inProgress = items.filter(
+      (r) => IN_PROGRESS_STATUSES.has(r.status) || (!hasOutcome(r) && r.status !== 'CLOSED'),
+    ).length;
+    const outcomeReady = items.filter((r) => hasOutcome(r) && isEad(r)).length;
+    const reportReady = items.filter((r) => isAdvisoryReportReady(r.latestReport)).length;
+    const unassigned = items.filter((r) => !primaryAnalyst(r)).length;
+    const level3 = items.filter((r) => isLevel3(r)).length;
+    return { total, inProgress, outcomeReady, reportReady, unassigned, level3 };
+  }, [items]);
+
+  const statusOptions = useMemo(() => {
+    const set = new Set(items.map((r) => r.status).filter(Boolean));
+    return Array.from(set)
+      .sort()
+      .map((value) => ({ value, label: value.replace(/_/g, ' ') }));
+  }, [items]);
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter((row) => {
+      if (productFilter !== 'ALL' && row.productCode !== productFilter) return false;
+      if (statusFilter && row.status !== statusFilter) return false;
+      if (!matchesKpi(row, selectedKpi)) return false;
+      if (!q) return true;
+      const hay = [
+        row.reference,
+        row.title,
+        row.organisation?.name,
+        LABELS[row.productCode],
+        row.productCode,
+        row.status,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [items, productFilter, statusFilter, selectedKpi, query]);
+
+  const hasActiveFilters =
+    productFilter !== 'ALL' || Boolean(statusFilter) || Boolean(query.trim()) || Boolean(selectedKpi);
+
+  function clearFilters() {
+    setProductFilter('ALL');
+    setStatusFilter('');
+    setQuery('');
+    setSelectedKpi(null);
+  }
+
+  function setKpiFilter(key: KpiKey) {
+    setSelectedKpi((prev) => (prev === key ? null : key));
+    if (key === 'in_progress') setStatusFilter('');
+    if (key === 'level3') setProductFilter('ALL');
+  }
+
+  function kpiCardClass(key: KpiKey) {
+    return cn(
+      'min-h-[108px] rounded-xl border bg-white shadow-none transition-[border-color,box-shadow,background-color]',
+      selectedKpi === key
+        ? 'border-[#c41230]/35 bg-[#fff8f9] shadow-[inset_0_0_0_1px_rgba(196,18,48,0.08)]'
+        : 'border-slate-200',
+    );
+  }
 
   function startEdit(row: AdvisoryRow) {
     setEditing({ id: row.id, title: row.title });
@@ -159,7 +281,6 @@ export default function AdvisoryPage() {
       });
       await load();
       if (report?.id) {
-        // Prefer outcome for EAD — preview opens there without the issue-report page.
         if (row.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
           router.push(`/advisory/${row.id}/outcome`);
         } else {
@@ -179,25 +300,134 @@ export default function AdvisoryPage() {
   return (
     <AuthGate>
       <Shell
-        title="Executive Advisory"
+        title="Diagnostics & assurance"
         hideTitle
         headerLeading={<AdvisoryBreadcrumb current="Diagnostics & assurance" root />}
       >
-        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="m-0 text-xl font-semibold">Paid diagnostics and focused assurance</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Level 2 Executive Advisory Diagnostic → Level 3 focused assurance.
-            </p>
-          </div>
-          <Button asChild>
-            <Link href="/advisory/new">+ New engagement</Link>
-          </Button>
-          {isAdmin ? (
-            <Button asChild variant="outline">
-              <Link href="/admin/ead-diagnostic-template">Diagnostic questionnaire</Link>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <p className="m-0 max-w-2xl text-sm text-moss-muted">
+            Level 2 Executive Advisory Diagnostic → Level 3 focused assurance.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/advisory/new">+ New engagement</Link>
             </Button>
-          ) : null}
+            {isAdmin ? (
+              <Button asChild variant="outline">
+                <Link href="/admin/ead-diagnostic-template">Diagnostic questionnaire</Link>
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mb-5 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-stretch">
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Engagement activity
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('total')}>
+                  <StatCard
+                    icon={ClipboardList}
+                    title="Total engagements"
+                    value={summary.total}
+                    description="All advisory work"
+                    tone="blue"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('total')}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="triage2-kpi-btn"
+                  onClick={() => setKpiFilter('in_progress')}
+                >
+                  <StatCard
+                    icon={Send}
+                    title="In progress"
+                    value={summary.inProgress}
+                    description="Active diagnostics"
+                    tone="amber"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('in_progress')}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="triage2-kpi-btn"
+                  onClick={() => setKpiFilter('outcome_ready')}
+                >
+                  <StatCard
+                    icon={FileCheck}
+                    title="Outcome ready"
+                    value={summary.outcomeReady}
+                    description="Completed diagnostics"
+                    tone="violet"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('outcome_ready')}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden w-px bg-slate-200 xl:block" aria-hidden="true" />
+
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Delivery &amp; coverage
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button
+                  type="button"
+                  className="triage2-kpi-btn"
+                  onClick={() => setKpiFilter('report_ready')}
+                >
+                  <StatCard
+                    icon={FileText}
+                    title="Report ready"
+                    value={summary.reportReady}
+                    description="PDF available"
+                    tone="green"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('report_ready')}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="triage2-kpi-btn"
+                  onClick={() => setKpiFilter('unassigned')}
+                >
+                  <StatCard
+                    icon={UserRound}
+                    title="Unassigned"
+                    value={summary.unassigned}
+                    description="Needs consultant"
+                    tone="amber"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('unassigned')}
+                  />
+                </button>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('level3')}>
+                  <StatCard
+                    icon={BadgeCheck}
+                    title="Level 3 engagements"
+                    value={summary.level3}
+                    description="Focused assurance"
+                    tone="teal"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('level3')}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         {editing ? (
@@ -232,18 +462,47 @@ export default function AdvisoryPage() {
 
         <Card className="mb-4 rounded-xl border-slate-200 shadow-sm">
           <CardContent className="p-4">
-            <div className="max-w-md space-y-2">
-              <p className="text-sm font-medium">Product</p>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative min-w-[240px] flex-[1_1_280px] max-w-xl">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search organisation, reference or title…"
+                  aria-label="Search advisory engagements"
+                  className="h-10"
+                />
+              </div>
               <FilterSelect
-                value={filter}
-                onChange={setFilter}
+                value={statusFilter}
+                onChange={setStatusFilter}
+                placeholder="All statuses"
+                aria-label="Filter by status"
+                triggerClassName="h-10 w-full min-w-[150px]"
+                className="min-w-[150px] flex-[0_1_170px]"
+                options={statusOptions}
+              />
+              <FilterSelect
+                value={productFilter}
+                onChange={setProductFilter}
                 includeAll={false}
-                placeholder="All advisory products"
+                placeholder="All products"
+                aria-label="Filter by product"
+                triggerClassName="h-10 w-full min-w-[200px]"
+                className="min-w-[200px] flex-[0_1_240px]"
                 options={[
                   { value: 'ALL', label: 'All advisory products' },
                   ...Object.entries(LABELS).map(([k, v]) => ({ value: k, label: v })),
                 ]}
               />
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  className="ml-auto text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+                  onClick={clearFilters}
+                >
+                  Clear filters
+                </button>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -251,7 +510,10 @@ export default function AdvisoryPage() {
         <Card className="rounded-xl border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Engagements</CardTitle>
-            <CardDescription>{rows.length} record{rows.length === 1 ? '' : 's'}</CardDescription>
+            <CardDescription>
+              {rows.length} record{rows.length === 1 ? '' : 's'}
+              {hasActiveFilters ? ' (filtered)' : ''}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -270,22 +532,19 @@ export default function AdvisoryPage() {
                 </thead>
                 <tbody>
                   {rows.map((x) => {
-                    const a = x.assignments?.find(
-                      (row) => row.role === 'PRIMARY_ANALYST' && row.status !== 'CANCELLED',
-                    );
-                    const hasOutcome =
-                      Boolean(x.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(x.status);
-                    const isEad = x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+                    const a = primaryAnalyst(x);
+                    const outcomeReady = hasOutcome(x);
+                    const ead = isEad(x);
                     const reportReady = isAdvisoryReportReady(x.latestReport);
                     const workspaceHref = advisoryWorkspaceHref({
                       assessmentId: x.id,
                       productCode: x.productCode,
                       reference: x.reference,
-                      hasOutcome,
+                      hasOutcome: outcomeReady,
                     });
                     const showGenerate = canGenerateAdvisoryReport({
                       status: x.status,
-                      hasOutcome,
+                      hasOutcome: outcomeReady,
                       reportReady,
                     });
                     return (
@@ -302,7 +561,7 @@ export default function AdvisoryPage() {
                         tabIndex={0}
                         role="link"
                         aria-label={
-                          hasOutcome && isEad
+                          outcomeReady && ead
                             ? `Open diagnostic outcome ${x.reference}`
                             : `Open engagement ${x.reference}`
                         }
@@ -320,9 +579,9 @@ export default function AdvisoryPage() {
                             <span>{x.status}</span>
                             {reportReady ? (
                               <span className="mt-0.5 block text-xs text-moss-success">Report ready</span>
-                            ) : hasOutcome && isEad ? (
+                            ) : outcomeReady && ead ? (
                               <span className="mt-0.5 block text-xs text-moss-success">Outcome ready</span>
-                            ) : hasOutcome ? (
+                            ) : outcomeReady ? (
                               <span className="mt-0.5 block text-xs text-slate-500">No report yet</span>
                             ) : null}
                           </div>
@@ -339,7 +598,7 @@ export default function AdvisoryPage() {
                               </span>
                               <Link
                                 href={
-                                  isEad && hasOutcome
+                                  ead && outcomeReady
                                     ? workspaceHref
                                     : advisoryReportHref(x.latestReport.id)
                                 }
@@ -348,7 +607,7 @@ export default function AdvisoryPage() {
                                 View
                               </Link>
                             </div>
-                          ) : hasOutcome && isEad ? (
+                          ) : outcomeReady && ead ? (
                             <div className="leading-snug">
                               <span className="font-medium text-slate-900">Outcome</span>
                               <Link
@@ -383,11 +642,11 @@ export default function AdvisoryPage() {
                             )}
                           >
                             <Link href={workspaceHref} onClick={() => setMenuOpenId(null)}>
-                              {hasOutcome && isEad
+                              {outcomeReady && ead
                                 ? 'Open diagnostic outcome'
                                 : 'Open engagement'}
                             </Link>
-                            {hasOutcome && isEad ? (
+                            {outcomeReady && ead ? (
                               <Link
                                 href={advisoryWorkingPapersHref(x.id)}
                                 onClick={() => setMenuOpenId(null)}
@@ -398,7 +657,7 @@ export default function AdvisoryPage() {
                             {reportReady && x.latestReport ? (
                               <Link
                                 href={
-                                  isEad && hasOutcome
+                                  ead && outcomeReady
                                     ? workspaceHref
                                     : advisoryReportHref(x.latestReport.id)
                                 }
@@ -456,7 +715,9 @@ export default function AdvisoryPage() {
                   {rows.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
-                        No advisory engagements yet.
+                        {hasActiveFilters
+                          ? 'No engagements match the current filters.'
+                          : 'No advisory engagements yet.'}
                       </td>
                     </tr>
                   ) : null}

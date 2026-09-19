@@ -167,6 +167,26 @@ export class EadDiagnosticQuestionsController {
     return this.service.archiveTemplateQuestion(versionId, questionId, user);
   }
 
+  @Post('admin/ead-diagnostic-template/versions/:versionId/questions/:questionId/restore')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
+  restoreTemplateQuestion(
+    @Param('versionId') versionId: string,
+    @Param('questionId') questionId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.restoreTemplateQuestion(versionId, questionId, user);
+  }
+
+  @Post('admin/ead-diagnostic-template/versions/:versionId/questions/:questionId/delete')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
+  deleteTemplateQuestion(
+    @Param('versionId') versionId: string,
+    @Param('questionId') questionId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.deleteTemplateQuestion(versionId, questionId, user);
+  }
+
   @Post('admin/ead-diagnostic-template/versions/:versionId/publish')
   @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   publish(

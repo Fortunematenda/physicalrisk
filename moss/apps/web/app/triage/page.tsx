@@ -25,7 +25,6 @@ import { StatCard } from '@/components/dashboard/stat-card';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { AnalystFilterSelect } from '@/components/triage/AnalystFilterSelect';
 import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
-import { PageHeader } from '@/components/layout/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
@@ -667,31 +666,28 @@ export default function TriageSubmissionsPage() {
 
   return (
     <AuthGate>
-      <Shell title="Executive Governance Triage" hideSearch hideTitle>
+      <Shell title="Executive Governance Triage" hideSearch>
         {error && <p className="error">{error}</p>}
 
-        <PageHeader
-          className="mb-5"
-          title="Executive Governance Triage"
-          subtitle="Level 1 questionnaire submissions and commercial progression."
-          actions={(
-            <div
-              className="inline-flex items-center gap-2 text-xs font-medium text-slate-500"
-              aria-live="polite"
-              title={refreshing ? 'Refreshing triage data' : 'Last data refresh'}
-            >
-              <span
-                className={cn(
-                  'size-1.5 rounded-full',
-                  refreshing ? 'animate-pulse bg-amber-500' : 'bg-emerald-500',
-                )}
-                aria-hidden="true"
-              />
-              <span>{liveLabel}</span>
-            </div>
-          )}
-        />
-
+        <div className="mb-5 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="m-0 text-sm text-moss-muted">
+            Level 1 questionnaire submissions and commercial progression.
+          </p>
+          <div
+            className="inline-flex items-center gap-2 text-xs font-medium text-slate-500"
+            aria-live="polite"
+            title={refreshing ? 'Refreshing triage data' : 'Last data refresh'}
+          >
+            <span
+              className={cn(
+                'size-1.5 rounded-full',
+                refreshing ? 'animate-pulse bg-amber-500' : 'bg-emerald-500',
+              )}
+              aria-hidden="true"
+            />
+            <span>{liveLabel}</span>
+          </div>
+        </div>
         <div className="mb-5 space-y-4">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-stretch">
             <div>
