@@ -6,17 +6,26 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   PHYSICAL_RISK_PRODUCTS,
   SHIELD360_DRAFT_CORRECTION_MESSAGE,
+  formatEadMissingRequirementLabel,
   hasValidBusinessConsequences,
+  isCountableEadEvidenceStatus,
   isEadDiagnosticModuleCode,
   isLegacyShield360ProductCode,
   isRichTextFilled,
+  legacySingularRecommendedProduct,
+  moduleHasLegacyShield360Recommendation,
   parseBusinessConsequenceCodes,
   parseDiagnosticResponses,
+  resolveModuleRecommendedProducts,
   richTextToPlainText,
   scoreEadDiagnosticCriteria,
+  validateExecutiveAdvisoryModule,
   type EadBusinessConsequenceCode,
   type EadDiagnosticAnswers,
   type EadDiagnosticCriterion,
+  type EadModuleMissingRequirement,
+  type EadModuleValidationResult,
+  type EadRoutingProductCode,
 } from '@moss/shared';
 import {
   AlertCircle,
@@ -33,6 +42,7 @@ import { AuthGate } from '@/components/AuthGate';
 import { BusinessConsequenceSelector } from '@/components/advisory/BusinessConsequenceSelector';
 import { EadDiagnosticPanel } from '@/components/advisory/EadDiagnosticPanel';
 import type { AssessmentDiagnosticQuestion } from '@/components/advisory/ManageDiagnosticQuestionsDialog';
+import { RecommendedProductsSelector } from '@/components/advisory/RecommendedProductsSelector';
 import { RichTextField } from '@/components/advisory/RichTextField';
 import { flushAllRichTextEditors } from '@/components/ui/rich-text-editor';
 import { useConfirm } from '@/components/confirm-dialog';
@@ -69,15 +79,6 @@ const PRODUCT_LABELS: Record<string, string> = Object.fromEntries(
   Object.entries(PHYSICAL_RISK_PRODUCTS).map(([code, v]) => [code, v.name]),
 );
 
-const ROUTES: [string, string][] = [
-  ['', 'No focused product selected'],
-  ['SCLI_COST_LEAKAGE', PRODUCT_LABELS.SCLI_COST_LEAKAGE],
-  ['CONTRACT_SLA_ASSURANCE', PRODUCT_LABELS.CONTRACT_SLA_ASSURANCE],
-  ['VENDOR_PERFORMANCE_ASSURANCE', PRODUCT_LABELS.VENDOR_PERFORMANCE_ASSURANCE],
-  ['GOVERNANCE_EXECUTIVE_ASSURANCE', PRODUCT_LABELS.GOVERNANCE_EXECUTIVE_ASSURANCE],
-  ['CYBER_PHYSICAL_DEPENDENCY', PRODUCT_LABELS.CYBER_PHYSICAL_DEPENDENCY],
-];
-
 type ModuleReview = {
   id: string;
   moduleCode: string;
@@ -96,7 +97,10 @@ type ModuleReview = {
   otherBusinessConsequence?: string | null;
   accountableExecutive?: string | null;
   requiredDecision?: string | null;
+  /** Legacy singular — kept in sync with first of recommendedProducts. */
   recommendedProduct?: string | null;
+  /** Stage 9 multi-select Level 3 product codes. */
+  recommendedProducts?: EadRoutingProductCode[];
   analystNote?: string | null;
 };
 
@@ -108,18 +112,32 @@ type ConfirmedRoute = {
   sourceModuleName?: string;
 };
 
-type ModuleStatus = 'not_started' | 'in_progress' | 'needs_attention' | 'complete';
+type ModuleStatus = 'not_started' | 'in_progress' | 'evidence_required' | 'needs_attention' | 'complete';
 
-type RequiredFieldKey = 'finding' | 'businessConsequence' | 'requiredDecision';
+type RequiredFieldKey =
+  | 'finding'
+  | 'businessConsequence'
+  | 'requiredDecision'
+  | 'evidenceSummary'
+  | 'diagnosticResponses';
 
 const REQUIRED_FIELDS: Array<{ key: RequiredFieldKey; label: string }> = [
+  { key: 'diagnosticResponses', label: 'Diagnostic criteria' },
   { key: 'finding', label: 'Finding' },
   { key: 'businessConsequence', label: 'Business consequences' },
   { key: 'requiredDecision', label: 'Required executive decision' },
+  { key: 'evidenceSummary', label: 'Supporting evidence or limitation' },
 ];
 
 function moduleConsequenceCodes(m: ModuleReview): EadBusinessConsequenceCode[] {
   return parseBusinessConsequenceCodes(m.businessConsequences);
+}
+
+function moduleRecommendedProducts(m: ModuleReview): EadRoutingProductCode[] {
+  return resolveModuleRecommendedProducts({
+    recommendedProducts: m.recommendedProducts,
+    recommendedProduct: m.recommendedProduct,
+  });
 }
 
 function isBusinessConsequenceComplete(m: ModuleReview) {
@@ -150,29 +168,43 @@ function activeCriteriaFromQuestions(questions: AssessmentDiagnosticQuestion[]):
     }));
 }
 
-function isModuleComplete(m: ModuleReview, allQuestions?: AssessmentDiagnosticQuestion[]) {
-  const narrative = Boolean(
-    isRichTextFilled(m.finding) && isRichTextFilled(m.requiredDecision),
-  );
-  if (!narrative || !isBusinessConsequenceComplete(m)) return false;
-  if (!isEadDiagnosticModuleCode(m.moduleCode)) return true;
-  const answers =
-    m.diagnosticAnswers ||
-    parseDiagnosticResponses(m.diagnosticResponses)?.answers ||
-    {};
-  const criteria = activeCriteriaFromQuestions(moduleQuestions(allQuestions, m.moduleCode));
-  if (!criteria.length) {
-    // Fallback while snapshot loads
-    return Object.keys(answers).length > 0;
-  }
-  return scoreEadDiagnosticCriteria(criteria, answers).allRequiredAnswered;
+function validateModule(
+  m: ModuleReview,
+  opts?: {
+    allQuestions?: AssessmentDiagnosticQuestion[];
+    attachmentCount?: number;
+  },
+): EadModuleValidationResult {
+  return validateExecutiveAdvisoryModule({
+    moduleCode: m.moduleCode,
+    finding: m.finding,
+    requiredDecision: m.requiredDecision,
+    evidenceSummary: m.evidenceSummary,
+    businessConsequences: m.businessConsequences,
+    otherBusinessConsequence: m.otherBusinessConsequence,
+    diagnosticResponses: m.diagnosticResponses,
+    diagnosticAnswers: m.diagnosticAnswers,
+    attachmentCount: opts?.attachmentCount ?? 0,
+    criteria: activeCriteriaFromQuestions(moduleQuestions(opts?.allQuestions, m.moduleCode)),
+  });
+}
+
+function isModuleComplete(
+  m: ModuleReview,
+  allQuestions?: AssessmentDiagnosticQuestion[],
+  attachmentCount = 0,
+) {
+  return validateModule(m, { allQuestions, attachmentCount }).isComplete;
 }
 
 function incompleteModules(
   modules: ModuleReview[],
   allQuestions?: AssessmentDiagnosticQuestion[],
+  attachmentCounts?: Record<string, number>,
 ) {
-  return modules.filter((m) => !isModuleComplete(m, allQuestions));
+  return modules.filter(
+    (m) => !isModuleComplete(m, allQuestions, attachmentCounts?.[m.moduleCode] || 0),
+  );
 }
 
 function moduleHasAnyContent(m: ModuleReview) {
@@ -190,20 +222,42 @@ function moduleHasAnyContent(m: ModuleReview) {
       m.otherBusinessConsequence?.trim() ||
       m.accountableExecutive?.trim() ||
       m.requiredDecision?.trim() ||
-      m.recommendedProduct?.trim() ||
+      moduleRecommendedProducts(m).length > 0 ||
       m.analystNote?.trim() ||
       hasDiagnostic ||
       (m.exposureRating != null && Number.isFinite(Number(m.exposureRating))),
   );
 }
 
-function missingRequiredFields(m: ModuleReview) {
-  return REQUIRED_FIELDS.filter((f) => {
-    if (f.key === 'businessConsequence') return !isBusinessConsequenceComplete(m);
-    if (f.key === 'finding' || f.key === 'requiredDecision') {
-      return !isRichTextFilled(m[f.key]);
-    }
-    return !String(m[f.key] || '').trim();
+function missingRequirementToFieldKey(
+  key: EadModuleMissingRequirement,
+): RequiredFieldKey {
+  switch (key) {
+    case 'diagnosticResponses':
+      return 'diagnosticResponses';
+    case 'finding':
+      return 'finding';
+    case 'businessConsequences':
+      return 'businessConsequence';
+    case 'executiveDecision':
+      return 'requiredDecision';
+    case 'evidence':
+      return 'evidenceSummary';
+    default:
+      return 'finding';
+  }
+}
+
+function missingRequiredFields(
+  m: ModuleReview,
+  allQuestions?: AssessmentDiagnosticQuestion[],
+  attachmentCount = 0,
+) {
+  const validation = validateModule(m, { allQuestions, attachmentCount });
+  return validation.missingRequirements.map((key) => {
+    const fieldKey = missingRequirementToFieldKey(key);
+    const meta = REQUIRED_FIELDS.find((f) => f.key === fieldKey);
+    return { key: fieldKey, label: meta?.label || formatEadMissingRequirementLabel(key) };
   });
 }
 
@@ -219,9 +273,15 @@ function getModuleStatus(
     forceAttention?: boolean;
     reviewAttempted?: boolean;
     allQuestions?: AssessmentDiagnosticQuestion[];
+    attachmentCount?: number;
   },
 ): ModuleStatus {
-  if (isModuleComplete(m, opts?.allQuestions)) return 'complete';
+  const validation = validateModule(m, {
+    allQuestions: opts?.allQuestions,
+    attachmentCount: opts?.attachmentCount,
+  });
+  if (validation.isComplete) return 'complete';
+  if (validation.onlyEvidenceMissing) return 'evidence_required';
   if (opts?.forceAttention || opts?.reviewAttempted) return 'needs_attention';
   if (!moduleHasAnyContent(m)) return 'not_started';
   return 'in_progress';
@@ -251,6 +311,8 @@ function statusBadgeProps(status: ModuleStatus): {
   switch (status) {
     case 'complete':
       return { label: 'Complete', variant: 'success' };
+    case 'evidence_required':
+      return { label: 'Evidence required', variant: 'warning' };
     case 'needs_attention':
       return { label: 'Needs attention', variant: 'warning' };
     case 'in_progress':
@@ -264,7 +326,7 @@ function StatusIcon({ status }: { status: ModuleStatus }) {
   if (status === 'complete') {
     return <CheckCircle2 className="size-4 shrink-0 text-moss-success" aria-hidden="true" />;
   }
-  if (status === 'needs_attention') {
+  if (status === 'evidence_required' || status === 'needs_attention') {
     return <AlertCircle className="size-4 shrink-0 text-amber-600" aria-hidden="true" />;
   }
   if (status === 'in_progress') {
@@ -309,11 +371,33 @@ export default function AdvisoryDetail() {
   const [reviewAttempted, setReviewAttempted] = useState(false);
   /** Touched fields: `${moduleCode}:${fieldKey}` */
   const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
+  /** Module-scoped countable evidence attachments (Stage 7). */
+  const [evidenceCounts, setEvidenceCounts] = useState<Record<string, number>>({});
   const dirtyRef = useRef(false);
   const modulesRef = useRef(modules);
+  const evidenceCountsRef = useRef(evidenceCounts);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   modulesRef.current = modules;
+  evidenceCountsRef.current = evidenceCounts;
+
+  const refreshEvidenceCounts = useCallback(async () => {
+    if (!id) return;
+    try {
+      const rows = await apiFetch<Array<{ moduleCode?: string | null; status?: string }>>(
+        `/evidence/assessment/${id}`,
+      );
+      const next: Record<string, number> = {};
+      for (const row of rows || []) {
+        const code = String(row.moduleCode || '').trim();
+        if (!code || !isCountableEadEvidenceStatus(row.status)) continue;
+        next[code] = (next[code] || 0) + 1;
+      }
+      setEvidenceCounts(next);
+    } catch {
+      // Keep last known counts; panel still loads per-module evidence.
+    }
+  }, [id]);
 
   const load = useCallback(async () => {
     const data = await apiFetch<any>(`/advisory/${id}`);
@@ -326,12 +410,20 @@ export default function AdvisoryDetail() {
         String(row.businessConsequenceDetail || '').trim() ||
         (!codes.length && String(row.businessConsequence || '').trim()) ||
         '';
+      const recommendedProducts = resolveModuleRecommendedProducts({
+        recommendedProducts: row.recommendedProducts,
+        recommendedProduct: row.recommendedProduct,
+      });
       return {
         ...row,
         diagnosticAnswers: snap?.answers || row.diagnosticAnswers,
         businessConsequences: codes,
         businessConsequenceDetail: detail,
         otherBusinessConsequence: row.otherBusinessConsequence || '',
+        recommendedProducts,
+        recommendedProduct:
+          recommendedProducts[0] ||
+          (isLegacyShield360ProductCode(row.recommendedProduct) ? row.recommendedProduct : null),
       };
     });
     setModules(rows);
@@ -350,8 +442,9 @@ export default function AdvisoryDetail() {
       );
     }
     dirtyRef.current = false;
+    await refreshEvidenceCounts();
     return data;
-  }, [id]);
+  }, [id, refreshEvidenceCounts]);
 
   useEffect(() => {
     void load()
@@ -388,8 +481,8 @@ export default function AdvisoryDetail() {
 
   const diagnosticQuestions = (x?.eadDiagnosticQuestions || []) as AssessmentDiagnosticQuestion[];
   const missing = useMemo(
-    () => incompleteModules(modules, diagnosticQuestions),
-    [modules, diagnosticQuestions],
+    () => incompleteModules(modules, diagnosticQuestions, evidenceCounts),
+    [modules, diagnosticQuestions, evidenceCounts],
   );
   const locked = Boolean(x?.diagnosticOutcome);
   const primaryAnalystLocked = Boolean(x?.primaryAnalystLocked);
@@ -399,10 +492,24 @@ export default function AdvisoryDetail() {
     return missing.length === 0 && confirmedRoutes.some((r) => r.productCode);
   }, [x?.productCode, missing.length, confirmedRoutes]);
 
-  const completeCount = modules.filter((m) => isModuleComplete(m, diagnosticQuestions)).length;
+  const completeCount = modules.filter((m) =>
+    isModuleComplete(m, diagnosticQuestions, evidenceCounts[m.moduleCode] || 0),
+  ).length;
   const progressPct = modules.length ? Math.round((completeCount / modules.length) * 100) : 0;
   const anyStarted = modules.some(
-    (m) => moduleHasAnyContent(m) || isModuleComplete(m, diagnosticQuestions),
+    (m) =>
+      moduleHasAnyContent(m) ||
+      isModuleComplete(m, diagnosticQuestions, evidenceCounts[m.moduleCode] || 0),
+  );
+  const evidenceMissingModules = useMemo(
+    () =>
+      modules.filter((m) =>
+        validateModule(m, {
+          allQuestions: diagnosticQuestions,
+          attachmentCount: evidenceCounts[m.moduleCode] || 0,
+        }).missingRequirements.includes('evidence'),
+      ),
+    [modules, diagnosticQuestions, evidenceCounts],
   );
   const activeModule = modules.find((m) => m.moduleCode === activeCode) || modules[0] || null;
   const activeIndex = modules.findIndex((m) => m.moduleCode === (activeModule?.moduleCode || ''));
@@ -412,16 +519,22 @@ export default function AdvisoryDetail() {
   const attentionModules = useMemo(
     () =>
       modules.filter((m) => {
-        if (isModuleComplete(m, diagnosticQuestions)) return false;
-        if (missingRequiredFields(m).length === 0) return false;
+        const count = evidenceCounts[m.moduleCode] || 0;
+        if (isModuleComplete(m, diagnosticQuestions, count)) return false;
+        if (missingRequiredFields(m, diagnosticQuestions, count).length === 0) return false;
         return reviewAttempted || attentionCodes.has(m.moduleCode);
       }),
-    [modules, reviewAttempted, attentionCodes, diagnosticQuestions],
+    [modules, reviewAttempted, attentionCodes, diagnosticQuestions, evidenceCounts],
   );
 
   const attentionFieldCount = useMemo(
-    () => attentionModules.reduce((n, m) => n + missingRequiredFields(m).length, 0),
-    [attentionModules],
+    () =>
+      attentionModules.reduce(
+        (n, m) =>
+          n + missingRequiredFields(m, diagnosticQuestions, evidenceCounts[m.moduleCode] || 0).length,
+        0,
+      ),
+    [attentionModules, diagnosticQuestions, evidenceCounts],
   );
 
   function moduleStatusFor(m: ModuleReview): ModuleStatus {
@@ -429,6 +542,7 @@ export default function AdvisoryDetail() {
       forceAttention: attentionCodes.has(m.moduleCode),
       reviewAttempted,
       allQuestions: diagnosticQuestions,
+      attachmentCount: evidenceCounts[m.moduleCode] || 0,
     });
   }
 
@@ -451,29 +565,31 @@ export default function AdvisoryDetail() {
   function rebuildSuggestedRoutes(nextModules: ModuleReview[] = modules) {
     const byProduct = new Map<string, ConfirmedRoute & { maxExposure: number }>();
     for (const m of nextModules) {
-      const code = String(m.recommendedProduct || '').trim();
-      if (!code) continue;
+      const codes = moduleRecommendedProducts(m);
       const exposure = Number(m.exposureRating);
       const priority = Number.isFinite(exposure) && exposure >= 70 ? 'HIGH' : 'RECOMMENDED';
       const rationale =
         richTextToPlainText(String(m.analystNote || '')).trim() ||
         richTextToPlainText(String(m.finding || '')).trim().slice(0, 280);
-      const existing = byProduct.get(code);
-      if (!existing) {
-        byProduct.set(code, {
-          productCode: code,
-          priority,
-          rationale,
-          sourceModuleCode: m.moduleCode,
-          sourceModuleName: m.moduleName,
-          maxExposure: Number.isFinite(exposure) ? exposure : 0,
-        });
-      } else if (Number.isFinite(exposure) && exposure > existing.maxExposure) {
-        existing.maxExposure = exposure;
-        if (exposure >= 70) existing.priority = 'HIGH';
-        existing.sourceModuleCode = m.moduleCode;
-        existing.sourceModuleName = m.moduleName;
-        if (rationale) existing.rationale = rationale;
+      for (const code of codes) {
+        if (!code) continue;
+        const existing = byProduct.get(code);
+        if (!existing) {
+          byProduct.set(code, {
+            productCode: code,
+            priority,
+            rationale,
+            sourceModuleCode: m.moduleCode,
+            sourceModuleName: m.moduleName,
+            maxExposure: Number.isFinite(exposure) ? exposure : 0,
+          });
+        } else if (Number.isFinite(exposure) && exposure > existing.maxExposure) {
+          existing.maxExposure = exposure;
+          if (exposure >= 70) existing.priority = 'HIGH';
+          existing.sourceModuleCode = m.moduleCode;
+          existing.sourceModuleName = m.moduleName;
+          if (rationale) existing.rationale = rationale;
+        }
       }
     }
     setConfirmedRoutes([...byProduct.values()].map(({ maxExposure: _m, ...row }) => row));
@@ -495,6 +611,7 @@ export default function AdvisoryDetail() {
       // Route suggestions only depend on product / exposure / notes — skip thrashing the form
       // when only consequence chips or narrative fields change.
       const routeRelevant =
+        patch.recommendedProducts !== undefined ||
         patch.recommendedProduct !== undefined ||
         patch.exposureRating !== undefined ||
         patch.analystNote !== undefined ||
@@ -516,7 +633,7 @@ export default function AdvisoryDetail() {
         otherBusinessConsequence: m.otherBusinessConsequence ?? '',
         accountableExecutive: m.accountableExecutive ?? '',
         requiredDecision: m.requiredDecision ?? '',
-        recommendedProduct: m.recommendedProduct || '',
+        recommendedProducts: moduleRecommendedProducts(m),
         analystNote: m.analystNote ?? '',
       };
       if (isEadDiagnosticModuleCode(m.moduleCode)) {
@@ -545,7 +662,7 @@ export default function AdvisoryDetail() {
       dirtyRef.current = false;
       setLastSavedAt(new Date());
       setSaveError('');
-      if (isModuleComplete(m, diagnosticQuestions)) {
+      if (isModuleComplete(m, diagnosticQuestions, evidenceCountsRef.current[m.moduleCode] || 0)) {
         setAttentionCodes((prev) => {
           if (!prev.has(moduleCode)) return prev;
           const next = new Set(prev);
@@ -578,7 +695,7 @@ export default function AdvisoryDetail() {
     if (hasOutcome || !rows.length) return;
     const lastCode = rows[rows.length - 1]?.moduleCode;
     if (!lastCode || targetModuleCode !== lastCode) return;
-    if (incompleteModules(rows, diagnosticQuestions).length > 0) return;
+    if (incompleteModules(rows, diagnosticQuestions, evidenceCountsRef.current).length > 0) return;
     setCompletionOpen(true);
   }
 
@@ -620,7 +737,11 @@ export default function AdvisoryDetail() {
 
   async function saveAndNext() {
     if (!activeModule) return;
-    const gaps = missingRequiredFields(activeModule);
+    const gaps = missingRequiredFields(
+      activeModule,
+      diagnosticQuestions,
+      evidenceCounts[activeModule.moduleCode] || 0,
+    );
     if (gaps.length) {
       markModuleAttention(activeModule.moduleCode);
       toast({
@@ -759,19 +880,45 @@ export default function AdvisoryDetail() {
       }
       await persistModules(modulesRef.current);
       const legacyShield = modulesRef.current.filter((m) =>
-        isLegacyShield360ProductCode(m.recommendedProduct),
+        moduleHasLegacyShield360Recommendation(m),
       );
       if (legacyShield.length) {
         throw new Error(SHIELD360_DRAFT_CORRECTION_MESSAGE);
       }
-      const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
+      const stillMissing = incompleteModules(
+        modulesRef.current,
+        diagnosticQuestions,
+        evidenceCountsRef.current,
+      );
       if (stillMissing.length) {
         setReviewAttempted(true);
         markModulesAttention(stillMissing.map((m) => m.moduleCode));
+        const evidenceOnly = stillMissing.every((m) =>
+          validateModule(m, {
+            allQuestions: diagnosticQuestions,
+            attachmentCount: evidenceCountsRef.current[m.moduleCode] || 0,
+          }).onlyEvidenceMissing,
+        );
+        if (evidenceOnly) {
+          throw new Error(
+            [
+              `${stillMissing.length} module${stillMissing.length === 1 ? '' : 's'} still require supporting evidence or an explicit limitation.`,
+              ...stillMissing.map((m) => `• ${m.moduleName}`),
+            ].join('\n'),
+          );
+        }
         throw new Error(
-          `Complete finding, business consequence and required decision for all modules. Missing: ${stillMissing
-            .map((m) => m.moduleName)
-            .join(', ')}`,
+          [
+            'The following items still require attention:',
+            ...stillMissing.flatMap((m) => {
+              const fields = missingRequiredFields(
+                m,
+                diagnosticQuestions,
+                evidenceCountsRef.current[m.moduleCode] || 0,
+              );
+              return [m.moduleName, ...fields.map((f) => `• ${f.label}`)];
+            }),
+          ].join('\n'),
         );
       }
       const body =
@@ -798,6 +945,7 @@ export default function AdvisoryDetail() {
       });
       await load();
     } catch (e: any) {
+      setIssuesOpen(true);
       toast({
         variant: 'error',
         title: 'Unable to complete',
@@ -813,7 +961,11 @@ export default function AdvisoryDetail() {
       router.push(`/advisory/${id}/outcome`);
       return;
     }
-    const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
+    const stillMissing = incompleteModules(
+      modulesRef.current,
+      diagnosticQuestions,
+      evidenceCountsRef.current,
+    );
     if (stillMissing.length) {
       setReviewAttempted(true);
       markModulesAttention(stillMissing.map((m) => m.moduleCode));
@@ -822,7 +974,7 @@ export default function AdvisoryDetail() {
         id: 'review-validation',
         variant: 'warning',
         title: `${stillMissing.length} module${stillMissing.length === 1 ? '' : 's'} need attention`,
-        description: 'Resolve required fields before completing the assessment.',
+        description: 'Resolve required fields and evidence before completing the assessment.',
       });
       return;
     }
@@ -843,14 +995,19 @@ export default function AdvisoryDetail() {
     try {
       if (!locked) {
         await persistModules(modulesRef.current);
-        const stillMissing = incompleteModules(modulesRef.current, diagnosticQuestions);
+        const stillMissing = incompleteModules(
+          modulesRef.current,
+          diagnosticQuestions,
+          evidenceCountsRef.current,
+        );
         if (stillMissing.length) {
           setReviewAttempted(true);
           markModulesAttention(stillMissing.map((m) => m.moduleCode));
           throw new Error(
-            `Complete finding, business consequence and required decision for all product modules before generating the report. Missing: ${stillMissing
-              .map((m) => m.moduleName)
-              .join(', ')}`,
+            [
+              'Complete all modules before generating the report.',
+              ...stillMissing.map((m) => `• ${m.moduleName}`),
+            ].join('\n'),
           );
         }
       }
@@ -923,7 +1080,42 @@ export default function AdvisoryDetail() {
   const canAssignPrimary = !primaryName && (isAdmin || (!locked && !primaryAnalystLocked));
   const canManagePrimary = canAssignPrimary || canChangePrimary;
 
-  const completionActions = (
+  const completionActions =
+    !locked && missing.length > 0 ? (
+      <div className="space-y-4">
+        <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-3 text-sm text-amber-950">
+          <p className="m-0 font-semibold">Assessment not ready</p>
+          <p className="m-0 mt-1">
+            {missing.length} module{missing.length === 1 ? '' : 's'} still require attention
+            {evidenceMissingModules.length
+              ? ` (${evidenceMissingModules.length} need supporting evidence or a limitation)`
+              : ''}
+            .
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            className="h-10 shrink-0 whitespace-nowrap px-4"
+            onClick={() => {
+              setCompletionOpen(false);
+              setIssuesOpen(true);
+            }}
+          >
+            Review outstanding items
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 shrink-0 whitespace-nowrap px-4"
+            disabled={busy}
+            onClick={() => void generateReport()}
+          >
+            Generate PDF report
+          </Button>
+        </div>
+      </div>
+    ) : (
     <div className="flex flex-wrap gap-2">
       <Button
         type="button"
@@ -947,7 +1139,7 @@ export default function AdvisoryDetail() {
         {locked ? 'Regenerate PDF report' : 'Generate PDF report'}
       </Button>
     </div>
-  );
+    );
 
   const moduleNav = (
     <nav className="space-y-1" aria-label="Assessment modules">
@@ -958,7 +1150,11 @@ export default function AdvisoryDetail() {
         const status = moduleStatusFor(m);
         const badge = statusBadgeProps(status);
         const selected = m.moduleCode === activeModule?.moduleCode;
-        const missingCount = missingRequiredFields(m).length;
+        const missingCount = missingRequiredFields(
+          m,
+          diagnosticQuestions,
+          evidenceCounts[m.moduleCode] || 0,
+        ).length;
         return (
           <button
             key={m.moduleCode}
@@ -1140,7 +1336,7 @@ export default function AdvisoryDetail() {
                     <div className="min-w-0">
                       <p className="m-0 text-sm font-semibold text-moss-success">Ready for completion</p>
                       <p className="m-0 mt-0.5 text-sm text-slate-700">
-                        All required findings, business consequences and executive decisions are complete.
+                        All modules meet findings, consequences, executive decisions, and evidence requirements.
                         {isDiagnostic && !locked && !isLastModule
                           ? ' Open the last module to generate the brief and complete the diagnostic.'
                           : null}
@@ -1148,6 +1344,30 @@ export default function AdvisoryDetail() {
                     </div>
                   </CardContent>
                 </Card>
+              ) : evidenceMissingModules.length > 0 &&
+                evidenceMissingModules.length === missing.length &&
+                anyStarted ? (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="m-0 text-sm font-semibold text-amber-950">Assessment in progress</p>
+                      <p className="m-0 mt-0.5 text-sm text-amber-900/80">
+                        {evidenceMissingModules.length} module
+                        {evidenceMissingModules.length === 1 ? '' : 's'} still require supporting evidence or an
+                        evidence limitation.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 shrink-0 whitespace-nowrap border-amber-300 bg-white px-3 text-amber-950"
+                    onClick={() => setIssuesOpen(true)}
+                  >
+                    View issues
+                  </Button>
+                </div>
               ) : attentionModules.length > 0 ? (
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
                   <div className="flex min-w-0 items-start gap-2.5">
@@ -1245,6 +1465,12 @@ export default function AdvisoryDetail() {
                             criteria={activeCriteriaFromQuestions(
                               moduleQuestions(diagnosticQuestions, activeModule.moduleCode),
                             )}
+                            onEvidenceChange={(count) => {
+                              setEvidenceCounts((prev) => ({
+                                ...prev,
+                                [activeModule.moduleCode]: count,
+                              }));
+                            }}
                             onQuestionsChanged={async () => {
                               dirtyRef.current = true;
                               await load();
@@ -1291,7 +1517,7 @@ export default function AdvisoryDetail() {
                             onChange={(v) =>
                               patchModule(activeModule.moduleCode, { evidenceSummary: v })
                             }
-                            placeholder="Evidence reviewed or limitation noted..."
+                            placeholder="Describe the evidence reviewed or record why supporting evidence was unavailable."
                           />
                           <BusinessConsequenceSelector
                             id={fieldDomId(activeModule.moduleCode, 'businessConsequence')}
@@ -1349,32 +1575,18 @@ export default function AdvisoryDetail() {
                               className="h-10"
                             />
                           </div>
-                          <div className="space-y-1.5">
-                            <Label>Recommended next product</Label>
-                            <FilterSelect
-                              value={
-                                isLegacyShield360ProductCode(activeModule.recommendedProduct)
-                                  ? ''
-                                  : activeModule.recommendedProduct || ''
-                              }
-                              disabled={locked || busy || savingModule}
-                              onChange={(next) =>
-                                patchModule(activeModule.moduleCode, {
-                                  recommendedProduct: next || null,
-                                })
-                              }
-                              placeholder={
-                                isLegacyShield360ProductCode(activeModule.recommendedProduct)
-                                  ? 'Select a replacement or no recommendation'
-                                  : 'No focused product selected'
-                              }
-                              triggerClassName="h-10 w-full min-w-0"
-                              options={ROUTES.filter(([k]) => k).map(([k, v]) => ({
-                                value: k,
-                                label: v,
-                              }))}
-                            />
-                          </div>
+                          <RecommendedProductsSelector
+                            id={fieldDomId(activeModule.moduleCode, 'recommendedProducts')}
+                            value={moduleRecommendedProducts(activeModule)}
+                            disabled={locked || busy || savingModule}
+                            legacyShield360={moduleHasLegacyShield360Recommendation(activeModule)}
+                            onChange={(codes) =>
+                              patchModule(activeModule.moduleCode, {
+                                recommendedProducts: codes,
+                                recommendedProduct: legacySingularRecommendedProduct(codes),
+                              })
+                            }
+                          />
                           <RichTextField
                             id={fieldDomId(activeModule.moduleCode, 'analystNote')}
                             className="md:col-span-2"
@@ -1564,7 +1776,7 @@ export default function AdvisoryDetail() {
               </DialogDescription>
             </DialogHeader>
             <div className="max-h-[min(60vh,420px)] space-y-4 overflow-y-auto pr-1">
-              {attentionModules.map((m) => (
+              {(attentionModules.length ? attentionModules : missing).map((m) => (
                 <div key={m.moduleCode} className="space-y-1.5">
                   <button
                     type="button"
@@ -1574,7 +1786,11 @@ export default function AdvisoryDetail() {
                     {m.moduleName}
                   </button>
                   <ul className="m-0 list-disc space-y-1 pl-5 text-sm text-slate-600">
-                    {missingRequiredFields(m).map((f) => (
+                    {missingRequiredFields(
+                      m,
+                      diagnosticQuestions,
+                      evidenceCounts[m.moduleCode] || 0,
+                    ).map((f) => (
                       <li key={f.key}>
                         <button
                           type="button"
@@ -1588,7 +1804,7 @@ export default function AdvisoryDetail() {
                   </ul>
                 </div>
               ))}
-              {!attentionModules.length ? (
+              {!attentionModules.length && !missing.length ? (
                 <p className="text-sm text-slate-500">No open issues.</p>
               ) : null}
             </div>

@@ -4,6 +4,8 @@ import {
   EAD_MODULE_CRITERIA,
   buildConsequenceDiagnosticSnapshot,
   buildEadDiagnosticSnapshot,
+  isEadLikertValue,
+  likertOptionsForCriterion,
   likertToAssuranceScore,
   scoreConsequenceDiagnostic,
   scoreEadDiagnostic,
@@ -12,12 +14,59 @@ import {
 
 describe('ead-diagnostic-scoring', () => {
   it('maps Never to poorest assurance and Always to strongest', () => {
+    expect(likertToAssuranceScore('NOT_AWARE')).toBe(0);
     expect(likertToAssuranceScore('NEVER')).toBe(0);
     expect(likertToAssuranceScore('RARELY')).toBe(25);
     expect(likertToAssuranceScore('SOMETIMES')).toBe(50);
     expect(likertToAssuranceScore('MOSTLY')).toBe(75);
     expect(likertToAssuranceScore('ALWAYS')).toBe(100);
     expect(likertToAssuranceScore('NA')).toBeNull();
+  });
+
+  it('keeps NOT_AWARE distinct from NEVER while sharing the minimum score', () => {
+    expect(isEadLikertValue('NOT_AWARE')).toBe(true);
+    expect(isEadLikertValue('NEVER')).toBe(true);
+    expect(likertToAssuranceScore('NOT_AWARE')).toBe(likertToAssuranceScore('NEVER'));
+  });
+
+  it('includes NOT_AWARE in the denominator and excludes NA', () => {
+    const scored = scoreEadDiagnostic('FINANCIAL', {
+      TRACEABILITY: 'NOT_AWARE',
+      JUSTIFICATION: 'NEVER',
+      VALUE_RECEIVED: 'SOMETIMES',
+      VARIANCE: 'NA',
+    });
+    expect(scored.applicableCount).toBe(3);
+    expect(scored.answeredCount).toBe(4);
+    expect(scored.assuranceScore).toBe(Math.round(((0 + 0 + 50) / 3) * 10) / 10);
+    expect(scored.allRequiredAnswered).toBe(true);
+  });
+
+  it('treats NOT_AWARE as a completed required answer', () => {
+    const scored = scoreEadDiagnosticCriteria(
+      [
+        { code: 'A', title: 'A', question: 'A?', allowNa: false, isRequired: true },
+        { code: 'B', title: 'B', question: 'B?', allowNa: true, isRequired: true },
+      ],
+      { A: 'NOT_AWARE', B: 'NA' },
+    );
+    expect(scored.allRequiredAnswered).toBe(true);
+    expect(scored.applicableCount).toBe(1);
+  });
+
+  it('exposes NOT_AWARE in the standard option list before Never', () => {
+    const opts = likertOptionsForCriterion(true);
+    expect(opts.map((o) => o.value)).toEqual([
+      'NOT_AWARE',
+      'NEVER',
+      'RARELY',
+      'SOMETIMES',
+      'MOSTLY',
+      'ALWAYS',
+      'NA',
+    ]);
+    expect(likertOptionsForCriterion(false).map((o) => o.value)).not.toContain('NA');
+    expect(likertOptionsForCriterion(false).map((o) => o.value)).toContain('NOT_AWARE');
   });
 
   it('defines criteria for every EAD diagnostic module', () => {

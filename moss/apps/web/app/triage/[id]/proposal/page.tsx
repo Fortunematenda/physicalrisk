@@ -2,7 +2,6 @@
 
 import { useParams } from 'next/navigation';
 import { AuthGate } from '@/components/AuthGate';
-import { Shell } from '@/components/Shell';
 import { ProposalWorkspace } from '@/components/triage/proposal/ProposalWorkspace';
 
 export default function TriageProposalWorkspacePage() {
@@ -11,9 +10,7 @@ export default function TriageProposalWorkspacePage() {
 
   return (
     <AuthGate>
-      <Shell title="Proposal workspace" hideSearch>
-        {submissionId ? <ProposalWorkspace submissionId={submissionId} /> : null}
-      </Shell>
+      {submissionId ? <ProposalWorkspace submissionId={submissionId} /> : null}
     </AuthGate>
   );
 }

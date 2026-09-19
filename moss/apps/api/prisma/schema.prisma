@@ -1145,7 +1145,10 @@ model AdvisoryModuleReview {
   otherBusinessConsequence  String?
   accountableExecutive String?
   requiredDecision     String?
+  /// Legacy singular Level 3 recommendation (kept in sync with first of recommendedProducts).
   recommendedProduct   ProductCode?
+  /// Stage 9 multi-select Level 3 product codes (JSON string array).
+  recommendedProducts  Json?
   analystNote          String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt

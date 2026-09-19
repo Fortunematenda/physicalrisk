@@ -22,12 +22,48 @@ import type { RiskBand } from './types';
 
 /** Likert scale shared across EAD diagnostic criteria. */
 export const EAD_LIKERT_OPTIONS = [
-  { value: 'NEVER', label: 'Never', shortLabel: 'Never' },
-  { value: 'RARELY', label: 'Rarely', shortLabel: 'Rarely' },
-  { value: 'SOMETIMES', label: 'Sometimes', shortLabel: 'Sometimes' },
-  { value: 'MOSTLY', label: 'Mostly', shortLabel: 'Mostly' },
-  { value: 'ALWAYS', label: 'Always', shortLabel: 'Always' },
-  { value: 'NA', label: 'N/A', shortLabel: 'N/A' },
+  {
+    value: 'NOT_AWARE',
+    label: 'Not aware',
+    shortLabel: 'Not aware',
+    helpText: 'Unable to confirm whether this control or practice exists or operates.',
+  },
+  {
+    value: 'NEVER',
+    label: 'Never',
+    shortLabel: 'Never',
+    helpText: 'Known not to be applied or performed.',
+  },
+  {
+    value: 'RARELY',
+    label: 'Rarely',
+    shortLabel: 'Rarely',
+    helpText: 'Applied infrequently.',
+  },
+  {
+    value: 'SOMETIMES',
+    label: 'Sometimes',
+    shortLabel: 'Sometimes',
+    helpText: 'Applied inconsistently.',
+  },
+  {
+    value: 'MOSTLY',
+    label: 'Mostly',
+    shortLabel: 'Mostly',
+    helpText: 'Usually applied, with gaps.',
+  },
+  {
+    value: 'ALWAYS',
+    label: 'Always',
+    shortLabel: 'Always',
+    helpText: 'Consistently applied.',
+  },
+  {
+    value: 'NA',
+    label: 'N/A',
+    shortLabel: 'N/A',
+    helpText: 'This criterion does not apply to this organisation or assessment.',
+  },
 ] as const;
 
 export type EadLikertValue = (typeof EAD_LIKERT_OPTIONS)[number]['value'];
@@ -36,8 +72,12 @@ export type EadLikertValue = (typeof EAD_LIKERT_OPTIONS)[number]['value'];
  * Assurance contribution per answer (high = good).
  * Mirrors triage direction after exposure→assurance inversion
  * (Never ≈ exposure 100 → assurance 0; Always ≈ exposure 0 → assurance 100).
+ *
+ * NOT_AWARE shares the minimum score with NEVER but remains a distinct semantic value
+ * (visibility/knowledge gap vs known non-operation).
  */
 export const EAD_LIKERT_ASSURANCE_SCORES: Record<Exclude<EadLikertValue, 'NA'>, number> = {
+  NOT_AWARE: 0,
   NEVER: 0,
   RARELY: 25,
   SOMETIMES: 50,
@@ -417,4 +457,24 @@ export function parseDiagnosticResponses(raw: unknown): EadDiagnosticResponseSna
 /** Options shown for a criterion (omit N/A when not allowed). */
 export function likertOptionsForCriterion(allowNa: boolean) {
   return allowNa ? [...EAD_LIKERT_OPTIONS] : EAD_LIKERT_OPTIONS.filter((o) => o.value !== 'NA');
+}
+
+/** Count criteria answered NOT_AWARE (knowledge / visibility gaps). */
+export function countNotAwareAnswers(answers: EadDiagnosticAnswers): number {
+  return Object.values(answers).filter((v) => v === 'NOT_AWARE').length;
+}
+
+export function eadResponseScaleLegend(): Array<{ value: string; label: string; note: string }> {
+  return [
+    {
+      value: 'NOT_AWARE',
+      label: 'Not aware',
+      note: 'The respondent could not confirm whether the criterion is in place or operating. This receives the minimum assurance score.',
+    },
+    {
+      value: 'NA',
+      label: 'N/A',
+      note: 'The criterion does not apply and is excluded from scoring.',
+    },
+  ];
 }

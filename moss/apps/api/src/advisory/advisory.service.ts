@@ -17,21 +17,25 @@ import {
   SHIELD360_RETIRED_MESSAGE,
   buildEadDiagnosticSnapshot,
   formatBusinessConsequencesForLegacyReport,
-  hasValidBusinessConsequences,
+  formatEadMissingRequirementLabel,
+  formatRecommendedProductLabels,
+  isCountableEadEvidenceStatus,
   isEadBusinessConsequenceCode,
   isEadDiagnosticModuleCode,
   isEadLikertValue,
   isLegacyShield360ProductCode,
-  isRichTextFilled,
+  legacySingularRecommendedProduct,
   normalizeOtherBusinessConsequence,
   parseBusinessConsequenceCodes,
   parseDiagnosticResponses,
+  resolveModuleRecommendedProducts,
   richTextToPlainText,
   sanitizeRichText,
-  scoreEadDiagnostic,
-  scoreEadDiagnosticCriteria,
   type EadDiagnosticAnswers,
   type EadLikertValue,
+  type EadRoutingProductCode,
+  validateExecutiveAdvisoryModule,
+  validateRecommendedProductCodes,
 } from '@moss/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -151,48 +155,74 @@ export class AdvisoryService {
     }>,
     assessmentId?: string,
   ) {
-    const missingCore = modules.filter(
-      (m) => !isRichTextFilled(m.finding) || !isRichTextFilled(m.requiredDecision),
-    );
-    if (missingCore.length) {
-      throw new BadRequestException(
-        `Complete finding, business consequence, and required decision for: ${missingCore.map((m) => m.moduleName).join(', ')}`,
-      );
-    }
-    const missingConsequences = modules.filter((m) => {
-      const codes = parseBusinessConsequenceCodes(m.businessConsequences);
-      if (codes.length) {
-        return !hasValidBusinessConsequences(codes, m.otherBusinessConsequence);
-      }
-      return true;
-    });
-    if (missingConsequences.length) {
-      throw new BadRequestException(
-        `Select at least one business consequence for: ${missingConsequences.map((m) => m.moduleName).join(', ')}`,
-      );
-    }
-    const missingEvidence = modules.filter((m) => !isRichTextFilled(m.evidenceSummary));
-    if (missingEvidence.length) {
-      throw new BadRequestException(
-        `Record supporting evidence or an explicit limitation for: ${missingEvidence.map((m) => m.moduleName).join(', ')}`,
-      );
-    }
     const aid = assessmentId || modules[0]?.assessmentId;
-    for (const m of modules) {
-      if (!m.moduleCode || !isEadDiagnosticModuleCode(m.moduleCode)) continue;
-      const snap = parseDiagnosticResponses(m.diagnosticResponses);
-      const criteria = aid
-        ? await this.eadQuestions.listActiveCriteriaForModule(aid, m.moduleCode)
-        : null;
-      const scored = criteria?.length
-        ? scoreEadDiagnosticCriteria(criteria, snap?.answers || {})
-        : scoreEadDiagnostic(m.moduleCode, snap?.answers || {});
-      if (!scored.allRequiredAnswered) {
-        throw new BadRequestException(
-          `Complete all diagnostic criteria for: ${m.moduleName}`,
-        );
+    const attachmentCounts = new Map<string, number>();
+    if (aid) {
+      const rows = await this.prisma.evidenceDocument.findMany({
+        where: { assessmentId: aid, moduleCode: { not: null } },
+        select: { moduleCode: true, status: true },
+      });
+      for (const row of rows) {
+        if (!row.moduleCode || !isCountableEadEvidenceStatus(row.status)) continue;
+        attachmentCounts.set(row.moduleCode, (attachmentCounts.get(row.moduleCode) || 0) + 1);
       }
     }
+
+    const incomplete: Array<{
+      moduleName: string;
+      moduleCode: string;
+      missing: string[];
+    }> = [];
+
+    for (const m of modules) {
+      const moduleCode = String(m.moduleCode || '');
+      const criteria =
+        aid && isEadDiagnosticModuleCode(moduleCode)
+          ? await this.eadQuestions.listActiveCriteriaForModule(aid, moduleCode)
+          : null;
+      const validation = validateExecutiveAdvisoryModule({
+        moduleCode,
+        finding: m.finding,
+        requiredDecision: m.requiredDecision,
+        evidenceSummary: m.evidenceSummary,
+        businessConsequences: m.businessConsequences,
+        otherBusinessConsequence: m.otherBusinessConsequence,
+        diagnosticResponses: m.diagnosticResponses,
+        attachmentCount: attachmentCounts.get(moduleCode) || 0,
+        criteria,
+      });
+      if (!validation.isComplete) {
+        incomplete.push({
+          moduleName: m.moduleName,
+          moduleCode,
+          missing: validation.missingRequirements.map(formatEadMissingRequirementLabel),
+        });
+      }
+    }
+
+    if (!incomplete.length) return;
+
+    const evidenceOnly = incomplete.every(
+      (row) => row.missing.length === 1 && row.missing[0] === 'Supporting evidence or limitation',
+    );
+    if (evidenceOnly) {
+      throw new BadRequestException(
+        [
+          `${incomplete.length} module${incomplete.length === 1 ? '' : 's'} still require supporting evidence or an explicit limitation.`,
+          ...incomplete.map((row) => `• ${row.moduleName}`),
+        ].join('\n'),
+      );
+    }
+
+    throw new BadRequestException(
+      [
+        'The following items still require attention:',
+        ...incomplete.flatMap((row) => [
+          row.moduleName,
+          ...row.missing.map((label) => `• ${label}`),
+        ]),
+      ].join('\n'),
+    );
   }
 
   /** Suggest routes from module working papers (consultant confirms before complete). */
@@ -201,6 +231,7 @@ export class AdvisoryService {
       moduleCode: string;
       moduleName: string;
       recommendedProduct?: ProductCode | null;
+      recommendedProducts?: unknown;
       exposureRating?: number | null;
       analystNote?: string | null;
       finding?: string | null;
@@ -208,32 +239,37 @@ export class AdvisoryService {
   ): ConfirmedRouteInput[] {
     const byProduct = new Map<string, ConfirmedRouteInput & { maxExposure: number }>();
     for (const m of modules) {
-      const code = String(m.recommendedProduct || '').trim();
-      if (!code || !L3_ROUTING_PRODUCTS.has(code)) continue;
+      const codes = resolveModuleRecommendedProducts({
+        recommendedProducts: m.recommendedProducts,
+        recommendedProduct: m.recommendedProduct,
+      });
       const exposure = Number(m.exposureRating);
-      const existing = byProduct.get(code);
       const priority: AdvisoryRoutePriority =
         Number.isFinite(exposure) && exposure >= 70 ? AdvisoryRoutePriority.HIGH : AdvisoryRoutePriority.RECOMMENDED;
       const rationale =
         richTextToPlainText(String(m.analystNote || '')).trim() ||
         richTextToPlainText(String(m.finding || '')).trim().slice(0, 280) ||
         undefined;
-      if (!existing) {
-        byProduct.set(code, {
-          productCode: code,
-          priority,
-          rationale,
-          sourceModuleCode: m.moduleCode,
-          sourceModuleName: m.moduleName,
-          maxExposure: Number.isFinite(exposure) ? exposure : 0,
-        });
-      } else {
-        if (Number.isFinite(exposure) && exposure > existing.maxExposure) {
-          existing.maxExposure = exposure;
-          if (exposure >= 70) existing.priority = AdvisoryRoutePriority.HIGH;
-          if (!existing.rationale && rationale) existing.rationale = rationale;
-          existing.sourceModuleCode = m.moduleCode;
-          existing.sourceModuleName = m.moduleName;
+      for (const code of codes) {
+        if (!code || !L3_ROUTING_PRODUCTS.has(code)) continue;
+        const existing = byProduct.get(code);
+        if (!existing) {
+          byProduct.set(code, {
+            productCode: code,
+            priority,
+            rationale,
+            sourceModuleCode: m.moduleCode,
+            sourceModuleName: m.moduleName,
+            maxExposure: Number.isFinite(exposure) ? exposure : 0,
+          });
+        } else {
+          if (Number.isFinite(exposure) && exposure > existing.maxExposure) {
+            existing.maxExposure = exposure;
+            if (exposure >= 70) existing.priority = AdvisoryRoutePriority.HIGH;
+            if (!existing.rationale && rationale) existing.rationale = rationale;
+            existing.sourceModuleCode = m.moduleCode;
+            existing.sourceModuleName = m.moduleName;
+          }
         }
       }
     }
@@ -547,22 +583,62 @@ export class AdvisoryService {
         input.requiredDecision !== undefined
           ? sanitizeRichText(String(input.requiredDecision ?? '')) || null
           : undefined,
-      recommendedProduct: input.recommendedProduct || null,
       analystNote:
         input.analystNote !== undefined
           ? sanitizeRichText(String(input.analystNote ?? '')) || null
           : undefined,
     };
 
-    if (input.recommendedProduct !== undefined && input.recommendedProduct) {
-      const code = String(input.recommendedProduct).trim();
-      if (isLegacyShield360ProductCode(code) || !L3_ROUTING_PRODUCTS.has(code)) {
-        if (isLegacyShield360ProductCode(code)) {
-          throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+    let recommendationAudit:
+      | {
+          from: string[];
+          to: string[];
         }
-        throw new BadRequestException(`Unsupported Level 3 product: ${code}`);
+      | undefined;
+
+    const existingRecommended = resolveModuleRecommendedProducts({
+      recommendedProducts: existing.recommendedProducts,
+      recommendedProduct: existing.recommendedProduct,
+    });
+
+    if (input.recommendedProducts !== undefined) {
+      const validated = validateRecommendedProductCodes(input.recommendedProducts);
+      if (!validated.ok) {
+        throw new BadRequestException(validated.error);
       }
-      data.recommendedProduct = code as ProductCode;
+      const codes = validated.codes;
+      data.recommendedProducts = codes;
+      data.recommendedProduct = legacySingularRecommendedProduct(codes);
+      recommendationAudit = {
+        from: formatRecommendedProductLabels(existingRecommended),
+        to: formatRecommendedProductLabels(codes),
+      };
+    } else if (input.recommendedProduct !== undefined) {
+      // Legacy singular clients: treat as a zero-or-one list.
+      const raw = input.recommendedProduct;
+      if (raw == null || raw === '') {
+        data.recommendedProducts = [] as EadRoutingProductCode[];
+        data.recommendedProduct = null;
+        recommendationAudit = {
+          from: formatRecommendedProductLabels(existingRecommended),
+          to: [],
+        };
+      } else {
+        const code = String(raw).trim();
+        if (isLegacyShield360ProductCode(code) || !L3_ROUTING_PRODUCTS.has(code)) {
+          if (isLegacyShield360ProductCode(code)) {
+            throw new BadRequestException(SHIELD360_RETIRED_MESSAGE);
+          }
+          throw new BadRequestException(`Unsupported Level 3 product: ${code}`);
+        }
+        const codes = [code as EadRoutingProductCode];
+        data.recommendedProducts = codes;
+        data.recommendedProduct = code as ProductCode;
+        recommendationAudit = {
+          from: formatRecommendedProductLabels(existingRecommended),
+          to: formatRecommendedProductLabels(codes),
+        };
+      }
     }
 
     let consequenceAudit:
@@ -645,6 +721,9 @@ export class AdvisoryService {
     }
 
     // Structured diagnostic modules: answers calculate assurance; exposureRating is derived.
+    let diagnosticAnswerAudit:
+      | { changes: Array<{ code: string; from: string | null; to: string | null }> }
+      | undefined;
     if (isEadDiagnosticModuleCode(moduleCode) && input.diagnosticAnswers !== undefined) {
       const answers: EadDiagnosticAnswers = {};
       const raw = input.diagnosticAnswers && typeof input.diagnosticAnswers === 'object'
@@ -660,6 +739,16 @@ export class AdvisoryService {
         }
         answers[key] = value as EadLikertValue;
       }
+      const previousSnap = parseDiagnosticResponses(existing.diagnosticResponses);
+      const previousAnswers = previousSnap?.answers || {};
+      const changes: Array<{ code: string; from: string | null; to: string | null }> = [];
+      const codes = new Set([...Object.keys(previousAnswers), ...Object.keys(answers)]);
+      for (const code of codes) {
+        const from = previousAnswers[code] == null ? null : String(previousAnswers[code]);
+        const to = answers[code] == null ? null : String(answers[code]);
+        if (from !== to) changes.push({ code, from, to });
+      }
+      if (changes.length) diagnosticAnswerAudit = { changes };
       const criteria = await this.eadQuestions.listActiveCriteriaForModule(id, moduleCode);
       const snapshot = buildEadDiagnosticSnapshot(moduleCode, answers, new Date(), criteria);
       data.diagnosticResponses = snapshot;
@@ -692,6 +781,7 @@ export class AdvisoryService {
         moduleCode,
         diagnosticCalculated: Boolean(data.diagnosticResponses),
         exposureRating: row.exposureRating,
+        ...(diagnosticAnswerAudit ? { diagnosticAnswerChanges: diagnosticAnswerAudit.changes } : {}),
         ...(consequenceAudit
           ? {
               businessConsequencesFrom: consequenceAudit.from,
@@ -699,6 +789,13 @@ export class AdvisoryService {
               businessConsequenceDetailChanged: consequenceAudit.detailChanged,
             }
           : {}),
+        ...(recommendationAudit &&
+        (recommendationAudit.from.join('|') !== recommendationAudit.to.join('|')
+          ? {
+              recommendedProductsFrom: recommendationAudit.from,
+              recommendedProductsTo: recommendationAudit.to,
+            }
+          : {})),
       },
     });
     return row;

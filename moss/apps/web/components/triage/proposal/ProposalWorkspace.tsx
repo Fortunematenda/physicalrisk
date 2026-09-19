@@ -10,14 +10,17 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { flushSync } from 'react-dom';
 import {
+  Briefcase,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   Loader2,
   Plus,
   Trash2,
   Upload,
+  User,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -31,6 +34,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +44,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
+import { Shell } from '@/components/Shell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { flushAllRichTextEditors, RichTextEditor } from '@/components/ui/rich-text-editor';
 import { useToast } from '@/components/ui/toast';
@@ -83,6 +88,33 @@ const WORKSPACE_TABS = new Set([
   'team',
   'terms',
 ]);
+
+function OrgAvatar({ name }: { name: string }) {
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() || '')
+      .join('') || 'OR';
+  return (
+    <span
+      className="inline-flex size-14 shrink-0 items-center justify-center rounded-full bg-sky-100 text-base font-bold tracking-wide text-sky-700"
+      aria-hidden="true"
+    >
+      {initials}
+    </span>
+  );
+}
+
+function formatProposalStatus(status?: string | null) {
+  const raw = String(status || '').trim();
+  if (!raw) return 'Draft';
+  return raw
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 function draftFingerprint(draft: ProposalWorkspaceDraft): string {
   return JSON.stringify(draftToPayload(draft, clientFeeTotals(draft)));
@@ -814,104 +846,176 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
     String(workspace?.status || ''),
   );
   const backHref = `/triage/${submissionId}?tab=commercial`;
+  const orgName = String(draft?.organisationName || workspace?.organisationName || 'Client').trim() || 'Client';
+  const contactName = String(draft?.addressedTo || workspace?.addressedTo || '').trim();
+  const jobTitle = String(draft?.jobTitle || workspace?.jobTitle || '').trim();
+  const headerMeta = [
+    workspace?.triageReference,
+    workspace?.versionLabel ? `Version ${workspace.versionLabel}` : null,
+    'Physical Risk landscape proposal',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const statusLabel = formatProposalStatus(workspace?.status);
+
+  const headerLeading = (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+      <Link
+        href={backHref}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+        aria-label="Back to triage"
+        onClick={(e) => {
+          if (isDirtyRef.current) {
+            e.preventDefault();
+            void goBack();
+          }
+        }}
+      >
+        <ChevronLeft className="size-4" aria-hidden="true" />
+      </Link>
+      <Link
+        href={backHref}
+        className="font-medium text-slate-500 transition-colors hover:text-slate-800"
+        onClick={(e) => {
+          if (isDirtyRef.current) {
+            e.preventDefault();
+            void goBack();
+          }
+        }}
+      >
+        Back to triage
+      </Link>
+      <ChevronRight className="size-3.5 shrink-0 text-slate-300" aria-hidden="true" />
+      <span className="truncate font-semibold text-slate-900">Proposal workspace</span>
+    </nav>
+  );
+
+  const actionButtons = (
+    <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 sm:w-auto sm:justify-end">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="outline" className="h-10" disabled={isBusy}>
+            More
+            <ChevronDown className="size-4 opacity-70" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[220px]">
+          <DropdownMenuItem disabled={isBusy} onSelect={() => void downloadPdf()}>
+            <Download className="size-4" />
+            Download PDF
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isBusy || proposalSent}
+            onSelect={() => fileRef.current?.click()}
+          >
+            <Upload className="size-4" />
+            Upload external proposal
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-10"
+        disabled={isBusy || !isDirty}
+        onClick={() => void save()}
+      >
+        {saving ? (
+          <>
+            <Loader2 className="size-4 animate-spin" />
+            Saving…
+          </>
+        ) : (
+          'Save'
+        )}
+      </Button>
+      {proposalSent ? (
+        <Button type="button" className="h-10" disabled={isBusy} onClick={() => void downloadPdf()}>
+          <Eye className="size-4" />
+          View proposal
+        </Button>
+      ) : (
+        <Button type="button" className="h-10" disabled={isBusy} onClick={() => void previewProposal()}>
+          {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+          Preview
+        </Button>
+      )}
+    </div>
+  );
 
   if (loading || !draft) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <Loader2 className="size-8 animate-spin text-slate-400" />
-      </div>
+      <Shell title="Proposal workspace" hideSearch hideTitle headerLeading={headerLeading}>
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="size-8 animate-spin text-slate-400" />
+        </div>
+      </Shell>
     );
   }
 
   return (
-    <div className="flex flex-col bg-slate-50">
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void uploadExternal(file);
-          e.target.value = '';
-        }}
-      />
+    <Shell title="Proposal workspace" hideSearch hideTitle headerLeading={headerLeading}>
+      <div className="triage-detail-workspace space-y-4 pb-8">
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void uploadExternal(file);
+            e.target.value = '';
+          }}
+        />
 
-      <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <Link
-              href={backHref}
-              className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800"
-              onClick={(e) => {
-                if (isDirty) {
-                  e.preventDefault();
-                  void goBack();
-                }
-              }}
-            >
-              <ChevronLeft className="size-3.5" />
-              Back to triage
-            </Link>
-            <h1 className="m-0 truncate text-lg font-semibold text-slate-900">Proposal workspace</h1>
-            <p className="m-0 truncate text-sm text-slate-500">
-              {workspace?.organisationName || 'Client'} · Physical Risk landscape proposal
-              {isDirty ? ' · Unsaved changes' : ''}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" disabled={isBusy}>
-                  More
-                  <ChevronDown className="size-4 opacity-70" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[220px]">
-                <DropdownMenuItem disabled={isBusy} onSelect={() => void downloadPdf()}>
-                  <Download className="size-4" />
-                  Download PDF
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={isBusy || proposalSent}
-                  onSelect={() => fileRef.current?.click()}
-                >
-                  <Upload className="size-4" />
-                  Upload external proposal
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isBusy || !isDirty}
-              onClick={() => void save()}
-            >
-              {saving ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Saving…
-                </>
-              ) : (
-                'Save'
-              )}
-            </Button>
-            {proposalSent ? (
-              <Button type="button" disabled={isBusy} onClick={() => void downloadPdf()}>
-                <Eye className="size-4" />
-                View proposal
-              </Button>
-            ) : (
-              <Button type="button" disabled={isBusy} onClick={() => void previewProposal()}>
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-                Preview
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardContent className="space-y-4 p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex min-w-0 flex-1 items-start gap-4">
+                <OrgAvatar name={orgName} />
+                <div className="min-w-0 space-y-2">
+                  <h1 className="m-0 text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
+                    {orgName}
+                  </h1>
+                  {headerMeta ? <p className="m-0 text-sm text-slate-500">{headerMeta}</p> : null}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+                    {contactName ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <User className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                        {contactName}
+                      </span>
+                    ) : null}
+                    {jobTitle ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Briefcase className="size-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+                        {jobTitle}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                      {statusLabel}
+                    </Badge>
+                    {workspace?.assuranceScore != null ? (
+                      <Badge variant="outline" className="shrink-0 whitespace-nowrap">
+                        {workspace.assuranceScore}/100
+                        {workspace.assuranceBandLabel ? ` · ${workspace.assuranceBandLabel}` : ''}
+                      </Badge>
+                    ) : null}
+                    {isDirty ? (
+                      <Badge variant="warning" className="shrink-0 whitespace-nowrap">
+                        Unsaved changes
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
 
-      <div className="mx-auto w-full max-w-6xl px-4 py-4 sm:px-6">
+              {actionButtons}
+            </div>
+          </CardContent>
+        </Card>
+
         <Tabs
           value={tab}
           onValueChange={(next) => {
@@ -1595,40 +1699,40 @@ export function ProposalWorkspace({ submissionId, onSaved, busy = false }: Props
             </TabsContent>
           </div>
         </Tabs>
+
+        <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+              <AlertDialogDescription>
+                You have unsaved proposal edits. Leave and discard them, or stay and click Save.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Stay</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  discardAndLeave();
+                }}
+              >
+                Discard and leave
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <PdfPreviewDialog
+          open={Boolean(pdfPreview)}
+          onOpenChange={(open) => {
+            if (!open) setPdfPreview(null);
+          }}
+          pdfBytes={pdfPreview?.bytes || null}
+          title={pdfPreview?.title || 'Proposal preview'}
+          onDownload={() => void downloadPdf()}
+          downloadDisabled={isBusy}
+        />
       </div>
-
-      <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have unsaved proposal edits. Leave and discard them, or stay and click Save.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Stay</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                discardAndLeave();
-              }}
-            >
-              Discard and leave
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <PdfPreviewDialog
-        open={Boolean(pdfPreview)}
-        onOpenChange={(open) => {
-          if (!open) setPdfPreview(null);
-        }}
-        pdfBytes={pdfPreview?.bytes || null}
-        title={pdfPreview?.title || 'Proposal preview'}
-        onDownload={() => void downloadPdf()}
-        downloadDisabled={isBusy}
-      />
-    </div>
+    </Shell>
   );
 }

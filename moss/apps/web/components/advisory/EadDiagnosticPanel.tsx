@@ -5,6 +5,7 @@ import {
   exposureToAssuranceScore,
   getAssuranceBand,
   getEadModuleCriteria,
+  isCountableEadEvidenceStatus,
   likertOptionsForCriterion,
   parseDiagnosticResponses,
   resolveEgtAssuranceVisual,
@@ -27,8 +28,13 @@ type EvidenceRow = {
   mimeType: string;
   sizeBytes: number;
   moduleCode?: string | null;
+  status?: string;
   uploadedAt: string;
 };
+
+function countableEvidence(rows: EvidenceRow[]) {
+  return rows.filter((row) => isCountableEadEvidenceStatus(row.status));
+}
 
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
@@ -54,6 +60,7 @@ export function EadDiagnosticPanel({
   questions = [],
   onAnswersChange,
   onQuestionsChanged,
+  onEvidenceChange,
 }: {
   assessmentId: string;
   moduleCode: string;
@@ -66,6 +73,8 @@ export function EadDiagnosticPanel({
   questions?: AssessmentDiagnosticQuestion[];
   onAnswersChange: (answers: EadDiagnosticAnswers) => void;
   onQuestionsChanged?: () => Promise<void> | void;
+  /** Fired whenever the module-scoped evidence list changes (upload/delete/load). */
+  onEvidenceChange?: (count: number) => void;
 }) {
   const [manageOpen, setManageOpen] = useState(false);
   const criteria = useMemo(() => {
@@ -93,17 +102,21 @@ export function EadDiagnosticPanel({
         if (!cancelled) {
           setEvidence(rows);
           setEvidenceError('');
+          onEvidenceChange?.(countableEvidence(rows).length);
         }
       } catch (e: any) {
         if (!cancelled) {
           setEvidence([]);
           setEvidenceError(e?.message || 'Unable to load evidence.');
+          onEvidenceChange?.(0);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
+    // Intentionally omit onEvidenceChange from deps — parent passes inline callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessmentId, moduleCode]);
 
   const scored = useMemo(() => scoreEadDiagnosticCriteria(criteria, answers), [criteria, answers]);
@@ -129,6 +142,7 @@ export function EadDiagnosticPanel({
     setEvidenceBusy(true);
     setEvidenceError('');
     try {
+      const uploaded: EvidenceRow[] = [];
       for (const file of Array.from(files)) {
         const body = new FormData();
         body.append('file', file);
@@ -139,8 +153,13 @@ export function EadDiagnosticPanel({
           method: 'POST',
           body,
         });
-        setEvidence((prev) => [row, ...prev]);
+        uploaded.push(row);
       }
+      setEvidence((prev) => {
+        const next = [...uploaded, ...prev];
+        onEvidenceChange?.(countableEvidence(next).length);
+        return next;
+      });
     } catch (e: any) {
       setEvidenceError(e?.message || 'Upload failed.');
     } finally {
@@ -155,7 +174,11 @@ export function EadDiagnosticPanel({
     setEvidenceError('');
     try {
       await apiFetch(`/evidence/${id}`, { method: 'DELETE' });
-      setEvidence((prev) => prev.filter((e) => e.id !== id));
+      setEvidence((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        onEvidenceChange?.(countableEvidence(next).length);
+        return next;
+      });
     } catch (e: any) {
       setEvidenceError(e?.message || 'Remove failed.');
     } finally {
@@ -271,7 +294,7 @@ export function EadDiagnosticPanel({
             <fieldset key={criterion.code} className="space-y-2 rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-semibold text-slate-900">{criterion.title}</legend>
               <p className="m-0 text-sm text-slate-600">{criterion.question}</p>
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap gap-2 pt-1" role="group" aria-label={`${criterion.title} response`}>
                 {options.map((opt) => {
                   const active = selected === opt.value;
                   return (
@@ -279,6 +302,9 @@ export function EadDiagnosticPanel({
                       key={opt.value}
                       type="button"
                       disabled={locked || busy}
+                      title={opt.helpText}
+                      aria-pressed={active}
+                      aria-label={`${opt.label}${opt.helpText ? `. ${opt.helpText}` : ''}`}
                       onClick={() => setAnswer(criterion.code, opt.value)}
                       className={cn(
                         'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
@@ -293,6 +319,12 @@ export function EadDiagnosticPanel({
                   );
                 })}
               </div>
+              {selected === 'NOT_AWARE' ? (
+                <p className="m-0 text-xs text-slate-500">
+                  Consider documenting the visibility or governance gap in the Finding or Supporting
+                  evidence / limitation.
+                </p>
+              ) : null}
             </fieldset>
           );
         })}
@@ -303,7 +335,7 @@ export function EadDiagnosticPanel({
           <div>
             <Label className="text-sm font-semibold text-slate-900">Supporting evidence files</Label>
             <p className="m-0 mt-0.5 text-xs text-slate-500">
-              PDF, Word, Excel, or images. Linked to this module for later report appendices.
+              Upload supporting evidence for this module, or record an explicit evidence limitation below.
             </p>
           </div>
           <Button

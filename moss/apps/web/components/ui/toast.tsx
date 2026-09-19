@@ -110,7 +110,7 @@ function ToastCard({
       <div className="min-w-0 flex-1 space-y-1">
         <p className="m-0 text-sm font-semibold leading-snug text-slate-900">{item.title}</p>
         {item.description ? (
-          <p className="m-0 text-sm leading-relaxed text-slate-600">{item.description}</p>
+          <p className="m-0 whitespace-pre-line text-sm leading-relaxed text-slate-600">{item.description}</p>
         ) : null}
         {item.action ? (
           <Button

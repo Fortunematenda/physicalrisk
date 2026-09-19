@@ -21,9 +21,18 @@ import {
 } from './ead-business-consequences';
 import {
   EAD_LIKERT_OPTIONS,
+  countNotAwareAnswers,
+  eadResponseScaleLegend,
   parseDiagnosticResponses,
   type EadDiagnosticResponseSnapshot,
 } from './ead-diagnostic-scoring';
+import {
+  formatRecommendedProductLabels,
+  orderRecommendedProductCodes,
+  recommendedProductLabel,
+  resolveModuleRecommendedProducts,
+} from './ead-recommended-products';
+import { EAD_ROUTING_PRODUCT_CODES } from './ead-routing';
 import { isLegacyShield360ProductCode, PRODUCT_LABELS } from './product-architecture';
 import { richTextToPlainText } from './ead-rich-text';
 
@@ -44,7 +53,10 @@ export type EadReportModuleInput = {
   otherBusinessConsequence?: string | null;
   accountableExecutive?: string | null;
   requiredDecision?: string | null;
+  /** Legacy singular recommendation (pre–Stage 9). */
   recommendedProduct?: string | null;
+  /** Stage 9 multi-select product codes. */
+  recommendedProducts?: unknown;
   analystNote?: string | null;
 };
 
@@ -83,8 +95,12 @@ export type EadModuleScoreRow = {
   requiredDecisionHtml: string;
   evidenceSummaryPlain: string;
   accountableExecutive: string;
+  /** @deprecated Prefer recommendedProductCodes — first selected product for compat. */
   recommendedProductCode: string | null;
+  /** @deprecated Prefer recommendedProductLabels — first selected label for compat. */
   recommendedProductLabel: string | null;
+  recommendedProductCodes: string[];
+  recommendedProductLabels: string[];
   consequenceCodes: EadBusinessConsequenceCode[];
   consequenceLabels: string[];
   consequenceDetailPlain: string;
@@ -106,11 +122,18 @@ export type EadConsequenceAggregate = {
   moduleCount: number;
 };
 
+export type EadRecommendedSourceModule = {
+  moduleCode: string;
+  moduleName: string;
+};
+
 export type EadRecommendedProduct = {
   productCode: string;
   label: string;
-  source: 'confirmed_route' | 'module';
+  source: 'confirmed_route' | 'module' | 'both';
   rationale?: string | null;
+  /** Modules that selected this product (traceability; empty for route-only). */
+  sourceModules: EadRecommendedSourceModule[];
 };
 
 export type EadEvidenceRef = {
@@ -139,6 +162,9 @@ export type EadReportSummary = {
   recommendations: EadRecommendedProduct[];
   evidence: EadEvidenceRef[];
   assuranceScaleLegend: Array<{ range: string; label: string }>;
+  responseScaleLegend: Array<{ value: string; label: string; note: string }>;
+  /** Criteria answered NOT_AWARE across all modules (knowledge / visibility gaps). */
+  notAwareCount: number;
 };
 
 function likertLabel(value: string): string {
@@ -183,9 +209,12 @@ export function buildEadModuleScoreRows(modules: EadReportModuleInput[]): EadMod
       : m.businessConsequence?.trim()
         ? [m.businessConsequence.trim()]
         : [];
-    const productCode = String(m.recommendedProduct || '').trim() || null;
-    const safeProduct =
-      productCode && !isLegacyShield360ProductCode(productCode) ? productCode : null;
+    const productCodes = resolveModuleRecommendedProducts({
+      recommendedProducts: m.recommendedProducts,
+      recommendedProduct: m.recommendedProduct,
+    });
+    const productLabels = formatRecommendedProductLabels(productCodes);
+    const first = productCodes[0] || null;
     return {
       moduleCode: m.moduleCode,
       moduleName: m.moduleName,
@@ -198,10 +227,10 @@ export function buildEadModuleScoreRows(modules: EadReportModuleInput[]): EadMod
       requiredDecisionHtml: String(m.requiredDecision || ''),
       evidenceSummaryPlain: richTextToPlainText(String(m.evidenceSummary || '')).trim(),
       accountableExecutive: String(m.accountableExecutive || '').trim(),
-      recommendedProductCode: safeProduct,
-      recommendedProductLabel: safeProduct
-        ? PRODUCT_LABELS[safeProduct] || safeProduct.replaceAll('_', ' ')
-        : null,
+      recommendedProductCode: first,
+      recommendedProductLabel: first ? recommendedProductLabel(first) : null,
+      recommendedProductCodes: productCodes,
+      recommendedProductLabels: productLabels,
       consequenceCodes: codes,
       consequenceLabels,
       consequenceDetailPlain: richTextToPlainText(String(m.businessConsequenceDetail || '')).trim(),
@@ -220,7 +249,11 @@ export function calculateOverallEadAssuranceScore(rows: EadModuleScoreRow[]): nu
   return Math.round((sum / scores.length) * 10) / 10;
 }
 
-export function buildEadExecutiveNarrative(rows: EadModuleScoreRow[], overall: number | null): string {
+export function buildEadExecutiveNarrative(
+  rows: EadModuleScoreRow[],
+  overall: number | null,
+  notAwareCount = 0,
+): string {
   if (overall == null || !rows.length) {
     return 'Insufficient diagnostic scores were available to form an overall assurance conclusion.';
   }
@@ -247,7 +280,17 @@ export function buildEadExecutiveNarrative(rows: EadModuleScoreRow[], overall: n
       : `, with comparatively stronger control maturity in ${joinNames(strongNames)}`;
   }
   text += '.';
+  if (notAwareCount > 0) {
+    text += ` ${notAwareCount} diagnostic criterion${notAwareCount === 1 ? ' was' : ' were'} marked “Not aware”, indicating areas where control operation could not be confirmed.`;
+  }
   return text;
+}
+
+export function countEadNotAwareAcrossModules(rows: EadModuleScoreRow[]): number {
+  return rows.reduce((sum, row) => {
+    const answers = row.diagnostic?.answers || {};
+    return sum + countNotAwareAnswers(answers);
+  }, 0);
 }
 
 function joinNames(names: string[]): string {
@@ -326,34 +369,57 @@ export function collectEadRecommendations(
   rows: EadModuleScoreRow[],
   routes?: EadReportRouteInput[] | null,
 ): EadRecommendedProduct[] {
-  const out: EadRecommendedProduct[] = [];
-  const seen = new Set<string>();
+  const byCode = new Map<string, EadRecommendedProduct>();
+
+  for (const row of rows) {
+    for (const code of row.recommendedProductCodes) {
+      if (!code || isLegacyShield360ProductCode(code)) continue;
+      const existing = byCode.get(code);
+      const sourceModule = { moduleCode: row.moduleCode, moduleName: row.moduleName };
+      if (!existing) {
+        byCode.set(code, {
+          productCode: code,
+          label: recommendedProductLabel(code),
+          source: 'module',
+          rationale: null,
+          sourceModules: [sourceModule],
+        });
+      } else if (!existing.sourceModules.some((m) => m.moduleCode === row.moduleCode)) {
+        existing.sourceModules.push(sourceModule);
+      }
+    }
+  }
 
   for (const route of routes || []) {
     const code = String(route.productCode || '').trim();
-    if (!code || isLegacyShield360ProductCode(code) || seen.has(code)) continue;
-    seen.add(code);
-    out.push({
-      productCode: code,
-      label: PRODUCT_LABELS[code] || code.replaceAll('_', ' '),
-      source: 'confirmed_route',
-      rationale: route.rationale || null,
-    });
+    if (!code || isLegacyShield360ProductCode(code)) continue;
+    const existing = byCode.get(code);
+    if (!existing) {
+      byCode.set(code, {
+        productCode: code,
+        label: PRODUCT_LABELS[code] || recommendedProductLabel(code),
+        source: 'confirmed_route',
+        rationale: route.rationale || null,
+        sourceModules: [],
+      });
+    } else {
+      existing.source = existing.sourceModules.length ? 'both' : 'confirmed_route';
+      if (!existing.rationale && route.rationale) existing.rationale = route.rationale;
+    }
   }
 
-  for (const row of rows) {
-    const code = row.recommendedProductCode;
-    if (!code || seen.has(code)) continue;
-    seen.add(code);
-    out.push({
-      productCode: code,
-      label: row.recommendedProductLabel || PRODUCT_LABELS[code] || code,
-      source: 'module',
-      rationale: null,
-    });
-  }
+  const catalogueOrder = new Set<string>(EAD_ROUTING_PRODUCT_CODES);
+  const ordered = orderRecommendedProductCodes([...byCode.keys()]);
+  const extras = [...byCode.keys()].filter((code) => !catalogueOrder.has(code));
+  return [...ordered, ...extras].map((code) => byCode.get(code)!);
+}
 
-  return out;
+/** Human-readable “Recommended from” line for report / PDF. */
+export function formatRecommendationSourceModules(
+  sourceModules: EadRecommendedSourceModule[] | undefined,
+): string {
+  if (!sourceModules?.length) return '';
+  return sourceModules.map((m) => m.moduleName).join('; ');
 }
 
 export function buildEadEvidenceReferences(evidence: EadReportEvidenceInput[]): EadEvidenceRef[] {
@@ -396,18 +462,21 @@ export function buildEadReportSummary(input: {
 }): EadReportSummary {
   const moduleScores = buildEadModuleScoreRows(input.modules);
   const overallAssuranceScore = calculateOverallEadAssuranceScore(moduleScores);
+  const notAwareCount = countEadNotAwareAcrossModules(moduleScores);
   return {
     moduleScores,
     overallAssuranceScore,
     overallBand: overallAssuranceScore == null ? null : getAssuranceBand(overallAssuranceScore),
     overallVisual:
       overallAssuranceScore == null ? null : resolveEgtAssuranceVisual(overallAssuranceScore),
-    executiveNarrative: buildEadExecutiveNarrative(moduleScores, overallAssuranceScore),
+    executiveNarrative: buildEadExecutiveNarrative(moduleScores, overallAssuranceScore, notAwareCount),
     priorityAreas: selectEadPriorityAreas(moduleScores),
     consequences: aggregateEadBusinessConsequences(moduleScores),
     executiveDecisions: collectEadExecutiveDecisions(moduleScores),
     recommendations: collectEadRecommendations(moduleScores, input.routes),
     evidence: buildEadEvidenceReferences(input.evidence || []),
     assuranceScaleLegend: eadAssuranceScaleLegend(),
+    responseScaleLegend: eadResponseScaleLegend(),
+    notAwareCount,
   };
 }

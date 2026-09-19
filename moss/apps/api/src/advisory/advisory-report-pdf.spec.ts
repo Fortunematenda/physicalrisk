@@ -20,7 +20,7 @@ function mod(code: string, name: string, assurance: number, extras: Record<strin
   };
 }
 
-describe('renderAdvisoryPdf (Stage 6)', () => {
+describe('renderAdvisoryPdf (Stage 6 + Stage 9)', () => {
   it('generates a PDF buffer with executive summary content and no Shield 360', async () => {
     const pdf = await renderAdvisoryPdf({
       reference: 'EAD-2026-TEST',
@@ -33,16 +33,18 @@ describe('renderAdvisoryPdf (Stage 6)', () => {
       salesEmail: 'sales@physicalrisk.com',
       modules: [
         mod('CONSEQUENCE', 'Consequence Management', 35, {
-          recommendedProduct: 'SCLI_COST_LEAKAGE',
+          recommendedProducts: ['SCLI_COST_LEAKAGE', 'VENDOR_PERFORMANCE_ASSURANCE'],
           businessConsequences: ['FINANCIAL_LOSS', 'REPUTATIONAL_DAMAGE'],
         }),
         mod('CONTRACTUAL', 'Contractual Assurance', 72, {
-          recommendedProduct: 'CONTRACT_SLA_ASSURANCE',
+          recommendedProducts: ['CONTRACT_SLA_ASSURANCE', 'VENDOR_PERFORMANCE_ASSURANCE'],
         }),
         mod('FINANCIAL', 'Financial Assurance', 48),
         mod('GOVERNANCE', 'Governance and accountability', 61),
         mod('REPORTING', 'Reporting Integrity', 40),
-        mod('RESILIENCE', 'Operational Resilience', 76),
+        mod('RESILIENCE', 'Operational Resilience', 76, {
+          recommendedProducts: [],
+        }),
       ],
       evidence: [{ id: '1', fileName: 'incident.pdf', title: 'Incident Report 2026' }],
       routes: [{ productCode: 'SCLI_COST_LEAKAGE', priority: 'HIGH' }],

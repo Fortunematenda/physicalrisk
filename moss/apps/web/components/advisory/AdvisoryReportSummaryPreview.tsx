@@ -75,12 +75,20 @@ export function AdvisoryReportSummaryPreview({
 
       <div>
         <p className="m-0 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Recommended next step
+          Recommended next engagements
         </p>
         {summary.recommendations.length ? (
-          <ul className="m-0 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-slate-700">
             {summary.recommendations.map((r) => (
-              <li key={r.productCode}>{r.label}</li>
+              <li key={r.productCode}>
+                <span className="font-medium text-slate-900">{r.label}</span>
+                {r.sourceModules.length ? (
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    Recommended from:{' '}
+                    {r.sourceModules.map((m) => m.moduleName).join('; ')}
+                  </span>
+                ) : null}
+              </li>
             ))}
           </ul>
         ) : (

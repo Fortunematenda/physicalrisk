@@ -15,6 +15,7 @@ import {
 import {
   buildEadReportSummary,
   formatDiagnosticAnswerLabel,
+  formatRecommendationSourceModules,
   sanitizeRichText,
   type EadReportEvidenceInput,
   type EadReportModuleInput,
@@ -795,14 +796,14 @@ function drawRecommendations(
   salesEmail: string,
   ctx: DrawCtx,
 ) {
-  ctx.sectionTitle('Recommended next step');
+  ctx.sectionTitle('Recommended next engagements');
   if (!summary.recommendations.length) {
     doc
       .fillColor(ctx.muted)
       .font('Helvetica')
       .fontSize(10)
       .text(
-        'No additional Physical Risk assessment has been automatically recommended. Further advisory discussion may be appropriate.',
+        'No additional Physical Risk assessment has been recommended. Further advisory discussion may be appropriate.',
         { width: ctx.pageW },
       );
     doc.moveDown(0.35);
@@ -813,18 +814,27 @@ function drawRecommendations(
       ctx,
       [
         { key: 'rank', header: '#', width: w * 0.06 },
-        { key: 'product', header: 'RECOMMENDED PRODUCT', width: w * 0.48 },
-        { key: 'rationale', header: 'RATIONALE', width: w * 0.46 },
+        { key: 'product', header: 'ENGAGEMENT', width: w * 0.42 },
+        { key: 'from', header: 'RECOMMENDED FROM', width: w * 0.52 },
       ],
-      summary.recommendations.map((rec, idx) => ({
-        accent: ctx.red || '#c41230',
-        fill: '#f8fafc',
-        cells: {
-          rank: { text: String(idx + 1), bold: true },
-          product: { text: rec.label, bold: true },
-          rationale: stripHtmlToPlain(rec.rationale || '') || '—',
-        },
-      })),
+      summary.recommendations.map((rec, idx) => {
+        const fromModules = formatRecommendationSourceModules(rec.sourceModules);
+        const rationale = stripHtmlToPlain(rec.rationale || '').trim();
+        const fromText =
+          fromModules ||
+          (rec.source === 'confirmed_route' || rec.source === 'both'
+            ? rationale || 'Confirmed route'
+            : '—');
+        return {
+          accent: ctx.red || '#c41230',
+          fill: '#f8fafc',
+          cells: {
+            rank: { text: String(idx + 1), bold: true },
+            product: { text: rec.label, bold: true },
+            from: { text: fromText },
+          },
+        };
+      }),
       { fontSize: 8, padY: 8 },
     );
   }
@@ -878,6 +888,33 @@ function drawAssuranceBasis(doc: PDFKit.PDFDocument, summary: EadReportSummary, 
       'Assurance score: higher is better. Exposure indicators (where shown) are derived as 100 − assurance and are for internal routing context only.',
       { width: ctx.pageW },
     );
+  doc.moveDown(0.45);
+
+  if (summary.responseScaleLegend?.length) {
+    doc.fillColor(ctx.ink).font('Helvetica-Bold').fontSize(9).text('Response scale notes');
+    doc.moveDown(0.3);
+    for (const row of summary.responseScaleLegend) {
+      doc
+        .fillColor(ctx.ink)
+        .font('Helvetica-Bold')
+        .fontSize(8)
+        .text(`${row.label}: `, { continued: true, width: ctx.pageW });
+      doc.font('Helvetica').fillColor(ctx.muted).text(row.note, { width: ctx.pageW });
+      doc.moveDown(0.2);
+    }
+  }
+
+  if (summary.notAwareCount > 0) {
+    doc.moveDown(0.2);
+    doc
+      .fillColor(ctx.ink)
+      .font('Helvetica')
+      .fontSize(8)
+      .text(
+        `Knowledge gaps identified: ${summary.notAwareCount} criterion${summary.notAwareCount === 1 ? '' : 'ia'} marked “Not aware”.`,
+        { width: ctx.pageW },
+      );
+  }
   doc.moveDown(0.55);
 }
 
@@ -1014,7 +1051,12 @@ function drawModuleDetails(
         'Required decision',
         stripHtmlToPlain(String(source?.requiredDecision || '')).trim() || 'Not recorded',
       ],
-      ['Recommended next product', row.recommendedProductLabel || 'Not recorded'],
+      [
+        'Recommended next products',
+        row.recommendedProductLabels.length
+          ? row.recommendedProductLabels.map((label) => `• ${label}`).join('\n')
+          : 'None selected',
+      ],
       [
         'Consultant note',
         stripHtmlToPlain(String(source?.analystNote || '')).trim() || 'Not recorded',
@@ -1104,7 +1146,7 @@ function drawConclusion(
   }
 
   if (summary.recommendations.length) {
-    doc.fillColor(ctx.ink).font('Helvetica-Bold').fontSize(9).text('Recommended next step');
+    doc.fillColor(ctx.ink).font('Helvetica-Bold').fontSize(9).text('Recommended next engagements');
     resetCursor(doc);
     doc.moveDown(0.5);
     resetCursor(doc);
@@ -1113,13 +1155,17 @@ function drawConclusion(
       ctx,
       [
         { key: 'rank', header: '#', width: w * 0.08 },
-        { key: 'product', header: 'PRODUCT', width: w * 0.92 },
+        { key: 'product', header: 'ENGAGEMENT', width: w * 0.52 },
+        { key: 'from', header: 'FROM', width: w * 0.4 },
       ],
       summary.recommendations.map((r, idx) => ({
         accent: ctx.red || '#c41230',
         cells: {
           rank: { text: String(idx + 1), bold: true },
           product: { text: r.label, bold: true },
+          from: {
+            text: formatRecommendationSourceModules(r.sourceModules) || '—',
+          },
         },
       })),
       { fontSize: 8 },
