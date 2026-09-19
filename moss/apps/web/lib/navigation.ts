@@ -72,7 +72,6 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     collapsible: true,
     items: [
       { id: 'advisory-engagements', label: 'Diagnostics & assurance', href: '/advisory', icon: IconShieldCheck, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
-      { id: 'advisory-reports', label: 'Advisory reports', href: '/reports#executive-advisory-reports', icon: IconFileText, roles: ['ADMIN', 'ANALYST', 'CLIENT'] },
       {
         id: 'advisory-diagnostic-template',
         label: 'Diagnostic templates',
@@ -324,7 +323,7 @@ export function applyNavHash(href: string) {
   scrollToNavHash(hashId);
 }
 
-/** True when the user is in the Executive & Advisory reports surface (list hash or report detail). */
+/** True when viewing an advisory PDF/report detail (not the removed advisory reports list). */
 export function isReportsAdvisoryContext(hash = '', search = ''): boolean {
   if (hash.includes('executive-advisory')) return true;
   const raw = search.startsWith('?') ? search.slice(1) : search;
@@ -340,13 +339,15 @@ export function isNavItemActive(pathname: string, href: string, hash = '', searc
 
   if (itemHash) {
     if (pathname !== path && !pathname.startsWith(`${path}/`)) return false;
-    if (itemHash === 'executive-advisory-reports') {
-      if (pathname.startsWith('/reports/')) {
-        return isReportsAdvisoryContext(hash, search);
-      }
-      return hash === `#${itemHash}` || hash === itemHash;
-    }
     return hash === `#${itemHash}` || hash === itemHash;
+  }
+
+  if (href === '/advisory') {
+    return (
+      pathname === '/advisory'
+      || pathname.startsWith('/advisory/')
+      || (pathname.startsWith('/reports/') && isReportsAdvisoryContext(hash, search))
+    );
   }
 
   if (path === '/dashboard') return pathname === '/dashboard';

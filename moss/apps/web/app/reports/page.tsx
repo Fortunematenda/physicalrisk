@@ -30,41 +30,29 @@ import {
 } from '../../lib/advisory-report';
 import { getStoredUser, resolveMvpNavRole } from '../../lib/auth-user';
 
-type ReportsView = 'scl' | 'advisory';
-
-function resolveReportsView(hash: string): ReportsView {
-  if (hash === '#executive-advisory-reports') return 'advisory';
-  return 'scl';
-}
+type ReportsView = 'scl';
 
 function useReportsView(): ReportsView {
   const router = useRouter();
-  const [view, setView] = useState<ReportsView>(() => {
-    if (typeof window === 'undefined') return 'scl';
-    return resolveReportsView(window.location.hash);
-  });
 
   useEffect(() => {
     const sync = () => {
-      if (window.location.hash === '#executive-triage-reports') {
+      const hash = window.location.hash;
+      if (hash === '#executive-triage-reports') {
         router.replace('/triage');
-        setView('scl');
         return;
       }
-      setView(resolveReportsView(window.location.hash));
+      // Advisory reports list removed — engagements live under /advisory.
+      if (hash === '#executive-advisory-reports') {
+        router.replace('/advisory');
+      }
     };
     sync();
     window.addEventListener('hashchange', sync);
     return () => window.removeEventListener('hashchange', sync);
   }, [router]);
 
-  useEffect(() => {
-    if (view === 'advisory') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, [view]);
-
-  return view;
+  return 'scl';
 }
 
 type UserRef = {
@@ -191,27 +179,7 @@ function engagementHref(row: ReportRow) {
 }
 
 /** Primary click for advisory report rows: EAD → Diagnostic outcome; others → report PDF. */
-function advisoryPrimaryHref(row: ReportRow) {
-  const assessmentId = row.assessment?.id;
-  if (
-    assessmentId &&
-    isExecutiveAdvisoryDiagnostic({
-      productCode: row.assessment?.productCode,
-      reference: row.assessment?.reference,
-    })
-  ) {
-    return advisoryWorkspaceHref({
-      assessmentId,
-      productCode: row.assessment?.productCode,
-      reference: row.assessment?.reference,
-      hasOutcome: true,
-    });
-  }
-  return reportDetailHref(row.id, 'advisory');
-}
-
-function reportDetailHref(reportId: string, scope: 'advisory' | 'scl' = 'scl') {
-  if (scope === 'advisory') return `/reports/${reportId}?view=advisory&pdf=1`;
+function reportDetailHref(reportId: string) {
   return `/reports/${reportId}`;
 }
 
@@ -231,59 +199,10 @@ function reportTypeLabel(type: string) {
   }
 }
 
-function filterReportRows(rows: ReportRow[], query: string, headerSearch: string) {
-  const q = (query || headerSearch).trim().toLowerCase();
-  if (!q) return rows;
-  return rows.filter((r) => {
-    const hay = [
-      r.reference,
-      r.title,
-      r.assessment?.reference,
-      r.assessment?.organisation?.name,
-      displayName(r.generatedBy),
-      reportTypeLabel(r.reportType),
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return hay.includes(q);
-  });
-}
-
 function isTriageReport(row: ReportRow) {
   const code = row.assessment?.productCode || '';
   const ref = row.assessment?.reference || '';
   return code === 'EXECUTIVE_GOVERNANCE_TRIAGE' || ref.startsWith('EGT-');
-}
-
-function isAdvisoryReport(row: ReportRow) {
-  if (isTriageReport(row)) return false;
-  const code = row.assessment?.productCode || '';
-  const ref = row.assessment?.reference || '';
-  if (code === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' || ref.startsWith('EAD-')) return true;
-  return [
-    'CONTRACT_SLA_ASSURANCE',
-    'VENDOR_PERFORMANCE_ASSURANCE',
-    'GOVERNANCE_EXECUTIVE_ASSURANCE',
-    'CYBER_PHYSICAL_DEPENDENCY',
-    // Legacy — historical Shield 360 reports still classify as advisory.
-    'SHIELD360',
-  ].includes(code);
-}
-
-function summarizeReports(rows: ReportRow[]) {
-  return {
-    total: rows.length,
-    issued: rows.filter((r) => r.uiStatus === 'issued' || r.status === 'ISSUED').length,
-    generated: rows.filter((r) => r.uiStatus === 'generated' || r.status === 'GENERATED').length,
-    draft: rows.filter((r) => ['draft', 'failed', 'pending'].includes(r.uiStatus) || r.status === 'DRAFT').length,
-  };
-}
-
-function mergeReportSections(primary: ReportRow[], secondary: ReportRow[] = []) {
-  const byId = new Map<string, ReportRow>();
-  for (const row of [...primary, ...secondary]) byId.set(row.id, row);
-  return [...byId.values()];
 }
 
 function statusLabel(status: string) {
@@ -299,8 +218,7 @@ function statusLabel(status: string) {
 
 export default function ReportsIndexPage() {
   const confirm = useConfirm();
-  const view = useReportsView();
-  const isAdvisoryView = view === 'advisory';
+  useReportsView();
   const [data, setData] = useState<ReportsResponse>({ items: [] });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -336,11 +254,6 @@ export default function ReportsIndexPage() {
   }, []);
 
   const items = data.items || [];
-  const executiveItems = useMemo(
-    () => mergeReportSections(data.executiveAdvisory?.items || []).filter(isAdvisoryReport),
-    [data.executiveAdvisory?.items],
-  );
-  const executiveSummary = useMemo(() => summarizeReports(executiveItems), [executiveItems]);
   const summary = data.summary || {
     total: items.length,
     preliminary: 0,
@@ -399,11 +312,6 @@ export default function ReportsIndexPage() {
     });
   }, [items, query, headerSearch, orgFilter, typeFilter, statusFilter, analystFilter, dateFrom, dateTo]);
 
-  const filteredExecutive = useMemo(
-    () => filterReportRows(executiveItems, query, headerSearch),
-    [executiveItems, query, headerSearch],
-  );
-
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -423,30 +331,6 @@ export default function ReportsIndexPage() {
     setAnalystFilter('');
     setDateFrom('');
     setDateTo('');
-  }
-
-  function exportExecutiveCsv() {
-    const rows = [
-      ['Report Reference', 'Engagement', 'Organisation', 'Type', 'Status', 'Version', 'Generated By', 'Generated'],
-      ...filteredExecutive.map((r) => [
-        r.reference,
-        r.assessment?.reference || '',
-        r.assessment?.organisation?.name || '',
-        reportTypeLabel(r.reportType),
-        statusLabel(r.uiStatus),
-        String(r.version),
-        displayName(r.generatedBy),
-        formatDateTime(r.generatedAt || r.createdAt),
-      ]),
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `executive-advisory-reports-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   function exportCsv() {
@@ -594,274 +478,15 @@ export default function ReportsIndexPage() {
   return (
     <AuthGate>
       <Shell
-        title={
-          isAdvisoryView
-            ? 'Executive & Advisory Reports'
-            : 'Security Cost Leakage Reports'
-        }
+        title="Security Cost Leakage Reports"
         hideEyebrow
-        subtitle={
-          isAdvisoryView
-            ? 'Level 2 Executive Advisory Diagnostic briefs and Level 3 assurance PDFs.'
-            : 'Preliminary and approved executive PDFs for Security Cost Leakage assessments.'
-        }
+        subtitle="Preliminary and approved executive PDFs for Security Cost Leakage assessments."
         searchPlaceholder="Search reports…"
         searchValue={headerSearch}
         onSearch={setHeaderSearch}
       >
         {error && <p className="error">{error}</p>}
 
-        {isAdvisoryView ? (
-          <>
-            <div className="org2-actions-row">
-              <button type="button" className="btn secondary org2-export-btn" onClick={exportExecutiveCsv}>
-                <IconDownload />
-                Export
-              </button>
-              <Link href="/triage" className="queue2-view-all" style={{ alignSelf: 'center' }}>
-                View Triage submissions
-              </Link>
-              <Link href="/reports" className="queue2-view-all" style={{ alignSelf: 'center' }}>
-                View Security Cost Leakage reports
-              </Link>
-            </div>
-
-            <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard
-                icon={FileText}
-                title="Total Reports"
-                value={executiveSummary.total}
-                description="Executive Advisory & assurance deliverables"
-                tone="blue"
-                loading={loading}
-              />
-              <StatCard
-                icon={Send}
-                title="Issued"
-                value={executiveSummary.issued}
-                description="Client delivered"
-                tone="violet"
-                loading={loading}
-              />
-              <StatCard
-                icon={BadgeCheck}
-                title="Generated"
-                value={executiveSummary.generated}
-                description="Awaiting issue"
-                tone="green"
-                loading={loading}
-              />
-              <StatCard
-                icon={ClipboardList}
-                title="Draft"
-                value={executiveSummary.draft}
-                description="In progress"
-                tone="amber"
-                loading={loading}
-              />
-            </div>
-
-            <section className="dash2-card org2-filters-card">
-              <div className="assess2-filters">
-                <label className="org2-filter-search">
-                  <IconSearch />
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search executive & advisory reports…"
-                    aria-label="Filter reports"
-                  />
-                </label>
-                <button type="button" className="dash2-filter-btn" onClick={clearFilters}>
-                  <IconRotateCcw />
-                  Clear
-                </button>
-              </div>
-            </section>
-
-            {editing ? (
-              <section className="dash2-card org2-create-card">
-                <div className="dash2-card-head">
-                  <div>
-                    <h2>Edit report</h2>
-                    <p>Update the report title shown across MOSS.</p>
-                  </div>
-                </div>
-                <form onSubmit={saveEdit} className="flex flex-wrap items-end gap-3">
-                  <div className="field" style={{ flex: '1 1 240px', marginBottom: 0 }}>
-                    <label htmlFor="edit-report-title">Title</label>
-                    <input
-                      id="edit-report-title"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      disabled={savingEdit}
-                    />
-                  </div>
-                  <button type="submit" className="btn" disabled={savingEdit}>
-                    {savingEdit ? 'Saving…' : 'Save changes'}
-                  </button>
-                  <button type="button" className="btn secondary" disabled={savingEdit} onClick={() => setEditing(null)}>
-                    Cancel
-                  </button>
-                </form>
-              </section>
-            ) : null}
-
-            <section className="dash2-card org2-table-card" id="executive-advisory-reports">
-              <div className="dash2-card-head">
-                <div>
-                  <h2>Executive &amp; Advisory Reports</h2>
-                  <p>Level 2 Executive Advisory Diagnostic (EAD) briefs and Level 3 assurance PDFs.</p>
-                </div>
-              </div>
-              <div className="table-wrap">
-                <table className="reports2-table">
-                  <thead>
-                    <tr>
-                      <th>Report Reference</th>
-                      <th>Engagement</th>
-                      <th>Organisation</th>
-                      <th>Report Type</th>
-                      <th>Status</th>
-                      <th>Version</th>
-                      <th>Generated By</th>
-                      <th>Generated Date</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExecutive.map((r) => {
-                      const by = displayName(r.generatedBy);
-                      const href = engagementHref(r);
-                      const detailHref = reportDetailHref(r.id, 'advisory');
-                      const primaryHref = advisoryPrimaryHref(r);
-                      const isEad = isExecutiveAdvisoryDiagnostic({
-                        productCode: r.assessment?.productCode,
-                        reference: r.assessment?.reference,
-                      });
-                      return (
-                        <tr
-                          key={r.id}
-                          className={isEad ? 'cursor-pointer' : undefined}
-                          onClick={
-                            isEad
-                              ? () => {
-                                  window.location.href = primaryHref;
-                                }
-                              : undefined
-                          }
-                        >
-                          <td>
-                            <Link href={primaryHref} onClick={(e) => e.stopPropagation()}>
-                              <strong>{r.reference}</strong>
-                            </Link>
-                          </td>
-                          <td>
-                            <div className="assess2-ref-cell">
-                              {href ? (
-                                <Link href={href} onClick={(e) => e.stopPropagation()}>
-                                  <strong>{r.assessment?.reference}</strong>
-                                </Link>
-                              ) : (
-                                <strong>{r.assessment?.reference || '—'}</strong>
-                              )}
-                              <span className="muted small">{r.assessment?.title || r.title}</span>
-                            </div>
-                          </td>
-                          <td>{r.assessment?.organisation?.name || '—'}</td>
-                          <td>{reportTypeLabel(r.reportType)}</td>
-                          <td>
-                            <span className={`reports2-status status-${r.uiStatus}`}>
-                              {statusLabel(r.uiStatus)}
-                            </span>
-                          </td>
-                          <td><strong>v{r.version}</strong></td>
-                          <td>
-                            {by ? (
-                              <div className="assess2-analyst">
-                                <span className="assess2-analyst-avatar">{initials(by)}</span>
-                                <strong>{by}</strong>
-                              </div>
-                            ) : <span className="muted">—</span>}
-                          </td>
-                          <td className="muted small">{formatDateTime(r.generatedAt || r.createdAt)}</td>
-                          <td
-                            className="org2-actions-cell"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="reports2-actions">
-                              <RowActionsMenu
-                                open={menuOpenId === r.id}
-                                onClose={() => setMenuOpenId(null)}
-                                trigger={(
-                                  <button
-                                    type="button"
-                                    className="org2-menu-btn"
-                                    aria-label="Report actions"
-                                    onClick={() => setMenuOpenId((id) => (id === r.id ? null : r.id))}
-                                  >
-                                    <IconMoreVertical />
-                                  </button>
-                                )}
-                              >
-                                {isEad && href ? (
-                                  <Link href={href} onClick={() => setMenuOpenId(null)}>
-                                    Open diagnostic outcome
-                                  </Link>
-                                ) : null}
-                                <Link href={detailHref} onClick={() => setMenuOpenId(null)}>View report</Link>
-                                {href && !isEad ? (
-                                  <Link href={href} onClick={() => setMenuOpenId(null)}>Open engagement</Link>
-                                ) : null}
-                                {isEad && r.assessment?.id ? (
-                                  <Link
-                                    href={`/advisory/${r.assessment.id}`}
-                                    onClick={() => setMenuOpenId(null)}
-                                  >
-                                    Open engagement workspace
-                                  </Link>
-                                ) : null}
-                                {r.assessment?.organisation?.id ? (
-                                  <Link
-                                    href={`/organisations/${r.assessment.organisation.id}`}
-                                    onClick={() => setMenuOpenId(null)}
-                                  >
-                                    View organisation
-                                  </Link>
-                                ) : null}
-                                <Link href={detailHref} onClick={() => setMenuOpenId(null)}>Issue report</Link>
-                                {isAdmin ? (
-                                  <button type="button" onClick={() => startEdit(r)} disabled={deletingId === r.id}>
-                                    Edit
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="danger"
-                                  disabled={deletingId === r.id}
-                                  onClick={() => void deleteReport(r)}
-                                >
-                                  {deletingId === r.id ? 'Deleting…' : 'Delete'}
-                                </button>
-                              </RowActionsMenu>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {!loading && !filteredExecutive.length && (
-                      <tr><td colSpan={9} className="muted">No executive or advisory reports yet.</td></tr>
-                    )}
-                    {loading && (
-                      <tr><td colSpan={9} className="muted">Loading executive &amp; advisory reports…</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </>
-        ) : (
-          <>
             <div className="org2-actions-row">
               <button type="button" className="btn org2-add-btn" onClick={() => void openGenerate()}>
                 <IconPlus />
@@ -871,9 +496,6 @@ export default function ReportsIndexPage() {
                 <IconDownload />
                 Export
               </button>
-              <Link href="/reports#executive-advisory-reports" className="queue2-view-all" style={{ alignSelf: 'center' }}>
-                View Executive &amp; Advisory reports
-              </Link>
               <Link href="/triage" className="queue2-view-all" style={{ alignSelf: 'center' }}>
                 View Triage submissions
               </Link>
@@ -1012,7 +634,7 @@ export default function ReportsIndexPage() {
                   <tbody>
                     {pageItems.map((r) => {
                       const by = displayName(r.generatedBy);
-                      const detailHref = reportDetailHref(r.id, 'scl');
+                      const detailHref = reportDetailHref(r.id);
                       return (
                         <tr key={r.id}>
                           <td>
@@ -1143,8 +765,6 @@ export default function ReportsIndexPage() {
                 </div>
               </div>
             </section>
-          </>
-        )}
       </Shell>
     </AuthGate>
   );

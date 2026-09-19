@@ -163,8 +163,8 @@ export default function ReportPage() {
     }
   }
 
-  const backHref = isAdvisoryReport ? '/reports#executive-advisory-reports' : '/reports';
-  const backLabel = isAdvisoryReport ? 'Back to advisory reports' : 'Back to Cost Leakage reports';
+  const backHref = isAdvisoryReport ? '/advisory' : '/reports';
+  const backLabel = isAdvisoryReport ? 'Back to diagnostics & assurance' : 'Back to Cost Leakage reports';
   const workHref = engagementHref(
     productCode,
     report?.assessment?.id,

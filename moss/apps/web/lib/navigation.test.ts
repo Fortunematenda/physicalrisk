@@ -17,6 +17,11 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     expect(triage?.items.map((i) => i.id)).toEqual(['triage-submissions']);
     expect(triage?.items.map((i) => i.href)).not.toContain('/reports#executive-triage-reports');
     expect(advisory?.label).toBe('Executive Advisory');
+    expect(advisory?.items.map((i) => i.href)).toEqual(
+      expect.arrayContaining(['/advisory']),
+    );
+    expect(advisory?.items.map((i) => i.href)).not.toContain('/reports#executive-advisory-reports');
+    expect(advisory?.items.map((i) => i.id)).not.toContain('advisory-reports');
     expect(scl?.label).toBe('Security Cost Leakage');
     expect(moss?.label).toBe('MOSS');
     expect(somod?.label).toBe('SOMOD');
@@ -112,17 +117,12 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     expect(filtered.some((s) => s.id === 'somod')).toBe(true);
   });
 
-  it('separates advisory and cost leakage report links', () => {
-    expect(isNavItemActive('/reports', '/reports', '#executive-advisory-reports')).toBe(false);
+  it('keeps advisory PDFs under Diagnostics & assurance, not Cost Leakage reports', () => {
     expect(isNavItemActive('/reports', '/reports', '')).toBe(true);
-    expect(
-      isNavItemActive('/reports', '/reports#executive-advisory-reports', '#executive-advisory-reports'),
-    ).toBe(true);
-    expect(isNavItemActive('/reports', '/reports#executive-advisory-reports', '')).toBe(false);
-    expect(isNavItemActive('/reports/abc', '/reports', '', '?view=advisory')).toBe(false);
-    expect(
-      isNavItemActive('/reports/abc', '/reports#executive-advisory-reports', '', '?view=advisory'),
-    ).toBe(true);
     expect(isNavItemActive('/reports/abc', '/reports', '', '')).toBe(true);
+    expect(isNavItemActive('/reports/abc', '/reports', '', '?view=advisory')).toBe(false);
+    expect(isNavItemActive('/advisory', '/advisory')).toBe(true);
+    expect(isNavItemActive('/advisory/abc', '/advisory')).toBe(true);
+    expect(isNavItemActive('/reports/abc', '/advisory', '', '?view=advisory')).toBe(true);
   });
 });

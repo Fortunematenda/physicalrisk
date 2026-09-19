@@ -54,7 +54,6 @@ import { ChevronDown } from 'lucide-react';
 export const NAV_ICON_MAP: Record<string, LucideIcon> = {
   'triage-submissions': ClipboardList,
   'advisory-engagements': ShieldCheck,
-  'advisory-reports': FileText,
   'advisory-new': ClipboardList,
   'scl-dashboard': LayoutDashboard,
   'scl-assessments': ClipboardList,
