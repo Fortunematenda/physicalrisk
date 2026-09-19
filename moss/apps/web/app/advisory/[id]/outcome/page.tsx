@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   PHYSICAL_RISK_PRODUCTS,
 } from '@moss/shared';
@@ -22,6 +22,7 @@ import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import {
   advisoryReportHref,
+  advisoryWorkingPapersHref,
   pickLatestAdvisoryReport,
   type LatestAdvisoryReport,
 } from '@/lib/advisory-report';
@@ -135,6 +136,7 @@ function RationaleBlock({ text }: { text: string }) {
 
 export default function AdvisoryOutcomePage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [notes, setNotes] = useState('');
@@ -152,6 +154,12 @@ export default function AdvisoryOutcomePage() {
     void load()
       .then(() => setLoadFailed(false))
       .catch((e: Error) => {
+        const msg = String(e.message || '');
+        // Incomplete diagnostic — send consultant back to working papers.
+        if (/not been confirmed|only available for Executive Advisory/i.test(msg)) {
+          router.replace(`/advisory/${id}`);
+          return;
+        }
         setLoadFailed(true);
         toast({
           title: 'Unable to load outcome',
@@ -159,7 +167,7 @@ export default function AdvisoryOutcomePage() {
           variant: 'error',
         });
       });
-  }, [load, toast]);
+  }, [load, toast, router, id]);
 
   async function commercialAction(action: string) {
     setBusy(true);
@@ -351,7 +359,7 @@ export default function AdvisoryOutcomePage() {
                     asChild
                     className="h-11 shrink-0 whitespace-nowrap px-4"
                   >
-                    <Link href={`/advisory/${id}`}>Generate report</Link>
+                    <Link href={advisoryWorkingPapersHref(String(id))}>Generate report</Link>
                   </Button>
                 )}
                 <Button
@@ -360,7 +368,7 @@ export default function AdvisoryOutcomePage() {
                   asChild
                   className="h-11 shrink-0 whitespace-nowrap px-4"
                 >
-                  <Link href={`/advisory/${id}`}>
+                  <Link href={advisoryWorkingPapersHref(String(id))}>
                     <NotebookPen className="size-4" />
                     Open working papers
                   </Link>

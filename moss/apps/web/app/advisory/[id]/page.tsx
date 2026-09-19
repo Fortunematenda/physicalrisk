@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   PHYSICAL_RISK_PRODUCTS,
   SHIELD360_DRAFT_CORRECTION_MESSAGE,
@@ -76,6 +76,7 @@ import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 import {
   advisoryReportHref,
+  advisoryWorkingPapersHref,
   formatAdvisoryReportVersion,
   isAdvisoryReportReady,
   pickLatestAdvisoryReport,
@@ -356,6 +357,9 @@ function fieldDomId(moduleCode: string, key: string) {
 export default function AdvisoryDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const forceWorkingPapers =
+    searchParams.get('papers') === '1' || searchParams.get('workspace') === '1';
   const { toast } = useToast();
   const confirm = useConfirm();
   const [x, setX] = useState<any>(null);
@@ -457,7 +461,17 @@ export default function AdvisoryDetail() {
 
   useEffect(() => {
     void load()
-      .then(() => setLoadFailed(false))
+      .then((data) => {
+        setLoadFailed(false);
+        // Completed EAD defaults to the outcome deliverable — not working papers.
+        if (
+          data?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' &&
+          data?.diagnosticOutcome &&
+          !forceWorkingPapers
+        ) {
+          router.replace(`/advisory/${id}/outcome`);
+        }
+      })
       .catch((e: Error) => {
         setLoadFailed(true);
         toast({
@@ -467,7 +481,7 @@ export default function AdvisoryDetail() {
         });
       });
     apiFetch<any[]>('/admin/users/analysts').then(setAnalysts).catch(() => []);
-  }, [load, toast]);
+  }, [load, toast, forceWorkingPapers, id, router]);
 
   useEffect(() => {
     return () => {
@@ -1236,6 +1250,22 @@ export default function AdvisoryDetail() {
     <AuthGate>
       <Shell title={productTitle} hideSearch>
         <div className="advisory-workspace pb-4">
+          {locked && forceWorkingPapers && x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-moss-info/30 bg-moss-info/[0.06] px-4 py-3">
+              <div className="min-w-0 space-y-0.5">
+                <p className="m-0 text-sm font-semibold text-slate-900">Working papers</p>
+                <p className="m-0 text-sm text-slate-600">
+                  Module answers for this completed diagnostic. Client deliverable and next steps are on the outcome screen.
+                </p>
+              </div>
+              <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
+                <Link href={`/advisory/${id}/outcome`}>
+                  Back to diagnostic outcome
+                  <ChevronRight className="size-4" />
+                </Link>
+              </Button>
+            </div>
+          ) : null}
           {/* Workspace identity — product name lives in Shell; avoid repeating at the same size */}
           <div className="sticky top-0 z-30 -mx-1 mb-4 border-b border-slate-200 bg-white/95 px-1 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/90">
             <div className="flex flex-wrap items-start justify-between gap-4">

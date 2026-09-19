@@ -7,6 +7,7 @@ import {
   isAdvisoryReportReady,
   isExecutiveAdvisoryDiagnostic,
   pickLatestAdvisoryReport,
+  advisoryWorkingPapersHref,
 } from './advisory-report';
 
 describe('advisory-report (Stage 11)', () => {
@@ -58,6 +59,10 @@ describe('advisory-report (Stage 11)', () => {
         hasOutcome: true,
       }),
     ).toBe('/advisory/l3_1');
+  });
+
+  it('builds working-papers href with papers flag', () => {
+    expect(advisoryWorkingPapersHref('ead_1')).toBe('/advisory/ead_1?papers=1');
   });
 
   it('allows generate when submitted without a ready report', () => {

@@ -16,6 +16,7 @@ import { apiFetch } from '@/lib/api';
 import {
   advisoryReportHref,
   advisoryWorkspaceHref,
+  advisoryWorkingPapersHref,
   canGenerateAdvisoryReport,
   formatAdvisoryReportVersion,
   isAdvisoryReportReady,
@@ -368,8 +369,11 @@ export default function AdvisoryPage() {
                                 : 'Open engagement'}
                             </Link>
                             {hasOutcome && isEad ? (
-                              <Link href={`/advisory/${x.id}`} onClick={() => setMenuOpenId(null)}>
-                                Open engagement workspace
+                              <Link
+                                href={advisoryWorkingPapersHref(x.id)}
+                                onClick={() => setMenuOpenId(null)}
+                              >
+                                Open working papers
                               </Link>
                             ) : null}
                             {reportReady && x.latestReport ? (

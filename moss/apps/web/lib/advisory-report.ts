@@ -67,6 +67,13 @@ export function advisoryWorkspaceHref(input: {
   return `/advisory/${id}`;
 }
 
+/** Explicit working-papers URL — only use after diagnostic completion (read-only modules). */
+export function advisoryWorkingPapersHref(assessmentId: string): string {
+  const id = String(assessmentId || '').trim();
+  if (!id) return '/advisory';
+  return `/advisory/${id}?papers=1`;
+}
+
 /** Engagement is far enough along that generating a report is meaningful. */
 export function canGenerateAdvisoryReport(input: {
   status: string;
