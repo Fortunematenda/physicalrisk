@@ -172,12 +172,54 @@ export default function ReportPage() {
     assessmentRef,
   );
 
+  // PDF deep-link: show only the preview dialog — never the issue/send page underneath.
+  const pdfOnlyMode = Boolean(forcePdf && isAdvisoryReport);
+
+  function leavePdfPreview() {
+    if (isEadReport && report?.assessment?.id) {
+      router.replace(
+        advisoryWorkspaceHref({
+          assessmentId: report.assessment.id,
+          productCode,
+          reference: assessmentRef,
+          hasOutcome: true,
+        }),
+      );
+      return;
+    }
+    if (workHref) {
+      router.replace(workHref);
+      return;
+    }
+    router.replace(backHref);
+  }
+
   return (
     <AuthGate>
-      <Shell title={report?.title || (isAdvisoryReport ? 'Advisory report' : 'Executive Report')}>
+      <Shell
+        title={report?.title || (isAdvisoryReport ? 'Advisory report' : 'Executive Report')}
+        hideSearch={pdfOnlyMode}
+        hideTitle={pdfOnlyMode}
+      >
         {error && <p className="error">{error}</p>}
-        {notice && <p className="notice">{notice}</p>}
-        {report ? (
+        {notice && !pdfOnlyMode && <p className="notice">{notice}</p>}
+        {pdfOnlyMode ? (
+          <div className="flex min-h-[40vh] items-center justify-center">
+            {previewError ? (
+              <div className="space-y-3 text-center">
+                <p className="error">{previewError}</p>
+                <Button type="button" variant="outline" onClick={() => leavePdfPreview()}>
+                  Back
+                </Button>
+              </div>
+            ) : previewLoading || !previewOpen ? (
+              <p className="muted flex items-center gap-2">
+                <Loader2 className="size-4 animate-spin" />
+                Opening report preview…
+              </p>
+            ) : null}
+          </div>
+        ) : report ? (
           <div className="grid two-col">
             <section className="card">
               <p className="eyebrow">{report.assessment.reference}</p>
@@ -250,22 +292,13 @@ export default function ReportPage() {
           open={previewOpen && Boolean(previewBytes)}
           onOpenChange={(open) => {
             setPreviewOpen(open);
-            // Closing an auto-opened PDF preview returns to the EAD outcome — do not leave
-            // the consultant on this issue/send report page.
-            if (!open && forcePdf && isEadReport && report?.assessment?.id) {
-              router.replace(
-                advisoryWorkspaceHref({
-                  assessmentId: report.assessment.id,
-                  productCode,
-                  reference: assessmentRef,
-                  hasOutcome: true,
-                }),
-              );
+            if (!open && forcePdf) {
+              leavePdfPreview();
             }
           }}
           pdfBytes={previewBytes}
           title={report?.title || 'Executive Advisory report'}
-          description="On-screen report preview. Use Download PDF if you need a file."
+          description="On-screen report preview. Closing returns you to the diagnostic outcome."
           downloadLabel="Download PDF"
           onDownload={() => {
             if (report?.downloadUrl) {

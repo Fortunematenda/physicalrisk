@@ -159,7 +159,12 @@ export default function AdvisoryPage() {
       });
       await load();
       if (report?.id) {
-        router.push(advisoryReportHref(report.id));
+        // Prefer outcome for EAD — preview opens there without the issue-report page.
+        if (row.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+          router.push(`/advisory/${row.id}/outcome`);
+        } else {
+          router.push(advisoryReportHref(report.id));
+        }
       }
     } catch (err: unknown) {
       showError(
@@ -328,7 +333,11 @@ export default function AdvisoryPage() {
                                 {formatAdvisoryReportVersion(x.latestReport.version)}
                               </span>
                               <Link
-                                href={advisoryReportHref(x.latestReport.id)}
+                                href={
+                                  isEad && hasOutcome
+                                    ? workspaceHref
+                                    : advisoryReportHref(x.latestReport.id)
+                                }
                                 className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
                               >
                                 View
@@ -383,7 +392,11 @@ export default function AdvisoryPage() {
                             ) : null}
                             {reportReady && x.latestReport ? (
                               <Link
-                                href={advisoryReportHref(x.latestReport.id)}
+                                href={
+                                  isEad && hasOutcome
+                                    ? workspaceHref
+                                    : advisoryReportHref(x.latestReport.id)
+                                }
                                 onClick={() => setMenuOpenId(null)}
                               >
                                 View PDF report

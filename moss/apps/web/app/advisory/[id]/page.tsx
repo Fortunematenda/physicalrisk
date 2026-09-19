@@ -1043,7 +1043,11 @@ export default function AdvisoryDetail() {
       });
       await load();
       if (r?.id) {
-        router.push(advisoryReportHref(r.id));
+        if (x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC') {
+          router.push(`/advisory/${id}/outcome`);
+        } else {
+          router.push(advisoryReportHref(r.id));
+        }
         return;
       }
     } catch (e: any) {
@@ -1398,7 +1402,13 @@ export default function AdvisoryDetail() {
                   {reportReady && latestReport ? (
                     <>
                       <Button asChild className="h-10 shrink-0 whitespace-nowrap px-4">
-                        <Link href={advisoryReportHref(latestReport.id)}>
+                        <Link
+                          href={
+                            locked && x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                              ? `/advisory/${id}/outcome`
+                              : advisoryReportHref(latestReport.id)
+                          }
+                        >
                           <FileText className="size-4" />
                           View report
                         </Link>
