@@ -41,6 +41,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
+import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { BusinessConsequenceSelector } from '@/components/advisory/BusinessConsequenceSelector';
 import { EadDiagnosticPanel } from '@/components/advisory/EadDiagnosticPanel';
 import type { AssessmentDiagnosticQuestion } from '@/components/advisory/ManageDiagnosticQuestionsDialog';
@@ -1092,7 +1093,12 @@ export default function AdvisoryDetail() {
   if (!x) {
     return (
       <AuthGate>
-        <Shell title="Advisory engagement">
+        <Shell
+          title="Advisory engagement"
+          hideSearch
+          hideTitle
+          headerLeading={<AdvisoryBreadcrumb current="…" />}
+        >
           {loadFailed ? (
             <Card className="rounded-xl border-slate-200 shadow-sm">
               <CardHeader>
@@ -1248,7 +1254,20 @@ export default function AdvisoryDetail() {
 
   return (
     <AuthGate>
-      <Shell title={productTitle} hideSearch>
+      <Shell
+        title={productTitle}
+        hideSearch
+        hideTitle
+        headerLeading={(
+          <AdvisoryBreadcrumb
+            current={
+              locked && forceWorkingPapers
+                ? `${x.reference} · Working papers`
+                : x.reference || 'Engagement'
+            }
+          />
+        )}
+      >
         <div className="advisory-workspace pb-4">
           {locked && forceWorkingPapers && x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-moss-info/30 bg-moss-info/[0.06] px-4 py-3">

@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/AuthGate';
+import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { Shell } from '@/components/Shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -75,7 +76,12 @@ export default function NewAdvisory() {
 
   return (
     <AuthGate>
-      <Shell title="New advisory engagement">
+      <Shell
+        title="New advisory engagement"
+        hideSearch
+        hideTitle
+        headerLeading={<AdvisoryBreadcrumb current="New engagement" />}
+      >
         <Card className="max-w-3xl rounded-xl border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle>Product journey</CardTitle>

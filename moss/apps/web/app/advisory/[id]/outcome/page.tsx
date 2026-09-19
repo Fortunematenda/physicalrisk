@@ -8,6 +8,7 @@ import {
 } from '@moss/shared';
 import { CheckCircle2, ChevronRight, FileText, Loader2, Lock, NotebookPen } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
+import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
 import { RequestComprehensiveProposalCard } from '@/components/advisory/RequestComprehensiveProposalCard';
 import { CreateLevel3EngagementsCard } from '@/components/triage/CreateLevel3EngagementsCard';
@@ -254,7 +255,12 @@ export default function AdvisoryOutcomePage() {
   if (!data) {
     return (
       <AuthGate>
-        <Shell title="Diagnostic outcome">
+        <Shell
+          title="Diagnostic outcome"
+          hideSearch
+          hideTitle
+          headerLeading={<AdvisoryBreadcrumb current="…" />}
+        >
           {loadFailed ? (
             <Card className="rounded-xl border-slate-200 shadow-sm">
               <CardHeader>
@@ -300,7 +306,12 @@ export default function AdvisoryOutcomePage() {
 
   return (
     <AuthGate>
-      <Shell title={`Diagnostic outcome · ${engagement.reference}`} hideSearch>
+      <Shell
+        title={`Diagnostic outcome · ${engagement.reference}`}
+        hideSearch
+        hideTitle
+        headerLeading={<AdvisoryBreadcrumb current={engagement.reference || 'Outcome'} />}
+      >
         <div className="outcome-workspace space-y-4 pb-8">
           {/* 1. Page header — completed treatment from persisted status */}
           <Card

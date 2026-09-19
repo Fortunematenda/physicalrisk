@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/AuthGate';
+import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { useConfirm } from '@/components/confirm-dialog';
 import { IconMoreVertical } from '@/components/NavIcons';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
@@ -172,7 +173,11 @@ export default function AdvisoryPage() {
 
   return (
     <AuthGate>
-      <Shell title="Executive Advisory">
+      <Shell
+        title="Executive Advisory"
+        hideTitle
+        headerLeading={<AdvisoryBreadcrumb current="Diagnostics & assurance" root />}
+      >
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="m-0 text-xl font-semibold">Paid diagnostics and focused assurance</h2>
