@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { EXECUTIVE_ADVISORY_MODULES } from '@moss/shared';
-import { FileText, Plus, Send } from 'lucide-react';
+import { FileText, Pencil, Plus, Send } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { Shell } from '@/components/Shell';
@@ -52,10 +52,18 @@ type TemplateQuestion = {
 
 function statusBadge(status?: string) {
   const s = String(status || '').toUpperCase();
-  if (s === 'PUBLISHED') return <Badge variant="success">Published</Badge>;
-  if (s === 'DRAFT') return <Badge variant="secondary">Draft</Badge>;
+  if (s === 'PUBLISHED') return <Badge variant="success">Published · live for new diagnostics</Badge>;
+  if (s === 'DRAFT') return <Badge variant="warning">Draft · editable</Badge>;
   if (s === 'ARCHIVED') return <Badge variant="outline">Archived</Badge>;
   return <Badge variant="outline">{status || '—'}</Badge>;
+}
+
+function pickPreferredVersion(rows: TemplateVersion[], preferId?: string | null) {
+  if (preferId) {
+    const match = rows.find((v) => v.id === preferId);
+    if (match) return match;
+  }
+  return rows.find((v) => v.status === 'DRAFT') || rows.find((v) => v.status === 'PUBLISHED') || rows[0] || null;
 }
 
 export default function EadDiagnosticTemplateAdminPage() {
@@ -75,20 +83,38 @@ export default function EadDiagnosticTemplateAdminPage() {
     isRequired: boolean;
   } | null>(null);
 
-  const load = useCallback(async () => {
-    const rows = await apiFetch<TemplateVersion[]>('/admin/ead-diagnostic-template/versions');
-    setVersions(rows);
-    const published = rows.find((v) => v.status === 'PUBLISHED') || rows[0];
-    if (published) {
-      const full = await apiFetch<TemplateVersion>(
-        `/admin/ead-diagnostic-template/versions/${published.id}`,
-      );
-      setActive(full);
-    }
+  const loadVersion = useCallback(async (versionId: string) => {
+    const full = await apiFetch<TemplateVersion>(
+      `/admin/ead-diagnostic-template/versions/${versionId}`,
+    );
+    setActive(full);
+    return full;
   }, []);
 
+  const load = useCallback(
+    async (preferVersionId?: string | null) => {
+      const rows = await apiFetch<TemplateVersion[]>('/admin/ead-diagnostic-template/versions');
+      setVersions(rows);
+      const preferred = pickPreferredVersion(rows, preferVersionId);
+      if (preferred) {
+        await loadVersion(preferred.id);
+      } else {
+        // First visit — seed published template then open a draft for editing.
+        await apiFetch('/admin/ead-diagnostic-template/published');
+        const draft = await apiFetch<TemplateVersion>('/admin/ead-diagnostic-template/draft', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+        const refreshed = await apiFetch<TemplateVersion[]>('/admin/ead-diagnostic-template/versions');
+        setVersions(refreshed);
+        await loadVersion(draft.id);
+      }
+    },
+    [loadVersion],
+  );
+
   useEffect(() => {
-    void load().catch((e) => setError(e.message));
+    void load().catch((e: Error) => setError(e.message));
   }, [load]);
 
   const questions = useMemo(
@@ -100,63 +126,107 @@ export default function EadDiagnosticTemplateAdminPage() {
   );
 
   const activeModule = EXECUTIVE_ADVISORY_MODULES.find((m) => m.code === moduleCode);
+  const isDraft = active?.status === 'DRAFT';
+  const isPublished = active?.status === 'PUBLISHED';
 
-  async function openDraft() {
+  async function ensureDraft(): Promise<TemplateVersion | null> {
+    if (active?.status === 'DRAFT') return active;
     setBusy(true);
     try {
       const draft = await apiFetch<TemplateVersion>('/admin/ead-diagnostic-template/draft', {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      const full = await apiFetch<TemplateVersion>(
-        `/admin/ead-diagnostic-template/versions/${draft.id}`,
-      );
-      setActive(full);
-      await load();
+      const full = await loadVersion(draft.id);
+      const rows = await apiFetch<TemplateVersion[]>('/admin/ead-diagnostic-template/versions');
+      setVersions(rows);
       toast({
         variant: 'success',
-        title: 'Draft ready',
-        description: 'Edit freely, then publish when the wording is ready for new diagnostics.',
+        title: 'Editing unlocked',
+        description: 'You are now on a draft. Changes apply to new diagnostics only after you publish.',
       });
-    } catch (e: any) {
-      toast({ variant: 'error', title: 'Unable to create draft', description: e.message });
+      return full;
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Unable to start editing',
+        description: e instanceof Error ? e.message : 'Draft could not be created.',
+      });
+      return null;
     } finally {
       setBusy(false);
     }
   }
 
+  async function startEditQuestion(q: TemplateQuestion) {
+    const draft = await ensureDraft();
+    if (!draft) return;
+    const draftQuestion =
+      (draft.questions || []).find(
+        (row) => row.moduleCode === q.moduleCode && row.questionCode === q.questionCode,
+      ) ||
+      (draft.questions || []).find(
+        (row) => row.moduleCode === q.moduleCode && row.title === q.title,
+      ) ||
+      q;
+    setEditor({
+      mode: 'edit',
+      id: draftQuestion.id,
+      title: draftQuestion.title,
+      questionText: draftQuestion.questionText,
+      helpText: draftQuestion.helpText || '',
+      allowNa: draftQuestion.allowNa,
+      isRequired: draftQuestion.isRequired,
+    });
+  }
+
+  async function startAddQuestion() {
+    const draft = await ensureDraft();
+    if (!draft) return;
+    setEditor({
+      mode: 'add',
+      title: '',
+      questionText: '',
+      helpText: '',
+      allowNa: false,
+      isRequired: true,
+    });
+  }
+
   async function publish() {
-    if (!active) return;
+    const draft = isDraft ? active : await ensureDraft();
+    if (!draft || draft.status !== 'DRAFT') return;
     setBusy(true);
     try {
       const published = await apiFetch<TemplateVersion>(
-        `/admin/ead-diagnostic-template/versions/${active.id}/publish`,
-        { method: 'POST', body: JSON.stringify({ changeNote: active.changeNote || undefined }) },
+        `/admin/ead-diagnostic-template/versions/${draft.id}/publish`,
+        { method: 'POST', body: JSON.stringify({ changeNote: draft.changeNote || undefined }) },
       );
-      setActive(published);
-      await load();
+      await load(published.id);
       toast({
         variant: 'success',
         title: `Published v${published.versionNumber}`,
         description: 'New Executive Advisory Diagnostics will use this questionnaire.',
       });
-    } catch (e: any) {
-      toast({ variant: 'error', title: 'Publish failed', description: e.message });
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Publish failed',
+        description: e instanceof Error ? e.message : 'Could not publish.',
+      });
     } finally {
       setBusy(false);
     }
   }
 
   async function saveEditor() {
-    if (!editor || !active) return;
-    if (active.status !== 'DRAFT') {
-      toast({ variant: 'warning', title: 'Create a draft before editing the questionnaire.' });
-      return;
-    }
+    if (!editor) return;
+    const draft = await ensureDraft();
+    if (!draft) return;
     setBusy(true);
     try {
       if (editor.mode === 'add') {
-        await apiFetch(`/admin/ead-diagnostic-template/versions/${active.id}/questions`, {
+        await apiFetch(`/admin/ead-diagnostic-template/versions/${draft.id}/questions`, {
           method: 'POST',
           body: JSON.stringify({
             moduleCode,
@@ -169,7 +239,7 @@ export default function EadDiagnosticTemplateAdminPage() {
         });
       } else if (editor.id) {
         await apiFetch(
-          `/admin/ead-diagnostic-template/versions/${active.id}/questions/${editor.id}`,
+          `/admin/ead-diagnostic-template/versions/${draft.id}/questions/${editor.id}`,
           {
             method: 'PATCH',
             body: JSON.stringify({
@@ -183,57 +253,48 @@ export default function EadDiagnosticTemplateAdminPage() {
         );
       }
       setEditor(null);
-      const full = await apiFetch<TemplateVersion>(
-        `/admin/ead-diagnostic-template/versions/${active.id}`,
-      );
-      setActive(full);
+      await loadVersion(draft.id);
+      const rows = await apiFetch<TemplateVersion[]>('/admin/ead-diagnostic-template/versions');
+      setVersions(rows);
       toast({ variant: 'success', title: 'Question saved' });
-    } catch (e: any) {
-      toast({ variant: 'error', title: 'Save failed', description: e.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function archiveQuestion(id: string) {
-    if (!active || active.status !== 'DRAFT') return;
-    setBusy(true);
-    try {
-      await apiFetch(
-        `/admin/ead-diagnostic-template/versions/${active.id}/questions/${id}/archive`,
-        { method: 'POST' },
-      );
-      const full = await apiFetch<TemplateVersion>(
-        `/admin/ead-diagnostic-template/versions/${active.id}`,
-      );
-      setActive(full);
-    } catch (e: any) {
-      toast({ variant: 'error', title: 'Archive failed', description: e.message });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function backfill() {
-    setBusy(true);
-    try {
-      const res = await apiFetch<{ assessmentsBackfilled: number }>(
-        '/admin/ead-diagnostic-template/backfill',
-        { method: 'POST' },
-      );
+    } catch (e: unknown) {
       toast({
-        variant: 'success',
-        title: 'Legacy backfill complete',
-        description: `${res.assessmentsBackfilled} assessment(s) snapshotted.`,
+        variant: 'error',
+        title: 'Save failed',
+        description: e instanceof Error ? e.message : 'Could not save question.',
       });
-    } catch (e: any) {
-      toast({ variant: 'error', title: 'Backfill failed', description: e.message });
     } finally {
       setBusy(false);
     }
   }
 
-  const isDraft = active?.status === 'DRAFT';
+  async function archiveQuestion(q: TemplateQuestion) {
+    const draft = await ensureDraft();
+    if (!draft) return;
+    setBusy(true);
+    try {
+      let questionId = q.id;
+      const match = (draft.questions || []).find(
+        (row) =>
+          row.moduleCode === q.moduleCode &&
+          (row.questionCode === q.questionCode || row.id === q.id),
+      );
+      if (match) questionId = match.id;
+      await apiFetch(
+        `/admin/ead-diagnostic-template/versions/${draft.id}/questions/${questionId}/archive`,
+        { method: 'POST' },
+      );
+      await loadVersion(draft.id);
+    } catch (e: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Archive failed',
+        description: e instanceof Error ? e.message : 'Could not archive.',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <AuthGate>
@@ -243,62 +304,61 @@ export default function EadDiagnosticTemplateAdminPage() {
         hideTitle
         headerLeading={<AdvisoryBreadcrumb current="Diagnostic questionnaire" />}
       >
-        <div className="mx-auto max-w-5xl space-y-5 pb-10">
+        <div className="w-full space-y-5 pb-10">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
               <h1 className="m-0 text-xl font-semibold text-slate-900 sm:text-2xl">
                 Diagnostic questionnaire
               </h1>
-              <p className="m-0 max-w-2xl text-sm text-slate-600">
-                Edit the Level 2 Executive Advisory Diagnostic questions admins and consultants run
-                in engagements. Publish when ready — only <strong>new</strong> diagnostics pick up
-                the change; existing ones keep their snapshotted wording.
+              <p className="m-0 max-w-3xl text-sm text-slate-600">
+                Edit the questions consultants answer on Executive Advisory Diagnostics. Use{' '}
+                <strong>Edit</strong> or <strong>Add question</strong> anytime — a draft is created
+                automatically. <strong>Publish</strong> when new diagnostics should use your wording.
               </p>
             </div>
-            <Button asChild variant="outline" className="h-10 shrink-0">
-              <Link href="/advisory">View engagements</Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline" className="h-10 shrink-0">
+                <Link href="/advisory">View engagements</Link>
+              </Button>
+              <Button
+                type="button"
+                className="h-10 shrink-0"
+                disabled={busy || (!isDraft && !isPublished)}
+                onClick={() => void publish()}
+              >
+                <Send className="size-4" />
+                Publish
+              </Button>
+            </div>
           </div>
 
           {error ? (
             <Alert variant="destructive">
-              <AlertTitle>Unable to load</AlertTitle>
+              <AlertTitle>Unable to load questionnaire</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
 
           <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 p-5 sm:p-6">
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0 p-5 sm:p-6">
               <div className="space-y-1">
-                <CardTitle className="text-base">Version</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-base">
                   {active
-                    ? `${active.label || `Version ${active.versionNumber}`} · ${active._count?.questions ?? questions.length} questions in this module view`
-                    : 'No template loaded yet'}
+                    ? active.label || `Version ${active.versionNumber}`
+                    : 'Loading questionnaire…'}
+                </CardTitle>
+                <CardDescription>
+                  {isDraft
+                    ? 'You can edit questions below. Publish when ready for new diagnostics.'
+                    : isPublished
+                      ? 'This version is live. Click Edit on any question to start a draft automatically.'
+                      : 'Select or create a version to manage questions.'}
                 </CardDescription>
               </div>
               {active ? statusBadge(active.status) : null}
             </CardHeader>
-            <CardContent className="space-y-4 p-5 pt-0 sm:p-6 sm:pt-0">
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" disabled={busy} onClick={() => void openDraft()}>
-                  {isDraft ? 'Refresh draft' : 'Create / open draft'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy || !isDraft}
-                  onClick={() => void publish()}
-                >
-                  <Send className="size-4" />
-                  Publish for new diagnostics
-                </Button>
-                <Button type="button" variant="ghost" disabled={busy} onClick={() => void backfill()}>
-                  Backfill legacy assessments
-                </Button>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
+            {versions.length > 1 ? (
+              <CardContent className="flex flex-wrap gap-2 border-t border-slate-100 p-5 pt-4 sm:px-6">
                 {versions.map((v) => (
                   <button
                     key={v.id}
@@ -310,44 +370,65 @@ export default function EadDiagnosticTemplateAdminPage() {
                         : 'border-slate-200 text-slate-600 hover:border-slate-300',
                     )}
                     onClick={() => {
-                      void apiFetch<TemplateVersion>(
-                        `/admin/ead-diagnostic-template/versions/${v.id}`,
-                      ).then(setActive);
+                      void loadVersion(v.id).catch((e: Error) =>
+                        toast({ variant: 'error', title: 'Unable to open version', description: e.message }),
+                      );
                     }}
                   >
                     v{v.versionNumber} · {v.status}
                     {v._count?.assessments ? ` · ${v._count.assessments} used` : ''}
                   </button>
                 ))}
-              </div>
-            </CardContent>
+              </CardContent>
+            ) : null}
           </Card>
 
           <Card className="rounded-xl border-slate-200 shadow-sm">
-            <CardHeader className="p-5 sm:p-6">
-              <CardTitle className="text-base">Modules</CardTitle>
-              <CardDescription>
-                Switch module to edit its diagnostic questions
-                {activeModule ? ` — currently ${activeModule.name}` : ''}.
-              </CardDescription>
+            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 p-5 sm:p-6">
+              <div className="space-y-1">
+                <CardTitle className="text-base">Questions by module</CardTitle>
+                <CardDescription>
+                  {activeModule
+                    ? `Editing ${activeModule.name} (${questions.length} question${questions.length === 1 ? '' : 's'})`
+                    : 'Select a module'}
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 shrink-0"
+                disabled={busy || !active}
+                onClick={() => void startAddQuestion()}
+              >
+                <Plus className="size-4" />
+                Add question
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4 p-5 pt-0 sm:p-6 sm:pt-0">
               <div className="flex flex-wrap gap-2">
-                {EXECUTIVE_ADVISORY_MODULES.map((m) => (
-                  <button
-                    key={m.code}
-                    type="button"
-                    className={cn(
-                      'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
-                      moduleCode === m.code
-                        ? 'border-slate-900 bg-slate-900 text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
-                    )}
-                    onClick={() => setModuleCode(m.code)}
-                  >
-                    {m.name}
-                  </button>
-                ))}
+                {EXECUTIVE_ADVISORY_MODULES.map((m) => {
+                  const count = (active?.questions || []).filter(
+                    (q) => q.moduleCode === m.code && q.isActive,
+                  ).length;
+                  return (
+                    <button
+                      key={m.code}
+                      type="button"
+                      className={cn(
+                        'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                        moduleCode === m.code
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                      )}
+                      onClick={() => setModuleCode(m.code)}
+                    >
+                      {m.name}
+                      <span className={cn('ml-1.5 text-xs', moduleCode === m.code ? 'text-white/70' : 'text-slate-400')}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="space-y-2">
@@ -363,7 +444,7 @@ export default function EadDiagnosticTemplateAdminPage() {
                       )}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0 space-y-1">
+                        <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="m-0 text-sm font-semibold text-slate-900">{q.title}</p>
                             {!q.isActive ? (
@@ -378,92 +459,64 @@ export default function EadDiagnosticTemplateAdminPage() {
                             <p className="m-0 text-xs text-slate-500">{q.helpText}</p>
                           ) : null}
                         </div>
-                        {isDraft ? (
-                          <div className="flex shrink-0 gap-2">
+                        <div className="flex shrink-0 gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void startEditQuestion(q)}
+                          >
+                            <Pencil className="size-3.5" />
+                            Edit
+                          </Button>
+                          {q.isActive ? (
                             <Button
                               type="button"
                               size="sm"
-                              variant="outline"
+                              variant="ghost"
                               disabled={busy}
-                              onClick={() =>
-                                setEditor({
-                                  mode: 'edit',
-                                  id: q.id,
-                                  title: q.title,
-                                  questionText: q.questionText,
-                                  helpText: q.helpText || '',
-                                  allowNa: q.allowNa,
-                                  isRequired: q.isRequired,
-                                })
-                              }
+                              onClick={() => void archiveQuestion(q)}
                             >
-                              Edit
+                              Archive
                             </Button>
-                            {q.isActive ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy}
-                                onClick={() => void archiveQuestion(q.id)}
-                              >
-                                Archive
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center">
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-4 py-10 text-center">
                     <FileText className="mx-auto size-8 text-slate-300" aria-hidden="true" />
                     <p className="mt-2 text-sm font-medium text-slate-700">No questions in this module</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {isDraft
-                        ? 'Add a question to build out this module for future diagnostics.'
-                        : 'Open a draft to add or edit questions.'}
+                      Add a question to include this module in future diagnostics.
                     </p>
+                    <Button
+                      type="button"
+                      className="mt-4"
+                      disabled={busy || !active}
+                      onClick={() => void startAddQuestion()}
+                    >
+                      <Plus className="size-4" />
+                      Add question
+                    </Button>
                   </div>
                 )}
               </div>
-
-              {isDraft ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    setEditor({
-                      mode: 'add',
-                      title: '',
-                      questionText: '',
-                      helpText: '',
-                      allowNa: false,
-                      isRequired: true,
-                    })
-                  }
-                >
-                  <Plus className="size-4" />
-                  Add question
-                </Button>
-              ) : (
-                <p className="m-0 text-sm text-slate-500">
-                  Create or open a draft above to edit questions for future assessments.
-                </p>
-              )}
             </CardContent>
           </Card>
         </div>
 
         <Dialog open={Boolean(editor)} onOpenChange={(v) => !v && setEditor(null)}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-lg">
             <DialogHeader>
               <DialogTitle>
                 {editor?.mode === 'add' ? 'Add question' : 'Edit question'}
               </DialogTitle>
               <DialogDescription>
-                Saved into the draft. Publish when you want new diagnostics to use this wording.
+                Saved to the draft. Publish from the top of the page when new diagnostics should use
+                this wording.
               </DialogDescription>
             </DialogHeader>
             {editor ? (
@@ -511,7 +564,11 @@ export default function EadDiagnosticTemplateAdminPage() {
               <Button type="button" variant="outline" onClick={() => setEditor(null)}>
                 Cancel
               </Button>
-              <Button type="button" disabled={busy} onClick={() => void saveEditor()}>
+              <Button
+                type="button"
+                disabled={busy || !editor?.title.trim() || !editor?.questionText.trim()}
+                onClick={() => void saveEditor()}
+              >
                 Save question
               </Button>
             </DialogFooter>

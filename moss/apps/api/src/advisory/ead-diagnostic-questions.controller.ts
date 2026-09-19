@@ -113,31 +113,31 @@ export class EadDiagnosticQuestionsController {
 
   // Template (admin)
   @Get('admin/ead-diagnostic-template/versions')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   listVersions(@CurrentUser() user: AuthUser) {
     return this.service.listTemplateVersions(user);
   }
 
   @Get('admin/ead-diagnostic-template/published')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   published(@CurrentUser() user: AuthUser) {
     return this.service.getLatestPublishedTemplate(user);
   }
 
   @Get('admin/ead-diagnostic-template/versions/:versionId')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   getVersion(@Param('versionId') versionId: string, @CurrentUser() user: AuthUser) {
     return this.service.getTemplateVersion(versionId, user);
   }
 
   @Post('admin/ead-diagnostic-template/draft')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   createDraft(@Body() body: PublishDto, @CurrentUser() user: AuthUser) {
     return this.service.upsertDraftFromPublished(user, body);
   }
 
   @Post('admin/ead-diagnostic-template/versions/:versionId/questions')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   addTemplateQuestion(
     @Param('versionId') versionId: string,
     @Body() body: TemplateQuestionDto,
@@ -147,7 +147,7 @@ export class EadDiagnosticQuestionsController {
   }
 
   @Patch('admin/ead-diagnostic-template/versions/:versionId/questions/:questionId')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   updateTemplateQuestion(
     @Param('versionId') versionId: string,
     @Param('questionId') questionId: string,
@@ -158,7 +158,7 @@ export class EadDiagnosticQuestionsController {
   }
 
   @Post('admin/ead-diagnostic-template/versions/:versionId/questions/:questionId/archive')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   archiveTemplateQuestion(
     @Param('versionId') versionId: string,
     @Param('questionId') questionId: string,
@@ -168,7 +168,7 @@ export class EadDiagnosticQuestionsController {
   }
 
   @Post('admin/ead-diagnostic-template/versions/:versionId/publish')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   publish(
     @Param('versionId') versionId: string,
     @Body() body: PublishDto,
@@ -178,7 +178,7 @@ export class EadDiagnosticQuestionsController {
   }
 
   @Post('admin/ead-diagnostic-template/backfill')
-  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ADMIN')
   backfill(@CurrentUser() user: AuthUser) {
     return this.service.backfillLegacyAssessments(user.id);
   }
