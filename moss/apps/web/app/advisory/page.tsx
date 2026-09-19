@@ -259,10 +259,12 @@ export default function AdvisoryPage() {
                     );
                     const hasOutcome =
                       Boolean(x.diagnosticOutcome?.confirmedAt) || OUTCOME_STATUSES.has(x.status);
+                    const isEad = x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
                     const reportReady = isAdvisoryReportReady(x.latestReport);
                     const workspaceHref = advisoryWorkspaceHref({
                       assessmentId: x.id,
                       productCode: x.productCode,
+                      reference: x.reference,
                       hasOutcome,
                     });
                     const showGenerate = canGenerateAdvisoryReport({
@@ -284,7 +286,7 @@ export default function AdvisoryPage() {
                         tabIndex={0}
                         role="link"
                         aria-label={
-                          hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                          hasOutcome && isEad
                             ? `Open diagnostic outcome ${x.reference}`
                             : `Open engagement ${x.reference}`
                         }
@@ -302,6 +304,8 @@ export default function AdvisoryPage() {
                             <span>{x.status}</span>
                             {reportReady ? (
                               <span className="mt-0.5 block text-xs text-moss-success">Report ready</span>
+                            ) : hasOutcome && isEad ? (
+                              <span className="mt-0.5 block text-xs text-moss-success">Outcome ready</span>
                             ) : hasOutcome ? (
                               <span className="mt-0.5 block text-xs text-slate-500">No report yet</span>
                             ) : null}
@@ -319,6 +323,16 @@ export default function AdvisoryPage() {
                               </span>
                               <Link
                                 href={advisoryReportHref(x.latestReport.id)}
+                                className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
+                              >
+                                View
+                              </Link>
+                            </div>
+                          ) : hasOutcome && isEad ? (
+                            <div className="leading-snug">
+                              <span className="font-medium text-slate-900">Outcome</span>
+                              <Link
+                                href={workspaceHref}
                                 className="mt-0.5 block text-xs font-medium text-[#c41230] hover:underline"
                               >
                                 View
@@ -349,11 +363,11 @@ export default function AdvisoryPage() {
                             )}
                           >
                             <Link href={workspaceHref} onClick={() => setMenuOpenId(null)}>
-                              {hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                              {hasOutcome && isEad
                                 ? 'Open diagnostic outcome'
                                 : 'Open engagement'}
                             </Link>
-                            {hasOutcome && x.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
+                            {hasOutcome && isEad ? (
                               <Link href={`/advisory/${x.id}`} onClick={() => setMenuOpenId(null)}>
                                 Open engagement workspace
                               </Link>
@@ -363,7 +377,7 @@ export default function AdvisoryPage() {
                                 href={advisoryReportHref(x.latestReport.id)}
                                 onClick={() => setMenuOpenId(null)}
                               >
-                                View report
+                                View PDF report
                               </Link>
                             ) : null}
                             {showGenerate ? (

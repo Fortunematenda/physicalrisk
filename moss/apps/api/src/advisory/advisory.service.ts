@@ -1610,11 +1610,29 @@ export class AdvisoryService {
     }
 
     if (engagement.diagnosticOutcome) {
+      const existingReport = await this.prisma.report.findFirst({
+        where: {
+          assessmentId: id,
+          status: { in: [ReportStatus.GENERATED, ReportStatus.APPROVED, ReportStatus.ISSUED] },
+        },
+        orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
+        select: { id: true },
+      });
+      let reportId = existingReport?.id || null;
+      if (!reportId) {
+        try {
+          const report = await this.generateReport(id, user);
+          reportId = report?.id || null;
+        } catch {
+          // Leave report generation for manual retry.
+        }
+      }
       return {
         ok: true,
         alreadyCompleted: true,
         status: engagement.status,
         outcomeId: engagement.diagnosticOutcome.id,
+        reportId,
         recommendedProducts: engagement.diagnosticOutcome.routes.map((r) => r.productCode),
       };
     }
@@ -1680,11 +1698,21 @@ export class AdvisoryService {
       },
     });
 
+    // Auto-generate the client brief so SUBMITTED engagements show a ready report.
+    let reportId: string | null = null;
+    try {
+      const report = await this.generateReport(id, user);
+      reportId = report?.id || null;
+    } catch {
+      // Outcome is already confirmed; report can be generated manually from the list/workspace.
+    }
+
     return {
       ok: true,
       alreadyCompleted: false,
       status: 'SUBMITTED',
       outcomeId: outcome.id,
+      reportId,
       recommendedProducts: outcome.routes.map((r) => r.productCode),
     };
   }
