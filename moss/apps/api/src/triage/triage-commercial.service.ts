@@ -645,7 +645,9 @@ export class TriageCommercialService {
     });
     if (!proposal) throw new NotFoundException('Proposal not found.');
     if (!proposal.documentStorageKey && normalized !== 'WITHDRAW') {
-      throw new BadRequestException('Upload the external proposal document before updating its status.');
+      throw new BadRequestException(
+        'Generate or upload the proposal PDF before updating its status.',
+      );
     }
 
     const now = new Date();
@@ -2030,7 +2032,7 @@ export class TriageCommercialService {
     signedFile?: { buffer: Buffer; originalname: string; mimetype: string; size: number },
   ) {
     this.assertCommercialWrite(user);
-    const proposal = await this.prisma.triageProposal.findFirst({
+    let proposal = await this.prisma.triageProposal.findFirst({
       where: { id: proposalId, publicLeadId },
     });
     if (!proposal) throw new NotFoundException('Proposal not found.');
@@ -2040,20 +2042,70 @@ export class TriageCommercialService {
       throw new BadRequestException('Invalid acceptance method.');
     }
 
-    let signedPatch: Record<string, unknown> = {};
     if (signedFile) {
       if (!PROPOSAL_MIME.has(signedFile.mimetype) && !signedFile.mimetype.includes('pdf')) {
         throw new BadRequestException('Signed proposal must be a PDF (or approved Word format).');
       }
+    }
+
+    // Prefer the uploaded signed PDF as the proposal document when none exists.
+    // Previously we auto-generated first and never applied the upload if generate failed.
+    let signedPatch: Record<string, unknown> = {};
+    let signedAlreadyStored = false;
+
+    if (!proposal.documentStorageKey && signedFile) {
+      const safeBase = String(signedFile.originalname || 'signed.pdf')
+        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+        .slice(0, 180);
+      const storageKey = `triage/${publicLeadId}/proposals/${Date.now()}-${safeBase}`;
+      await this.storage.put(storageKey, signedFile.buffer, signedFile.mimetype || 'application/pdf');
+      const parts = readProposalVersionParts(proposal as { version?: number; versionRevision?: number });
+      const ver = formatProposalVersionFile(parts.major, parts.revision);
+      const signedName = `Physical_Risk_Proposal_${proposal.proposalNumber}_${ver}_SIGNED.pdf`;
+      proposal = await this.prisma.triageProposal.update({
+        where: { id: proposalId },
+        data: {
+          documentStorageKey: storageKey,
+          documentFileName: signedFile.originalname || signedName,
+          documentMimeType: signedFile.mimetype || 'application/pdf',
+          documentSizeBytes: signedFile.size,
+          source: TriageProposalSource.UPLOAD,
+          signedDocumentStorageKey: storageKey,
+          signedDocumentFileName: signedName,
+          signedDocumentMimeType: signedFile.mimetype || 'application/pdf',
+          signedDocumentSizeBytes: signedFile.size,
+        },
+      });
+      signedAlreadyStored = true;
+    } else if (!proposal.documentStorageKey) {
+      try {
+        await this.generateProposalPdf(publicLeadId, user, proposalId);
+      } catch (err) {
+        this.logger.warn(
+          `Accept auto-generate PDF failed for ${proposalId}: ${(err as Error)?.message || err}`,
+        );
+      }
+      proposal = await this.prisma.triageProposal.findFirst({
+        where: { id: proposalId, publicLeadId },
+      });
+      if (!proposal?.documentStorageKey) {
+        throw new BadRequestException(
+          'Attach the signed proposal PDF (or generate/preview the proposal PDF) before marking it accepted.',
+        );
+      }
+    }
+
+    if (!proposal) throw new NotFoundException('Proposal not found.');
+
+    if (signedFile && !signedAlreadyStored) {
       const safeBase = String(signedFile.originalname || 'signed.pdf')
         .replace(/[^a-zA-Z0-9._-]+/g, '_')
         .slice(0, 180);
       const parts = readProposalVersionParts(proposal as { version?: number; versionRevision?: number });
       const ver = formatProposalVersionFile(parts.major, parts.revision);
-      const fileName =
-        proposal.documentFileName?.replace(/\.pdf$/i, '') 
-          ? `${String(proposal.documentFileName).replace(/\.pdf$/i, '')}_SIGNED.pdf`
-          : `Physical_Risk_Proposal_${proposal.proposalNumber}_${ver}_SIGNED.pdf`;
+      const fileName = proposal.documentFileName?.replace(/\.pdf$/i, '')
+        ? `${String(proposal.documentFileName).replace(/\.pdf$/i, '')}_SIGNED.pdf`
+        : `Physical_Risk_Proposal_${proposal.proposalNumber}_${ver}_SIGNED.pdf`;
       const storageKey = `triage/${publicLeadId}/proposals/signed/${Date.now()}-${safeBase}`;
       await this.storage.put(storageKey, signedFile.buffer, signedFile.mimetype || 'application/pdf');
       signedPatch = {

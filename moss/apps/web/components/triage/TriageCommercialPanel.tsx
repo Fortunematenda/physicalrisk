@@ -1227,12 +1227,16 @@ export function TriageCommercialPanel({
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span className="font-medium text-slate-700">Signed proposal attachment (PDF)</span>
+              <span className="font-medium text-slate-700">Signed proposal PDF</span>
               <Input
                 type="file"
                 accept="application/pdf,.pdf"
                 onChange={(e) => setSignedFile(e.target.files?.[0] || null)}
               />
+              <span className="text-xs text-slate-500">
+                Required when the proposal has not been generated yet — this file is stored as the
+                proposal document and marks acceptance.
+              </span>
             </label>
           </div>
           <AlertDialogFooter>
