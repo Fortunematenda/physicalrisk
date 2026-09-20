@@ -16,6 +16,8 @@ import {
   Download,
   Eye,
   Loader2,
+  Lock,
+  Pencil,
   Plus,
   Send,
   Trash2,
@@ -259,6 +261,8 @@ export function ProposalWorkspace({
   const [savedFingerprint, setSavedFingerprint] = useState('');
   const [discardOpen, setDiscardOpen] = useState(false);
   const [pdfPreview, setPdfPreview] = useState<{ bytes: ArrayBuffer; title: string } | null>(null);
+  /** After submit, form is locked until the analyst explicitly unlocks re-editing. */
+  const [editingUnlocked, setEditingUnlocked] = useState(false);
 
   const hasDraftRef = useRef(false);
   const isDirtyRef = useRef(false);
@@ -942,6 +946,7 @@ export function ProposalWorkspace({
   const proposalSent = ['SENT', 'VIEWED', 'ACCEPTED', 'DECLINED'].includes(
     String(workspace?.status || ''),
   );
+  const formLocked = proposalSent && !editingUnlocked;
   const isEadProposal =
     Boolean(eadContext?.assessmentId) ||
     workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
@@ -958,7 +963,7 @@ export function ProposalWorkspace({
   // Background autosave after typing pauses — never blur or flip `saving` (that freezes the form).
   const draftFpWhileDirty = isDirty && draft ? draftFingerprint(draft) : '';
   useEffect(() => {
-    if (!isDirty || loading || proposalSent || !draft || !draftFpWhileDirty) return;
+    if (!isDirty || loading || formLocked || !draft || !draftFpWhileDirty) return;
     const timer = window.setTimeout(() => {
       void (async () => {
         setAutosaveLabel('saving');
@@ -979,7 +984,7 @@ export function ProposalWorkspace({
     }, 1800);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, loading, proposalSent, draftFpWhileDirty, savedFingerprint]);
+  }, [isDirty, loading, formLocked, draftFpWhileDirty, savedFingerprint]);
 
   const guardDirtyNav = (e: MouseEvent) => {
     if (isDirtyRef.current) {
@@ -1051,15 +1056,17 @@ export function ProposalWorkspace({
   const actionButtons = (
     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
       <span className="mr-1 text-xs text-slate-500" aria-live="polite">
-        {autosaveLabel === 'saving'
-          ? 'Saving…'
-          : autosaveLabel === 'saved'
-            ? 'Saved'
-            : autosaveLabel === 'error'
-              ? 'Save failed — retrying when you edit'
-              : isDirty
-                ? 'Unsaved changes…'
-                : null}
+        {formLocked
+          ? null
+          : autosaveLabel === 'saving'
+            ? 'Saving…'
+            : autosaveLabel === 'saved'
+              ? 'Saved'
+              : autosaveLabel === 'error'
+                ? 'Save failed — retrying when you edit'
+                : isDirty
+                  ? 'Unsaved changes…'
+                  : null}
       </span>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -1074,7 +1081,7 @@ export function ProposalWorkspace({
             Download PDF
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={isBusy || proposalSent || loading || !draft}
+            disabled={isBusy || formLocked || loading || !draft}
             onSelect={() => fileRef.current?.click()}
           >
             <Upload className="size-4" />
@@ -1082,11 +1089,65 @@ export function ProposalWorkspace({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {proposalSent ? (
-        <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
-          <Eye className="size-4" />
-          View proposal
-        </Button>
+      {formLocked ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={isBusy}
+            onClick={() => {
+              setEditingUnlocked(true);
+              toast({
+                title: 'Re-editing enabled',
+                description: 'You can update the proposal. Save & regenerate PDF when finished.',
+              });
+            }}
+          >
+            <Pencil className="size-4" />
+            Enable re-editing
+          </Button>
+          <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
+            <Eye className="size-4" />
+            View proposal
+          </Button>
+        </>
+      ) : proposalSent ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={isBusy || isDirty}
+            onClick={() => setEditingUnlocked(false)}
+          >
+            <Lock className="size-4" />
+            Lock editing
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={isBusy || loading || !draft}
+            onClick={() => void previewProposal()}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+            Preview
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-9"
+            disabled={isBusy || loading || !draft}
+            onClick={() => void save()}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+            Save &amp; regenerate PDF
+          </Button>
+        </>
       ) : (
         <>
           <Button
@@ -1162,10 +1223,60 @@ export function ProposalWorkspace({
           </div>
         ) : null}
 
+        {formLocked ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="min-w-0 space-y-0.5">
+              <p className="m-0 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                <Lock className="size-3.5 text-slate-500" aria-hidden="true" />
+                Proposal submitted — editing locked
+              </p>
+              <p className="m-0 text-sm text-slate-600">
+                Review tabs below, or enable re-editing to update content and regenerate the PDF.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 shrink-0"
+              disabled={isBusy}
+              onClick={() => {
+                setEditingUnlocked(true);
+                toast({
+                  title: 'Re-editing enabled',
+                  description: 'You can update the proposal. Save & regenerate PDF when finished.',
+                });
+              }}
+            >
+              <Pencil className="size-4" />
+              Enable re-editing
+            </Button>
+          </div>
+        ) : proposalSent ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+            <div className="min-w-0 space-y-0.5">
+              <p className="m-0 text-sm font-semibold text-amber-950">Re-editing unlocked</p>
+              <p className="m-0 text-sm text-amber-900/80">
+                Changes autosave. Use Save &amp; regenerate PDF, then resend from Commercial if the client needs the updated file.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 shrink-0"
+              disabled={isBusy || isDirty}
+              onClick={() => setEditingUnlocked(false)}
+            >
+              <Lock className="size-4" />
+              Lock editing
+            </Button>
+          </div>
+        ) : null}
+
         <Tabs
           value={tab}
           onValueChange={(next) => {
-            syncEditorsIntoDraft({ blurActive: false });
+            if (!formLocked) syncEditorsIntoDraft({ blurActive: false });
             setTab(next);
           }}
         >
@@ -1182,7 +1293,15 @@ export function ProposalWorkspace({
             <TabsTrigger value="terms">Terms</TabsTrigger>
           </TabsList>
 
-          <div className="relative pb-8 pt-4">
+          <div
+            className={cn(
+              'relative pb-8 pt-4 transition-[opacity,filter]',
+              formLocked && 'pointer-events-none select-none opacity-55 grayscale-[0.35]',
+            )}
+            aria-disabled={formLocked || undefined}
+            // @ts-expect-error inert is widely supported; React 18 typings omit it
+            inert={formLocked ? '' : undefined}
+          >
             {/* Tab bodies — page scrolls as a whole (no nested overflow trap) */}
             <TabsContent value="overview" className={tabPanelClass()}>
               <div
