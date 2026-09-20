@@ -10,23 +10,24 @@ import {
   Send,
   User,
 } from 'lucide-react';
-import { AuthGate } from '../../components/AuthGate';
-import { Shell } from '../../components/Shell';
+import { AuthGate } from '@/components/AuthGate';
+import { Shell } from '@/components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
-import { RowActionsMenu } from '../../components/RowActionsMenu';
+import { RowActionsMenu } from '@/components/RowActionsMenu';
 import {
-  IconCalendar,
   IconChevronRight,
-  IconDownload,
-  IconFilter,
   IconMoreVertical,
-  IconPlus,
-  IconRotateCcw,
-  IconSearch,
-} from '../../components/NavIcons';
+} from '@/components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { apiFetch, money } from '../../lib/api';
-import { getStoredUser, resolveMvpNavRole } from '../../lib/auth-user';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { FilterSelect } from '@/components/ui/filter-select';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/toast';
+import { apiFetch, money } from '@/lib/api';
+import { getStoredUser, resolveMvpNavRole } from '@/lib/auth-user';
+import { formatDate } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 type UserRef = {
   id: string;
@@ -111,12 +112,7 @@ function relativeTime(iso: string) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function formatDate(iso?: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
+  return formatDate(iso);
 }
 
 function mapUiStatus(a: Assessment): UiStatus {
@@ -197,12 +193,20 @@ function shortOrgId(id?: string) {
   return `ORG-${id.slice(-5).toUpperCase()}`;
 }
 
+type KpiKey =
+  | 'total'
+  | 'in_progress'
+  | 'submitted'
+  | 'awaiting_review'
+  | 'approved'
+  | 'report_issued';
+
 export default function AssessmentsPage() {
   const confirm = useConfirm();
+  const { toast } = useToast();
   const [items, setItems] = useState<Assessment[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [headerSearch, setHeaderSearch] = useState('');
   const [query, setQuery] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -210,6 +214,7 @@ export default function AssessmentsPage() {
   const [analystFilter, setAnalystFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedKpi, setSelectedKpi] = useState<KpiKey | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -253,6 +258,7 @@ export default function AssessmentsPage() {
       });
       setItems((prev) => prev.map((item) => (item.id === editing.id ? { ...item, title } : item)));
       setEditing(null);
+      toast({ title: 'Assessment updated', variant: 'success' });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unable to update assessment.');
     } finally {
@@ -277,6 +283,7 @@ export default function AssessmentsPage() {
       setItems((prev) => prev.filter((item) => item.id !== a.id));
       if (editing?.id === a.id) setEditing(null);
       if (expandedId === a.id) setExpandedId(null);
+      toast({ title: 'Assessment deleted', variant: 'success' });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unable to delete assessment.');
     } finally {
@@ -336,8 +343,9 @@ export default function AssessmentsPage() {
   }, [enriched]);
 
   const filtered = useMemo(() => {
-    const q = (query || headerSearch).trim().toLowerCase();
+    const q = query.trim().toLowerCase();
     return enriched.filter((a) => {
+      if (selectedKpi && selectedKpi !== 'total' && a.uiStatus !== selectedKpi) return false;
       if (q) {
         const hay = [
           a.reference,
@@ -369,27 +377,61 @@ export default function AssessmentsPage() {
       }
       return true;
     });
-  }, [enriched, query, headerSearch, orgFilter, statusFilter, riskFilter, analystFilter, dateFrom, dateTo]);
+  }, [
+    enriched,
+    query,
+    selectedKpi,
+    orgFilter,
+    statusFilter,
+    riskFilter,
+    analystFilter,
+    dateFrom,
+    dateTo,
+  ]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const showingFrom = filtered.length ? (currentPage - 1) * pageSize + 1 : 0;
   const showingTo = Math.min(currentPage * pageSize, filtered.length);
+  const hasActiveFilters = Boolean(
+    query ||
+      orgFilter ||
+      statusFilter ||
+      riskFilter ||
+      analystFilter ||
+      dateFrom ||
+      dateTo ||
+      selectedKpi,
+  );
 
   useEffect(() => {
     setPage(1);
-  }, [query, headerSearch, orgFilter, statusFilter, riskFilter, analystFilter, dateFrom, dateTo, pageSize]);
+  }, [query, selectedKpi, orgFilter, statusFilter, riskFilter, analystFilter, dateFrom, dateTo, pageSize]);
 
   function clearFilters() {
     setQuery('');
-    setHeaderSearch('');
     setOrgFilter('');
     setStatusFilter('');
     setRiskFilter('');
     setAnalystFilter('');
     setDateFrom('');
     setDateTo('');
+    setSelectedKpi(null);
+  }
+
+  function setKpiFilter(key: KpiKey) {
+    setSelectedKpi((prev) => (prev === key ? null : key));
+    if (key !== 'total') setStatusFilter('');
+  }
+
+  function kpiCardClass(key: KpiKey) {
+    return cn(
+      'min-h-[108px] rounded-xl border bg-white shadow-none transition-[border-color,box-shadow,background-color]',
+      selectedKpi === key
+        ? 'border-[#c41230]/35 bg-[#fff8f9] shadow-[inset_0_0_0_1px_rgba(196,18,48,0.08)]'
+        : 'border-slate-200',
+    );
   }
 
   function exportCsv() {
@@ -425,374 +467,567 @@ export default function AssessmentsPage() {
   return (
     <AuthGate>
       <Shell
-        title="SCL Assessments"
-        hideEyebrow
-        subtitle="View and manage Cost Leakage / SCL assessments across your organisations."
-        searchPlaceholder="Search SCL assessments…"
-        searchValue={headerSearch}
-        onSearch={setHeaderSearch}
-      >
-        {error && <p className="error">{error}</p>}
-
-        {editing && (
-          <form className="dash2-card org2-create-card" onSubmit={saveEdit}>
-            <div className="dash2-card-head">
-              <div>
-                <h2>Edit assessment</h2>
-                <p>Update the assessment title shown in lists and reports</p>
-              </div>
-            </div>
-            <div className="form-grid">
-              <div className="field">
-                <label>Title</label>
-                <input
-                  required
-                  minLength={2}
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                />
-              </div>
-            </div>
-            <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
-              <button className="btn" disabled={savingEdit}>
-                {savingEdit ? 'Saving…' : 'Save changes'}
-              </button>
-              <button
-                type="button"
-                className="btn secondary"
-                disabled={savingEdit}
-                onClick={() => setEditing(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+        title="Security Cost Leakage"
+        hideSearch
+        hideTitle
+        headerLeading={(
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
+            <span className="truncate font-semibold text-slate-900">Security Cost Leakage</span>
+          </nav>
         )}
+      >
+        {error ? (
+          <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        ) : null}
 
-        <div className="org2-actions-row">
-          <button type="button" className="btn secondary org2-export-btn" onClick={exportCsv}>
-            <IconDownload />
-            Export
-          </button>
-          <Link href="/assessments/new" className="btn org2-add-btn">
-            <IconPlus />
-            New Assessment
-          </Link>
-        </div>
+        {editing ? (
+          <Card className="mb-5 rounded-xl border-slate-200 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Edit assessment</CardTitle>
+              <CardDescription>
+                Update the assessment title shown in lists and reports.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form className="space-y-4" onSubmit={saveEdit}>
+                <label className="grid max-w-xl gap-1.5 text-sm">
+                  <span className="font-medium text-slate-700">Title</span>
+                  <Input
+                    required
+                    minLength={2}
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" disabled={savingEdit}>
+                    {savingEdit ? 'Saving…' : 'Save changes'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={savingEdit}
+                    onClick={() => setEditing(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        ) : null}
 
-        <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-          <StatCard
-            icon={ClipboardList}
-            title="Total Assessments"
-            value={summary.total}
-            description="Portfolio volume"
-            tone="blue"
-            loading={loading}
-          />
-          <StatCard
-            icon={Send}
-            title="In Progress"
-            value={summary.inProgress}
-            description="Active sessions"
-            tone="amber"
-            loading={loading}
-          />
-          <StatCard
-            icon={Clock}
-            title="Submitted"
-            value={summary.submitted}
-            description="Ready for triage"
-            tone="violet"
-            loading={loading}
-          />
-          <StatCard
-            icon={User}
-            title="Awaiting Review"
-            value={summary.awaitingReview}
-            description="Analyst queue"
-            tone="amber"
-            loading={loading}
-          />
-          <StatCard
-            icon={BadgeCheck}
-            title="Approved"
-            value={summary.approved}
-            description="Verified assessments"
-            tone="green"
-            loading={loading}
-          />
-          <StatCard
-            icon={FileCheck}
-            title="Reports Issued"
-            value={summary.reportsIssued}
-            description="Client deliverables"
-            tone="slate"
-            loading={loading}
-          />
-        </div>
-
-        <section className="dash2-card org2-filters-card">
-          <div className="assess2-filters">
-            <label className="org2-filter-search">
-              <IconSearch />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search assessments…"
-                aria-label="Filter assessments"
-              />
-            </label>
-            <select value={orgFilter} onChange={(e) => setOrgFilter(e.target.value)} aria-label="Organisation">
-              <option value="">Organisation</option>
-              {organisations.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-            </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Status">
-              <option value="">Status</option>
-              <option value="draft">Draft</option>
-              <option value="in_progress">In Progress</option>
-              <option value="submitted">Submitted</option>
-              <option value="awaiting_review">Awaiting Review</option>
-              <option value="approved">Approved</option>
-              <option value="report_issued">Report Issued</option>
-            </select>
-            <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} aria-label="Risk rating">
-              <option value="">Risk Rating</option>
-              {['Critical', 'High', 'Moderate', 'Low'].map((band) => <option key={band} value={band}>{band}</option>)}
-            </select>
-            <select value={analystFilter} onChange={(e) => setAnalystFilter(e.target.value)} aria-label="Analyst">
-              <option value="">Analyst</option>
-              {analysts.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-            </select>
-            <label className="assess2-date-range">
-              <IconCalendar />
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-              <span>—</span>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
-            </label>
-            <button type="button" className="dash2-filter-btn" title="Filters">
-              <IconFilter />
-              Filters
-            </button>
-            <button type="button" className="dash2-filter-btn" onClick={clearFilters}>
-              <IconRotateCcw />
-              Clear
-            </button>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <p className="m-0 max-w-2xl text-sm text-moss-muted">
+            Level 3 Security Cost Leakage Assessment™ sessions across your organisations.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={exportCsv}>
+              Export
+            </Button>
+            <Button asChild>
+              <Link href="/assessments/new">+ New assessment</Link>
+            </Button>
           </div>
-        </section>
+        </div>
 
-        <section className="dash2-card org2-table-card">
-          <div className="table-wrap">
-            <table className="assess2-table">
-              <thead>
-                <tr>
-                  <th className="assess2-expand-col" />
-                  <th>Assessment</th>
-                  <th>Organisation</th>
-                  <th>Assessment Date</th>
-                  <th>Status</th>
-                  <th>Risk Rating</th>
-                  <th>Score</th>
-                  <th>Likely Leakage (ZAR)</th>
-                  <th>Responsible Analyst</th>
-                  <th>Updated</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {pageItems.map((a) => {
-                  const scli = a.snap ? Number(a.snap.overallRiskScore) : null;
-                  const gov = a.snap?.maturityScore != null ? Number(a.snap.maturityScore) : null;
-                  const leakage = Number(a.snap?.leakageResult?.likelyLeakageValue || 0);
-                  const minLeak = Number(a.snap?.leakageResult?.minimumLeakageValue || 0);
-                  const maxLeak = Number(a.snap?.leakageResult?.maximumExposureValue || a.snap?.leakageResult?.recoverableHigh || 0);
-                  const band = a.snap?.riskBand;
-                  const analystName = displayName(a.analyst);
-                  const expanded = expandedId === a.id;
+        <div className="mb-5 space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-stretch">
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Assessment activity
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('total')}>
+                  <StatCard
+                    icon={ClipboardList}
+                    title="Total assessments"
+                    value={summary.total}
+                    description="Portfolio volume"
+                    tone="blue"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('total')}
+                  />
+                </button>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('in_progress')}>
+                  <StatCard
+                    icon={Send}
+                    title="In progress"
+                    value={summary.inProgress}
+                    description="Active sessions"
+                    tone="amber"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('in_progress')}
+                  />
+                </button>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('submitted')}>
+                  <StatCard
+                    icon={Clock}
+                    title="Submitted"
+                    value={summary.submitted}
+                    description="Ready for triage"
+                    tone="violet"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('submitted')}
+                  />
+                </button>
+              </div>
+            </div>
 
-                  return (
-                    <Fragment key={a.id}>
-                      <tr>
-                        <td>
-                          <button
-                            type="button"
-                            className={`assess2-expand-btn${expanded ? ' open' : ''}`}
-                            aria-label={expanded ? 'Collapse row' : 'Expand row'}
-                            onClick={() => setExpandedId((id) => (id === a.id ? null : a.id))}
-                          >
-                            <IconChevronRight />
-                          </button>
-                        </td>
-                        <td>
-                          <div className="assess2-ref-cell">
-                            <Link href={`/assessments/${a.id}`}><strong>{a.reference}</strong></Link>
-                            <span className="muted small">{a.title || 'Security Risk Assessment'}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="assess2-org-cell">
-                            <strong>{a.organisation?.name || '—'}</strong>
-                            <span className="muted small">{shortOrgId(a.organisation?.id)}</span>
-                          </div>
-                        </td>
-                        <td>{formatDate(a.assessmentDate)}</td>
-                        <td>
-                          <span className={`assess2-status-badge status-${a.uiStatus}`}>
-                            {uiStatusLabel(a.uiStatus)}
-                          </span>
-                        </td>
-                        <td>
-                          {band ? (
-                            <span className={`org2-risk-badge risk-${riskTone(band)}`}>
-                              {band === 'Controlled' ? 'Low' : band}
-                            </span>
-                          ) : <span className="muted">—</span>}
-                        </td>
-                        <td>
-                          <div className="assess2-scores">
-                            <ScoreRing value={scli !== null && !Number.isNaN(scli) ? scli : null} label="SCLI" />
-                            <ScoreRing value={gov !== null && !Number.isNaN(gov) ? gov : null} label="Gov" />
-                          </div>
-                        </td>
-                        <td>
-                          {leakage > 0 ? (
-                            <div className="assess2-leakage">
-                              <strong>{money(leakage)}</strong>
-                              {(minLeak > 0 || maxLeak > 0) && (
-                                <span className="muted small">
-                                  ({money(minLeak)} – {money(maxLeak || leakage)})
-                                </span>
+            <div className="hidden w-px bg-slate-200 xl:block" aria-hidden="true" />
+
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                Review &amp; delivery
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('awaiting_review')}>
+                  <StatCard
+                    icon={User}
+                    title="Awaiting review"
+                    value={summary.awaitingReview}
+                    description="Analyst queue"
+                    tone="amber"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('awaiting_review')}
+                  />
+                </button>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('approved')}>
+                  <StatCard
+                    icon={BadgeCheck}
+                    title="Approved"
+                    value={summary.approved}
+                    description="Verified assessments"
+                    tone="green"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('approved')}
+                  />
+                </button>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('report_issued')}>
+                  <StatCard
+                    icon={FileCheck}
+                    title="Reports issued"
+                    value={summary.reportsIssued}
+                    description="Client deliverables"
+                    tone="slate"
+                    loading={loading && !items.length}
+                    textWrap
+                    className={kpiCardClass('report_issued')}
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Card className="mb-5 rounded-xl border-slate-200 shadow-sm">
+          <CardContent className="space-y-3 p-4 sm:p-5">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="grid min-w-[200px] flex-1 gap-1 text-sm">
+                <span className="font-medium text-slate-700">Search</span>
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search assessments…"
+                  aria-label="Filter assessments"
+                />
+              </label>
+              <label className="grid min-w-[160px] gap-1 text-sm">
+                <span className="font-medium text-slate-700">Organisation</span>
+                <FilterSelect
+                  value={orgFilter}
+                  onChange={setOrgFilter}
+                  placeholder="All organisations"
+                  options={organisations.map(([id, name]) => ({ value: id, label: name }))}
+                />
+              </label>
+              <label className="grid min-w-[150px] gap-1 text-sm">
+                <span className="font-medium text-slate-700">Status</span>
+                <FilterSelect
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                  placeholder="All statuses"
+                  options={[
+                    { value: 'draft', label: 'Draft' },
+                    { value: 'in_progress', label: 'In Progress' },
+                    { value: 'submitted', label: 'Submitted' },
+                    { value: 'awaiting_review', label: 'Awaiting Review' },
+                    { value: 'approved', label: 'Approved' },
+                    { value: 'report_issued', label: 'Report Issued' },
+                  ]}
+                />
+              </label>
+              <label className="grid min-w-[140px] gap-1 text-sm">
+                <span className="font-medium text-slate-700">Risk</span>
+                <FilterSelect
+                  value={riskFilter}
+                  onChange={setRiskFilter}
+                  placeholder="All ratings"
+                  options={['Critical', 'High', 'Moderate', 'Low'].map((band) => ({
+                    value: band,
+                    label: band,
+                  }))}
+                />
+              </label>
+              <label className="grid min-w-[150px] gap-1 text-sm">
+                <span className="font-medium text-slate-700">Analyst</span>
+                <FilterSelect
+                  value={analystFilter}
+                  onChange={setAnalystFilter}
+                  placeholder="All analysts"
+                  options={analysts.map(([id, name]) => ({ value: id, label: name }))}
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-medium text-slate-700">From</span>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-medium text-slate-700">To</span>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </label>
+              {hasActiveFilters ? (
+                <Button type="button" variant="outline" className="h-10" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-xl border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Assessments</CardTitle>
+            <CardDescription>
+              {filtered.length} record{filtered.length === 1 ? '' : 's'}
+              {hasActiveFilters ? ' (filtered)' : ''}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="w-10 px-2 py-2" />
+                    <th className="px-3 py-2">Assessment</th>
+                    <th className="px-3 py-2">Organisation</th>
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Risk</th>
+                    <th className="px-3 py-2">Score</th>
+                    <th className="px-3 py-2">Likely leakage</th>
+                    <th className="px-3 py-2">Analyst</th>
+                    <th className="px-3 py-2">Updated</th>
+                    <th className="px-3 py-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageItems.map((a) => {
+                    const scli = a.snap ? Number(a.snap.overallRiskScore) : null;
+                    const gov = a.snap?.maturityScore != null ? Number(a.snap.maturityScore) : null;
+                    const leakage = Number(a.snap?.leakageResult?.likelyLeakageValue || 0);
+                    const minLeak = Number(a.snap?.leakageResult?.minimumLeakageValue || 0);
+                    const maxLeak = Number(
+                      a.snap?.leakageResult?.maximumExposureValue ||
+                        a.snap?.leakageResult?.recoverableHigh ||
+                        0,
+                    );
+                    const band = a.snap?.riskBand;
+                    const analystName = displayName(a.analyst);
+                    const expanded = expandedId === a.id;
+
+                    return (
+                      <Fragment key={a.id}>
+                        <tr className="border-t border-slate-100 transition-colors hover:bg-slate-50/80">
+                          <td className="px-2 py-2">
+                            <button
+                              type="button"
+                              className={cn(
+                                'inline-flex size-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800',
+                                expanded && 'bg-slate-100 text-slate-800',
                               )}
-                            </div>
-                          ) : <span className="muted">—</span>}
-                        </td>
-                        <td>
-                          {analystName ? (
-                            <div className="assess2-analyst">
-                              <span className="assess2-analyst-avatar">{initials(analystName)}</span>
-                              <strong>{analystName}</strong>
-                            </div>
-                          ) : <span className="muted">Unassigned</span>}
-                        </td>
-                        <td className="muted">{relativeTime(a.updatedAt)}</td>
-                        <td className="org2-actions-cell">
-                          <RowActionsMenu
-                            open={menuOpenId === a.id}
-                            onClose={() => setMenuOpenId(null)}
-                            trigger={(
-                              <button
-                                type="button"
-                                className="org2-menu-btn"
-                                aria-label="Assessment actions"
-                                onClick={() => setMenuOpenId((id) => (id === a.id ? null : a.id))}
+                              aria-label={expanded ? 'Collapse row' : 'Expand row'}
+                              onClick={() => setExpandedId((id) => (id === a.id ? null : a.id))}
+                            >
+                              <IconChevronRight
+                                className={cn('size-4 transition-transform', expanded && 'rotate-90')}
+                              />
+                            </button>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="leading-snug">
+                              <Link
+                                href={`/assessments/${a.id}`}
+                                className="font-semibold text-slate-900 hover:underline"
                               >
-                                <IconMoreVertical />
-                              </button>
-                            )}
-                          >
-                            <Link href={`/assessments/${a.id}`} onClick={() => setMenuOpenId(null)}>Open assessment</Link>
-                            <Link href={`/assessments/${a.id}/review`} onClick={() => setMenuOpenId(null)}>Review</Link>
-                            {a.organisation?.id && (
-                              <Link href={`/organisations/${a.organisation.id}`} onClick={() => setMenuOpenId(null)}>View organisation</Link>
-                            )}
-                            {isAdmin && (
-                              <>
-                                <button type="button" onClick={() => startEdit(a)} disabled={busyId === a.id}>
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  className="danger"
-                                  onClick={() => void deleteAssessment(a)}
-                                  disabled={busyId === a.id}
-                                >
-                                  {busyId === a.id ? 'Deleting…' : 'Delete'}
-                                </button>
-                              </>
-                            )}
-                          </RowActionsMenu>
-                        </td>
-                      </tr>
-                      {expanded && (
-                        <tr className="assess2-detail-row">
-                          <td colSpan={11}>
-                            <div className="assess2-detail">
-                              <div>
-                                <em>Progress</em>
-                                <strong>{a.progress?.percent ?? 0}%</strong>
-                                <span>{a.progress?.label || '—'}</span>
-                              </div>
-                              <div>
-                                <em>Source</em>
-                                <strong>{a.source === 'PUBLIC' ? 'Public lead' : 'Internal'}</strong>
-                                <span>{a.publicLead?.email || a.createdBy?.email || '—'}</span>
-                              </div>
-                              <div>
-                                <em>Reports</em>
-                                <strong>{a.reports?.length || a._count?.reports || 0}</strong>
-                                <span>{a.reports?.[0]?.status || 'None issued'}</span>
-                              </div>
-                              <div>
-                                <em>Workflow</em>
-                                <strong>{a.status.replaceAll('_', ' ')}</strong>
-                                <span>Updated {formatDate(a.updatedAt)}</span>
-                              </div>
+                                {a.reference}
+                              </Link>
+                              <p className="m-0 text-xs text-slate-500">
+                                {a.title || 'Security Risk Assessment'}
+                              </p>
                             </div>
                           </td>
+                          <td className="px-3 py-2">
+                            <div className="leading-snug">
+                              <p className="m-0 font-medium text-slate-900">
+                                {a.organisation?.name || '—'}
+                              </p>
+                              <p className="m-0 text-xs text-slate-500">
+                                {shortOrgId(a.organisation?.id) || '—'}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">{formatDate(a.assessmentDate)}</td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={cn(
+                                'inline-flex rounded-md px-2 py-0.5 text-xs font-medium',
+                                a.uiStatus === 'report_issued' || a.uiStatus === 'approved'
+                                  ? 'bg-emerald-50 text-emerald-800'
+                                  : a.uiStatus === 'awaiting_review' || a.uiStatus === 'submitted'
+                                    ? 'bg-amber-50 text-amber-800'
+                                    : 'bg-slate-100 text-slate-700',
+                              )}
+                            >
+                              {uiStatusLabel(a.uiStatus)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {band ? (
+                              <span className={`org2-risk-badge risk-${riskTone(band)}`}>
+                                {band === 'Controlled' ? 'Low' : band}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="assess2-scores">
+                              <ScoreRing
+                                value={scli !== null && !Number.isNaN(scli) ? scli : null}
+                                label="SCLI"
+                              />
+                              <ScoreRing
+                                value={gov !== null && !Number.isNaN(gov) ? gov : null}
+                                label="Gov"
+                              />
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            {leakage > 0 ? (
+                              <div className="leading-snug">
+                                <p className="m-0 font-semibold text-slate-900">{money(leakage)}</p>
+                                {minLeak > 0 || maxLeak > 0 ? (
+                                  <p className="m-0 text-xs text-slate-500">
+                                    ({money(minLeak)} – {money(maxLeak || leakage)})
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {analystName ? (
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-[#c41230] text-[10px] font-semibold text-white">
+                                  {initials(analystName)}
+                                </span>
+                                <span className="font-medium text-slate-800">{analystName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">Unassigned</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-slate-500" title={formatDate(a.updatedAt)}>
+                            {relativeTime(a.updatedAt)}
+                          </td>
+                          <td
+                            className="org2-actions-cell px-3 py-2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <RowActionsMenu
+                              open={menuOpenId === a.id}
+                              onClose={() => setMenuOpenId(null)}
+                              trigger={(
+                                <button
+                                  type="button"
+                                  className="org2-menu-btn"
+                                  aria-label="Assessment actions"
+                                  onClick={() =>
+                                    setMenuOpenId((id) => (id === a.id ? null : a.id))
+                                  }
+                                >
+                                  <IconMoreVertical />
+                                </button>
+                              )}
+                            >
+                              <Link
+                                href={`/assessments/${a.id}`}
+                                onClick={() => setMenuOpenId(null)}
+                              >
+                                Open assessment
+                              </Link>
+                              <Link
+                                href={`/assessments/${a.id}/review`}
+                                onClick={() => setMenuOpenId(null)}
+                              >
+                                Review
+                              </Link>
+                              {a.organisation?.id ? (
+                                <Link
+                                  href={`/organisations/${a.organisation.id}`}
+                                  onClick={() => setMenuOpenId(null)}
+                                >
+                                  View organisation
+                                </Link>
+                              ) : null}
+                              {isAdmin ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => startEdit(a)}
+                                    disabled={busyId === a.id}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="danger"
+                                    onClick={() => void deleteAssessment(a)}
+                                    disabled={busyId === a.id}
+                                  >
+                                    {busyId === a.id ? 'Deleting…' : 'Delete'}
+                                  </button>
+                                </>
+                              ) : null}
+                            </RowActionsMenu>
+                          </td>
                         </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-                {!loading && !pageItems.length && (
-                  <tr><td colSpan={11} className="muted">No assessments match the current filters.</td></tr>
-                )}
-                {loading && (
-                  <tr><td colSpan={11} className="muted">Loading assessments…</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="org2-pagination">
-            <span>
-              Showing {showingFrom} to {showingTo} of {filtered.length} assessments
-            </span>
-            <div className="org2-pagination-controls">
-              <button type="button" disabled={currentPage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹</button>
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter((n) => n === 1 || n === totalPages || Math.abs(n - currentPage) <= 2)
-                .reduce<number[]>((acc, n, idx, arr) => {
-                  if (idx > 0 && n - arr[idx - 1] > 1) acc.push(-1);
-                  acc.push(n);
-                  return acc;
-                }, [])
-                .map((n, idx) => (
-                  n === -1 ? (
-                    <span key={`gap-${idx}`} className="org2-page-gap">…</span>
-                  ) : (
-                    <button
-                      key={n}
-                      type="button"
-                      className={n === currentPage ? 'active' : ''}
-                      onClick={() => setPage(n)}
-                    >
-                      {n}
-                    </button>
-                  )
-                ))}
-              <button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>›</button>
-              <select
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                aria-label="Rows per page"
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>{size} / page</option>
-                ))}
-              </select>
+                        {expanded ? (
+                          <tr className="border-t border-slate-100 bg-slate-50/60">
+                            <td colSpan={11} className="px-3 py-3">
+                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div>
+                                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Progress
+                                  </p>
+                                  <p className="m-0 mt-1 font-semibold text-slate-900">
+                                    {a.progress?.percent ?? 0}%
+                                  </p>
+                                  <p className="m-0 text-xs text-slate-500">
+                                    {a.progress?.label || '—'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Source
+                                  </p>
+                                  <p className="m-0 mt-1 font-semibold text-slate-900">
+                                    {a.source === 'PUBLIC' ? 'Public lead' : 'Internal'}
+                                  </p>
+                                  <p className="m-0 text-xs text-slate-500">
+                                    {a.publicLead?.email || a.createdBy?.email || '—'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Reports
+                                  </p>
+                                  <p className="m-0 mt-1 font-semibold text-slate-900">
+                                    {a.reports?.length || a._count?.reports || 0}
+                                  </p>
+                                  <p className="m-0 text-xs text-slate-500">
+                                    {a.reports?.[0]?.status || 'None issued'}
+                                  </p>
+                                </div>
+                                <div>
+                                  <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Workflow
+                                  </p>
+                                  <p className="m-0 mt-1 font-semibold text-slate-900">
+                                    {a.status.replaceAll('_', ' ')}
+                                  </p>
+                                  <p className="m-0 text-xs text-slate-500">
+                                    Updated {formatDate(a.updatedAt)}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                  {!loading && !pageItems.length ? (
+                    <tr>
+                      <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                        {hasActiveFilters
+                          ? 'No assessments match the current filters.'
+                          : 'No Cost Leakage assessments yet.'}
+                      </td>
+                    </tr>
+                  ) : null}
+                  {loading ? (
+                    <tr>
+                      <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                        Loading assessments…
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
-          </div>
-        </section>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+              <span>
+                Showing {showingFrom} to {showingTo} of {filtered.length} assessments
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-slate-500">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </Button>
+                <select
+                  className="h-8 rounded-md border border-slate-200 bg-white px-2 text-sm"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  aria-label="Rows per page"
+                >
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <option key={size} value={size}>
+                      {size} / page
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </Shell>
     </AuthGate>
   );
