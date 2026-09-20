@@ -11,6 +11,7 @@ import {
   User,
 } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
+import { CostLeakageBreadcrumb } from '@/components/assessments/CostLeakageBreadcrumb';
 import { Shell } from '@/components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
 import { RowActionsMenu } from '@/components/RowActionsMenu';
@@ -470,11 +471,7 @@ export default function AssessmentsPage() {
         title="Security Cost Leakage"
         hideSearch
         hideTitle
-        headerLeading={(
-          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
-            <span className="truncate font-semibold text-slate-900">Security Cost Leakage</span>
-          </nav>
-        )}
+        headerLeading={<CostLeakageBreadcrumb current="Security Cost Leakage" root />}
       >
         {error ? (
           <p className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

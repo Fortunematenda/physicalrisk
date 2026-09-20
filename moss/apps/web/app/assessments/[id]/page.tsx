@@ -10,17 +10,23 @@ import {
   type MoneyRangeValue,
   type PercentRangeValue,
 } from '@moss/shared';
-import { AuthGate } from '../../../components/AuthGate';
-import { IndustryWithOtherField } from '../../../components/IndustryWithOtherField';
-import { MoneyRangeSelector } from '../../../components/MoneyRangeSelector';
-import { PercentRangeSelector } from '../../../components/PercentRangeSelector';
-import { ZarCurrencyInput } from '../../../components/ZarCurrencyInput';
-import { Shell } from '../../../components/Shell';
-import { MetricCard, StatusBadge } from '../../../components/Ui';
-import { ApiError, apiFetch, money, pct } from '../../../lib/api';
-import { isIndustryValueComplete } from '../../../lib/scl-industry-other';
-import { resolveNextQuestion } from '../../../lib/scl-question-nav';
-import { splitOptionPresentation } from '../../../lib/scl-option-label';
+import { AuthGate } from '@/components/AuthGate';
+import { CostLeakageBreadcrumb } from '@/components/assessments/CostLeakageBreadcrumb';
+import { IndustryWithOtherField } from '@/components/IndustryWithOtherField';
+import { MoneyRangeSelector } from '@/components/MoneyRangeSelector';
+import { PercentRangeSelector } from '@/components/PercentRangeSelector';
+import { ZarCurrencyInput } from '@/components/ZarCurrencyInput';
+import { Shell } from '@/components/Shell';
+import { MetricCard, StatusBadge } from '@/components/Ui';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ApiError, apiFetch, money, pct } from '@/lib/api';
+import { formatDate } from '@/lib/format';
+import { isIndustryValueComplete } from '@/lib/scl-industry-other';
+import { resolveNextQuestion } from '@/lib/scl-question-nav';
+import { splitOptionPresentation } from '@/lib/scl-option-label';
+import { cn } from '@/lib/utils';
 
 type MissingFields = { missingInputs: string[]; missingQuestions: string[] };
 
@@ -292,7 +298,20 @@ export default function AssessmentDetailPage() {
     }
   }
 
-  if (!data) return <AuthGate><div className="loading-screen">Loading assessment…</div></AuthGate>;
+  if (!data) {
+    return (
+      <AuthGate>
+        <Shell
+          title="Security Cost Leakage"
+          hideSearch
+          hideTitle
+          headerLeading={<CostLeakageBreadcrumb current="…" />}
+        >
+          <p className="text-sm text-slate-500">Loading assessment…</p>
+        </Shell>
+      </AuthGate>
+    );
+  }
 
   const snapshot = data.scoreSnapshots?.[0];
   const leakage = snapshot?.leakageResult as any;
@@ -300,400 +319,630 @@ export default function AssessmentDetailPage() {
   const leftover = [...missing.missingInputs, ...missing.missingQuestions];
   const answeredCount = data.responses.filter((r: any) => r.responseOptionId).length;
   const selectedId = currentQuestion ? responseMap[currentQuestion.id]?.responseOptionId : '';
+  const statusLabel = String(data.status || '').replace(/_/g, ' ');
+
+  const tabs: Array<{ key: string; label: string; count: number }> = [
+    { key: 'profile', label: 'Calibration', count: missing.missingInputs.length },
+    { key: 'questionnaire', label: 'Questionnaire', count: missing.missingQuestions.length },
+    { key: 'evidence', label: 'Evidence', count: 0 },
+    { key: 'results', label: 'Results', count: 0 },
+  ];
 
   return (
     <AuthGate>
-      <Shell title={data.title} actions={<><StatusBadge value={data.status} /><Link className="btn secondary" href="/assessments">Back</Link></>}>
-        {error && (
-          <div className="error">
-            <p style={{ margin: 0 }}>{error}</p>
-            {leftover.length > 0 && (
-              <div className="missing-chips">
-                {missing.missingInputs.map((code) => (
-                  <button key={code} type="button" className="missing-chip" onClick={() => setTab('profile')}>{code}</button>
-                ))}
-                {missing.missingQuestions.map((code) => (
-                  <button
-                    key={code}
-                    type="button"
-                    className="missing-chip"
-                    onClick={() => {
-                      const idx = questions.findIndex((q: any) => q.code === code);
-                      setTab('questionnaire');
-                      setQIntro(false);
-                      if (idx >= 0) setQIndex(idx);
-                    }}
-                  >
-                    {code}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {notice && <p className="notice">{notice}</p>}
-
-        <section className="assess-hero">
-          <div>
-            <p className="eyebrow">SCL Assessment · {data.reference}</p>
-            <h2>{data.organisation.name}</h2>
-            <p className="muted">{data.questionnaireVersion.questionnaire.name} · Version {data.questionnaireVersion.version}</p>
-          </div>
-          <div className="assess-hero-stats">
-            <div><span>Overall</span><strong>{progress}%</strong></div>
-            <div><span>Questions</span><strong>{answeredCount}/{questions.length}</strong></div>
-            <div><span>Status</span><strong>{String(data.status).replace(/_/g, ' ')}</strong></div>
-          </div>
-          <div className="progress assess-progress"><span style={{ width: `${progress}%` }} /></div>
-        </section>
-
-        <div className="tabs">
-          {[
-            ['profile', 'Calibration', missing.missingInputs.length],
-            ['questionnaire', 'Questionnaire', missing.missingQuestions.length],
-            ['evidence', 'Evidence', 0],
-            ['results', 'Results', 0],
-          ].map(([key, label, count]) => (
-            <button key={key as string} onClick={() => setTab(key as string)} className={tab === key ? 'active' : ''}>
-              {label as string}
-              {Number(count) > 0 && <span className="tab-missing">{count}</span>}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'profile' && (
-          <section className="assess-stage">
-            <div className="assess-stage-head">
-              <div>
-                <p className="eyebrow">Step {calStep + 1} of {CALIBRATION_GROUPS.length}</p>
-                <h2>{currentGroup.title}</h2>
-                <p className="muted">{currentGroup.hint}</p>
-              </div>
-              <div className="step-dots">
-                {CALIBRATION_GROUPS.map((g, i) => (
-                  <button key={g.id} type="button" className={`step-dot${i === calStep ? ' active' : ''}${g.codes.some((c) => missingSet.has(c)) ? ' alert' : ''}`} onClick={() => setCalStep(i)} aria-label={g.title} />
-                ))}
-              </div>
-            </div>
-
-            {groupInputs.some(
-              (d: any) =>
-                d.valueType === 'PERCENT' || (d.valueType === 'CURRENCY' && isSclMoneyLossCode(d.code)),
-            ) && <p className="assess-cal-hint">Select an estimated range for each item below.</p>}
-            <div className="form-grid assess-cal-grid">
-              {groupInputs.map((def: any) => {
-                const stored = inputMap[def.id];
-                const value = stored;
-                const isMissing = missingSet.has(def.code);
-                return (
-                  <div className={`field${isMissing ? ' missing' : ''}`} key={def.id} data-field-code={def.code}>
-                    <label>
-                      <span className="field-code">{def.code}</span>
-                      {def.label}
-                      {def.required && <span className="req">*</span>}
-                      {isMissing && <span className="missing-tag">Required</span>}
-                    </label>
-                    {def.valueType === 'SELECT' && def.code === 'C2' ? (
-                      <IndustryWithOtherField
-                        variant="pills"
-                        options={def.options || []}
-                        value={value}
-                        onChange={(next) => void saveInput(def, next)}
-                      />
-                    ) : def.valueType === 'SELECT' ? (
-                      <div className="choice-grid">
-                        {(def.options || []).map((o: string) => (
-                          <button
-                            key={o}
-                            type="button"
-                            className={`choice-pill${String(value ?? '') === o ? ' selected' : ''}`}
-                            onClick={() => saveInput(def, o)}
-                          >
-                            {o}
-                          </button>
-                        ))}
-                      </div>
-                    ) : def.valueType === 'BOOLEAN' ? (
-                      <div className="choice-grid dual">
-                        {['YES', 'NO'].map((o) => (
-                          <button key={o} type="button" className={`choice-pill${String(value ?? '').toUpperCase() === o ? ' selected' : ''}`} onClick={() => saveInput(def, o)}>{o}</button>
-                        ))}
-                      </div>
-                    ) : def.valueType === 'PERCENT' ? (
-                      <PercentRangeSelector
-                        value={stored}
-                        onChange={(next: PercentRangeValue) => void saveInput(def, next)}
-                      />
-                    ) : def.valueType === 'CURRENCY' && isSclMoneyLossCode(def.code) ? (
-                      <MoneyRangeSelector
-                        value={stored}
-                        onChange={(next: MoneyRangeValue) => void saveInput(def, next)}
-                      />
-                    ) : def.code === 'C5' && def.valueType === 'CURRENCY' ? (
-                      <ZarCurrencyInput value={stored} id={def.id} step={100000} onCommit={(next) => void saveInput(def, next)} />
-                    ) : (
-                      <input
-                        key={`${def.id}-${stored === undefined ? 'empty' : 'set'}`}
-                        type={def.valueType === 'TEXT' ? 'text' : 'number'}
-                        step="1"
-                        min={def.valueType === 'NUMBER' || def.valueType === 'CURRENCY' ? 0 : undefined}
-                        defaultValue={stored === undefined ? '' : (stored ?? '')}
-                        onBlur={(e) => saveInput(def, e.target.value)}
-                        id={def.id}
-                      />
-                    )}
-                    {def.guidance ? <small>{def.guidance}</small> : null}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="assess-nav">
-              <button className="btn secondary" disabled={calStep === 0} onClick={() => setCalStep((s) => Math.max(0, s - 1))}>Back</button>
-              {calStep < CALIBRATION_GROUPS.length - 1 ? (
-                <button type="button" className="btn" onClick={() => setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1))}>Next</button>
-              ) : (
-                <button type="button" className="btn" onClick={() => { setTab('questionnaire'); setQIntro(false); setQIndex(0); }}>Next</button>
-              )}
-            </div>
-          </section>
-        )}
-
-        {tab === 'questionnaire' && (
-          <section className="assess-stage">
-            {qIntro ? (
-              <div className="assess-intro">
-                <p className="eyebrow">Executive SCL questionnaire</p>
-                <h2>Answer one focused question at a time</h2>
-                <p className="muted">
-                  {questions.length} controlled questions across {categories.length} dimensions. Each option carries a governed risk score — pick the best fit, not the longest answer.
-                </p>
-                <div className="intro-metrics">
-                  <div><span>Questions</span><strong>{questions.length}</strong></div>
-                  <div><span>Answered</span><strong>{answeredCount}</strong></div>
-                  <div><span>Est. time</span><strong>~12 min</strong></div>
+      <Shell
+        title={data.title || 'Security Cost Leakage'}
+        hideSearch
+        hideTitle
+        headerLeading={<CostLeakageBreadcrumb current={data.reference || data.title || 'Assessment'} />}
+      >
+        <div className="space-y-4 pb-8">
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <p className="m-0">{error}</p>
+              {leftover.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {missing.missingInputs.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      className="rounded-md border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                      onClick={() => setTab('profile')}
+                    >
+                      {code}
+                    </button>
+                  ))}
+                  {missing.missingQuestions.map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      className="rounded-md border border-red-200 bg-white px-2 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50"
+                      onClick={() => {
+                        const idx = questions.findIndex((q: any) => q.code === code);
+                        setTab('questionnaire');
+                        setQIntro(false);
+                        if (idx >= 0) setQIndex(idx);
+                      }}
+                    >
+                      {code}
+                    </button>
+                  ))}
                 </div>
-                <div className="category-rail">
-                  {categories.map((cat) => {
-                    const inCat = questions.filter((q: any) => q.category === cat);
-                    const done = inCat.filter((q: any) => responseMap[q.id]?.responseOptionId).length;
+              ) : null}
+            </div>
+          ) : null}
+          {notice ? (
+            <p className="m-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              {notice}
+            </p>
+          ) : null}
+
+          <Card className="rounded-xl border-slate-200 shadow-sm">
+            <CardContent className="space-y-4 p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    SCL Assessment · {data.reference}
+                  </p>
+                  <h1 className="m-0 text-xl font-semibold leading-snug text-slate-900 sm:text-2xl">
+                    {data.organisation.name}
+                  </h1>
+                  <p className="m-0 text-sm text-slate-500">
+                    {data.title}
+                    <span className="mx-1.5 text-slate-300" aria-hidden="true">·</span>
+                    {data.questionnaireVersion.questionnaire.name} · Version {data.questionnaireVersion.version}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge value={data.status} />
+                    <Badge variant="secondary" className="shrink-0 whitespace-nowrap">
+                      {answeredCount}/{questions.length} questions
+                    </Badge>
+                  </div>
+                </div>
+                <div className="grid min-w-[200px] grid-cols-3 gap-2 sm:min-w-[280px]">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-center">
+                    <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Overall</p>
+                    <p className="m-0 mt-0.5 text-lg font-semibold text-slate-900">{progress}%</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-center">
+                    <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Answered</p>
+                    <p className="m-0 mt-0.5 text-lg font-semibold text-slate-900">{answeredCount}/{questions.length}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 text-center">
+                    <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Status</p>
+                    <p className="m-0 mt-0.5 text-sm font-semibold capitalize text-slate-900">{statusLabel}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-slate-900 transition-[width]"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-px">
+            {tabs.map(({ key, label, count }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={cn(
+                  'relative -mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors',
+                  tab === key
+                    ? 'border-slate-900 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-800',
+                )}
+              >
+                {label}
+                {count > 0 ? (
+                  <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5">
+                    {count}
+                  </Badge>
+                ) : null}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'profile' && (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 p-5 sm:p-6">
+                <div className="min-w-0 space-y-1">
+                  <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Step {calStep + 1} of {CALIBRATION_GROUPS.length}
+                  </p>
+                  <CardTitle className="text-lg">{currentGroup.title}</CardTitle>
+                  <CardDescription>{currentGroup.hint}</CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {CALIBRATION_GROUPS.map((g, i) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      aria-label={g.title}
+                      onClick={() => setCalStep(i)}
+                      className={cn(
+                        'size-2.5 rounded-full transition-colors',
+                        i === calStep ? 'bg-slate-900' : 'bg-slate-300 hover:bg-slate-400',
+                        g.codes.some((c) => missingSet.has(c)) && i !== calStep && 'bg-amber-400',
+                      )}
+                    />
+                  ))}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5 px-5 pb-5 sm:px-6 sm:pb-6">
+                {groupInputs.some(
+                  (d: any) =>
+                    d.valueType === 'PERCENT' || (d.valueType === 'CURRENCY' && isSclMoneyLossCode(d.code)),
+                ) && (
+                  <p className="m-0 text-sm text-slate-500">Select an estimated range for each item below.</p>
+                )}
+                <div className="form-grid assess-cal-grid">
+                  {groupInputs.map((def: any) => {
+                    const stored = inputMap[def.id];
+                    const value = stored;
+                    const isMissing = missingSet.has(def.code);
                     return (
-                      <div key={cat} className="category-chip">
-                        <strong>{cat}</strong>
-                        <span>{done}/{inCat.length}</span>
+                      <div className={`field${isMissing ? ' missing' : ''}`} key={def.id} data-field-code={def.code}>
+                        <label>
+                          <span className="field-code">{def.code}</span>
+                          {def.label}
+                          {def.required && <span className="req">*</span>}
+                          {isMissing && <span className="missing-tag">Required</span>}
+                        </label>
+                        {def.valueType === 'SELECT' && def.code === 'C2' ? (
+                          <IndustryWithOtherField
+                            variant="pills"
+                            options={def.options || []}
+                            value={value}
+                            onChange={(next) => void saveInput(def, next)}
+                          />
+                        ) : def.valueType === 'SELECT' ? (
+                          <div className="choice-grid">
+                            {(def.options || []).map((o: string) => (
+                              <button
+                                key={o}
+                                type="button"
+                                className={`choice-pill${String(value ?? '') === o ? ' selected' : ''}`}
+                                onClick={() => saveInput(def, o)}
+                              >
+                                {o}
+                              </button>
+                            ))}
+                          </div>
+                        ) : def.valueType === 'BOOLEAN' ? (
+                          <div className="choice-grid dual">
+                            {['YES', 'NO'].map((o) => (
+                              <button
+                                key={o}
+                                type="button"
+                                className={`choice-pill${String(value ?? '').toUpperCase() === o ? ' selected' : ''}`}
+                                onClick={() => saveInput(def, o)}
+                              >
+                                {o}
+                              </button>
+                            ))}
+                          </div>
+                        ) : def.valueType === 'PERCENT' ? (
+                          <PercentRangeSelector
+                            value={stored}
+                            onChange={(next: PercentRangeValue) => void saveInput(def, next)}
+                          />
+                        ) : def.valueType === 'CURRENCY' && isSclMoneyLossCode(def.code) ? (
+                          <MoneyRangeSelector
+                            value={stored}
+                            onChange={(next: MoneyRangeValue) => void saveInput(def, next)}
+                          />
+                        ) : def.code === 'C5' && def.valueType === 'CURRENCY' ? (
+                          <ZarCurrencyInput value={stored} id={def.id} step={100000} onCommit={(next) => void saveInput(def, next)} />
+                        ) : (
+                          <input
+                            key={`${def.id}-${stored === undefined ? 'empty' : 'set'}`}
+                            type={def.valueType === 'TEXT' ? 'text' : 'number'}
+                            step="1"
+                            min={def.valueType === 'NUMBER' || def.valueType === 'CURRENCY' ? 0 : undefined}
+                            defaultValue={stored === undefined ? '' : (stored ?? '')}
+                            onBlur={(e) => saveInput(def, e.target.value)}
+                            id={def.id}
+                          />
+                        )}
+                        {def.guidance ? <small>{def.guidance}</small> : null}
                       </div>
                     );
                   })}
                 </div>
-                <button className="btn" onClick={() => { setQIntro(false); setQIndex(0); }}>
-                  {answeredCount ? 'Resume assessment' : 'Begin assessment'}
-                </button>
-              </div>
-            ) : currentQuestion && (
-              <div className="scl-triage">
-                <header className="scl-triage-progress">
-                  <div className="scl-triage-progress-top">
-                    <div>
-                      <p className="scl-triage-series">Security Cost Leakage</p>
-                      <p className="scl-triage-counter">
-                        Question {qIndex + 1} of {questions.length}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={calStep === 0}
+                    onClick={() => setCalStep((s) => Math.max(0, s - 1))}
+                  >
+                    Back
+                  </Button>
+                  {calStep < CALIBRATION_GROUPS.length - 1 ? (
+                    <Button
+                      type="button"
+                      onClick={() => setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1))}
+                    >
+                      Next
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setTab('questionnaire');
+                        setQIntro(false);
+                        setQIndex(0);
+                      }}
+                    >
+                      Next
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === 'questionnaire' && (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="p-5 sm:p-6">
+                {qIntro ? (
+                  <div className="space-y-5">
+                    <div className="space-y-1">
+                      <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Executive SCL questionnaire
+                      </p>
+                      <h2 className="m-0 text-xl font-semibold text-slate-900">
+                        Answer one focused question at a time
+                      </h2>
+                      <p className="m-0 text-sm text-slate-500">
+                        {questions.length} controlled questions across {categories.length} dimensions. Each option carries a governed risk score — pick the best fit, not the longest answer.
                       </p>
                     </div>
-                    <p className="scl-triage-pct">{qProgress}% complete</p>
-                  </div>
-                  <div
-                    className="scl-triage-bar"
-                    role="progressbar"
-                    aria-valuenow={qProgress}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  >
-                    <span style={{ width: `${qProgress}%` }} />
-                  </div>
-                </header>
-
-                <section className={`scl-triage-card${missingSet.has(currentQuestion.code) ? ' missing-border' : ''}`}>
-                  <p className="scl-triage-category">{currentQuestion.category}</p>
-                  <h2 className="scl-triage-question">{currentQuestion.text}</h2>
-                  <p className="scl-triage-prompt">Select the response that best reflects the current position.</p>
-                  {currentQuestion.evidenceHint ? (
-                    <p className="evidence-hint" style={{ marginTop: -8, marginBottom: 18 }}>
-                      <strong>Suggested evidence:</strong> {currentQuestion.evidenceHint}
-                    </p>
-                  ) : null}
-                  <div className="scl-triage-options" role="radiogroup" aria-label="Response options">
-                    {[...currentQuestion.options].sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((o: any) => {
-                      const selected = selectedId === o.id;
-                      const { title, description } = splitOptionPresentation(o.label);
-                      return (
-                        <button
-                          key={o.id}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          className={`scl-triage-option${selected ? ' selected' : ''}`}
-                          disabled={!!savingOption}
-                          onClick={() => saveResponse(currentQuestion, o.id)}
-                        >
-                          <span className="scl-triage-radio" aria-hidden="true" />
-                          <span className="scl-triage-option-copy">
-                            <strong>{title}</strong>
-                            {description ? <span>{description}</span> : null}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {questionError && (
-                    <p className="field-error" role="alert" style={{ marginTop: 16, color: '#b91c1c', fontWeight: 650 }}>
-                      {questionError}
-                    </p>
-                  )}
-                </section>
-
-                <footer className="scl-triage-nav">
-                  <button type="button" className="btn secondary scl-triage-prev" onClick={goBackQuestion}>Previous</button>
-                  {qIndex < questions.length - 1 ? (
-                    <button type="button" className="btn scl-triage-next" onClick={goNextQuestion}>Next question</button>
-                  ) : (
-                    <div className="assess-nav-right" style={{ marginLeft: 'auto', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      <button type="button" className="btn secondary" disabled={busy} onClick={() => action(`/assessments/${id}/evaluate`, 'Scores recalculated.', true)}>Recalculate</button>
-                      <button
-                        type="button"
-                        className="btn scl-triage-next"
-                        disabled={busy}
-                        onClick={() => {
-                          if (!selectedId) {
-                            setQuestionError('Please select an answer before submitting.');
-                            return;
-                          }
-                          setQuestionError('');
-                          action(`/assessments/${id}/submit`, 'Assessment evaluated successfully.', true);
-                        }}
-                      >
-                        Submit and evaluate
-                      </button>
-                    </div>
-                  )}
-                </footer>
-              </div>
-            )}
-          </section>
-        )}
-
-        {tab === 'evidence' && (
-          <div className="grid two-col">
-            <section className="card">
-              <div className="card-header">
-                <div>
-                  <h2>Evidence register</h2>
-                  <p className="muted small">Upload contracts, SLAs, reports, reconciliations and assurance records.</p>
-                </div>
-                <label className="btn">Upload file<input type="file" hidden onChange={upload} /></label>
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Document</th><th>Status</th><th>Question</th><th>Uploaded</th></tr></thead>
-                  <tbody>
-                    {data.evidence.map((e: any) => (
-                      <tr key={e.id}>
-                        <td><strong>{e.title}</strong><br /><span className="muted small">{e.fileName}</span></td>
-                        <td><StatusBadge value={e.status} /></td>
-                        <td>{e.questionCode || 'General'}</td>
-                        <td>{new Date(e.uploadedAt).toLocaleDateString('en-ZA')}</td>
-                      </tr>
-                    ))}
-                    {!data.evidence.length && <tr><td colSpan={4} className="muted">No evidence uploaded.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            <aside className="card">
-              <h2>Evidence review rules</h2>
-              <div className="list">
-                {['Submitted', 'Under review', 'Verified', 'Partially verified', 'Rejected or missing'].map((x) => (
-                  <div className="list-item" key={x}>
-                    <strong>{x}</strong>
-                    <span className="muted small">Risk and confidence remain separate; evidence improves confidence but does not erase a confirmed control gap.</span>
-                  </div>
-                ))}
-              </div>
-            </aside>
-          </div>
-        )}
-
-        {tab === 'results' && (
-          <>
-            {!snapshot ? (
-              <div className="empty">Complete and evaluate the questionnaire to generate results.</div>
-            ) : (
-              <>
-                <section className="results-hero">
-                  <div>
-                    <p className="eyebrow">Evaluation outcome</p>
-                    <h2>{snapshot.riskBand}</h2>
-                    <p className="muted">Exposure score {Number(snapshot.overallRiskScore).toFixed(1)}/100 · higher scores indicate greater exposure</p>
-                  </div>
-                  <div className="results-hero-leak">
-                    <span>Modelled leakage estimate</span>
-                    <strong>{money(leakage.likelyLeakageValue)}</strong>
-                    <small>{pct(leakage.likelyLeakageRate)} of annual security spend · evidence validation required</small>
-                  </div>
-                </section>
-                <div className="grid metrics">
-                  <MetricCard label="Exposure score" value={`${Number(snapshot.overallRiskScore).toFixed(1)}/100`} detail={snapshot.riskBand} />
-                  <MetricCard label="Evidence confidence" value={`${Number(snapshot.evidenceConfidence ?? 0).toFixed(1)}/100`} detail="Confidence in supporting evidence" />
-                  <MetricCard label="Modelled leakage" value={money(leakage.likelyLeakageValue)} detail={pct(leakage.likelyLeakageRate)} />
-                  <MetricCard label="Modelled recoverable range" value={`${money(leakage.recoverableLow)} – ${money(leakage.recoverableHigh)}`} detail={`Opportunity ${Number(snapshot.opportunityScore).toFixed(1)}/100`} />
-                </div>
-                <div className="grid two-col">
-                  <section className="card">
-                    <h2>Category risk profile</h2>
-                    {categoryScores.map((c) => (
-                      <div className="score-bar" key={c.category}>
-                        <span>{c.category}</span>
-                        <div className="score-track"><span style={{ width: `${Math.min(100, Number(c.score))}%` }} /></div>
-                        <strong>{Number(c.score).toFixed(1)}</strong>
+                    <div className="grid grid-cols-3 gap-2 sm:max-w-md">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Questions</p>
+                        <p className="m-0 mt-0.5 text-lg font-semibold text-slate-900">{questions.length}</p>
                       </div>
-                    ))}
-                    <h3 className="section-title">Modelled leakage range — validate against evidence</h3>
-                    <div className="three-col grid">
-                      <div className="risk-box"><span className="muted small">Minimum</span><strong style={{ display: 'block', fontSize: 20 }}>{money(leakage.minimumLeakageValue)}</strong><span>{pct(leakage.minimumLeakageRate)}</span></div>
-                      <div className="risk-box"><span className="muted small">Likely</span><strong style={{ display: 'block', fontSize: 20 }}>{money(leakage.likelyLeakageValue)}</strong><span>{pct(leakage.likelyLeakageRate)}</span></div>
-                      <div className="risk-box"><span className="muted small">Maximum</span><strong style={{ display: 'block', fontSize: 20 }}>{money(leakage.maximumExposureValue)}</strong><span>{pct(leakage.maximumExposureRate)}</span></div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Answered</p>
+                        <p className="m-0 mt-0.5 text-lg font-semibold text-slate-900">{answeredCount}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Est. time</p>
+                        <p className="m-0 mt-0.5 text-lg font-semibold text-slate-900">~12 min</p>
+                      </div>
                     </div>
-                  </section>
-                  <aside className="card">
-                    <h2>Priority recommendations</h2>
-                    <div className="list">
-                      {data.recommendations.map((r: any) => (
-                        <div className="list-item" key={r.id}>
-                          <StatusBadge value={r.priority} />
-                          <strong style={{ marginTop: 8 }}>{r.title}</strong>
-                          <span className="muted small">{r.summary}</span>
-                          {r.serviceOffering && <p className="small"><strong>Engagement:</strong> {r.serviceOffering}</p>}
+                    <div className="flex flex-wrap gap-2">
+                      {categories.map((cat) => {
+                        const inCat = questions.filter((q: any) => q.category === cat);
+                        const done = inCat.filter((q: any) => responseMap[q.id]?.responseOptionId).length;
+                        return (
+                          <div
+                            key={cat}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm"
+                          >
+                            <strong className="font-medium text-slate-800">{cat}</strong>
+                            <span className="text-slate-500">{done}/{inCat.length}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setQIntro(false);
+                        setQIndex(0);
+                      }}
+                    >
+                      {answeredCount ? 'Resume assessment' : 'Begin assessment'}
+                    </Button>
+                  </div>
+                ) : currentQuestion ? (
+                  <div className="scl-triage">
+                    <header className="scl-triage-progress">
+                      <div className="scl-triage-progress-top">
+                        <div>
+                          <p className="scl-triage-series">Security Cost Leakage</p>
+                          <p className="scl-triage-counter">
+                            Question {qIndex + 1} of {questions.length}
+                          </p>
                         </div>
-                      ))}
-                      {!data.recommendations.length && <p className="muted">No rules triggered.</p>}
+                        <p className="scl-triage-pct">{qProgress}% complete</p>
+                      </div>
+                      <div
+                        className="scl-triage-bar"
+                        role="progressbar"
+                        aria-valuenow={qProgress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      >
+                        <span style={{ width: `${qProgress}%` }} />
+                      </div>
+                    </header>
+
+                    <section className={`scl-triage-card${missingSet.has(currentQuestion.code) ? ' missing-border' : ''}`}>
+                      <p className="scl-triage-category">{currentQuestion.category}</p>
+                      <h2 className="scl-triage-question">{currentQuestion.text}</h2>
+                      <p className="scl-triage-prompt">Select the response that best reflects the current position.</p>
+                      {currentQuestion.evidenceHint ? (
+                        <p className="evidence-hint" style={{ marginTop: -8, marginBottom: 18 }}>
+                          <strong>Suggested evidence:</strong> {currentQuestion.evidenceHint}
+                        </p>
+                      ) : null}
+                      <div className="scl-triage-options" role="radiogroup" aria-label="Response options">
+                        {[...currentQuestion.options].sort((a: any, b: any) => a.sortOrder - b.sortOrder).map((o: any) => {
+                          const selected = selectedId === o.id;
+                          const { title, description } = splitOptionPresentation(o.label);
+                          return (
+                            <button
+                              key={o.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              className={`scl-triage-option${selected ? ' selected' : ''}`}
+                              disabled={!!savingOption}
+                              onClick={() => saveResponse(currentQuestion, o.id)}
+                            >
+                              <span className="scl-triage-radio" aria-hidden="true" />
+                              <span className="scl-triage-option-copy">
+                                <strong>{title}</strong>
+                                {description ? <span>{description}</span> : null}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {questionError ? (
+                        <p className="field-error" role="alert" style={{ marginTop: 16, color: '#b91c1c', fontWeight: 650 }}>
+                          {questionError}
+                        </p>
+                      ) : null}
+                    </section>
+
+                    <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4">
+                      <Button type="button" variant="outline" onClick={goBackQuestion}>
+                        Previous
+                      </Button>
+                      {qIndex < questions.length - 1 ? (
+                        <Button type="button" onClick={goNextQuestion}>
+                          Next question
+                        </Button>
+                      ) : (
+                        <div className="ml-auto flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => action(`/assessments/${id}/evaluate`, 'Scores recalculated.', true)}
+                          >
+                            Recalculate
+                          </Button>
+                          <Button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              if (!selectedId) {
+                                setQuestionError('Please select an answer before submitting.');
+                                return;
+                              }
+                              setQuestionError('');
+                              action(`/assessments/${id}/submit`, 'Assessment evaluated successfully.', true);
+                            }}
+                          >
+                            Submit and evaluate
+                          </Button>
+                        </div>
+                      )}
+                    </footer>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === 'evidence' && (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <Card className="rounded-xl border-slate-200 shadow-sm">
+                <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 p-5 sm:p-6">
+                  <div className="min-w-0 space-y-1">
+                    <CardTitle className="text-base">Evidence register</CardTitle>
+                    <CardDescription>
+                      Upload contracts, SLAs, reports, reconciliations and assurance records.
+                    </CardDescription>
+                  </div>
+                  <Button asChild>
+                    <label className="cursor-pointer">
+                      Upload file
+                      <input type="file" hidden onChange={upload} />
+                    </label>
+                  </Button>
+                </CardHeader>
+                <CardContent className="px-5 pb-5 sm:px-6 sm:pb-6">
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <table className="w-full min-w-[480px] text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Document</th>
+                          <th className="px-3 py-2 font-semibold">Status</th>
+                          <th className="px-3 py-2 font-semibold">Question</th>
+                          <th className="px-3 py-2 font-semibold">Uploaded</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.evidence.map((e: any) => (
+                          <tr key={e.id} className="border-t border-slate-100">
+                            <td className="px-3 py-2.5">
+                              <strong className="font-medium text-slate-900">{e.title}</strong>
+                              <br />
+                              <span className="text-xs text-slate-500">{e.fileName}</span>
+                            </td>
+                            <td className="px-3 py-2.5"><StatusBadge value={e.status} /></td>
+                            <td className="px-3 py-2.5 text-slate-600">{e.questionCode || 'General'}</td>
+                            <td className="px-3 py-2.5 text-slate-600">{formatDate(e.uploadedAt)}</td>
+                          </tr>
+                        ))}
+                        {!data.evidence.length ? (
+                          <tr>
+                            <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                              No evidence uploaded.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl border-slate-200 shadow-sm">
+                <CardHeader className="p-5 pb-3 sm:p-6 sm:pb-3">
+                  <CardTitle className="text-base">Evidence review rules</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 px-5 pb-5 sm:px-6 sm:pb-6">
+                  {['Submitted', 'Under review', 'Verified', 'Partially verified', 'Rejected or missing'].map((x) => (
+                    <div key={x} className="space-y-0.5 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                      <p className="m-0 text-sm font-medium text-slate-900">{x}</p>
+                      <p className="m-0 text-xs text-slate-500">
+                        Risk and confidence remain separate; evidence improves confidence but does not erase a confirmed control gap.
+                      </p>
                     </div>
-                  </aside>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {tab === 'results' && (
+            <>
+              {!snapshot ? (
+                <Card className="rounded-xl border-slate-200 shadow-sm">
+                  <CardContent className="p-8 text-center text-sm text-slate-500">
+                    Complete and evaluate the questionnaire to generate results.
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  <Card className="rounded-xl border-slate-200 shadow-sm">
+                    <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
+                      <div className="min-w-0 space-y-1">
+                        <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Evaluation outcome
+                        </p>
+                        <h2 className="m-0 text-2xl font-semibold text-slate-900">{snapshot.riskBand}</h2>
+                        <p className="m-0 text-sm text-slate-500">
+                          Exposure score {Number(snapshot.overallRiskScore).toFixed(1)}/100 · higher scores indicate greater exposure
+                        </p>
+                      </div>
+                      <div className="min-w-[200px] rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3">
+                        <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Modelled leakage estimate
+                        </p>
+                        <p className="m-0 mt-1 text-xl font-semibold text-slate-900">
+                          {money(leakage.likelyLeakageValue)}
+                        </p>
+                        <p className="m-0 mt-0.5 text-xs text-slate-500">
+                          {pct(leakage.likelyLeakageRate)} of annual security spend · evidence validation required
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <MetricCard label="Exposure score" value={`${Number(snapshot.overallRiskScore).toFixed(1)}/100`} detail={snapshot.riskBand} />
+                    <MetricCard label="Evidence confidence" value={`${Number(snapshot.evidenceConfidence ?? 0).toFixed(1)}/100`} detail="Confidence in supporting evidence" />
+                    <MetricCard label="Modelled leakage" value={money(leakage.likelyLeakageValue)} detail={pct(leakage.likelyLeakageRate)} />
+                    <MetricCard label="Modelled recoverable range" value={`${money(leakage.recoverableLow)} – ${money(leakage.recoverableHigh)}`} detail={`Opportunity ${Number(snapshot.opportunityScore).toFixed(1)}/100`} />
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <Card className="rounded-xl border-slate-200 shadow-sm">
+                      <CardHeader className="p-5 pb-3 sm:p-6 sm:pb-3">
+                        <CardTitle className="text-base">Category risk profile</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 px-5 pb-5 sm:px-6 sm:pb-6">
+                        {categoryScores.map((c) => (
+                          <div className="score-bar" key={c.category}>
+                            <span>{c.category}</span>
+                            <div className="score-track"><span style={{ width: `${Math.min(100, Number(c.score))}%` }} /></div>
+                            <strong>{Number(c.score).toFixed(1)}</strong>
+                          </div>
+                        ))}
+                        <h3 className="section-title !mt-4">Modelled leakage range — validate against evidence</h3>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                            <span className="text-xs text-slate-500">Minimum</span>
+                            <strong className="mt-0.5 block text-lg text-slate-900">{money(leakage.minimumLeakageValue)}</strong>
+                            <span className="text-xs text-slate-500">{pct(leakage.minimumLeakageRate)}</span>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                            <span className="text-xs text-slate-500">Likely</span>
+                            <strong className="mt-0.5 block text-lg text-slate-900">{money(leakage.likelyLeakageValue)}</strong>
+                            <span className="text-xs text-slate-500">{pct(leakage.likelyLeakageRate)}</span>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+                            <span className="text-xs text-slate-500">Maximum</span>
+                            <strong className="mt-0.5 block text-lg text-slate-900">{money(leakage.maximumExposureValue)}</strong>
+                            <span className="text-xs text-slate-500">{pct(leakage.maximumExposureRate)}</span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="rounded-xl border-slate-200 shadow-sm">
+                      <CardHeader className="p-5 pb-3 sm:p-6 sm:pb-3">
+                        <CardTitle className="text-base">Priority recommendations</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3 px-5 pb-5 sm:px-6 sm:pb-6">
+                        {data.recommendations.map((r: any) => (
+                          <div key={r.id} className="space-y-1 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                            <StatusBadge value={r.priority} />
+                            <p className="m-0 text-sm font-medium text-slate-900">{r.title}</p>
+                            <p className="m-0 text-xs text-slate-500">{r.summary}</p>
+                            {r.serviceOffering ? (
+                              <p className="m-0 text-xs text-slate-600">
+                                <strong>Engagement:</strong> {r.serviceOffering}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                        {!data.recommendations.length ? (
+                          <p className="m-0 text-sm text-slate-500">No rules triggered.</p>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card className="rounded-xl border-slate-200 shadow-sm">
+                    <CardHeader className="p-5 pb-3 sm:p-6 sm:pb-3">
+                      <CardTitle className="text-base">Report output</CardTitle>
+                      <CardDescription>
+                        Generate the executive PDF, then open it to email the client with the report attached.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-wrap gap-2 px-5 pb-5 sm:px-6 sm:pb-6">
+                      <Button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => action(`/reports/assessment/${id}/generate`, 'Executive report generated.')}
+                      >
+                        Generate PDF report
+                      </Button>
+                      {data.reports?.[0] ? (
+                        <Button asChild variant="outline">
+                          <Link href={`/reports/${data.reports[0].id}`}>Open latest report</Link>
+                        </Button>
+                      ) : null}
+                    </CardContent>
+                  </Card>
                 </div>
-                <section className="card" style={{ marginTop: 18 }}>
-                  <div className="card-header">
-                    <div>
-                      <h2>Report output</h2>
-                      <p className="muted small">Generate the executive PDF, then open it to email the client with the report attached.</p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button className="btn" disabled={busy} onClick={() => action(`/reports/assessment/${id}/generate`, 'Executive report generated.')}>Generate PDF report</button>
-                    {data.reports?.[0] && <Link className="btn secondary" href={`/reports/${data.reports[0].id}`}>Open latest report</Link>}
-                  </div>
-                </section>
-              </>
-            )}
-          </>
-        )}
+              )}
+            </>
+          )}
+        </div>
       </Shell>
     </AuthGate>
   );
