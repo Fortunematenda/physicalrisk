@@ -269,8 +269,13 @@ export function ProposalWorkspace({
     draftRef.current = draft;
   }, [draft]);
 
-  function syncEditorsIntoDraft(): ProposalWorkspaceDraft | null {
-    if (typeof document !== 'undefined') {
+  /**
+   * Push TipTap DOM state into React draft.
+   * Never blur on background autosave — that steals focus mid-keystroke.
+   * Explicit Save / Preview / Leave may blur so native inputs also commit.
+   */
+  function syncEditorsIntoDraft(opts?: { blurActive?: boolean }): ProposalWorkspaceDraft | null {
+    if (opts?.blurActive && typeof document !== 'undefined') {
       const active = document.activeElement as HTMLElement | null;
       if (active && typeof active.blur === 'function') active.blur();
     }
@@ -733,7 +738,7 @@ export function ProposalWorkspace({
   async function save() {
     setSaving(true);
     try {
-      const latest = syncEditorsIntoDraft();
+      const latest = syncEditorsIntoDraft({ blurActive: true });
       if (!latest) return;
       await persistDraft({ quiet: true, draftOverride: latest });
       await generatePdfSilent();
@@ -767,7 +772,7 @@ export function ProposalWorkspace({
   async function downloadPdf() {
     setSaving(true);
     try {
-      const latest = syncEditorsIntoDraft();
+      const latest = syncEditorsIntoDraft({ blurActive: true });
       if (!latest) return;
       await persistIfNeeded(latest);
       await generatePdfSilent();
@@ -806,7 +811,7 @@ export function ProposalWorkspace({
   async function previewProposal() {
     setSaving(true);
     try {
-      const latest = syncEditorsIntoDraft();
+      const latest = syncEditorsIntoDraft({ blurActive: true });
       if (!latest) return;
       await persistIfNeeded(latest);
       // Preview re-renders live — do not store/generate first (that path feels like a download).
@@ -832,7 +837,7 @@ export function ProposalWorkspace({
   async function sendProposalToClient() {
     setSaving(true);
     try {
-      const latest = syncEditorsIntoDraft();
+      const latest = syncEditorsIntoDraft({ blurActive: true });
       if (!latest) return;
       await persistIfNeeded(latest);
 
@@ -906,7 +911,7 @@ export function ProposalWorkspace({
       setAutosaveLabel('saving');
       setSaving(true);
       try {
-        const latest = syncEditorsIntoDraft();
+        const latest = syncEditorsIntoDraft({ blurActive: true });
         if (latest) {
           await persistDraft({ quiet: true, skipParentReload: true, draftOverride: latest });
         }
@@ -950,28 +955,31 @@ export function ProposalWorkspace({
       ? `/advisory/${eadAssessmentId}/outcome`
       : `/triage/${submissionId}?tab=commercial`;
 
-  // Background autosave while editing (status DRAFT / in preparation is expected until sent or accepted).
+  // Background autosave after typing pauses — never blur or flip `saving` (that freezes the form).
+  const draftFpWhileDirty = isDirty && draft ? draftFingerprint(draft) : '';
   useEffect(() => {
-    if (!isDirty || loading || proposalSent || !draft) return;
+    if (!isDirty || loading || proposalSent || !draft || !draftFpWhileDirty) return;
     const timer = window.setTimeout(() => {
       void (async () => {
         setAutosaveLabel('saving');
-        setSaving(true);
         try {
-          const latest = syncEditorsIntoDraft();
+          // No blur — keep caret/selection while the user may still be mid-thought.
+          const latest = syncEditorsIntoDraft({ blurActive: false }) ?? draftRef.current;
           if (!latest) return;
+          if (draftFingerprint(latest) === savedFingerprint) {
+            setAutosaveLabel('idle');
+            return;
+          }
           await persistDraft({ quiet: true, skipParentReload: true, draftOverride: latest });
           setAutosaveLabel('saved');
         } catch {
           setAutosaveLabel('error');
-        } finally {
-          setSaving(false);
         }
       })();
-    }, 1200);
+    }, 1800);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, loading, proposalSent, savedFingerprint]);
+  }, [isDirty, loading, proposalSent, draftFpWhileDirty, savedFingerprint]);
 
   const guardDirtyNav = (e: MouseEvent) => {
     if (isDirtyRef.current) {
@@ -1157,7 +1165,7 @@ export function ProposalWorkspace({
         <Tabs
           value={tab}
           onValueChange={(next) => {
-            syncEditorsIntoDraft();
+            syncEditorsIntoDraft({ blurActive: false });
             setTab(next);
           }}
         >
