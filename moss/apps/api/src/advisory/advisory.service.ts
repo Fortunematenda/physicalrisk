@@ -885,7 +885,10 @@ export class AdvisoryService {
       selectedLabels,
     });
     const indicativeScope = buildEadFollowOnIndicativeScope(validated.codes);
-    const feeLineItems = buildEadFollowOnFeeLineItems(validated.codes);
+    const feeLineItems = buildEadFollowOnFeeLineItems(
+      validated.codes,
+      feeDefaults.analystHourlyRate,
+    );
     const requestNote = String(input.requestNote || '').trim() || null;
 
     const contextSnapshot = {

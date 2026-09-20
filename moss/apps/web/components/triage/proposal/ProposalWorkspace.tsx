@@ -1592,7 +1592,26 @@ export function ProposalWorkspace({
                   label={`Analyst rate (${currencyLabel}/hr)`}
                   type="number"
                   value={draft.analystHourlyRate}
-                  onChange={(v) => patchDraft({ analystHourlyRate: v })}
+                  onChange={(v) => {
+                    const nextRate = Number(v) || 985;
+                    setDraft((prev) => {
+                      if (!prev) return prev;
+                      const prevRate = Number(prev.analystHourlyRate) || 985;
+                      const feeLineItems = prev.contentSnapshot.feeLineItems.map((row) => {
+                        const r = Number(row.rate);
+                        const shouldUpdate =
+                          row.rate == null || !Number.isFinite(r) || r <= 0 || r === prevRate;
+                        return recalcLineItemFee(shouldUpdate ? { ...row, rate: nextRate } : row);
+                      });
+                      const next = {
+                        ...prev,
+                        analystHourlyRate: v,
+                        contentSnapshot: { ...prev.contentSnapshot, feeLineItems },
+                      };
+                      draftRef.current = next;
+                      return next;
+                    });
+                  }}
                 />
                 <FieldInput
                   label={`Specialist rate (${currencyLabel}/hr)`}

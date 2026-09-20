@@ -412,8 +412,15 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
   const snap = ws.contentSnapshot || emptyContentSnapshot();
   const analystHourlyRate = ws.analystHourlyRate != null ? String(ws.analystHourlyRate) : '985';
   const specialistHourlyRate = ws.specialistHourlyRate != null ? String(ws.specialistHourlyRate) : '1825';
+  const defaultRate = Number(analystHourlyRate) || 985;
   const currency = normalizeProposalCurrency(ws.currency);
   const savedIntro = feesIntroductionForSave(snap.feesIntroduction);
+  const feeLineItems = (snap.feeLineItems || []).map((row) => {
+    const rateNum = Number(row.rate);
+    const rateMissing = row.rate == null || !Number.isFinite(rateNum) || rateNum <= 0;
+    const next = rateMissing ? { ...row, rate: defaultRate } : row;
+    return recalcLineItemFee(next);
+  });
   return {
     organisationName: ws.organisationName || '',
     addressedTo: ws.addressedTo || '',
@@ -457,6 +464,7 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
       // null = live rates default in the editor / PDF (do not lock stale rate text).
       feesIntroduction: savedIntro,
       methodologyItems: snap.methodologyItems || [],
+      feeLineItems,
     },
   };
 }

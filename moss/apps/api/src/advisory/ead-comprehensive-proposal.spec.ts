@@ -42,9 +42,16 @@ describe('ead-comprehensive-proposal (Stage 12)', () => {
     const lines = buildEadFollowOnFeeLineItems(['SCLI_COST_LEAKAGE', 'CONTRACT_SLA_ASSURANCE']);
     expect(lines.length).toBe(2);
     expect(lines[0].fee).toBe(0);
+    expect(lines[0].rate).toBe(985);
+    expect(lines[1].rate).toBe(985);
     expect(lines[0].description.includes('Cost Leakage') || lines[0].description.includes('Leakage')).toBe(
       true,
     );
+  });
+
+  it('prepopulates fee line rate from analyst hourly rate', () => {
+    const lines = buildEadFollowOnFeeLineItems(['VENDOR_PERFORMANCE_ASSURANCE'], 1200);
+    expect(lines[0].rate).toBe(1200);
   });
 
   it('builds understanding without fabricating consultant narrative beyond deterministic facts', () => {

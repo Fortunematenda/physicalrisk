@@ -72,21 +72,23 @@ function escapeHtml(value: string): string {
 
 export function buildEadFollowOnFeeLineItems(
   codes: readonly string[],
+  analystHourlyRate = 985,
 ): Array<{
   id: string;
   phase: string;
   description: string;
   hours: null;
-  rate: null;
+  rate: number;
   fee: number;
   sequence: number;
 }> {
+  const rate = Number(analystHourlyRate) > 0 ? Number(analystHourlyRate) : 985;
   return codes.map((code, index) => ({
     id: `ead-followon-${code}`,
     phase: String(index + 1),
     description: PRODUCT_LABELS[code] || code.replaceAll('_', ' '),
     hours: null,
-    rate: null,
+    rate,
     fee: 0,
     sequence: index + 1,
   }));
