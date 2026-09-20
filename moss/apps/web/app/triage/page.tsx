@@ -1158,7 +1158,7 @@ export default function TriageSubmissionsPage() {
                                 href={`/triage/${row.id}/proposal`}
                                 onClick={() => setMenuOpenId(null)}
                               >
-                                View proposal
+                                Open proposal
                               </Link>
                             ) : row.completedAt && !row.convertedAt ? (
                               <Link

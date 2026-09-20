@@ -574,11 +574,15 @@ function CommercialNextStepPanel({
     Boolean(comprehensiveProposal?.id) &&
     Boolean(comprehensiveProposal?.publicLeadId) &&
     canMarkAccepted(status);
+  const isSent = status === 'SENT' || status === 'VIEWED';
+  const isAccepted = status === 'ACCEPTED';
+  const isPreparing =
+    Boolean(comprehensiveProposal) && !isSent && !isAccepted && status !== 'DECLINED';
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-        {comprehensiveProposal ? 'Commercial proposal' : 'Commercial next step'}
+        Commercial next step
       </p>
 
       {!comprehensiveProposal ? (
@@ -586,102 +590,73 @@ function CommercialNextStepPanel({
           <p className="m-0 text-sm text-slate-700">
             <span className="font-semibold text-slate-900">{recommendationCount}</span>
             {' '}
-            recommendation{recommendationCount === 1 ? '' : 's'}
+            recommendation{recommendationCount === 1 ? '' : 's'} ready for a Level 3 proposal.
           </p>
-          <div>
-            <p className="m-0 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Proposal
-            </p>
-            <p className="m-0 text-sm font-medium text-slate-900">Not requested</p>
-          </div>
-          {recommendationCount > 0 ? (
-            <p className="m-0 text-sm text-slate-600">
-              {recommendationCount} recommended engagement{recommendationCount === 1 ? '' : 's'}{' '}
-              available for proposal.
-            </p>
-          ) : null}
           {canRequest ? (
             <Button type="button" className="h-10 w-full sm:w-auto" disabled={busy} onClick={onRequest}>
-              Request comprehensive proposal
+              Request proposal
             </Button>
-          ) : null}
+          ) : (
+            <p className="m-0 text-sm text-slate-600">Physical Risk will prepare the next commercial step.</p>
+          )}
         </div>
       ) : (
         <div className="mt-3 space-y-3">
-          <p className="m-0 text-base font-semibold text-slate-900">
-            {comprehensiveProposal.proposalNumber}
-          </p>
-          <dl className="grid gap-2 text-sm">
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Status
-              </dt>
-              <dd className="m-0 font-medium text-slate-900">
-                {humanizeProposalStatus(status)}
-              </dd>
-            </div>
-            {fmtDate(comprehensiveProposal.createdAt) ? (
-              <div>
-                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Requested
-                </dt>
-                <dd className="m-0 font-medium text-slate-900">
-                  {fmtDate(comprehensiveProposal.createdAt)}
-                </dd>
-              </div>
-            ) : null}
-            {fmtDate(comprehensiveProposal.sentAt) ? (
-              <div>
-                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Sent
-                </dt>
-                <dd className="m-0 font-medium text-slate-900">
-                  {fmtDate(comprehensiveProposal.sentAt)}
-                </dd>
-              </div>
-            ) : null}
-            {fmtDate(comprehensiveProposal.acceptedAt) ? (
-              <div>
-                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Accepted
-                </dt>
-                <dd className="m-0 font-medium text-slate-900">
-                  {fmtDate(comprehensiveProposal.acceptedAt)}
-                </dd>
-              </div>
-            ) : null}
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Selected engagements
-              </dt>
-              <dd className="m-0 font-medium text-slate-900">{selectedCount}</dd>
-            </div>
-          </dl>
+          <div className="space-y-1">
+            <p className="m-0 text-base font-semibold text-slate-900">
+              {comprehensiveProposal.proposalNumber}
+            </p>
+            <p className="m-0 text-sm text-slate-600">
+              {humanizeProposalStatus(status)}
+              {selectedCount ? ` · ${selectedCount} engagement${selectedCount === 1 ? '' : 's'}` : ''}
+              {fmtDate(comprehensiveProposal.sentAt) ? ` · Sent ${fmtDate(comprehensiveProposal.sentAt)}` : ''}
+              {fmtDate(comprehensiveProposal.acceptedAt)
+                ? ` · Accepted ${fmtDate(comprehensiveProposal.acceptedAt)}`
+                : ''}
+            </p>
+          </div>
+
+          {/* One primary action per stage — avoid competing View/Open/Send buttons */}
           <div className="flex flex-wrap gap-2">
-            {canOpenWorkspace ? (
+            {!canOpenWorkspace ? (
+              <p className="m-0 text-sm text-slate-600">Physical Risk is preparing your proposal.</p>
+            ) : isAccepted ? (
               <Button asChild variant="outline" className="h-10 px-4">
-                <Link href={comprehensiveProposal.workspaceHref}>
-                  {status === 'SENT' || status === 'VIEWED' || status === 'ACCEPTED'
-                    ? 'View proposal'
-                    : 'Open proposal workspace'}
-                </Link>
+                <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
+              </Button>
+            ) : isSent ? (
+              <>
+                {showAccept ? (
+                  <Button type="button" className="h-10 px-4" disabled={busy} onClick={onAccept}>
+                    Mark accepted
+                  </Button>
+                ) : null}
+                <Button asChild variant="outline" className="h-10 px-4">
+                  <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
+                </Button>
+              </>
+            ) : isPreparing ? (
+              <Button asChild className="h-10 px-4">
+                <Link href={comprehensiveProposal.workspaceHref}>Continue proposal</Link>
               </Button>
             ) : (
-              <p className="m-0 text-sm text-slate-600">Physical Risk is preparing your proposal.</p>
-            )}
-            {showAccept ? (
-              <Button type="button" className="h-10 px-4" disabled={busy} onClick={onAccept}>
-                Mark accepted
+              <Button asChild variant="outline" className="h-10 px-4">
+                <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
               </Button>
-            ) : null}
+            )}
           </div>
-          {status === 'ACCEPTED' ? (
+
+          {isAccepted ? (
             <p className="m-0 text-sm text-emerald-800">
-              Proposal accepted. Create Level 3 engagements below when ready.
+              Next: create Level 3 engagements below.
             </p>
-          ) : showAccept ? (
+          ) : isSent && showAccept ? (
             <p className="m-0 text-xs text-slate-500">
-              Stay on Diagnostics &amp; assurance — mark accepted here to unlock Level 3.
+              After the client accepts, mark it here to unlock Level 3.
+            </p>
+          ) : isPreparing ? (
+            <p className="m-0 text-xs text-slate-500">
+              Edit and submit the proposal from the workspace. PDF preview is there too.
             </p>
           ) : null}
         </div>

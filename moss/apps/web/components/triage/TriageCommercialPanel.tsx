@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
@@ -504,6 +505,18 @@ export function TriageCommercialPanel({
     && !isDeclined
     && (['SENT', 'VIEWED'].includes(proposalStatus) || leadProposalStatus === 'SENT');
 
+  const eadSnapshot =
+    activeProposal?.contextSnapshot && typeof activeProposal.contextSnapshot === 'object'
+      ? (activeProposal.contextSnapshot as Record<string, unknown>)
+      : null;
+  const isEadSourcedProposal = eadSnapshot?.source === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+  const eadOutcomeHref =
+    typeof eadSnapshot?.eadAssessmentId === 'string'
+      ? `/advisory/${eadSnapshot.eadAssessmentId}/outcome`
+      : null;
+  const eadReference =
+    typeof eadSnapshot?.eadReference === 'string' ? eadSnapshot.eadReference : null;
+
   return (
     <div className="space-y-4">
       {/* A. Proposal / Commercial summary */}
@@ -524,16 +537,11 @@ export function TriageCommercialPanel({
                 {lastUpdated ? ` · Last updated ${fmt(lastUpdated)}` : ''}
               </p>
               {(() => {
-                const snap =
-                  activeProposal?.contextSnapshot &&
-                  typeof activeProposal.contextSnapshot === 'object'
-                    ? (activeProposal.contextSnapshot as Record<string, unknown>)
-                    : null;
-                if (snap?.source !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC') return null;
+                if (!isEadSourcedProposal) return null;
                 return (
                   <p className="m-0 text-xs text-slate-500">
                     Source: Executive Advisory Diagnostic
-                    {typeof snap.eadReference === 'string' ? ` ${snap.eadReference}` : ''}
+                    {eadReference ? ` ${eadReference}` : ''}
                   </p>
                 );
               })()}
@@ -727,163 +735,168 @@ export function TriageCommercialPanel({
             </div>
           ) : null}
 
-          {/* Contextual actions */}
-          <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-2">
-              {(stepKey === 'ready' || stepKey === 'preparing') && !proposalIsSent ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isBusy}
-                  onClick={() => void ensureAndPreview()}
-                >
-                  <Eye className="size-4" />
-                  Preview
-                </Button>
-              ) : null}
-              {proposalIsSent && hasDocument ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={isBusy}
-                    onClick={() => void ensureAndPreview()}
-                  >
-                    <Eye className="size-4" />
-                    View proposal
-                  </Button>
-                  {!isDeclined ? (
+          {/* EAD proposals are owned on the diagnostic outcome — one path only */}
+          {isEadSourcedProposal && eadOutcomeHref ? (
+            <div className="space-y-3 border-t border-slate-100 pt-4">
+              <p className="m-0 text-sm text-slate-700">
+                This proposal is managed from the Level 2 diagnostic outcome. Continue there to
+                edit, send, accept, and create Level 3 engagements.
+              </p>
+              <Button asChild size="sm" className="h-9">
+                <Link href={eadOutcomeHref}>
+                  Continue on diagnostic outcome
+                  {eadReference ? ` · ${eadReference}` : ''}
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  {(stepKey === 'ready' || stepKey === 'preparing') && !proposalIsSent ? (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       disabled={isBusy}
-                      onClick={() => openResendModal()}
+                      onClick={() => void ensureAndPreview()}
                     >
-                      <Send className="size-4" />
-                      Resend proposal
+                      <Eye className="size-4" />
+                      Preview PDF
                     </Button>
                   ) : null}
-                </>
-              ) : null}
-              {stepKey === 'ready' && !proposalIsSent ? (
+                  {proposalIsSent && hasDocument ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isBusy}
+                        onClick={() => void ensureAndPreview()}
+                      >
+                        <Eye className="size-4" />
+                        View PDF
+                      </Button>
+                      {!isDeclined ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={isBusy}
+                          onClick={() => openResendModal()}
+                        >
+                          <Send className="size-4" />
+                          Resend
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {stepKey === 'ready' && !proposalIsSent ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={isBusy || !readinessReady}
+                      onClick={() => void sendProposalToClient()}
+                    >
+                      <Send className="size-4" />
+                      Send proposal
+                    </Button>
+                  ) : null}
+                </div>
+
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={isBusy || !readinessReady}
-                  onClick={() => void sendProposalToClient()}
+                  className="sm:ml-auto"
+                  disabled={isBusy}
+                  onClick={() => openProposalWorkspace()}
                 >
-                  <Send className="size-4" />
-                  Send proposal
+                  {proposalIsSent ? 'Open proposal' : 'Continue proposal'}
                 </Button>
-              ) : null}
-            </div>
-
-            <Button
-              type="button"
-              size="sm"
-              className="sm:ml-auto"
-              disabled={isBusy}
-              onClick={() => openProposalWorkspace()}
-            >
-              Open proposal workspace →
-            </Button>
-          </div>
-
-          {showAcceptDecline ? (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={isBusy}
-                onClick={() => {
-                  setAcceptDraft((d) => ({
-                    ...d,
-                    acceptedByName: d.acceptedByName || (prospectName !== '—' ? prospectName : ''),
-                    acceptanceDate: new Date().toISOString().slice(0, 10),
-                  }));
-                  setAcceptOpen(true);
-                }}
-              >
-                Mark accepted
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={isBusy}
-                onClick={() => setConfirmAction('DECLINED')}
-              >
-                Mark declined
-              </Button>
-            </div>
-          ) : null}
-
-          {isAccepted ? (
-            <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm">
-              <p className="m-0 font-semibold text-emerald-900">Proposal documents</p>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Original proposal</p>
-                  <p className="m-0 truncate font-medium">{activeProposal?.documentFileName || '—'}</p>
-                </div>
-                <div>
-                  <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Signed proposal</p>
-                  <p className="m-0 truncate font-medium">
-                    {activeProposal?.signedDocumentFileName || 'Not uploaded'}
-                  </p>
-                  {activeProposal?.signedDocumentStorageKey ? (
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto p-0 text-emerald-800"
-                      onClick={() => {
-                        void (async () => {
-                          try {
-                            const data = await apiFetch<{ url: string }>(
-                              `/triage/submissions/${submissionId}/proposals/${activeProposal.id}/signed-download`,
-                            );
-                            if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
-                          } catch (e) {
-                            toast({
-                              variant: 'error',
-                              title: 'Download failed',
-                              description: e instanceof Error ? e.message : 'Unable to download signed PDF.',
-                            });
-                          }
-                        })();
-                      }}
-                    >
-                      Download signed PDF
-                    </Button>
-                  ) : null}
-                </div>
               </div>
-              <p className="m-0 text-emerald-900">
-                Accepted {fmtDate(activeProposal?.acceptedAt)}
-                {activeProposal?.acceptedByName ? ` · ${activeProposal.acceptedByName}` : ''}
-                {activeProposal?.acceptanceMethod
-                  ? ` · ${String(activeProposal.acceptanceMethod).replaceAll('_', ' ').toLowerCase()}`
-                  : ''}
-              </p>
-            </div>
-          ) : null}
 
-          {isAccepted &&
-          activeProposal?.id &&
-          String((activeProposal as { contextSnapshot?: { source?: string } })?.contextSnapshot?.source || '') ===
-            'EXECUTIVE_ADVISORY_DIAGNOSTIC' ? (
-            <CreateLevel3FromAcceptedProposal
-              proposalId={String(activeProposal.id)}
-              proposalNumber={activeProposal.proposalNumber}
-              organisationName={organisation?.name || item.organisationName}
-              onReload={onReload}
-            />
-          ) : null}
+              {showAcceptDecline ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isBusy}
+                    onClick={() => {
+                      setAcceptDraft((d) => ({
+                        ...d,
+                        acceptedByName: d.acceptedByName || (prospectName !== '—' ? prospectName : ''),
+                        acceptanceDate: new Date().toISOString().slice(0, 10),
+                      }));
+                      setAcceptOpen(true);
+                    }}
+                  >
+                    Mark accepted
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isBusy}
+                    onClick={() => setConfirmAction('DECLINED')}
+                  >
+                    Mark declined
+                  </Button>
+                </div>
+              ) : null}
+
+              {isAccepted ? (
+                <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm">
+                  <p className="m-0 font-semibold text-emerald-900">Proposal documents</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Original proposal</p>
+                      <p className="m-0 truncate font-medium">{activeProposal?.documentFileName || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="m-0 text-xs uppercase tracking-wide text-emerald-800">Signed proposal</p>
+                      <p className="m-0 truncate font-medium">
+                        {activeProposal?.signedDocumentFileName || 'Not uploaded'}
+                      </p>
+                      {activeProposal?.signedDocumentStorageKey ? (
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-auto p-0 text-emerald-800"
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                const data = await apiFetch<{ url: string }>(
+                                  `/triage/submissions/${submissionId}/proposals/${activeProposal.id}/signed-download`,
+                                );
+                                if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
+                              } catch (e) {
+                                toast({
+                                  variant: 'error',
+                                  title: 'Download failed',
+                                  description: e instanceof Error ? e.message : 'Unable to download signed PDF.',
+                                });
+                              }
+                            })();
+                          }}
+                        >
+                          Download signed PDF
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <p className="m-0 text-emerald-900">
+                    Accepted {fmtDate(activeProposal?.acceptedAt)}
+                    {activeProposal?.acceptedByName ? ` · ${activeProposal.acceptedByName}` : ''}
+                    {activeProposal?.acceptanceMethod
+                      ? ` · ${String(activeProposal.acceptanceMethod).replaceAll('_', ' ').toLowerCase()}`
+                      : ''}
+                  </p>
+                </div>
+              ) : null}
+            </>
+          )}
         </CardContent>
       </Card>
 

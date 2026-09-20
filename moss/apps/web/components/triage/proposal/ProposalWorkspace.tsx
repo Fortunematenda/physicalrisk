@@ -1110,7 +1110,7 @@ export function ProposalWorkspace({
           </Button>
           <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
             <Eye className="size-4" />
-            View proposal
+            View PDF
           </Button>
         </>
       ) : proposalSent ? (
