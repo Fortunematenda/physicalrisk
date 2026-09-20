@@ -812,6 +812,43 @@ export function ProposalWorkspace({
     }
   }
 
+  /** Open stored/live PDF in the in-app viewer (no regenerate — avoids popup blockers). */
+  async function viewPdf() {
+    setSaving(true);
+    try {
+      const status = String(workspace?.status || '');
+      const alreadySent = ['SENT', 'VIEWED', 'ACCEPTED', 'DECLINED'].includes(status);
+      // Prefer the stored document when already sent; otherwise live preview.
+      const proposalId = workspace?.proposalId;
+      if (alreadySent && proposalId) {
+        try {
+          const data = await apiFetch<{ url: string }>(
+            `/triage/submissions/${submissionId}/proposals/${proposalId}/download`,
+          );
+          if (data?.url) {
+            const res = await fetch(data.url);
+            if (res.ok) {
+              const bytes = await res.arrayBuffer();
+              setPdfPreview({ bytes, title: 'Proposal PDF' });
+              return;
+            }
+          }
+        } catch {
+          // Fall through to live preview.
+        }
+      }
+      await openPreviewPdf();
+    } catch (e) {
+      toast({
+        variant: 'error',
+        title: 'Unable to open PDF',
+        description: e instanceof Error ? e.message : 'Preview failed.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function previewProposal() {
     setSaving(true);
     try {
@@ -1090,29 +1127,16 @@ export function ProposalWorkspace({
         </DropdownMenuContent>
       </DropdownMenu>
       {formLocked ? (
-        <>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9"
-            disabled={isBusy}
-            onClick={() => {
-              setEditingUnlocked(true);
-              toast({
-                title: 'Re-editing enabled',
-                description: 'You can update the proposal. Save & regenerate PDF when finished.',
-              });
-            }}
-          >
-            <Pencil className="size-4" />
-            Enable re-editing
-          </Button>
-          <Button type="button" size="sm" className="h-9" disabled={isBusy} onClick={() => void downloadPdf()}>
-            <Eye className="size-4" />
-            View PDF
-          </Button>
-        </>
+        <Button
+          type="button"
+          size="sm"
+          className="h-9"
+          disabled={isBusy}
+          onClick={() => void viewPdf()}
+        >
+          {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+          View PDF
+        </Button>
       ) : proposalSent ? (
         <>
           <Button
