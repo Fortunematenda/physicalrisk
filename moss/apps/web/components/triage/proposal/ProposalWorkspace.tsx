@@ -17,6 +17,7 @@ import {
   Eye,
   Loader2,
   Plus,
+  Send,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -821,6 +822,67 @@ export function ProposalWorkspace({
     }
   }
 
+  function focusValidationField(field?: string | null) {
+    const target = proposalValidationTarget(field);
+    setTab(target.tab);
+    setFocusFieldId(target.fieldId);
+    setHighlightFieldId(target.fieldId);
+  }
+
+  async function sendProposalToClient() {
+    setSaving(true);
+    try {
+      const latest = syncEditorsIntoDraft();
+      if (!latest) return;
+      await persistIfNeeded(latest);
+
+      const ws = await apiFetch<ProposalWorkspace>(
+        `/triage/submissions/${submissionId}/proposal-workspace${workspaceQuery}`,
+      );
+      setWorkspace(ws);
+      const blocking = (ws.validationIssues || []).filter((i) => i.blocking);
+      if (!ws.readyToSend || blocking.length > 0) {
+        const first = blocking[0];
+        if (first) focusValidationField(first.field);
+        toast({
+          variant: 'error',
+          title: 'Proposal incomplete',
+          description: first?.message || 'Complete required fields before submitting.',
+        });
+        return;
+      }
+
+      await apiFetch(`/triage/submissions/${submissionId}/proposal-send`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      clearDraftBackup();
+      if (onSaved) await onSaved();
+      toast({
+        title: 'Proposal sent successfully',
+        description: 'The client has been emailed and the proposal status is Sent.',
+      });
+      const eadId =
+        eadContext?.assessmentId || workspace?.proposalSource?.eadAssessmentId || null;
+      const fromEad =
+        Boolean(eadContext?.assessmentId) ||
+        workspace?.proposalSource?.type === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+      router.push(
+        fromEad && eadId
+          ? `/advisory/${eadId}/outcome`
+          : `/triage/${submissionId}?tab=commercial`,
+      );
+    } catch (e) {
+      toast({
+        variant: 'error',
+        title: 'Send failed',
+        description: e instanceof Error ? e.message : 'Unable to send proposal.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function uploadExternal(file: File) {
     setSaving(true);
     try {
@@ -1018,16 +1080,29 @@ export function ProposalWorkspace({
           View proposal
         </Button>
       ) : (
-        <Button
-          type="button"
-          size="sm"
-          className="h-9"
-          disabled={isBusy || loading || !draft}
-          onClick={() => void previewProposal()}
-        >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-          Preview
-        </Button>
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={isBusy || loading || !draft}
+            onClick={() => void previewProposal()}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+            Preview
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-9"
+            disabled={isBusy || loading || !draft}
+            onClick={() => void sendProposalToClient()}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+            Submit
+          </Button>
+        </>
       )}
     </div>
   );
