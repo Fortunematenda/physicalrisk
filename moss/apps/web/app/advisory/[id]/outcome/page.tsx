@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { CheckCircle2, FileText, Loader2, Lock, NotebookPen } from 'lucide-react';
+import { CheckCircle2, FileText, Loader2, Lock, NotebookPen, Send } from 'lucide-react';
 import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { AdvisoryReportSummaryPreview } from '@/components/advisory/AdvisoryReportSummaryPreview';
@@ -14,6 +14,15 @@ import { Shell } from '@/components/Shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
@@ -53,6 +62,10 @@ export default function AdvisoryOutcomePage() {
   const [previewBytes, setPreviewBytes] = useState<ArrayBuffer | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewDownloadUrl, setPreviewDownloadUrl] = useState<string | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendReportId, setSendReportId] = useState<string | null>(null);
+  const [sendEmail, setSendEmail] = useState('');
+  const [sendBusy, setSendBusy] = useState(false);
 
   const load = useCallback(async () => {
     const row = await apiFetch<any>(`/advisory/${id}/outcome`);
@@ -101,6 +114,70 @@ export default function AdvisoryOutcomePage() {
       });
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function openSendReport(reportId: string) {
+    setSendBusy(true);
+    setSendReportId(reportId);
+    try {
+      const report = await apiFetch<{
+        suggestedRecipientEmail?: string | null;
+        assessment?: { organisation?: { primaryEmail?: string | null } };
+        contact?: { email?: string | null };
+      }>(`/reports/${reportId}`);
+      const suggested =
+        report.suggestedRecipientEmail
+        || report.assessment?.organisation?.primaryEmail
+        || report.contact?.email
+        || data?.engagement?.organisation?.primaryEmail
+        || '';
+      setSendEmail(String(suggested || '').trim());
+      setSendOpen(true);
+    } catch (e: unknown) {
+      setSendReportId(null);
+      toast({
+        title: 'Unable to prepare send',
+        description: e instanceof Error ? e.message : 'Please try again.',
+        variant: 'error',
+      });
+    } finally {
+      setSendBusy(false);
+    }
+  }
+
+  async function sendReport() {
+    if (!sendReportId) return;
+    const email = sendEmail.trim();
+    if (!email) {
+      toast({
+        title: 'Recipient required',
+        description: 'Enter a client email address before sending.',
+        variant: 'error',
+      });
+      return;
+    }
+    setSendBusy(true);
+    try {
+      await apiFetch(`/reports/${sendReportId}/issue`, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setSendOpen(false);
+      setSendReportId(null);
+      toast({
+        title: 'Report sent',
+        description: `The executive report was emailed to ${email}.`,
+      });
+      await load();
+    } catch (e: unknown) {
+      toast({
+        title: 'Send failed',
+        description: e instanceof Error ? e.message : 'Unable to send report.',
+        variant: 'error',
+      });
+    } finally {
+      setSendBusy(false);
     }
   }
 
@@ -268,6 +345,23 @@ export default function AdvisoryOutcomePage() {
                     Open working papers
                   </Link>
                 </Button>
+                {latestReport?.id ? (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    type="button"
+                    className="h-11 shrink-0 whitespace-nowrap px-4"
+                    disabled={sendBusy}
+                    onClick={() => void openSendReport(latestReport.id)}
+                  >
+                    {sendBusy && !sendOpen ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Send className="size-4" />
+                    )}
+                    Send
+                  </Button>
+                ) : null}
               </div>
             </CardContent>
           </Card>
@@ -490,6 +584,49 @@ export default function AdvisoryOutcomePage() {
             }
           }}
         />
+
+        <Dialog
+          open={sendOpen}
+          onOpenChange={(open) => {
+            setSendOpen(open);
+            if (!open) setSendReportId(null);
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Send report</DialogTitle>
+              <DialogDescription>
+                Email the client the executive PDF as an attachment, plus a secure seven-day download link.
+              </DialogDescription>
+            </DialogHeader>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-medium text-slate-700">Recipient email</span>
+              <Input
+                type="email"
+                required
+                autoFocus
+                value={sendEmail}
+                onChange={(e) => setSendEmail(e.target.value)}
+                placeholder="client@company.com"
+                disabled={sendBusy}
+              />
+            </label>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={sendBusy}
+                onClick={() => setSendOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="button" disabled={sendBusy || !sendEmail.trim()} onClick={() => void sendReport()}>
+                {sendBusy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                {sendBusy ? 'Sending…' : 'Send report'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </Shell>
     </AuthGate>
   );
