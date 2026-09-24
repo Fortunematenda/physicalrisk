@@ -1,5 +1,5 @@
 import { readProposalContextSnapshot } from '../../common/triage-proposal-context';
-import { calculateProposalFees, recalculateAllLineItems, normalizeVatRate } from './proposal-fee-calculations';
+import { calculateProposalFees, recalculateAllLineItems, normalizeVatRate, resolveIncludedExpenses, recalculateAllExpenseLines } from './proposal-fee-calculations';
 import {
   applyProposalPlaceholders,
   buildPlaceholderMap,
@@ -236,12 +236,21 @@ export function buildPhysicalRiskProposalInput(input: {
     );
 
   const feeLineItems = recalculateAllLineItems(defaultContent.feeLineItems);
+  const expenseLineItems = recalculateAllExpenseLines(defaultContent.expenseLineItems);
   const discount = Number(p.discount) || 0;
   const vatRate = normalizeVatRate(
     (p.vatRate as number | string | null | undefined) ?? feeDefaults.vatRate,
   );
-  const expensesEstimate = Number(p.expensesEstimate) || 0;
+  const includedExpenses = resolveIncludedExpenses({
+    includeExpenses: defaultContent.includeExpenses,
+    expenseLineItems,
+    expensesEstimate: Number(p.expensesEstimate) || 0,
+  });
+  const expensesEstimate = includedExpenses.total;
   const feeTotals = calculateProposalFees({ lineItems: feeLineItems, discount, vatRate, expensesEstimate });
+  defaultContent.feeLineItems = feeLineItems;
+  defaultContent.expenseLineItems = expenseLineItems;
+  defaultContent.includeExpenses = includedExpenses.include;
 
   // TipTap forceMount flush historically copied Understanding into other fields —
   // drop those clones so only the Understanding slide carries that narrative.

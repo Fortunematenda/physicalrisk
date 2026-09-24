@@ -40,6 +40,10 @@ export type ComprehensiveProposalSummary = {
   createdAt?: string | null;
   sentAt?: string | null;
   acceptedAt?: string | null;
+  poRequirement?: string | null;
+  poNumber?: string | null;
+  awaitingPo?: boolean;
+  canCreateLevel3?: boolean;
 } | null;
 
 type Props = {
@@ -59,12 +63,15 @@ function humanizeProposalStatus(status?: string | null) {
     DRAFT: 'In preparation',
     INTERNAL_REVIEW: 'Internal review',
     APPROVED: 'Approved',
-    SENT: 'Sent',
-    VIEWED: 'Viewed',
+    READY_TO_SEND: 'Ready to send',
+    SENT: 'Awaiting client response',
+    VIEWED: 'Client viewed — awaiting response',
+    CHANGES_REQUESTED: 'Changes requested',
     ACCEPTED: 'Accepted',
     DECLINED: 'Declined',
     EXPIRED: 'Expired',
     WITHDRAWN: 'Withdrawn',
+    SUPERSEDED: 'Superseded',
   };
   return map[String(status || '')] || String(status || '—').replaceAll('_', ' ');
 }
@@ -613,6 +620,11 @@ function CommercialNextStepPanel({
               {fmtDate(comprehensiveProposal.acceptedAt)
                 ? ` · Accepted ${fmtDate(comprehensiveProposal.acceptedAt)}`
                 : ''}
+              {comprehensiveProposal.awaitingPo
+                ? ' · Awaiting PO'
+                : comprehensiveProposal.poNumber
+                  ? ` · PO ${comprehensiveProposal.poNumber}`
+                  : ''}
             </p>
           </div>
 
@@ -624,7 +636,7 @@ function CommercialNextStepPanel({
               <Button asChild variant="outline" className="h-10 px-4">
                 <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
               </Button>
-            ) : isSent ? (
+            ) : isSent || status === 'CHANGES_REQUESTED' ? (
               <>
                 {showAccept ? (
                   <Button type="button" className="h-10 px-4" disabled={busy} onClick={onAccept}>
@@ -632,7 +644,9 @@ function CommercialNextStepPanel({
                   </Button>
                 ) : null}
                 <Button asChild variant="outline" className="h-10 px-4">
-                  <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
+                  <Link href={comprehensiveProposal.workspaceHref}>
+                    {status === 'CHANGES_REQUESTED' ? 'Revise proposal' : 'View / resend proposal'}
+                  </Link>
                 </Button>
               </>
             ) : isPreparing ? (
@@ -645,12 +659,24 @@ function CommercialNextStepPanel({
               </Button>
             )}
           </div>
-
-          {isAccepted ? (
+          {isAccepted && comprehensiveProposal.awaitingPo ? (
+            <p className="m-0 text-sm text-amber-900">
+              Proposal accepted — Purchase Order required before Level 3 work can commence.
+            </p>
+          ) : isAccepted ? (
             <p className="m-0 text-sm text-emerald-800">
               Next: create Level 3 engagements below.
             </p>
-          ) : isSent && showAccept ? (
+          ) : isSent ? (
+            <p className="m-0 text-sm text-slate-600">
+              Awaiting client response via the secure proposal link. You can also mark accepted
+              manually if acceptance arrived offline.
+            </p>
+          ) : status === 'CHANGES_REQUESTED' ? (
+            <p className="m-0 text-sm text-amber-900">
+              Client requested changes. Revise the proposal version and resend when ready.
+            </p>
+          ) : showAccept ? (
             <p className="m-0 text-xs text-slate-500">
               After the client accepts, mark it here to unlock Level 3.
             </p>

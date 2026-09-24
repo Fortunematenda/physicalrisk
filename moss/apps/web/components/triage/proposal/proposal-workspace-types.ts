@@ -14,12 +14,38 @@ export type ProposalFeeLineItem = {
   id: string;
   phase: string;
   description: string;
+  /** @deprecated Prefer dataAnalystHours / specialistHours. Kept for backward compatibility. */
   hours?: number | null;
+  /** @deprecated Prefer dataAnalystRate / specialistRate. Kept for backward compatibility. */
   rate?: number | null;
+  dataAnalystHours?: number | null;
+  dataAnalystRate?: number | null;
+  specialistHours?: number | null;
+  specialistRate?: number | null;
   fee: number;
   parentId?: string | null;
   sequence: number;
 };
+
+export type ProposalExpenseLineItem = {
+  id: string;
+  description: string;
+  unit: string;
+  quantity?: number | null;
+  unitCharge?: number | null;
+  total: number;
+  sequence: number;
+};
+
+export const PROPOSAL_EXPENSE_UNIT_OPTIONS = [
+  { value: 'Flight', label: 'Flight' },
+  { value: 'Day', label: 'Day' },
+  { value: 'Night', label: 'Night' },
+  { value: 'Person', label: 'Person' },
+  { value: 'Person/day', label: 'Person/day' },
+  { value: 'Trip', label: 'Trip' },
+  { value: 'Vehicle', label: 'Vehicle' },
+] as const;
 
 export type ProposalTimelineRow = {
   name: string;
@@ -122,6 +148,8 @@ export type ProposalContentSnapshot = {
   sectionHeadings?: Partial<Record<ProposalSectionHeadingKey, string>>;
   /** Intro paragraph above the fees table (time-and-materials / rates copy). */
   feesIntroduction?: string | null;
+  expenseLineItems?: ProposalExpenseLineItem[];
+  includeExpenses?: boolean;
   projectExclusions: string[];
   feeAssumptions: string[];
 };
@@ -233,6 +261,7 @@ export type ProposalWorkspace = {
   discount?: number;
   vatRate?: number;
   expensesEstimate?: number;
+  poRequirement?: string | null;
   paymentTerms?: string;
   estimatedProjectWeeks?: number | null;
   timelineNarrative?: string;
@@ -303,6 +332,7 @@ export type ProposalWorkspaceDraft = {
   discount: string;
   vatRate: string;
   expensesEstimate: string;
+  poRequirement: string;
   paymentTerms: string;
   estimatedProjectWeeks: string;
   timelineNarrative: string;
@@ -323,6 +353,8 @@ export function emptyContentSnapshot(): ProposalContentSnapshot {
     customSections: [],
     sectionHeadings: {},
     feesIntroduction: null,
+    expenseLineItems: [],
+    includeExpenses: false,
     projectExclusions: [],
     feeAssumptions: [],
   };
@@ -412,15 +444,27 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
   const snap = ws.contentSnapshot || emptyContentSnapshot();
   const analystHourlyRate = ws.analystHourlyRate != null ? String(ws.analystHourlyRate) : '985';
   const specialistHourlyRate = ws.specialistHourlyRate != null ? String(ws.specialistHourlyRate) : '1825';
-  const defaultRate = Number(analystHourlyRate) || 985;
   const currency = normalizeProposalCurrency(ws.currency);
   const savedIntro = feesIntroductionForSave(snap.feesIntroduction);
-  const feeLineItems = (snap.feeLineItems || []).map((row) => {
-    const rateNum = Number(row.rate);
-    const rateMissing = row.rate == null || !Number.isFinite(rateNum) || rateNum <= 0;
-    const next = rateMissing ? { ...row, rate: defaultRate } : row;
-    return recalcLineItemFee(next);
-  });
+  const includeExpenses =
+    typeof snap.includeExpenses === 'boolean'
+      ? snap.includeExpenses
+      : (snap.expenseLineItems || []).length > 0 || Number(ws.expensesEstimate) > 0;
+  let expenseLineItems = (snap.expenseLineItems || []).map(recalcExpenseLine);
+  // Preserve a legacy single expensesEstimate as one editable line when no itemised rows exist.
+  if (includeExpenses && expenseLineItems.length === 0 && Number(ws.expensesEstimate) > 0) {
+    expenseLineItems = [
+      recalcExpenseLine({
+        id: 'legacy-expenses-estimate',
+        description: 'Estimated expenses',
+        unit: 'Estimate',
+        quantity: 1,
+        unitCharge: Number(ws.expensesEstimate),
+        total: Number(ws.expensesEstimate),
+        sequence: 1,
+      }),
+    ];
+  }
   return {
     organisationName: ws.organisationName || '',
     addressedTo: ws.addressedTo || '',
@@ -449,6 +493,7 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
     discount: ws.discount != null ? String(ws.discount) : '0',
     vatRate: ws.vatRate != null ? String(ws.vatRate) : '0.15',
     expensesEstimate: ws.expensesEstimate != null ? String(ws.expensesEstimate) : '0',
+    poRequirement: ws.poRequirement || 'NOT_REQUIRED',
     paymentTerms: ws.paymentTerms || '',
     estimatedProjectWeeks: ws.estimatedProjectWeeks != null ? String(ws.estimatedProjectWeeks) : '',
     timelineNarrative: ws.timelineNarrative || '',
@@ -457,6 +502,9 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
     contentSnapshot: {
       ...snap,
       phases: snap.phases || [],
+      feeLineItems: (snap.feeLineItems || []).map((row) =>
+        withDefaultRoleRates(row, analystHourlyRate, specialistHourlyRate),
+      ),
       teamMembers: snap.teamMembers || [],
       experienceItems: snap.experienceItems || [],
       customSections: snap.customSections || [],
@@ -464,12 +512,20 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
       // null = live rates default in the editor / PDF (do not lock stale rate text).
       feesIntroduction: savedIntro,
       methodologyItems: snap.methodologyItems || [],
-      feeLineItems,
+      expenseLineItems,
+      includeExpenses,
+      ganttRows: snap.ganttRows || [],
     },
   };
 }
 
 export function draftToPayload(draft: ProposalWorkspaceDraft, _feeTotals?: ProposalFeeTotals) {
+  const feeLineItems = draft.contentSnapshot.feeLineItems.map(recalcLineItemFee);
+  const expenseLineItems = (draft.contentSnapshot.expenseLineItems || []).map(recalcExpenseLine);
+  const includeExpenses = Boolean(draft.contentSnapshot.includeExpenses);
+  const expensesTotal = includeExpenses
+    ? expenseLineItems.reduce((sum, row) => sum + (Number(row.total) || 0), 0)
+    : 0;
   return {
     organisationName: draft.organisationName,
     addressedTo: draft.addressedTo,
@@ -497,7 +553,8 @@ export function draftToPayload(draft: ProposalWorkspaceDraft, _feeTotals?: Propo
     specialistHourlyRate: draft.specialistHourlyRate ? Number(draft.specialistHourlyRate) : null,
     discount: draft.discount ? Number(draft.discount) : 0,
     vatRate: draft.vatRate ? Number(draft.vatRate) : 0.15,
-    expensesEstimate: draft.expensesEstimate ? Number(draft.expensesEstimate) : 0,
+    expensesEstimate: Math.round(expensesTotal * 100) / 100,
+    poRequirement: draft.poRequirement || 'NOT_REQUIRED',
     paymentTerms: draft.paymentTerms,
     estimatedProjectWeeks: draft.estimatedProjectWeeks ? Number(draft.estimatedProjectWeeks) : null,
     timelineNarrative: draft.timelineNarrative,
@@ -505,6 +562,9 @@ export function draftToPayload(draft: ProposalWorkspaceDraft, _feeTotals?: Propo
     projectChampion: draft.projectChampion,
     contentSnapshot: {
       ...draft.contentSnapshot,
+      feeLineItems,
+      expenseLineItems,
+      includeExpenses,
       feesIntroduction: feesIntroductionForSave(draft.contentSnapshot.feesIntroduction),
     },
   };
@@ -534,11 +594,104 @@ export function defaultFeesIntroduction(
   return `The costs below are estimated on a time-and-materials basis. Analyst rate: ${formatMoney(analyst, currency || 'ZAR')} per hour. Specialist rate: ${formatMoney(specialist, currency || 'ZAR')} per hour.`;
 }
 
+function finiteOrNull(value: unknown): number | null {
+  if (value === '' || value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, n) : null;
+}
+
+function hasDualRoleFields(item: ProposalFeeLineItem): boolean {
+  return (
+    item.dataAnalystHours != null
+    || item.dataAnalystRate != null
+    || item.specialistHours != null
+    || item.specialistRate != null
+  );
+}
+
+export function withDefaultRoleRates(
+  item: ProposalFeeLineItem,
+  analystHourlyRate?: string | number | null,
+  specialistHourlyRate?: string | number | null,
+): ProposalFeeLineItem {
+  const normalised = recalcLineItemFee(item);
+  const defaultAnalyst = Number(analystHourlyRate);
+  const defaultSpecialist = Number(specialistHourlyRate);
+  return recalcLineItemFee({
+    ...normalised,
+    dataAnalystRate:
+      normalised.dataAnalystRate != null
+        ? normalised.dataAnalystRate
+        : Number.isFinite(defaultAnalyst) && defaultAnalyst >= 0
+          ? defaultAnalyst
+          : 985,
+    specialistRate:
+      normalised.specialistRate != null
+        ? normalised.specialistRate
+        : Number.isFinite(defaultSpecialist) && defaultSpecialist >= 0
+          ? defaultSpecialist
+          : 1825,
+  });
+}
+
 export function recalcLineItemFee(item: ProposalFeeLineItem): ProposalFeeLineItem {
-  if (item.hours != null && item.rate != null) {
-    return { ...item, fee: Math.round(Number(item.hours) * Number(item.rate) * 100) / 100 };
+  let dataAnalystHours = finiteOrNull(item.dataAnalystHours);
+  let dataAnalystRate = finiteOrNull(item.dataAnalystRate);
+  let specialistHours = finiteOrNull(item.specialistHours);
+  let specialistRate = finiteOrNull(item.specialistRate);
+
+  if (!hasDualRoleFields(item)) {
+    dataAnalystHours = finiteOrNull(item.hours);
+    dataAnalystRate = finiteOrNull(item.rate);
   }
-  return item;
+
+  const aH = dataAnalystHours ?? 0;
+  const aR = dataAnalystRate ?? 0;
+  const sH = specialistHours ?? 0;
+  const sR = specialistRate ?? 0;
+  const hasAnyRoleInput =
+    dataAnalystHours != null
+    || dataAnalystRate != null
+    || specialistHours != null
+    || specialistRate != null
+    || item.hours != null
+    || item.rate != null;
+
+  const fee = hasAnyRoleInput
+    ? Math.round((aH * aR + sH * sR) * 100) / 100
+    : Math.round((Number(item.fee) || 0) * 100) / 100;
+
+  const totalHours = aH + sH;
+  return {
+    ...item,
+    dataAnalystHours,
+    dataAnalystRate,
+    specialistHours,
+    specialistRate,
+    hours: totalHours > 0 ? Math.round(totalHours * 100) / 100 : finiteOrNull(item.hours),
+    rate:
+      totalHours > 0
+        ? Math.round((fee / totalHours) * 100) / 100
+        : dataAnalystRate ?? specialistRate ?? finiteOrNull(item.rate),
+    fee,
+  };
+}
+
+export function recalcExpenseLine(item: ProposalExpenseLineItem): ProposalExpenseLineItem {
+  const quantity = finiteOrNull(item.quantity);
+  const unitCharge = finiteOrNull(item.unitCharge);
+  const total =
+    quantity != null && unitCharge != null
+      ? Math.round(quantity * unitCharge * 100) / 100
+      : Math.round((Number(item.total) || 0) * 100) / 100;
+  return {
+    ...item,
+    description: String(item.description || ''),
+    unit: String(item.unit || ''),
+    quantity,
+    unitCharge,
+    total,
+  };
 }
 
 export function clientFeeTotals(draft: ProposalWorkspaceDraft): ProposalFeeTotals {
@@ -546,11 +699,15 @@ export function clientFeeTotals(draft: ProposalWorkspaceDraft): ProposalFeeTotal
   const subtotal = lineItems.reduce((sum, row) => sum + (Number(row.fee) || 0), 0);
   const discount = Math.max(0, Number(draft.discount) || 0);
   const discountedSubtotal = Math.max(0, subtotal - discount);
-  // Accept 0.15 or 15 (%)
   const rawVat = Number(draft.vatRate) || 0;
   const vatRate = rawVat > 1 ? rawVat / 100 : rawVat;
   const vatAmount = Math.round(discountedSubtotal * vatRate * 100) / 100;
-  const expenses = Number(draft.expensesEstimate) || 0;
+  const includeExpenses = Boolean(draft.contentSnapshot.includeExpenses);
+  const expenses = includeExpenses
+    ? (draft.contentSnapshot.expenseLineItems || [])
+        .map(recalcExpenseLine)
+        .reduce((sum, row) => sum + (Number(row.total) || 0), 0)
+    : 0;
   const grandTotal = Math.round((discountedSubtotal + vatAmount + expenses) * 100) / 100;
   return {
     subtotal: Math.round(subtotal * 100) / 100,

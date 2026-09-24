@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   BookOpen,
@@ -44,6 +45,20 @@ function NewAssessmentForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [governance, setGovernance] = useState<{
+    allowed: boolean;
+    guidanceTitle?: string;
+    guidanceBody?: string;
+    completedEad?: { id: string; reference: string; outcomeHref: string };
+    proposal?: {
+      proposalNumber: string;
+      status: string;
+      sentAt?: string | null;
+      acceptedAt?: string | null;
+      awaitingPo?: boolean;
+    } | null;
+    actions?: Array<{ label: string; href: string }>;
+  } | null>(null);
 
   useEffect(() => {
     const prefOrg = searchParams.get('org') || '';
@@ -62,6 +77,39 @@ function NewAssessmentForm() {
       })
       .finally(() => setLoading(false));
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!organisationId) {
+      setGovernance(null);
+      return;
+    }
+    let cancelled = false;
+    apiFetch<{
+      allowed: boolean;
+      guidanceTitle?: string;
+      guidanceBody?: string;
+      completedEad?: { id: string; reference: string; outcomeHref: string };
+      proposal?: {
+        proposalNumber: string;
+        status: string;
+        sentAt?: string | null;
+        acceptedAt?: string | null;
+        awaitingPo?: boolean;
+      } | null;
+      actions?: Array<{ label: string; href: string }>;
+    }>(
+      `/advisory/governance/manual-create?organisationId=${encodeURIComponent(organisationId)}&productCode=SCLI_COST_LEAKAGE`,
+    )
+      .then((policy) => {
+        if (!cancelled) setGovernance(policy);
+      })
+      .catch(() => {
+        if (!cancelled) setGovernance(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -103,6 +151,39 @@ function NewAssessmentForm() {
       </div>
 
       {error ? <p className="error">{error}</p> : null}
+
+      {governance && !governance.allowed ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-4 text-sm text-amber-950">
+          <p className="m-0 text-base font-semibold">
+            {governance.guidanceTitle || 'Commercial acceptance required'}
+          </p>
+          <p className="mt-2 m-0 text-amber-900">
+            {governance.guidanceBody
+              || 'This assessment must originate from an accepted Executive Advisory proposal.'}
+          </p>
+          {governance.completedEad ? (
+            <p className="mt-2 m-0">
+              <span className="font-medium">Diagnostic:</span> {governance.completedEad.reference}
+            </p>
+          ) : null}
+          {governance.proposal ? (
+            <p className="mt-1 m-0">
+              <span className="font-medium">Proposal:</span> {governance.proposal.proposalNumber}
+              {' · '}
+              <span className="font-medium">Status:</span>{' '}
+              {String(governance.proposal.status).replaceAll('_', ' ')}
+              {governance.proposal.awaitingPo ? ' · Awaiting PO' : ''}
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(governance.actions || []).map((action) => (
+              <Button key={action.href} asChild variant="outline" size="sm">
+                <Link href={action.href}>{action.label}</Link>
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -175,7 +256,7 @@ function NewAssessmentForm() {
               <div className="flex flex-wrap gap-2 pt-1">
                 <Button
                   type="submit"
-                  disabled={!organisationId || saving}
+                  disabled={!organisationId || saving || Boolean(governance && !governance.allowed)}
                   className="bg-[#c41230] hover:bg-[#a10f28]"
                 >
                   {saving ? 'Creating…' : 'Create Cost Leakage assessment'}

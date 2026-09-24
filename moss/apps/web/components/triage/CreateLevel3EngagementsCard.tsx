@@ -15,6 +15,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '@/lib/api';
 
@@ -36,6 +38,7 @@ type Props = {
   organisationName?: string | null;
   items: DeliveryEngagementItem[];
   canCreate: boolean;
+  awaitingPo?: boolean;
   onChanged?: () => Promise<void> | void;
 };
 
@@ -61,16 +64,22 @@ export function CreateLevel3EngagementsCard({
   organisationName,
   items,
   canCreate,
+  awaitingPo = false,
   onChanged,
 }: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [poOpen, setPoOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [poNumber, setPoNumber] = useState('');
+  const [poDate, setPoDate] = useState('');
+  const [poNotes, setPoNotes] = useState('');
 
   const pending = useMemo(() => items.filter((i) => !i.engagement), [items]);
   const created = useMemo(() => items.filter((i) => i.engagement), [items]);
   const isAccepted = String(proposalStatus || '').toUpperCase() === 'ACCEPTED';
+  const createEnabled = canCreate && isAccepted && !awaitingPo;
 
   useEffect(() => {
     setSelected(pending.map((p) => p.productCode));
@@ -125,6 +134,42 @@ export function CreateLevel3EngagementsCard({
     }
   }
 
+  async function savePo() {
+    if (!poNumber.trim()) {
+      toast({
+        title: 'PO Number required',
+        description: 'Enter the Purchase Order number to unlock Level 3 work.',
+        variant: 'error',
+      });
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiFetch(`/advisory/proposals/${proposalId}/purchase-order`, {
+        method: 'POST',
+        body: JSON.stringify({
+          poNumber: poNumber.trim(),
+          poDate: poDate || undefined,
+          poNotes: poNotes.trim() || undefined,
+        }),
+      });
+      setPoOpen(false);
+      toast({
+        title: 'Purchase Order recorded',
+        description: 'Level 3 engagements can now be created.',
+      });
+      await onChanged?.();
+    } catch (e: unknown) {
+      toast({
+        title: 'Unable to record PO',
+        description: e instanceof Error ? e.message : 'Please try again.',
+        variant: 'error',
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <Card className="rounded-xl border-slate-200 shadow-sm">
@@ -137,7 +182,26 @@ export function CreateLevel3EngagementsCard({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 p-5 pt-0 sm:p-6 sm:pt-0">
-          {isAccepted ? (
+          {isAccepted && awaitingPo ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3">
+              <p className="m-0 text-sm font-semibold text-amber-950">Accepted — Awaiting PO</p>
+              <p className="m-0 mt-1 text-sm text-amber-900">
+                {proposalNumber ? `${proposalNumber} · ` : ''}
+                Add Purchase Order details before Level 3 work can start.
+              </p>
+              {canCreate ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3 h-9"
+                  disabled={busy}
+                  onClick={() => setPoOpen(true)}
+                >
+                  Add PO details
+                </Button>
+              ) : null}
+            </div>
+          ) : isAccepted ? (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-4 py-3">
               <p className="m-0 text-sm font-semibold text-emerald-900">Proposal accepted</p>
               <p className="m-0 mt-1 text-sm text-emerald-800">
@@ -163,7 +227,11 @@ export function CreateLevel3EngagementsCard({
                     </p>
                   ) : (
                     <p className="m-0 mt-0.5 text-xs text-slate-500">
-                      {isAccepted ? 'Not created yet' : 'Awaiting proposal acceptance'}
+                      {awaitingPo
+                        ? 'Blocked until PO received'
+                        : isAccepted
+                          ? 'Not created yet'
+                          : 'Awaiting proposal acceptance'}
                     </p>
                   )}
                 </div>
@@ -176,20 +244,22 @@ export function CreateLevel3EngagementsCard({
                       </Button>
                     </>
                   ) : (
-                    <Badge variant="secondary">Pending</Badge>
+                    <Badge variant="secondary">{awaitingPo ? 'Awaiting PO' : 'Pending'}</Badge>
                   )}
                 </div>
               </li>
             ))}
           </ul>
 
-          {canCreate && isAccepted && pending.length > 0 ? (
+          {createEnabled && pending.length > 0 ? (
             <Button type="button" className="h-10 px-4" disabled={busy} onClick={() => setOpen(true)}>
-              Create Level 3 engagements
+              {pending.some((p) => p.productCode === 'SCLI_COST_LEAKAGE') && pending.length === 1
+                ? 'Start Security Cost Leakage Assessment'
+                : 'Create Level 3 engagements'}
             </Button>
           ) : null}
 
-          {canCreate && isAccepted && pending.length === 0 && created.length > 0 ? (
+          {createEnabled && pending.length === 0 && created.length > 0 ? (
             <p className="m-0 text-sm text-slate-600">
               All accepted proposal services already have delivery engagements.
             </p>
@@ -258,6 +328,54 @@ export function CreateLevel3EngagementsCard({
             </Button>
             <Button type="button" disabled={busy || selected.length === 0} onClick={() => void create()}>
               {busy ? 'Creating…' : 'Create engagements'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={poOpen} onOpenChange={setPoOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Purchase Order details</DialogTitle>
+            <DialogDescription>
+              Record the PO so Level 3 work can commence for {proposalNumber || 'this proposal'}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="l3-po-number">PO Number *</Label>
+              <Input
+                id="l3-po-number"
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                placeholder="e.g. PO-2026-00412"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="l3-po-date">PO Date</Label>
+              <Input
+                id="l3-po-date"
+                type="date"
+                value={poDate}
+                onChange={(e) => setPoDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="l3-po-notes">Notes</Label>
+              <Input
+                id="l3-po-notes"
+                value={poNotes}
+                onChange={(e) => setPoNotes(e.target.value)}
+                placeholder="Optional procurement notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setPoOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy || !poNumber.trim()} onClick={() => void savePo()}>
+              {busy ? 'Saving…' : 'Save PO'}
             </Button>
           </DialogFooter>
         </DialogContent>

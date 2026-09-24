@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { PublicService } from './public.service';
 import { AnonymousSessionService } from './anonymous-session.service';
 import { ContactService } from './contact.service';
+import { ProposalClientResponseService } from '../triage/proposal-client-response.service';
 
 class ContactDto {
   @IsString() @MinLength(2) @MaxLength(120) fullName!: string;
@@ -79,7 +80,76 @@ export class PublicController {
     private readonly sessions: AnonymousSessionService,
     private readonly contacts: ContactService,
     private readonly config: ConfigService,
+    private readonly proposalRespond: ProposalClientResponseService,
   ) {}
+
+  @Get('proposal/respond')
+  getProposalRespond(@Query('token') token: string, @Req() req: Request) {
+    this.limit(req, 'proposal-respond-get', 60, 60_000);
+    return this.proposalRespond.getPublicProposal(token);
+  }
+
+  @Get('proposal/respond/pdf')
+  async getProposalRespondPdf(
+    @Query('token') token: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    this.limit(req, 'proposal-respond-pdf', 30, 60_000);
+    const file = await this.proposalRespond.downloadPublicPdf(token);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${String(file.fileName).replace(/"/g, '')}"`,
+    );
+    res.send(file.buffer);
+  }
+
+  @Post('proposal/respond/accept')
+  acceptProposalRespond(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    this.limit(req, 'proposal-respond-accept', 20, 60 * 60_000);
+    return this.proposalRespond.acceptPublic({
+      token: String(body.token || ''),
+      acceptedByName: String(body.acceptedByName || ''),
+      acceptedByEmail: String(body.acceptedByEmail || ''),
+      acceptedByJobTitle: body.acceptedByJobTitle ? String(body.acceptedByJobTitle) : undefined,
+      acceptedByPhone: body.acceptedByPhone ? String(body.acceptedByPhone) : undefined,
+      authorised: Boolean(body.authorised),
+      poRequiredChoice: body.poRequiredChoice as 'YES' | 'NO' | 'NOT_YET' | undefined,
+      poNumber: body.poNumber ? String(body.poNumber) : undefined,
+      poDate: body.poDate ? String(body.poDate) : undefined,
+      poValue: body.poValue as number | string | undefined,
+      procurementContact: body.procurementContact ? String(body.procurementContact) : undefined,
+      procurementEmail: body.procurementEmail ? String(body.procurementEmail) : undefined,
+      poNotes: body.poNotes ? String(body.poNotes) : undefined,
+      ipAddress: this.clientIp(req),
+      userAgent: String(req.headers['user-agent'] || ''),
+    });
+  }
+
+  @Post('proposal/respond/changes')
+  requestProposalChanges(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    this.limit(req, 'proposal-respond-changes', 20, 60 * 60_000);
+    return this.proposalRespond.requestChangesPublic({
+      token: String(body.token || ''),
+      notes: String(body.notes || ''),
+      contactName: body.contactName ? String(body.contactName) : undefined,
+      contactEmail: body.contactEmail ? String(body.contactEmail) : undefined,
+      ipAddress: this.clientIp(req),
+    });
+  }
+
+  @Post('proposal/respond/decline')
+  declineProposalRespond(@Body() body: Record<string, unknown>, @Req() req: Request) {
+    this.limit(req, 'proposal-respond-decline', 20, 60 * 60_000);
+    return this.proposalRespond.declinePublic({
+      token: String(body.token || ''),
+      reason: String(body.reason || ''),
+      contactName: body.contactName ? String(body.contactName) : undefined,
+      contactEmail: body.contactEmail ? String(body.contactEmail) : undefined,
+      ipAddress: this.clientIp(req),
+    });
+  }
 
   @Post('contact')
   async contact(@Body() body: ContactDto, @Req() req: Request) {

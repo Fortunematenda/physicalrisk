@@ -316,6 +316,13 @@ export function mergeContentSnapshot(
       incoming.feesIntroduction !== undefined
         ? incoming.feesIntroduction
         : existing.feesIntroduction,
+    expenseLineItems: Array.isArray(incoming.expenseLineItems)
+      ? incoming.expenseLineItems
+      : existing.expenseLineItems || [],
+    includeExpenses:
+      incoming.includeExpenses !== undefined
+        ? incoming.includeExpenses
+        : existing.includeExpenses,
     projectExclusions: pickNonEmptyArray(incoming.projectExclusions, existing.projectExclusions),
     feeAssumptions: pickNonEmptyArray(incoming.feeAssumptions, existing.feeAssumptions),
     acceptance: incoming.acceptance ?? existing.acceptance,
@@ -334,6 +341,8 @@ export function readContentSnapshot(value: unknown): ProposalContentSnapshot {
     customSections: [],
     sectionHeadings: {},
     feesIntroduction: null,
+    expenseLineItems: [],
+    includeExpenses: undefined,
     projectExclusions: [],
     feeAssumptions: [],
   };
@@ -352,6 +361,8 @@ export function readContentSnapshot(value: unknown): ProposalContentSnapshot {
       v.sectionHeadings && typeof v.sectionHeadings === 'object' ? { ...v.sectionHeadings } : {},
     feesIntroduction:
       typeof v.feesIntroduction === 'string' ? v.feesIntroduction : v.feesIntroduction ?? null,
+    expenseLineItems: Array.isArray(v.expenseLineItems) ? v.expenseLineItems : [],
+    includeExpenses: typeof v.includeExpenses === 'boolean' ? v.includeExpenses : undefined,
     projectExclusions: Array.isArray(v.projectExclusions) ? v.projectExclusions : [],
     feeAssumptions: Array.isArray(v.feeAssumptions) ? v.feeAssumptions : [],
     acceptance: v.acceptance,

@@ -15,10 +15,26 @@ export type ProposalFeeLineItem = {
   id: string;
   phase: string;
   description: string;
+  /** @deprecated Prefer dataAnalystHours / specialistHours. Kept for backward compatibility. */
   hours?: number | null;
+  /** @deprecated Prefer dataAnalystRate / specialistRate. Kept for backward compatibility. */
   rate?: number | null;
+  dataAnalystHours?: number | null;
+  dataAnalystRate?: number | null;
+  specialistHours?: number | null;
+  specialistRate?: number | null;
   fee: number;
   parentId?: string | null;
+  sequence: number;
+};
+
+export type ProposalExpenseLineItem = {
+  id: string;
+  description: string;
+  unit: string;
+  quantity?: number | null;
+  unitCharge?: number | null;
+  total: number;
   sequence: number;
 };
 
@@ -132,6 +148,13 @@ export type ProposalContentSnapshot = {
    * (e.g. time-and-materials + analyst/specialist rates).
    */
   feesIntroduction?: string | null;
+  /** Optional itemised expenses (Air travel, Accommodation, etc.). */
+  expenseLineItems?: ProposalExpenseLineItem[];
+  /**
+   * When false, expense lines are retained but excluded from totals/PDF.
+   * When undefined on legacy proposals, inferred from expensesEstimate / lines.
+   */
+  includeExpenses?: boolean;
   projectExclusions: string[];
   feeAssumptions: string[];
   acceptance?: {

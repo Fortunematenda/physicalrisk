@@ -636,22 +636,68 @@ export class EmailService {
         lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
         break;
       case 'triage_proposal_sent':
-        lines.push('<h2>Your Executive Advisory Proposal</h2>');
+        lines.push('<h2>Your Physical Risk Proposal</h2>');
         lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
         lines.push(
-          `<p>Please find attached the Executive Advisory Diagnostic proposal for <strong>${escapeHtml(
+          `<p>Please find your proposal from Physical Risk Consultancy for <strong>${escapeHtml(
             payload.organisationName || 'your organisation',
           )}</strong>.</p>`,
         );
         lines.push(`<p><strong>Proposal reference:</strong> ${escapeHtml(payload.proposalReference)}</p>`);
+        if (payload.proposalVersion) {
+          lines.push(`<p><strong>Version:</strong> ${escapeHtml(payload.proposalVersion)}</p>`);
+        }
         lines.push(
           `<p><strong>Recommended service:</strong> ${escapeHtml(
             payload.recommendedProduct || 'Executive Advisory Diagnostic',
           )}</p>`,
         );
+        if (payload.respondUrl) {
+          lines.push(
+            `<p style="margin:24px 0"><a href="${escapeHtml(String(payload.respondUrl))}" style="background:#c41230;color:#fff;padding:12px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600">Review &amp; respond to proposal</a></p>`,
+          );
+          lines.push(
+            '<p>Use the secure link above to accept the proposal, request changes, or decline. The PDF is attached for your records.</p>',
+          );
+        } else {
+          lines.push(
+            '<p>This proposal is confidential and prepared for executive consideration. A member of the Physical Risk advisory team remains available to discuss scope, timing, or commercial terms.</p>',
+          );
+        }
+        break;
+      case 'proposal_acceptance_confirmed':
+        lines.push('<h2>Proposal acceptance confirmed</h2>');
+        lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
         lines.push(
-          '<p>This proposal is confidential and prepared for executive consideration. A member of the Physical Risk advisory team remains available to discuss scope, timing, or commercial terms.</p>',
+          `<p>Thank you. We have recorded your acceptance of proposal <strong>${escapeHtml(payload.proposalReference)}</strong>.</p>`,
         );
+        lines.push(`<p><strong>Accepted by:</strong> ${escapeHtml(payload.acceptedByName || '')}</p>`);
+        if (payload.poNumber) {
+          lines.push(`<p><strong>Purchase Order:</strong> ${escapeHtml(payload.poNumber)}</p>`);
+        }
+        lines.push(
+          '<p>A member of the Physical Risk team will contact you regarding next steps for the agreed engagement.</p>',
+        );
+        break;
+      case 'proposal_acceptance_internal':
+        lines.push('<h2>Proposal accepted</h2>');
+        lines.push(
+          `<p>Proposal <strong>${escapeHtml(payload.proposalReference)}</strong> for <strong>${escapeHtml(payload.organisationName || '')}</strong> has been accepted.</p>`,
+        );
+        lines.push(`<p><strong>Accepted by:</strong> ${escapeHtml(payload.acceptedByName || '')} (${escapeHtml(payload.acceptedByEmail || '')})</p>`);
+        if (payload.mossUrl) {
+          lines.push(`<p><a href="${escapeHtml(String(payload.mossUrl))}">Open in MOSS</a></p>`);
+        }
+        break;
+      case 'proposal_client_response_internal':
+        lines.push('<h2>Client proposal response</h2>');
+        lines.push(
+          `<p>Proposal <strong>${escapeHtml(payload.proposalReference)}</strong> (${escapeHtml(payload.organisationName || '')}): <strong>${escapeHtml(payload.responseKind || '')}</strong></p>`,
+        );
+        lines.push(`<p>${escapeHtml(payload.detail || '')}</p>`);
+        if (payload.mossUrl) {
+          lines.push(`<p><a href="${escapeHtml(String(payload.mossUrl))}">Open in MOSS</a></p>`);
+        }
         break;
       case 'website_contact_enquiry':
         lines.push('<h2>Website contact enquiry – Book a MOSS Assessment</h2>');

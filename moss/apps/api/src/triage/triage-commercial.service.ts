@@ -40,13 +40,14 @@ import { StorageService } from '../evidence/storage.service';
 import { EmailService } from '../email/email.service';
 import { readProposalContextSnapshot } from '../common/triage-proposal-context';
 import { TriageProposalRequestService } from './triage-proposal-request.service';
+import { ProposalClientResponseService } from './proposal-client-response.service';
 import {
   buildProposalPdfDefaults,
   renderExecutiveAdvisoryProposalPdf,
   type ProposalPdfInput,
 } from './triage-proposal-pdf';
 import { buildDefaultContentSnapshot, buildPhysicalRiskProposalInput, resolveTemplateConfig } from './proposal/proposal-content-builder';
-import { calculateProposalFees, recalculateAllLineItems } from './proposal/proposal-fee-calculations';
+import { calculateProposalFees, recalculateAllLineItems, resolveIncludedExpenses, recalculateAllExpenseLines } from './proposal/proposal-fee-calculations';
 import {
   proposalPdfV2Enabled,
   renderPhysicalRiskProposalPdf,
@@ -75,6 +76,7 @@ const ACCEPTANCE_METHODS = new Set([
   'SIGNED_PROPOSAL_RECEIVED',
   'EMAIL_CONFIRMATION',
   'MANUAL_CONFIRMATION',
+  'CLIENT_PORTAL',
   'OTHER',
 ]);
 
@@ -83,6 +85,7 @@ const PROPOSAL_ACTIONS = new Set([
   'APPROVE',
   'SENT',
   'VIEWED',
+  'CHANGES_REQUESTED',
   'ACCEPTED',
   'DECLINED',
   'EXPIRE',
@@ -107,6 +110,7 @@ export class TriageCommercialService {
     private readonly storage: StorageService,
     private readonly email: EmailService,
     private readonly proposalRequests: TriageProposalRequestService,
+    private readonly proposalRespond: ProposalClientResponseService,
   ) {}
 
   assertCommercialWrite(user: AuthUser) {
@@ -660,7 +664,10 @@ export class TriageCommercialService {
       next = TriageProposalStatus.SENT;
       auditAction = 'PROPOSAL_SENT';
     } else if (normalized === 'VIEWED') next = TriageProposalStatus.VIEWED;
-    else if (normalized === 'ACCEPTED') {
+    else if (normalized === 'CHANGES_REQUESTED') {
+      next = TriageProposalStatus.CHANGES_REQUESTED;
+      auditAction = 'PROPOSAL_CHANGES_REQUESTED';
+    } else if (normalized === 'ACCEPTED') {
       next = TriageProposalStatus.ACCEPTED;
       auditAction = 'PROPOSAL_ACCEPTED';
     } else if (normalized === 'DECLINED') {
@@ -1111,17 +1118,32 @@ export class TriageCommercialService {
     const proposal = await this.loadProposalWithRelations(publicLeadId, user, proposalId);
     const content = readContentSnapshot(proposal.contentSnapshot);
     const feeLineItems = recalculateAllLineItems(content.feeLineItems);
+    const expenseLineItems = recalculateAllExpenseLines(content.expenseLineItems);
+    const includedExpenses = resolveIncludedExpenses({
+      includeExpenses: content.includeExpenses,
+      expenseLineItems,
+      expensesEstimate: Number(proposal.expensesEstimate) || 0,
+    });
     const feeTotals = calculateProposalFees({
       lineItems: feeLineItems,
       discount: Number(proposal.discount) || 0,
       vatRate: Number(proposal.vatRate) || 0.15,
-      expensesEstimate: Number(proposal.expensesEstimate) || 0,
+      expensesEstimate: includedExpenses.total,
     });
     const validation = validateProposalForSend(
       buildPhysicalRiskProposalInput({
         lead,
         organisation: proposal.organisation,
-        proposal: { ...proposal, contentSnapshot: { ...content, feeLineItems } } as Record<string, unknown>,
+        proposal: {
+          ...proposal,
+          expensesEstimate: includedExpenses.total,
+          contentSnapshot: {
+            ...content,
+            feeLineItems,
+            expenseLineItems,
+            includeExpenses: includedExpenses.include,
+          },
+        } as Record<string, unknown>,
       }),
     );
     const snap =
@@ -1160,20 +1182,35 @@ export class TriageCommercialService {
       specialistHourlyRate: proposal.specialistHourlyRate != null ? Number(proposal.specialistHourlyRate) : null,
       discount: proposal.discount != null ? Number(proposal.discount) : 0,
       vatRate: proposal.vatRate != null ? Number(proposal.vatRate) : 0.15,
-      expensesEstimate: proposal.expensesEstimate != null ? Number(proposal.expensesEstimate) : 0,
+      expensesEstimate: includedExpenses.total,
+      poRequirement: (proposal as { poRequirement?: string | null }).poRequirement || 'NOT_REQUIRED',
       paymentTerms: proposal.paymentTerms,
       estimatedProjectWeeks: proposal.estimatedProjectWeeks,
       timelineNarrative: proposal.timelineNarrative,
       projectSponsor: proposal.projectSponsor,
       projectChampion: proposal.projectChampion,
       currency: proposal.currency || templateView.currency || 'ZAR',
-      contentSnapshot: content,
+      contentSnapshot: {
+        ...content,
+        feeLineItems,
+        expenseLineItems,
+        includeExpenses: includedExpenses.include,
+      },
       feeTotals,
       readyToSend: canMarkReadyToSend(
         buildPhysicalRiskProposalInput({
           lead,
           organisation: proposal.organisation,
-          proposal: { ...proposal, contentSnapshot: { ...content, feeLineItems } } as Record<string, unknown>,
+          proposal: {
+            ...proposal,
+            expensesEstimate: includedExpenses.total,
+            contentSnapshot: {
+              ...content,
+              feeLineItems,
+              expenseLineItems,
+              includeExpenses: includedExpenses.include,
+            },
+          } as Record<string, unknown>,
         }),
       ),
       validationIssues: validation,
@@ -1319,6 +1356,7 @@ export class TriageCommercialService {
       discount?: number | null;
       vatRate?: number | null;
       expensesEstimate?: number | null;
+      poRequirement?: string | null;
       paymentTerms?: string;
       estimatedProjectWeeks?: number | null;
       timelineNarrative?: string;
@@ -1360,6 +1398,7 @@ export class TriageCommercialService {
     const nextContent: ProposalContentSnapshot = {
       ...mergedContent,
       feeLineItems: recalculateAllLineItems(mergedContent.feeLineItems),
+      expenseLineItems: recalculateAllExpenseLines(mergedContent.expenseLineItems),
       timelineRows: normalizeTimelineRows(
         mergedContent.timelineRows || [],
         input.estimatedProjectWeeks !== undefined
@@ -1382,10 +1421,18 @@ export class TriageCommercialService {
       input.discount !== undefined ? Number(input.discount) || 0 : Number(proposal.discount) || 0;
     const nextVatRate =
       input.vatRate !== undefined ? Number(input.vatRate) || 0 : Number(proposal.vatRate) || 0.15;
-    const nextExpenses =
+    const incomingExpensesEstimate =
       input.expensesEstimate !== undefined
         ? Number(input.expensesEstimate) || 0
         : Number(proposal.expensesEstimate) || 0;
+    const includedExpenses = resolveIncludedExpenses({
+      includeExpenses: nextContent.includeExpenses,
+      expenseLineItems: nextContent.expenseLineItems,
+      expensesEstimate: incomingExpensesEstimate,
+    });
+    nextContent.includeExpenses = includedExpenses.include;
+    nextContent.expenseLineItems = includedExpenses.lines;
+    const nextExpenses = includedExpenses.total;
     const feeTotals = calculateProposalFees({
       lineItems: nextContent.feeLineItems,
       discount: nextDiscount,
@@ -1569,8 +1616,11 @@ export class TriageCommercialService {
               : proposal!.specialistHourlyRate,
           discount: input.discount !== undefined ? input.discount : proposal!.discount,
           vatRate: input.vatRate !== undefined ? input.vatRate : proposal!.vatRate,
-          expensesEstimate:
-            input.expensesEstimate !== undefined ? input.expensesEstimate : proposal!.expensesEstimate,
+          expensesEstimate: nextExpenses,
+          poRequirement:
+            input.poRequirement !== undefined
+              ? this.proposalRespond.normalizePoRequirement(input.poRequirement)
+              : (proposal as { poRequirement?: string | null }).poRequirement || 'NOT_REQUIRED',
           paymentTerms:
             input.paymentTerms !== undefined ? input.paymentTerms.trim() || null : proposal!.paymentTerms,
           estimatedProjectWeeks:
@@ -1853,11 +1903,12 @@ export class TriageCommercialService {
       || lead.firstName;
     const parts = readProposalVersionParts(proposal);
     const versionLabel = formatProposalVersionShort(parts.major, parts.revision);
+    const respondUrl = await this.proposalRespond.ensureRespondUrl(proposal.id);
 
     // Deliver via SMTP before marking SENT / recording success.
     const job = await this.email.enqueueAndDeliver({
       recipient,
-      subject: `Executive Advisory Proposal — ${lead.organisationName}`,
+      subject: `Physical Risk Proposal ${proposal.proposalNumber}`,
       template: 'triage_proposal_sent',
       relatedType: 'TriageProposal',
       relatedId: proposal.id,
@@ -1874,6 +1925,8 @@ export class TriageCommercialService {
         attachmentContentType: proposal.documentMimeType || 'application/pdf',
         sendType,
         proposalVersion: versionLabel,
+        respondUrl,
+        grandTotalLabel: null,
       },
     });
 
@@ -1881,7 +1934,7 @@ export class TriageCommercialService {
       publicLeadId,
       userId: user.id,
       recipients,
-      subject: `Executive Advisory Proposal — ${lead.organisationName}`,
+      subject: `Physical Risk Proposal ${proposal.proposalNumber}`,
       proposalNumber: proposal.proposalNumber,
       versionLabel,
       sendType,
@@ -2027,6 +2080,12 @@ export class TriageCommercialService {
       acceptedByName?: string;
       acceptanceMethod?: string;
       acceptanceNotes?: string;
+      poNumber?: string;
+      poDate?: string;
+      poValue?: number | string;
+      procurementContact?: string;
+      procurementEmail?: string;
+      poNotes?: string;
     },
     user: AuthUser,
     signedFile?: { buffer: Buffer; originalname: string; mimetype: string; size: number },
@@ -2123,6 +2182,18 @@ export class TriageCommercialService {
       throw new BadRequestException('Invalid acceptance date.');
     }
 
+    const poNumber = String(input.poNumber || '').trim() || null;
+    let poDate: Date | null = null;
+    if (input.poDate) {
+      poDate = new Date(input.poDate);
+      if (Number.isNaN(poDate.getTime())) throw new BadRequestException('Invalid PO date.');
+    }
+    let poValue: number | null = null;
+    if (input.poValue != null && String(input.poValue).trim() !== '') {
+      poValue = Number(input.poValue);
+      if (!Number.isFinite(poValue)) throw new BadRequestException('Invalid PO value.');
+    }
+
     await this.prisma.triageProposal.update({
       where: { id: proposalId },
       data: {
@@ -2131,6 +2202,17 @@ export class TriageCommercialService {
         acceptanceMethod: method,
         acceptanceNotes: String(input.acceptanceNotes || '').trim() || null,
         acceptedAt,
+        ...(poNumber
+          ? {
+              poNumber,
+              poDate,
+              poValue,
+              procurementContact: String(input.procurementContact || '').trim() || null,
+              procurementEmail: String(input.procurementEmail || '').trim() || null,
+              poNotes: String(input.poNotes || '').trim() || null,
+              poReceivedAt: new Date(),
+            }
+          : {}),
       },
     });
 

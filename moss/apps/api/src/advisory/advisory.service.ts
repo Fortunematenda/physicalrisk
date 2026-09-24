@@ -43,6 +43,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
+import { seedScliOrganisationNameInput } from '../assessments/seed-scli-org-name';
 import { generateAssessmentReference } from '../common/assessment-reference';
 import { generateL3ProposalReference } from '../common/l3-proposal-reference';
 import { generateProposalReference } from '../common/proposal-reference';
@@ -616,6 +617,9 @@ export class AdvisoryService {
         publicLeadId: true,
         contextSnapshot: true,
         sourceReportId: true,
+        poRequirement: true,
+        poNumber: true,
+        poReceivedAt: true,
       },
     });
     const activeFollowOn = followOnProposals[0] || null;
@@ -690,7 +694,14 @@ export class AdvisoryService {
           }
         : null,
       comprehensiveProposal: activeFollowOn
-        ? {
+        ? (() => {
+            const poReq = String(activeFollowOn.poRequirement || 'NOT_REQUIRED').toUpperCase();
+            const awaitingPo =
+              activeFollowOn.status === TriageProposalStatus.ACCEPTED
+              && (poReq === 'REQUIRED_BEFORE_WORK' || poReq === 'REQUIRED_WITH_ACCEPTANCE')
+              && !activeFollowOn.poNumber
+              && !activeFollowOn.poReceivedAt;
+            return {
             id: activeFollowOn.id,
             proposalNumber: activeFollowOn.proposalNumber,
             status: activeFollowOn.status,
@@ -699,6 +710,10 @@ export class AdvisoryService {
             sentAt: activeFollowOn.sentAt,
             acceptedAt: activeFollowOn.acceptedAt,
             publicLeadId: activeFollowOn.publicLeadId,
+            poRequirement: activeFollowOn.poRequirement || 'NOT_REQUIRED',
+            poNumber: activeFollowOn.poNumber,
+            poReceivedAt: activeFollowOn.poReceivedAt,
+            awaitingPo,
             workspaceHref: eadProposalWorkspaceHref(
               engagement.id,
               activeFollowOn.id,
@@ -706,7 +721,8 @@ export class AdvisoryService {
             ),
             selectedProductCodes,
             sourceReportId: activeFollowOn.sourceReportId,
-            canCreateLevel3: activeFollowOn.status === TriageProposalStatus.ACCEPTED,
+            canCreateLevel3:
+              activeFollowOn.status === TriageProposalStatus.ACCEPTED && !awaitingPo,
             deliveryEngagements: selectedProductCodes.map((code) => {
               const eng = deliveryByProduct.get(code as ProductCode) || null;
               return {
@@ -722,7 +738,8 @@ export class AdvisoryService {
                   : null,
               };
             }),
-          }
+          };
+          })()
         : null,
       followOnProposals: followOnProposals.map((p) => {
         const ctx =
@@ -1884,6 +1901,94 @@ export class AdvisoryService {
   }
 
   /**
+   * Record Purchase Order details on an accepted proposal (unlocks Level 3 when PO was deferred).
+   */
+  async recordProposalPurchaseOrder(
+    proposalId: string,
+    input: {
+      poNumber?: string;
+      poDate?: string;
+      poValue?: number | string;
+      procurementContact?: string;
+      procurementEmail?: string;
+      poNotes?: string;
+    },
+    user: AuthUser,
+  ) {
+    const proposal = await this.prisma.triageProposal.findUnique({
+      where: { id: proposalId },
+      select: {
+        id: true,
+        proposalNumber: true,
+        status: true,
+        organisationId: true,
+        sourceAdvisoryAssessmentId: true,
+        poNumber: true,
+        poReceivedAt: true,
+      },
+    });
+    if (!proposal) throw new NotFoundException('Proposal not found.');
+    if (proposal.status !== TriageProposalStatus.ACCEPTED) {
+      throw new BadRequestException('Purchase Order can only be recorded on an accepted proposal.');
+    }
+    if (proposal.sourceAdvisoryAssessmentId) {
+      await this.assertAccess(proposal.sourceAdvisoryAssessmentId, user);
+    } else if (!INTERNAL_ROLES.has(user.role)) {
+      throw new ForbiddenException('Not permitted to update procurement details.');
+    }
+
+    const poNumber = String(input.poNumber || '').trim();
+    if (!poNumber) throw new BadRequestException('PO Number is required.');
+
+    let poDate: Date | null = null;
+    if (input.poDate) {
+      poDate = new Date(input.poDate);
+      if (Number.isNaN(poDate.getTime())) throw new BadRequestException('Invalid PO date.');
+    }
+    let poValue: number | null = null;
+    if (input.poValue != null && String(input.poValue).trim() !== '') {
+      poValue = Number(input.poValue);
+      if (!Number.isFinite(poValue)) throw new BadRequestException('Invalid PO value.');
+    }
+
+    const updated = await this.prisma.triageProposal.update({
+      where: { id: proposalId },
+      data: {
+        poNumber,
+        poDate,
+        poValue,
+        procurementContact: String(input.procurementContact || '').trim() || null,
+        procurementEmail: String(input.procurementEmail || '').trim() || null,
+        poNotes: String(input.poNotes || '').trim() || null,
+        poReceivedAt: new Date(),
+      },
+      select: {
+        id: true,
+        proposalNumber: true,
+        poNumber: true,
+        poDate: true,
+        poValue: true,
+        poReceivedAt: true,
+      },
+    });
+
+    await this.audit.record({
+      userId: user.id,
+      action: 'PROPOSAL_PO_RECORDED',
+      entityType: 'TriageProposal',
+      entityId: proposalId,
+      organisationId: proposal.organisationId || undefined,
+      metadata: {
+        proposalNumber: proposal.proposalNumber,
+        poNumber,
+        previouslyHadPo: Boolean(proposal.poNumber || proposal.poReceivedAt),
+      },
+    });
+
+    return updated;
+  }
+
+  /**
    * Stage 13 — create Level 3 delivery engagement(s) from an ACCEPTED EAD follow-on proposal.
    * One engagement per selected product; idempotent per (proposalId, productCode).
    */
@@ -1921,6 +2026,18 @@ export class AdvisoryService {
     if (proposal.status !== TriageProposalStatus.ACCEPTED) {
       throw new BadRequestException(
         'Level 3 engagements can only be created after the proposal is accepted.',
+      );
+    }
+    const poReq = String((proposal as { poRequirement?: string | null }).poRequirement || 'NOT_REQUIRED').toUpperCase();
+    const poNumber = (proposal as { poNumber?: string | null }).poNumber;
+    const poReceivedAt = (proposal as { poReceivedAt?: Date | null }).poReceivedAt;
+    if (
+      (poReq === 'REQUIRED_BEFORE_WORK' || poReq === 'REQUIRED_WITH_ACCEPTANCE')
+      && !poNumber
+      && !poReceivedAt
+    ) {
+      throw new BadRequestException(
+        'Proposal accepted — Purchase Order required before Level 3 work can commence. Add PO details on the proposal, then try again.',
       );
     }
 
@@ -2126,6 +2243,11 @@ export class AdvisoryService {
                 sourceProposalId: proposalId,
                 sourceContext: sourceContext as object,
               },
+            });
+            await seedScliOrganisationNameInput(tx, {
+              assessmentId: row.id,
+              questionnaireVersionId: questionnaire.versions[0].id,
+              organisationName: ead.organisation.name,
             });
             if (route) {
               await tx.advisoryConfirmedRoute.update({
@@ -2381,6 +2503,11 @@ export class AdvisoryService {
             status: AssessmentStatus.IN_PROGRESS,
             parentAssessmentId: id,
           },
+        });
+        await seedScliOrganisationNameInput(tx, {
+          assessmentId: row.id,
+          questionnaireVersionId: questionnaire.versions[0].id,
+          organisationName: engagement.organisation.name,
         });
         await tx.advisoryConfirmedRoute.update({
           where: { id: routeId },

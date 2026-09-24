@@ -402,6 +402,7 @@ export default function AdvisoryOutcomePage() {
               organisationName={engagement.organisation?.name}
               items={data.comprehensiveProposal?.deliveryEngagements || []}
               canCreate={Boolean(data.permissions?.canCreateLevel3Engagements)}
+              awaitingPo={Boolean(data.comprehensiveProposal?.awaitingPo)}
               onChanged={() => load()}
             />
           ) : null}

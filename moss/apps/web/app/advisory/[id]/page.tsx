@@ -48,7 +48,6 @@ import type { AssessmentDiagnosticQuestion } from '@/components/advisory/ManageD
 import { RecommendedProductsSelector } from '@/components/advisory/RecommendedProductsSelector';
 import { RichTextField } from '@/components/advisory/RichTextField';
 import { flushAllRichTextEditors } from '@/components/ui/rich-text-editor';
-import { useConfirm } from '@/components/confirm-dialog';
 import { Shell } from '@/components/Shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -362,7 +361,6 @@ export default function AdvisoryDetail() {
   const forceWorkingPapers =
     searchParams.get('papers') === '1' || searchParams.get('workspace') === '1';
   const { toast } = useToast();
-  const confirm = useConfirm();
   const [x, setX] = useState<any>(null);
   const [modules, setModules] = useState<ModuleReview[]>([]);
   const [confirmedRoutes, setConfirmedRoutes] = useState<ConfirmedRoute[]>([]);
@@ -508,9 +506,13 @@ export default function AdvisoryDetail() {
     () => incompleteModules(modules, diagnosticQuestions, evidenceCounts),
     [modules, diagnosticQuestions, evidenceCounts],
   );
-  const locked = Boolean(x?.diagnosticOutcome);
-  const primaryAnalystLocked = Boolean(x?.primaryAnalystLocked);
   const isDiagnostic = x?.productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC';
+  const isSubmitted = ['SUBMITTED', 'COMPLETED', 'APPROVED', 'CLOSED'].includes(
+    String(x?.status || '').toUpperCase(),
+  );
+  /** EAD locks on confirmed outcome; focused assurance locks once submitted. */
+  const locked = isDiagnostic ? Boolean(x?.diagnosticOutcome) : isSubmitted;
+  const primaryAnalystLocked = Boolean(x?.primaryAnalystLocked);
   const canCompleteDiagnostic = useMemo(() => {
     if (x?.productCode !== 'EXECUTIVE_ADVISORY_DIAGNOSTIC') return true;
     return missing.length === 0 && confirmedRoutes.some((r) => r.productCode);
@@ -899,7 +901,18 @@ export default function AdvisoryDetail() {
     setBusy(true);
     try {
       if (locked) {
-        router.push(`/advisory/${id}/outcome`);
+        if (isDiagnostic) {
+          router.push(`/advisory/${id}/outcome`);
+          return;
+        }
+        const existing = pickLatestAdvisoryReport(
+          (x?.reports || []) as LatestAdvisoryReport[],
+        );
+        if (existing?.id) {
+          router.push(advisoryReportHref(existing.id));
+          return;
+        }
+        router.push('/advisory');
         return;
       }
       await persistModules(modulesRef.current);
@@ -962,12 +975,26 @@ export default function AdvisoryDetail() {
         router.push(`/advisory/${id}/outcome`);
         return;
       }
+
       toast({
         variant: 'success',
         title: 'Assessment completed',
-        description: `Review completed (${humanizeStatus(r.status)}).`,
+        description: `Review completed (${humanizeStatus(r.status)}). Opening the report…`,
       });
+
+      try {
+        const report = await apiFetch<{ id?: string }>(`/advisory/${id}/generate-report`, {
+          method: 'POST',
+        });
+        if (report?.id) {
+          router.push(advisoryReportHref(report.id));
+          return;
+        }
+      } catch {
+        // Completion already succeeded — fall back to the engagements list.
+      }
       await load();
+      router.push('/advisory');
     } catch (e: any) {
       setIssuesOpen(true);
       toast({
@@ -993,6 +1020,7 @@ export default function AdvisoryDetail() {
     if (stillMissing.length) {
       setReviewAttempted(true);
       markModulesAttention(stillMissing.map((m) => m.moduleCode));
+      setCompletionOpen(false);
       setIssuesOpen(true);
       toast({
         id: 'review-validation',
@@ -1002,15 +1030,7 @@ export default function AdvisoryDetail() {
       });
       return;
     }
-    const ok = await confirm({
-      title: 'Complete this assessment?',
-      description:
-        'Once completed, the final assessment state will be recorded and cannot be changed afterwards.',
-      confirmLabel: 'Complete assessment',
-      cancelLabel: 'Cancel',
-      variant: 'default',
-    });
-    if (!ok) return;
+    setCompletionOpen(false);
     await runComplete();
   }
 
@@ -1184,9 +1204,11 @@ export default function AdvisoryDetail() {
       >
         {locked && isDiagnostic
           ? 'Open diagnostic outcome'
-          : isDiagnostic
-            ? 'Complete diagnostic'
-            : 'Complete assessment'}
+          : locked
+            ? 'View report'
+            : isDiagnostic
+              ? 'Complete diagnostic'
+              : 'Complete assessment'}
       </Button>
       <Button
         type="button"
@@ -1874,8 +1896,10 @@ export default function AdvisoryDetail() {
                 {isDiagnostic
                   ? locked
                     ? 'Diagnostic is complete. Open the outcome page for the commercial proposal next step.'
-                    : 'Complete the diagnostic when modules and routing are ready. Generating the Executive Advisory Brief PDF is optional.'
-                  : 'Mark the engagement complete once every module is finished.'}
+                    : 'Complete the diagnostic when modules and routing are ready. Once completed, the final assessment state cannot be changed. Generating the Executive Advisory Brief PDF is optional.'
+                  : locked
+                    ? 'This engagement is complete. Open the report or return to Diagnostics & assurance.'
+                    : 'Mark the engagement complete once every module is finished. Once completed, the final assessment state cannot be changed afterwards.'}
               </DialogDescription>
             </DialogHeader>
             {completionActions}

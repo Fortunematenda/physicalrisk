@@ -482,7 +482,10 @@ export default function AssessmentDetailPage() {
                 <div className="form-grid assess-cal-grid">
                   {groupInputs.map((def: any) => {
                     const stored = inputMap[def.id];
-                    const value = stored;
+                    const value =
+                      def.code === 'C1' && !isFilled(stored)
+                        ? data.organisation?.name || ''
+                        : stored;
                     const isMissing = missingSet.has(def.code);
                     return (
                       <div className={`field${isMissing ? ' missing' : ''}`} key={def.id} data-field-code={def.code}>
@@ -539,11 +542,11 @@ export default function AssessmentDetailPage() {
                           <ZarCurrencyInput value={stored} id={def.id} step={100000} onCommit={(next) => void saveInput(def, next)} />
                         ) : (
                           <input
-                            key={`${def.id}-${stored === undefined ? 'empty' : 'set'}`}
+                            key={`${def.id}-${value === undefined || value === '' ? 'empty' : 'set'}`}
                             type={def.valueType === 'TEXT' ? 'text' : 'number'}
                             step="1"
                             min={def.valueType === 'NUMBER' || def.valueType === 'CURRENCY' ? 0 : undefined}
-                            defaultValue={stored === undefined ? '' : (stored ?? '')}
+                            defaultValue={value === undefined || value === null ? '' : value}
                             onBlur={(e) => saveInput(def, e.target.value)}
                             id={def.id}
                           />

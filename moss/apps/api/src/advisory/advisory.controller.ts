@@ -95,6 +95,23 @@ export class AdvisoryController {
     return this.service.createLevel3EngagementsFromAcceptedProposal(proposalId, body || {}, user);
   }
 
+  @Post('proposals/:proposalId/purchase-order')
+  recordPurchaseOrder(
+    @Param('proposalId') proposalId: string,
+    @Body()
+    body: {
+      poNumber?: string;
+      poDate?: string;
+      poValue?: number | string;
+      procurementContact?: string;
+      procurementEmail?: string;
+      poNotes?: string;
+    },
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.recordProposalPurchaseOrder(proposalId, body || {}, user);
+  }
+
   @Get(':id')
   get(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.get(id, user);

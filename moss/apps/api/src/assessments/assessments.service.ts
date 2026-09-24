@@ -28,6 +28,7 @@ import { assertManualLevel3CreationAllowed } from '../common/l3-governance';
 import { INTERNAL_ROLES as INTERNAL_ROLE_SET } from '../common/roles';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { generateAssessmentReference } from '../common/assessment-reference';
+import { seedScliOrganisationNameInput } from './seed-scli-org-name';
 
 const INTERNAL_ROLES = INTERNAL_ROLE_SET;
 const asNumber = (value: unknown): number => asFiniteNumber(value, 0);
@@ -201,7 +202,7 @@ export class AssessmentsService {
     await assertManualLevel3CreationAllowed(this.prisma, input.organisationId, 'SCLI_COST_LEAKAGE');
     const assessment = await this.prisma.$transaction(async (tx) => {
       const reference = await generateAssessmentReference(tx, 'SCLI_COST_LEAKAGE');
-      return tx.assessmentSession.create({
+      const row = await tx.assessmentSession.create({
         data: {
           reference,
           organisationId: organisation.id,
@@ -212,6 +213,12 @@ export class AssessmentsService {
           status: AssessmentStatus.IN_PROGRESS,
         },
       });
+      await seedScliOrganisationNameInput(tx, {
+        assessmentId: row.id,
+        questionnaireVersionId: questionnaire.versions[0].id,
+        organisationName: organisation.name,
+      });
+      return row;
     });
     await this.audit.record({
       userId: user.id,
@@ -246,6 +253,25 @@ export class AssessmentsService {
       },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
+
+    if (
+      ['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode))
+      && !assessment.lockedAt
+    ) {
+      const seeded = await seedScliOrganisationNameInput(this.prisma, {
+        assessmentId: assessment.id,
+        questionnaireVersionId: assessment.questionnaireVersionId,
+        organisationName: assessment.organisation?.name,
+      });
+      if (seeded) {
+        const refreshed = await this.prisma.assessmentInputValue.findMany({
+          where: { assessmentId: assessment.id },
+          include: { inputDefinition: true },
+        });
+        (assessment as { inputValues: typeof refreshed }).inputValues = refreshed;
+      }
+    }
+
     const approvedOverride = await this.prisma.scoreOverride.findFirst({
       where: { assessmentId: id, status: 'APPROVED' },
       orderBy: { decidedAt: 'desc' },

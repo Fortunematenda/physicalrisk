@@ -275,39 +275,64 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       bodyText(doc, chrome, String(section.body || '').trim() || '—', CONTENT_W);
     }
 
-    // Fees — simple Phase / Hours / Fee table with clear Ex VAT and Incl VAT
+    // Fees — Phase / Description / Analyst / Specialist / Fee
     beginMajorSection(doc, chrome, heading('fees'), CONTENT_W, { pageBreak: true });
     mark(heading('fees'));
     bodyText(doc, chrome, resolveFeesIntroduction(input), CONTENT_W, { fontSize: 9 });
     doc.moveDown(0.45);
 
-    const feeCols = [CONTENT_W - 200, 70, 130];
+    const feeCols = [36, CONTENT_W - 36 - 52 - 70 - 52 - 70 - 90, 52, 70, 52, 70, 90];
     drawTableHeader(
       doc,
       [
         { label: 'Phase', width: feeCols[0] },
-        { label: 'Hours', width: feeCols[1] },
-        { label: 'Fee', width: feeCols[2] },
+        { label: 'Description', width: feeCols[1] },
+        { label: 'DA Hrs', width: feeCols[2] },
+        { label: 'DA Rate', width: feeCols[3] },
+        { label: 'Spec Hrs', width: feeCols[4] },
+        { label: 'Spec Rate', width: feeCols[5] },
+        { label: 'Fee', width: feeCols[6] },
       ],
       PROPOSAL_MARGIN,
     );
 
-    let totalHours = 0;
     for (const row of input.content.feeLineItems) {
-      const phase = String(row.phase || '').trim();
-      const description = String(row.description || '').trim();
-      const phaseLabel =
-        phase && description && !description.toLowerCase().startsWith(phase.toLowerCase())
-          ? `${phase}. ${description}`
-          : description || phase || '—';
-      const hours = row.hours != null ? Number(row.hours) : null;
-      if (hours != null && Number.isFinite(hours)) totalHours += hours;
+      const phase = String(row.phase || '').trim() || '—';
+      const description = String(row.description || '').trim() || '—';
+      const aH = row.dataAnalystHours != null ? Number(row.dataAnalystHours) : null;
+      const aR = row.dataAnalystRate != null ? Number(row.dataAnalystRate) : null;
+      const sH = row.specialistHours != null ? Number(row.specialistHours) : null;
+      const sR = row.specialistRate != null ? Number(row.specialistRate) : null;
+      // Legacy fallback when dual fields were never migrated into the snapshot yet.
+      const legacyH = row.hours != null ? Number(row.hours) : null;
+      const legacyR = row.rate != null ? Number(row.rate) : null;
+      const showLegacy = aH == null && aR == null && sH == null && sR == null;
       drawTableRow(
         doc,
         chrome,
         [
-          phaseLabel,
-          hours != null ? String(hours) : '—',
+          phase,
+          description,
+          showLegacy
+            ? legacyH != null && Number.isFinite(legacyH)
+              ? String(legacyH)
+              : '—'
+            : aH != null && Number.isFinite(aH)
+              ? String(aH)
+              : '—',
+          showLegacy
+            ? legacyR != null && Number.isFinite(legacyR)
+              ? formatProposalMoney(legacyR, input.currency)
+              : '—'
+            : aR != null && Number.isFinite(aR)
+              ? formatProposalMoney(aR, input.currency)
+              : '—',
+          showLegacy ? '—' : sH != null && Number.isFinite(sH) ? String(sH) : '—',
+          showLegacy
+            ? '—'
+            : sR != null && Number.isFinite(sR)
+              ? formatProposalMoney(sR, input.currency)
+              : '—',
           formatProposalMoney(row.fee, input.currency),
         ],
         feeCols,
@@ -316,65 +341,83 @@ export function renderPhysicalRiskProposalPdf(input: PhysicalRiskProposalInput):
       );
     }
 
-    const hoursLabel = totalHours > 0 ? String(Math.round(totalHours * 100) / 100) : '';
     const discount = Number(input.discount) || 0;
-    const expenses = Number(input.expensesEstimate) || 0;
+    const expenseLines = Array.isArray(input.content.expenseLineItems)
+      ? input.content.expenseLineItems
+      : [];
+    const includeExpenses =
+      input.content.includeExpenses != null
+        ? Boolean(input.content.includeExpenses)
+        : expenseLines.length > 0 || Number(input.expensesEstimate) > 0;
+    const expenses = includeExpenses ? Number(input.expensesEstimate) || 0 : 0;
     const vatPct = input.vatRate > 1 ? Math.round(input.vatRate) : Math.round(input.vatRate * 100);
+    const totalsLabelCols = [CONTENT_W - 130, 130];
 
-    // Optional discount rows only when set — keep the table simple otherwise.
+    const drawTotalsRow = (
+      label: string,
+      amount: string,
+      opts?: { boldFirst?: boolean; fill?: string },
+    ) => {
+      drawTableRow(doc, chrome, [label, amount], totalsLabelCols, PROPOSAL_MARGIN, opts);
+    };
+
+    doc.moveDown(0.35);
     if (discount > 0) {
-      drawTableRow(
-        doc,
-        chrome,
-        ['Subtotal', hoursLabel, formatProposalMoney(input.feeTotals.subtotal, input.currency)],
-        feeCols,
-        PROPOSAL_MARGIN,
-        { boldFirst: true },
-      );
-      drawTableRow(
-        doc,
-        chrome,
-        ['Discount', '', `-${formatProposalMoney(discount, input.currency)}`],
-        feeCols,
-        PROPOSAL_MARGIN,
-      );
+      drawTotalsRow('Professional fees (subtotal)', formatProposalMoney(input.feeTotals.subtotal, input.currency), {
+        boldFirst: true,
+      });
+      drawTotalsRow('Discount', `-${formatProposalMoney(discount, input.currency)}`);
     }
-
-    drawTableRow(
-      doc,
-      chrome,
-      [
-        'Total (Ex. VAT)',
-        discount > 0 ? '' : hoursLabel,
-        formatProposalMoney(input.feeTotals.discountedSubtotal, input.currency),
-      ],
-      feeCols,
-      PROPOSAL_MARGIN,
+    drawTotalsRow(
+      'Professional fees (Ex. VAT)',
+      formatProposalMoney(input.feeTotals.discountedSubtotal, input.currency),
       { boldFirst: true, fill: '#F4F6F8' },
     );
-    drawTableRow(
-      doc,
-      chrome,
-      [`VAT (${vatPct}%)`, '', formatProposalMoney(input.feeTotals.vatAmount, input.currency)],
-      feeCols,
-      PROPOSAL_MARGIN,
-    );
-    // Expenses after VAT so the Incl. VAT total clearly includes them.
-    if (expenses > 0) {
-      drawTableRow(
+    drawTotalsRow(`VAT (${vatPct}%)`, formatProposalMoney(input.feeTotals.vatAmount, input.currency));
+
+    if (includeExpenses && expenseLines.length > 0) {
+      doc.moveDown(0.55);
+      ensureProposalSpace(doc, chrome, 48);
+      sectionTitle(doc, 'Estimated expenses', chrome.red, CONTENT_W);
+      const expCols = [CONTENT_W - 70 - 50 - 90 - 90, 70, 50, 90, 90];
+      drawTableHeader(
         doc,
-        chrome,
-        ['Expenses (estimated)', '', formatProposalMoney(expenses, input.currency)],
-        feeCols,
+        [
+          { label: 'Expense', width: expCols[0] },
+          { label: 'Unit', width: expCols[1] },
+          { label: 'Qty', width: expCols[2] },
+          { label: 'Unit rate', width: expCols[3] },
+          { label: 'Total', width: expCols[4] },
+        ],
         PROPOSAL_MARGIN,
       );
+      for (const row of expenseLines) {
+        drawTableRow(
+          doc,
+          chrome,
+          [
+            String(row.description || '').trim() || '—',
+            String(row.unit || '').trim() || '—',
+            row.quantity != null ? String(row.quantity) : '—',
+            row.unitCharge != null
+              ? formatProposalMoney(Number(row.unitCharge), input.currency)
+              : '—',
+            formatProposalMoney(Number(row.total) || 0, input.currency),
+          ],
+          expCols,
+          PROPOSAL_MARGIN,
+        );
+      }
+      drawTotalsRow('Estimated expenses', formatProposalMoney(expenses, input.currency), {
+        boldFirst: true,
+      });
+    } else if (includeExpenses && expenses > 0) {
+      drawTotalsRow('Estimated expenses', formatProposalMoney(expenses, input.currency));
     }
-    drawTableRow(
-      doc,
-      chrome,
-      ['Total (Incl. VAT)', '', formatProposalMoney(input.feeTotals.grandTotal, input.currency)],
-      feeCols,
-      PROPOSAL_MARGIN,
+
+    drawTotalsRow(
+      'Grand total (Incl. VAT)',
+      formatProposalMoney(input.feeTotals.grandTotal, input.currency),
       { boldFirst: true, fill: '#E8F0FE' },
     );
 

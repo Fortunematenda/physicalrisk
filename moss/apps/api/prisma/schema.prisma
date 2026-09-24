@@ -259,6 +259,7 @@ enum TriageProposalStatus {
   APPROVED
   SENT
   VIEWED
+  CHANGES_REQUESTED
   ACCEPTED
   DECLINED
   EXPIRED
@@ -1508,9 +1509,30 @@ model TriageProposal {
   lastSendType             String?
   lastSentById             String?
   acceptedByName           String?
-  /// SIGNED_PROPOSAL_RECEIVED | EMAIL_CONFIRMATION | MANUAL_CONFIRMATION | OTHER
+  acceptedByEmail          String?
+  acceptedByJobTitle       String?
+  /// SIGNED_PROPOSAL_RECEIVED | EMAIL_CONFIRMATION | MANUAL_CONFIRMATION | CLIENT_PORTAL | OTHER
   acceptanceMethod         String?
   acceptanceNotes          String?
+  /// Opaque token for public /proposal/respond links (unguesable).
+  responseToken            String?              @unique
+  responseTokenExpiresAt   DateTime?
+  /// NOT_REQUIRED | REQUIRED_WITH_ACCEPTANCE | REQUIRED_BEFORE_WORK
+  poRequirement            String?              @default("NOT_REQUIRED")
+  poNumber                 String?
+  poDate                   DateTime?
+  poValue                  Decimal?             @db.Decimal(12, 2)
+  procurementContact       String?
+  procurementEmail         String?
+  poNotes                  String?
+  poDocumentStorageKey     String?
+  poDocumentFileName       String?
+  poDocumentMimeType       String?
+  poDocumentSizeBytes      Int?
+  poReceivedAt             DateTime?
+  changesRequestNotes      String?
+  changesRequestedAt       DateTime?
+  declinedReason           String?
   signedDocumentStorageKey String?
   signedDocumentFileName   String?
   signedDocumentMimeType   String?

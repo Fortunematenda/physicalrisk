@@ -205,6 +205,7 @@ class ProposalTemplateDto {
   @IsOptional() discount?: number | null;
   @IsOptional() vatRate?: number | null;
   @IsOptional() expensesEstimate?: number | null;
+  @IsOptional() @IsString() @MaxLength(40) poRequirement?: string | null;
   @IsOptional() @IsString() @MaxLength(8000) paymentTerms?: string;
   @IsOptional() estimatedProjectWeeks?: number | null;
   @IsOptional() @IsString() @MaxLength(4000) timelineNarrative?: string;
@@ -436,6 +437,12 @@ export class TriageController {
       acceptedByName?: string;
       acceptanceMethod?: string;
       acceptanceNotes?: string;
+      poNumber?: string;
+      poDate?: string;
+      poValue?: number | string;
+      procurementContact?: string;
+      procurementEmail?: string;
+      poNotes?: string;
     },
     @CurrentUser() user: AuthUser,
   ) {

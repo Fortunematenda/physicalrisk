@@ -13,15 +13,18 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
   Download,
   Eye,
   Loader2,
   Lock,
   Pencil,
   Plus,
+  Save,
   Send,
   Trash2,
   Upload,
+  AlertCircle,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -53,6 +56,7 @@ import { uploadTriageProposal } from '@/lib/triage-proposal-upload';
 import { cn } from '@/lib/utils';
 import {
   PROPOSAL_CURRENCY_OPTIONS,
+  PROPOSAL_EXPENSE_UNIT_OPTIONS,
   PROPOSAL_SECTION_HEADING_KEYS,
   PROPOSAL_SECTION_HEADING_LABELS,
   DEFAULT_PROPOSAL_SECTION_HEADINGS,
@@ -65,8 +69,11 @@ import {
   normalizeProposalCurrency,
   proposalFieldDomId,
   proposalValidationTarget,
+  recalcExpenseLine,
   recalcLineItemFee,
+  withDefaultRoleRates,
   workspaceToDraft,
+  type ProposalExpenseLineItem,
   type ProposalFeeLineItem,
   type ProposalPhase,
   type ProposalSectionHeadingKey,
@@ -83,11 +90,84 @@ const WORKSPACE_TABS = new Set([
   'scope',
   'methodology',
   'sections',
-  'fees',
   'timeline',
+  'fees',
   'team',
   'terms',
 ]);
+
+/** Build fee line items 1:1 from timeline Gantt rows (phase + description). */
+function syncFeeLinesFromTimeline(draft: ProposalWorkspaceDraft): ProposalFeeLineItem[] {
+  const timelineRows = draft.contentSnapshot.timelineRows || [];
+  // No timeline rows yet — leave existing fee lines alone (new proposals / blank timeline).
+  if (!timelineRows.length) return draft.contentSnapshot.feeLineItems;
+
+  const existing = draft.contentSnapshot.feeLineItems || [];
+  const used = new Set<number>();
+
+  // Strict 1:1 with timeline — deleting a timeline phase drops its fee row.
+  return timelineRows.map((tl, index) => {
+    const phaseNum = String(tl.sequence || index + 1);
+    const name = String(tl.name || '').trim();
+    const matchIndex = existing.findIndex((row, i) => {
+      if (used.has(i)) return false;
+      const phase = String(row.phase || '').trim();
+      const desc = String(row.description || '').trim();
+      return (
+        phase === phaseNum
+        || (name && desc === name)
+        || row.sequence === (tl.sequence || index + 1)
+      );
+    });
+    if (matchIndex >= 0) {
+      used.add(matchIndex);
+      const row = existing[matchIndex];
+      return withDefaultRoleRates(
+        {
+          ...row,
+          phase: String(row.phase || '').trim() || phaseNum,
+          description: String(row.description || '').trim() || name,
+          sequence: index + 1,
+        },
+        draft.analystHourlyRate,
+        draft.specialistHourlyRate,
+      );
+    }
+    return withDefaultRoleRates(
+      {
+        id: `fee-tl-${tl.sequence || index + 1}-${index}`,
+        phase: phaseNum,
+        description: name,
+        dataAnalystHours: null,
+        dataAnalystRate: null,
+        specialistHours: null,
+        specialistRate: null,
+        hours: null,
+        rate: null,
+        fee: 0,
+        sequence: index + 1,
+      },
+      draft.analystHourlyRate,
+      draft.specialistHourlyRate,
+    );
+  });
+}
+
+function feeLinesFingerprint(rows: ProposalFeeLineItem[]): string {
+  return JSON.stringify(
+    rows.map((r) => ({
+      id: r.id,
+      phase: r.phase,
+      description: r.description,
+      sequence: r.sequence,
+      dataAnalystHours: r.dataAnalystHours,
+      dataAnalystRate: r.dataAnalystRate,
+      specialistHours: r.specialistHours,
+      specialistRate: r.specialistRate,
+      fee: r.fee,
+    })),
+  );
+}
 
 function humanizeProposalWorkspaceStatus(status?: string | null) {
   const raw = String(status || 'DRAFT').trim().toUpperCase();
@@ -253,6 +333,7 @@ export function ProposalWorkspace({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [autosaveLabel, setAutosaveLabel] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [tab, setTab] = useState('overview');
   const [focusFieldId, setFocusFieldId] = useState<string | null>(null);
   const [highlightFieldId, setHighlightFieldId] = useState<string | null>(null);
@@ -393,6 +474,42 @@ export function ProposalWorkspace({
       // ignore
     }
   }, [submissionId, tab]);
+
+  // When opening Fees (or timeline rows change), prepopulate fee phases from Timeline.
+  const timelineSyncKey = useMemo(
+    () =>
+      JSON.stringify(
+        (draft?.contentSnapshot.timelineRows || []).map((r) => ({
+          sequence: r.sequence,
+          name: r.name,
+        })),
+      ),
+    [draft?.contentSnapshot.timelineRows],
+  );
+
+  useEffect(() => {
+    if (tab !== 'fees' || loading) return;
+    const current = draftRef.current;
+    if (!current) return;
+    if (!(current.contentSnapshot.timelineRows || []).length) return;
+    const synced = syncFeeLinesFromTimeline(current);
+    if (feeLinesFingerprint(synced) === feeLinesFingerprint(current.contentSnapshot.feeLineItems)) {
+      return;
+    }
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const nextLines = syncFeeLinesFromTimeline(prev);
+      if (feeLinesFingerprint(nextLines) === feeLinesFingerprint(prev.contentSnapshot.feeLineItems)) {
+        return prev;
+      }
+      const next = {
+        ...prev,
+        contentSnapshot: { ...prev.contentSnapshot, feeLineItems: nextLines },
+      };
+      draftRef.current = next;
+      return next;
+    });
+  }, [tab, loading, timelineSyncKey]);
 
   // After the target tab mounts, scroll/focus the missing field.
   useEffect(() => {
@@ -591,8 +708,12 @@ export function ProposalWorkspace({
           id: `fee-${Date.now()}`,
           phase: '',
           description: '',
+          dataAnalystHours: null,
+          dataAnalystRate: Number(draft.analystHourlyRate) || 985,
+          specialistHours: null,
+          specialistRate: Number(draft.specialistHourlyRate) || 1825,
           hours: null,
-          rate: Number(draft.analystHourlyRate) || 985,
+          rate: null,
           fee: 0,
           sequence: seq,
         },
@@ -604,6 +725,52 @@ export function ProposalWorkspace({
     if (!draft) return;
     patchContent({
       feeLineItems: draft.contentSnapshot.feeLineItems.filter((_, i) => i !== index),
+    });
+  }
+
+  function updateExpenseLine(
+    index: number,
+    field: keyof ProposalExpenseLineItem,
+    value: string | number,
+  ) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const expenseLineItems = [...(prev.contentSnapshot.expenseLineItems || [])];
+      const row = { ...expenseLineItems[index], [field]: value };
+      expenseLineItems[index] = recalcExpenseLine(row);
+      const next = {
+        ...prev,
+        contentSnapshot: { ...prev.contentSnapshot, expenseLineItems },
+      };
+      draftRef.current = next;
+      return next;
+    });
+  }
+
+  function addExpenseRow() {
+    if (!draft) return;
+    const seq = (draft.contentSnapshot.expenseLineItems || []).length + 1;
+    patchContent({
+      includeExpenses: true,
+      expenseLineItems: [
+        ...(draft.contentSnapshot.expenseLineItems || []),
+        {
+          id: `exp-${Date.now()}`,
+          description: '',
+          unit: 'Day',
+          quantity: null,
+          unitCharge: null,
+          total: 0,
+          sequence: seq,
+        },
+      ],
+    });
+  }
+
+  function removeExpenseRow(index: number) {
+    if (!draft) return;
+    patchContent({
+      expenseLineItems: (draft.contentSnapshot.expenseLineItems || []).filter((_, i) => i !== index),
     });
   }
 
@@ -634,10 +801,35 @@ export function ProposalWorkspace({
 
   function removeTimelineRow(index: number) {
     if (!draft) return;
+    const removed = draft.contentSnapshot.timelineRows[index];
+    const nextTimeline = draft.contentSnapshot.timelineRows
+      .filter((_, i) => i !== index)
+      .map((row, i) => ({ ...row, sequence: i + 1 }));
+    const removedPhase = String(removed?.sequence || index + 1);
+    const removedName = String(removed?.name || '').trim();
+    // Drop the matching fee row immediately when a timeline phase is deleted.
+    const nextFees = draft.contentSnapshot.feeLineItems
+      .filter((row) => {
+        const phase = String(row.phase || '').trim();
+        const desc = String(row.description || '').trim();
+        if (phase && phase === removedPhase) return false;
+        if (removedName && desc === removedName) return false;
+        if (row.sequence === (removed?.sequence || index + 1)) return false;
+        return true;
+      });
+    const draftAfter: ProposalWorkspaceDraft = {
+      ...draft,
+      contentSnapshot: {
+        ...draft.contentSnapshot,
+        timelineRows: nextTimeline,
+        feeLineItems: nextFees,
+      },
+    };
+    // Re-sync so remaining fees stay 1:1 with timeline (phase numbers renumber).
+    const syncedFees = syncFeeLinesFromTimeline(draftAfter);
     patchContent({
-      timelineRows: draft.contentSnapshot.timelineRows
-        .filter((_, i) => i !== index)
-        .map((row, i) => ({ ...row, sequence: i + 1 })),
+      timelineRows: nextTimeline,
+      feeLineItems: syncedFees,
     });
   }
 
@@ -715,6 +907,7 @@ export function ProposalWorkspace({
     draftRef.current = mergedDraft;
     setSavedFingerprint(draftFingerprint(mergedDraft));
     clearDraftBackup();
+    setLastSavedAt(new Date());
     if (!opts.skipParentReload && onSaved) await onSaved();
     if (!opts.quiet) {
       toast({ title: 'Saved', description: 'Proposal changes saved.' });
@@ -741,19 +934,21 @@ export function ProposalWorkspace({
 
   async function save() {
     setSaving(true);
+    setAutosaveLabel('saving');
     try {
       const latest = syncEditorsIntoDraft({ blurActive: true });
       if (!latest) return;
       await persistDraft({ quiet: true, draftOverride: latest });
-      await generatePdfSilent();
+      setAutosaveLabel('saved');
       toast({
         title: 'Saved',
-        description: 'Proposal changes saved and PDF generated.',
+        description: 'Proposal changes saved.',
       });
     } catch (e) {
+      setAutosaveLabel('error');
       toast({
         variant: 'error',
-        title: 'Save failed',
+        title: 'Could not save changes. Try again.',
         description: e instanceof Error ? e.message : 'Please try again.',
       });
     } finally {
@@ -1105,6 +1300,17 @@ export function ProposalWorkspace({
                   ? 'Unsaved changes…'
                   : null}
       </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9"
+        disabled={isBusy || loading || !draft || proposalSent}
+        onClick={() => void save()}
+      >
+        {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+        Save changes
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="sm" className="h-9" disabled={isBusy}>
@@ -1311,8 +1517,8 @@ export function ProposalWorkspace({
             <TabsTrigger value="scope">Scope</TabsTrigger>
             <TabsTrigger value="methodology">Methodology</TabsTrigger>
             <TabsTrigger value="sections">Sections</TabsTrigger>
-            <TabsTrigger value="fees">Fees</TabsTrigger>
             <TabsTrigger value="timeline">Timeline</TabsTrigger>
+            <TabsTrigger value="fees">Fees</TabsTrigger>
             <TabsTrigger value="team">Team</TabsTrigger>
             <TabsTrigger value="terms">Terms</TabsTrigger>
           </TabsList>
@@ -1593,16 +1799,27 @@ export function ProposalWorkspace({
                   type="number"
                   value={draft.analystHourlyRate}
                   onChange={(v) => {
-                    const nextRate = Number(v) || 985;
+                    const previous = Number(draft.analystHourlyRate);
+                    const nextDefault = Number(v);
                     setDraft((prev) => {
                       if (!prev) return prev;
-                      const prevRate = Number(prev.analystHourlyRate) || 985;
-                      const feeLineItems = prev.contentSnapshot.feeLineItems.map((row) => {
-                        const r = Number(row.rate);
-                        const shouldUpdate =
-                          row.rate == null || !Number.isFinite(r) || r <= 0 || r === prevRate;
-                        return recalcLineItemFee(shouldUpdate ? { ...row, rate: nextRate } : row);
-                      });
+                      const feeLineItems =
+                        Number.isFinite(nextDefault) && nextDefault >= 0
+                          ? prev.contentSnapshot.feeLineItems.map((row) => {
+                              const current = row.dataAnalystRate;
+                              if (
+                                current == null
+                                || (Number.isFinite(previous) && current === previous)
+                              ) {
+                                return withDefaultRoleRates(
+                                  { ...row, dataAnalystRate: nextDefault },
+                                  v,
+                                  prev.specialistHourlyRate,
+                                );
+                              }
+                              return row;
+                            })
+                          : prev.contentSnapshot.feeLineItems;
                       const next = {
                         ...prev,
                         analystHourlyRate: v,
@@ -1617,7 +1834,37 @@ export function ProposalWorkspace({
                   label={`Specialist rate (${currencyLabel}/hr)`}
                   type="number"
                   value={draft.specialistHourlyRate}
-                  onChange={(v) => patchDraft({ specialistHourlyRate: v })}
+                  onChange={(v) => {
+                    const previous = Number(draft.specialistHourlyRate);
+                    const nextDefault = Number(v);
+                    setDraft((prev) => {
+                      if (!prev) return prev;
+                      const feeLineItems =
+                        Number.isFinite(nextDefault) && nextDefault >= 0
+                          ? prev.contentSnapshot.feeLineItems.map((row) => {
+                              const current = row.specialistRate;
+                              if (
+                                current == null
+                                || (Number.isFinite(previous) && current === previous)
+                              ) {
+                                return withDefaultRoleRates(
+                                  { ...row, specialistRate: nextDefault },
+                                  prev.analystHourlyRate,
+                                  v,
+                                );
+                              }
+                              return row;
+                            })
+                          : prev.contentSnapshot.feeLineItems;
+                      const next = {
+                        ...prev,
+                        specialistHourlyRate: v,
+                        contentSnapshot: { ...prev.contentSnapshot, feeLineItems },
+                      };
+                      draftRef.current = next;
+                      return next;
+                    });
+                  }}
                 />
                 <FieldInput
                   label={`Discount (${currencyLabel})`}
@@ -1671,6 +1918,25 @@ export function ProposalWorkspace({
                 placeholder="Payment schedule and billing terms…"
               />
 
+              <label className="grid max-w-xl gap-1.5">
+                <FieldLabel>Purchase Order requirement</FieldLabel>
+                <FilterSelect
+                  value={draft.poRequirement || 'NOT_REQUIRED'}
+                  onChange={(v) => patchDraft({ poRequirement: v })}
+                  options={[
+                    { value: 'NOT_REQUIRED', label: 'Not required' },
+                    { value: 'REQUIRED_WITH_ACCEPTANCE', label: 'Required with acceptance' },
+                    { value: 'REQUIRED_BEFORE_WORK', label: 'Required before work starts' },
+                  ]}
+                  placeholder="PO requirement"
+                  includeAll={false}
+                  triggerClassName="h-10 w-full bg-white"
+                />
+                <span className="text-[11px] text-slate-400">
+                  Controls whether the client must supply a PO when accepting, or before Level 3 work starts.
+                </span>
+              </label>
+
               <FieldTextarea
                 label="Fee assumptions"
                 value={(draft.contentSnapshot.feeAssumptions || []).join('\n')}
@@ -1689,31 +1955,52 @@ export function ProposalWorkspace({
                   highlightFieldId === 'feeLineItems' && 'bg-amber-50/80 p-2 ring-2 ring-amber-400 ring-offset-2',
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <FieldLabel>Fee line items</FieldLabel>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <FieldLabel>Fee line items</FieldLabel>
+                    <p className="m-0 text-xs text-slate-500">
+                      Phase and description are prefilled from Timeline Gantt rows when available.
+                    </p>
+                  </div>
                   <Button type="button" variant="outline" size="sm" onClick={addFeeRow}>
                     <Plus className="size-4" />
                     Add row
                   </Button>
                 </div>
                 <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full min-w-[640px] text-sm">
+                  <table className="w-full min-w-[720px] text-sm">
                     <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                       <tr>
-                        <th className="px-2 py-2">Phase</th>
-                        <th className="px-2 py-2">Description</th>
-                        <th className="w-20 px-2 py-2">Hours</th>
-                        <th className="w-24 px-2 py-2">Rate</th>
-                        <th className="w-28 px-2 py-2">Fee ({currencyLabel})</th>
-                        <th className="w-10 px-2 py-2" />
+                        <th className="w-14 px-1.5 py-1.5 align-bottom" rowSpan={2}>
+                          Phase
+                        </th>
+                        <th className="min-w-[12rem] px-2 py-1.5 align-bottom" rowSpan={2}>
+                          Description
+                        </th>
+                        <th className="border-b border-slate-200 px-2 py-1.5 text-center" colSpan={2}>
+                          Data Analyst
+                        </th>
+                        <th className="border-b border-slate-200 px-2 py-1.5 text-center" colSpan={2}>
+                          Specialist
+                        </th>
+                        <th className="w-28 px-2 py-1.5 text-right align-bottom" rowSpan={2}>
+                          Fee ({currencyLabel})
+                        </th>
+                        <th className="w-10 px-1 py-1.5 align-bottom" rowSpan={2} />
+                      </tr>
+                      <tr>
+                        <th className="w-[4.5rem] px-1.5 py-1.5 font-medium normal-case">Hours</th>
+                        <th className="w-[5.5rem] px-1.5 py-1.5 font-medium normal-case">Rate</th>
+                        <th className="w-[4.5rem] px-1.5 py-1.5 font-medium normal-case">Hours</th>
+                        <th className="w-[5.5rem] px-1.5 py-1.5 font-medium normal-case">Rate</th>
                       </tr>
                     </thead>
                     <tbody>
                       {draft.contentSnapshot.feeLineItems.map((row, index) => (
                         <tr key={row.id || index} className="border-t border-slate-100">
-                          <td className="px-2 py-1">
+                          <td className="px-1.5 py-1">
                             <Input
-                              className="h-8 bg-white"
+                              className="h-8 w-12 bg-white px-1.5 text-center"
                               value={row.phase}
                               onChange={(e) => updateFeeLine(index, 'phase', e.target.value)}
                             />
@@ -1725,38 +2012,74 @@ export function ProposalWorkspace({
                               onChange={(e) => updateFeeLine(index, 'description', e.target.value)}
                             />
                           </td>
-                          <td className="px-2 py-1">
+                          <td className="px-1.5 py-1">
                             <Input
-                              className="h-8 bg-white"
+                              className="h-8 bg-white px-1.5"
                               type="number"
-                              value={row.hours != null ? String(row.hours) : ''}
+                              min={0}
+                              step="0.25"
+                              value={row.dataAnalystHours != null ? String(row.dataAnalystHours) : ''}
                               onChange={(e) =>
                                 updateFeeLine(
                                   index,
-                                  'hours',
+                                  'dataAnalystHours',
                                   e.target.value === '' ? '' : Number(e.target.value),
                                 )
                               }
                             />
                           </td>
-                          <td className="px-2 py-1">
+                          <td className="px-1.5 py-1">
                             <Input
-                              className="h-8 bg-white"
+                              className="h-8 bg-white px-1.5"
                               type="number"
-                              value={row.rate != null ? String(row.rate) : ''}
+                              min={0}
+                              step="1"
+                              value={row.dataAnalystRate != null ? String(row.dataAnalystRate) : ''}
                               onChange={(e) =>
                                 updateFeeLine(
                                   index,
-                                  'rate',
+                                  'dataAnalystRate',
                                   e.target.value === '' ? '' : Number(e.target.value),
                                 )
                               }
                             />
                           </td>
-                          <td className="px-2 py-1 font-medium">
+                          <td className="px-1.5 py-1">
+                            <Input
+                              className="h-8 bg-white px-1.5"
+                              type="number"
+                              min={0}
+                              step="0.25"
+                              value={row.specialistHours != null ? String(row.specialistHours) : ''}
+                              onChange={(e) =>
+                                updateFeeLine(
+                                  index,
+                                  'specialistHours',
+                                  e.target.value === '' ? '' : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-1.5 py-1">
+                            <Input
+                              className="h-8 bg-white px-1.5"
+                              type="number"
+                              min={0}
+                              step="1"
+                              value={row.specialistRate != null ? String(row.specialistRate) : ''}
+                              onChange={(e) =>
+                                updateFeeLine(
+                                  index,
+                                  'specialistRate',
+                                  e.target.value === '' ? '' : Number(e.target.value),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1 text-right font-medium tabular-nums">
                             {formatMoney(Number(row.fee) || 0, draft.currency)}
                           </td>
-                          <td className="px-2 py-1">
+                          <td className="px-1 py-1">
                             <Button
                               type="button"
                               variant="ghost"
@@ -1772,39 +2095,190 @@ export function ProposalWorkspace({
                     </tbody>
                   </table>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
-                  <FieldInput
-                    label={`Expenses estimate (${currencyLabel})`}
-                    type="number"
-                    value={draft.expensesEstimate}
-                    onChange={(v) => patchDraft({ expensesEstimate: v })}
-                  />
-                  <p className="text-xs text-slate-500 sm:pb-2">
-                    Shown after VAT on the PDF and included in the grand total.
-                  </p>
+
+                <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+                      <input
+                        type="checkbox"
+                        className="size-4 rounded border-slate-300 text-[#c41230] focus:ring-[#c41230]"
+                        checked={Boolean(draft.contentSnapshot.includeExpenses)}
+                        onChange={(e) =>
+                          patchContent({ includeExpenses: e.target.checked })
+                        }
+                      />
+                      Include estimated expenses in proposal
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!draft.contentSnapshot.includeExpenses}
+                      onClick={addExpenseRow}
+                    >
+                      <Plus className="size-4" />
+                      Add expense
+                    </Button>
+                  </div>
+                  {draft.contentSnapshot.includeExpenses ? (
+                    <>
+                      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                        <table className="w-full min-w-[640px] text-sm">
+                          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                            <tr>
+                              <th className="px-2 py-2">Expense item</th>
+                              <th className="w-32 px-2 py-2">Unit</th>
+                              <th className="w-28 px-2 py-2">Qty / Persons</th>
+                              <th className="w-28 px-2 py-2">Unit charge</th>
+                              <th className="w-28 px-2 py-2 text-right">Total</th>
+                              <th className="w-10 px-2 py-2" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(draft.contentSnapshot.expenseLineItems || []).map((row, index) => (
+                              <tr key={row.id || index} className="border-t border-slate-100">
+                                <td className="px-2 py-1">
+                                  <Input
+                                    className="h-8 bg-white"
+                                    placeholder="e.g. Accommodation"
+                                    value={row.description}
+                                    onChange={(e) =>
+                                      updateExpenseLine(index, 'description', e.target.value)
+                                    }
+                                  />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <Input
+                                    className="h-8 bg-white"
+                                    list={`expense-unit-options-${index}`}
+                                    placeholder="Flight / Day / Night"
+                                    value={row.unit}
+                                    onChange={(e) =>
+                                      updateExpenseLine(index, 'unit', e.target.value)
+                                    }
+                                  />
+                                  <datalist id={`expense-unit-options-${index}`}>
+                                    {PROPOSAL_EXPENSE_UNIT_OPTIONS.map((opt) => (
+                                      <option key={opt.value} value={opt.value} />
+                                    ))}
+                                  </datalist>
+                                </td>
+                                <td className="px-2 py-1">
+                                  <Input
+                                    className="h-8 bg-white"
+                                    type="number"
+                                    min={0}
+                                    step="1"
+                                    value={row.quantity != null ? String(row.quantity) : ''}
+                                    onChange={(e) =>
+                                      updateExpenseLine(
+                                        index,
+                                        'quantity',
+                                        e.target.value === '' ? '' : Number(e.target.value),
+                                      )
+                                    }
+                                  />
+                                </td>
+                                <td className="px-2 py-1">
+                                  <Input
+                                    className="h-8 bg-white"
+                                    type="number"
+                                    min={0}
+                                    step="1"
+                                    value={row.unitCharge != null ? String(row.unitCharge) : ''}
+                                    onChange={(e) =>
+                                      updateExpenseLine(
+                                        index,
+                                        'unitCharge',
+                                        e.target.value === '' ? '' : Number(e.target.value),
+                                      )
+                                    }
+                                  />
+                                </td>
+                                <td className="px-2 py-1 text-right font-medium tabular-nums">
+                                  {formatMoney(Number(row.total) || 0, draft.currency)}
+                                </td>
+                                <td className="px-2 py-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 p-0"
+                                    onClick={() => removeExpenseRow(index)}
+                                  >
+                                    <Trash2 className="size-4 text-red-600" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            ))}
+                            {(draft.contentSnapshot.expenseLineItems || []).length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-4 text-center text-sm text-slate-500">
+                                  No expense lines yet. Add Air travel, Car hire, Accommodation, or Meal
+                                  allowance as needed.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="m-0 text-right text-sm font-medium text-slate-700">
+                        Expenses total:{' '}
+                        {formatMoney(
+                          (draft.contentSnapshot.expenseLineItems || []).reduce(
+                            (sum, row) => sum + (Number(row.total) || 0),
+                            0,
+                          ),
+                          draft.currency,
+                        )}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="m-0 text-xs text-slate-500">
+                      Expenses are optional. When enabled, itemised lines appear on the proposal PDF and
+                      are added after VAT in the grand total.
+                    </p>
+                  )}
                 </div>
+
                 {feeTotals ? (
                   <dl className="grid gap-1 text-sm sm:grid-cols-2 sm:justify-items-end">
-                    <dt className="text-slate-500">Subtotal</dt>
-                    <dd className="font-medium">{formatMoney(feeTotals.subtotal, draft.currency)}</dd>
+                    <dt className="text-slate-500">Professional fees</dt>
+                    <dd className="font-medium tabular-nums">
+                      {formatMoney(feeTotals.subtotal, draft.currency)}
+                    </dd>
                     {Number(draft.discount) > 0 ? (
                       <>
                         <dt className="text-slate-500">Discount</dt>
-                        <dd>-{formatMoney(Number(draft.discount) || 0, draft.currency)}</dd>
+                        <dd className="tabular-nums">
+                          -{formatMoney(Number(draft.discount) || 0, draft.currency)}
+                        </dd>
                         <dt className="text-slate-500">After discount</dt>
-                        <dd>{formatMoney(feeTotals.discountedSubtotal, draft.currency)}</dd>
+                        <dd className="tabular-nums">
+                          {formatMoney(feeTotals.discountedSubtotal, draft.currency)}
+                        </dd>
                       </>
                     ) : null}
                     <dt className="text-slate-500">VAT</dt>
-                    <dd>{formatMoney(feeTotals.vatAmount, draft.currency)}</dd>
-                    {Number(draft.expensesEstimate) > 0 ? (
+                    <dd className="tabular-nums">{formatMoney(feeTotals.vatAmount, draft.currency)}</dd>
+                    {draft.contentSnapshot.includeExpenses ? (
                       <>
-                        <dt className="text-slate-500">Expenses (estimated)</dt>
-                        <dd>{formatMoney(Number(draft.expensesEstimate) || 0, draft.currency)}</dd>
+                        <dt className="text-slate-500">Estimated expenses</dt>
+                        <dd className="tabular-nums">
+                          {formatMoney(
+                            (draft.contentSnapshot.expenseLineItems || []).reduce(
+                              (sum, row) => sum + (Number(row.total) || 0),
+                              0,
+                            ),
+                            draft.currency,
+                          )}
+                        </dd>
                       </>
                     ) : null}
                     <dt className="font-semibold text-slate-700">Grand total</dt>
-                    <dd className="font-semibold">{formatMoney(feeTotals.grandTotal, draft.currency)}</dd>
+                    <dd className="font-semibold tabular-nums">
+                      {formatMoney(feeTotals.grandTotal, draft.currency)}
+                    </dd>
                   </dl>
                 ) : null}
               </div>
