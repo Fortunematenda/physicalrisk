@@ -514,7 +514,6 @@ export function workspaceToDraft(ws: ProposalWorkspace): ProposalWorkspaceDraft 
       methodologyItems: snap.methodologyItems || [],
       expenseLineItems,
       includeExpenses,
-      ganttRows: snap.ganttRows || [],
     },
   };
 }
