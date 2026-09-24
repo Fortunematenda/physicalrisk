@@ -231,8 +231,8 @@ export class EspoCrmClient {
     return this.request<T>('POST', path, { data, headers });
   }
 
-  put<T = EspoRecord>(path: string, data: Record<string, unknown>) {
-    return this.request<T>('PUT', path, { data });
+  put<T = EspoRecord>(path: string, data: Record<string, unknown>, headers?: Record<string, string>) {
+    return this.request<T>('PUT', path, { data, headers });
   }
 
   delete<T = EspoRecord>(path: string) {

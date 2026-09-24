@@ -345,6 +345,9 @@ export class AuditService {
       case 'created':
         return `New ${moduleLabel.toLowerCase()} created${recordName ? `: ${recordName}` : ''}`;
       case 'updated':
+        if (action.toUpperCase().includes('ESPOCRM_SYNC_FAILED') && meta.code) {
+          return `EspoCRM sync failed (${String(meta.code)}) for ${recordName}`;
+        }
         if (meta.code) return `Updated ${String(meta.code)} on ${recordName}`;
         if (meta.questionCode) return `Saved response ${String(meta.questionCode)}`;
         if (meta.riskBand) return `Evaluated risk band to ${String(meta.riskBand)}`;

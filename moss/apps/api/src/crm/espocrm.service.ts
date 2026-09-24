@@ -964,12 +964,91 @@ export class EspoCrmService {
       }
     };
 
+    const updateLead = async (id: string) => {
+      try {
+        await client.put(`/Lead/${id}`, payload);
+        return id;
+      } catch (error: unknown) {
+        if (!(error instanceof EspoCrmHttpError)) throw error;
+
+        // Stale remote id — recreate from email / new Lead.
+        if (error.code === 'NOT_FOUND') {
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { espocrmLeadId: null },
+          });
+          const byEmail = await client.findByEmail<{ id: string }>('Lead', lead.email).catch(() => null);
+          if (byEmail?.id) {
+            await client.put(`/Lead/${byEmail.id}`, payload, { 'X-Skip-Duplicate-Check': 'true' });
+            await this.prisma.publicLead.update({
+              where: { id: lead.id },
+              data: { espocrmLeadId: byEmail.id },
+            });
+            return byEmail.id;
+          }
+          const created = await createLead();
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { espocrmLeadId: created.data.id },
+          });
+          return String(created.data.id);
+        }
+
+        if (!['CONFLICT', 'DUPLICATE_EMAIL'].includes(error.code)) throw error;
+
+        // Espo duplicate/conflict checker can 409 on update when email/name collide.
+        // Prefer the matching email record, then retry with skip-duplicate.
+        const normalizedEmail = lead.email.trim().toLowerCase();
+        let conflictingId: string | null = null;
+        for (const candidateId of [...error.duplicateRecordIds, ...error.conflictRecordIds]) {
+          try {
+            const candidate = await client.findOne<Record<string, unknown> & { id: string }>(
+              'Lead',
+              candidateId,
+            );
+            const candidateEmails = [
+              candidate.emailAddress,
+              ...(Array.isArray(candidate.emailAddressData)
+                ? candidate.emailAddressData.map(
+                    (item) => (item as { emailAddress?: unknown }).emailAddress,
+                  )
+                : []),
+            ];
+            if (
+              candidateEmails.some(
+                (value) => String(value || '').trim().toLowerCase() === normalizedEmail,
+              )
+            ) {
+              conflictingId = candidate.id;
+              break;
+            }
+          } catch {
+            // ignore missing conflict candidates
+          }
+        }
+        if (!conflictingId) {
+          const byEmail = await client.findByEmail<{ id: string }>('Lead', lead.email).catch(() => null);
+          conflictingId = byEmail?.id || null;
+        }
+
+        const targetId = conflictingId || id;
+        await client.put(`/Lead/${targetId}`, payload, { 'X-Skip-Duplicate-Check': 'true' });
+        if (targetId !== lead.espocrmLeadId) {
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { espocrmLeadId: targetId },
+          });
+        }
+        return targetId;
+      }
+    };
+
     try {
       let remoteId = lead.espocrmLeadId;
       let action = 'update';
 
       if (remoteId) {
-        await client.put(`/Lead/${remoteId}`, payload);
+        remoteId = await updateLead(remoteId);
       } else {
         let byEmail: { id: string } | null = null;
         try {
@@ -978,12 +1057,24 @@ export class EspoCrmService {
           byEmail = null;
         }
         if (byEmail?.id) {
-          remoteId = byEmail.id;
-          await client.put(`/Lead/${remoteId}`, payload);
+          remoteId = await updateLead(byEmail.id);
         } else {
           action = 'create';
-          const created = await createLead();
-          remoteId = created.data.id;
+          try {
+            const created = await createLead();
+            remoteId = created.data.id;
+          } catch (error: unknown) {
+            if (
+              !(error instanceof EspoCrmHttpError)
+              || !['DUPLICATE_EMAIL', 'CONFLICT'].includes(error.code)
+            ) {
+              throw error;
+            }
+            const byConflict = await client.findByEmail<{ id: string }>('Lead', lead.email).catch(() => null);
+            if (!byConflict?.id) throw error;
+            remoteId = await updateLead(byConflict.id);
+            action = 'update';
+          }
         }
         await this.prisma.publicLead.update({
           where: { id: lead.id },
