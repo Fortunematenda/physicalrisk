@@ -1,10 +1,11 @@
 import { mkdirSync, writeFileSync } from 'fs';
+import { inflateSync } from 'zlib';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { getRiskBand } from '@moss/shared';
 
 import { DEFAULT_SCL_REPORT_BRANDING, resolveSclReportLogoPath } from './scl-report-branding';
-import { buildScoringMatrixPanels, renderSclExecutivePdf } from './scl-report-pdf';
+import { buildScoringMatrixPanels, costLeakageNextSteps, renderSclExecutivePdf } from './scl-report-pdf';
 import {
   buildPriorityActionText,
   listSclClassificationVisuals,
@@ -96,6 +97,9 @@ describe('SCL executive PDF band fixtures', () => {
       const buffer = await renderSclExecutivePdf({
         brand: DEFAULT_SCL_REPORT_BRANDING,
         logoPath,
+        productCode: 'SCLI_COST_LEAKAGE',
+        assessmentTitle: 'Security Cost Leakage Assessment',
+        assessmentStatus: 'SUBMITTED',
         companyName: sample.company,
         reference: `SCLI-DEMO-${visual.colourName}`,
         assessmentDateLabel: '20 August 2026, 14:30',
@@ -121,10 +125,10 @@ describe('SCL executive PDF band fixtures', () => {
           recoverableHigh: sample.leakage * 0.65,
         },
         categoryScores: [
-          { category: 'Executive Assurance', score: sample.score + 4 },
-          { category: 'Contract and SLA Enforcement', score: sample.score - 2 },
-          { category: 'Technology and Verification', score: sample.score },
+          { category: 'Contract and SLA Enforcement', score: sample.score + 4 },
           { category: 'Labour Deployment', score: Math.max(10, sample.score - 8) },
+          { category: 'Technology Verification', score: sample.score },
+          { category: 'Loss, Reporting and Value', score: sample.score - 2 },
         ],
         recommendations: [
           {
@@ -176,8 +180,85 @@ describe('SCL executive PDF band fixtures', () => {
       expect(buffer.byteLength).toBeGreaterThan(2000);
       // PDF magic
       expect(buffer.subarray(0, 4).toString('utf8')).toBe('%PDF');
+      const text = normalizePdfText(extractPdfText(buffer));
+      expect(text).toContain('securitycostleakageindication');
+      expect(text).toContain(sample.company.replace(/\s+/g, '').toLowerCase());
+      expect(text).toContain('contractandslaenforcement');
+      expect(text).toContain('likelyleakage');
+      expect(text).not.toContain('executivegovernanceindication');
+      expect(text).not.toContain('requestanexecutiveadvisoryproposal');
+      expect(text).not.toContain('commissionapaidexecutiveadvisory');
+      expect(text).not.toContain('assurancedimensions');
       writeFileSync(join(outDir, sample.file), buffer);
       expect(visual.accessibleLabel).toContain(visual.colourName);
     }
   }, 30_000);
 });
+
+describe('Cost Leakage report copy', () => {
+  it('uses review workflow next steps and keeps triage indication copy separate', async () => {
+    expect(costLeakageNextSteps('SUBMITTED', true).join(' ')).toContain('evidence validation');
+    expect(costLeakageNextSteps('SUBMITTED', true).join(' ')).not.toContain('Executive Advisory');
+    expect(costLeakageNextSteps('APPROVED', false).join(' ')).toContain('approved report');
+
+    const triage = await renderSclExecutivePdf({
+      brand: DEFAULT_SCL_REPORT_BRANDING,
+      productCode: 'EXECUTIVE_GOVERNANCE_TRIAGE',
+      companyName: 'Triage Example',
+      reference: 'EGT-2026-000001',
+      assessmentDateLabel: '1 October 2026, 09:00',
+      reportTitle: 'Preliminary Executive Report',
+      isPreliminary: true,
+      modelVersion: 'EGT 1.0',
+      overallRiskScore: 70,
+      maturityScore: 30,
+      riskBand: 'High',
+      methodologyConfidence: 0.5,
+      evidenceConfidence: 0.4,
+      opportunityScore: 40,
+      leakage: {
+        minimumLeakageValue: 0,
+        minimumLeakageRate: 0,
+        likelyLeakageValue: 0,
+        likelyLeakageRate: 0,
+        maximumExposureValue: 0,
+        maximumExposureRate: 0,
+        recoverableLow: 0,
+        recoverableHigh: 0,
+      },
+      categoryScores: [{ category: 'Executive Assurance', score: 70 }],
+      recommendations: [],
+    });
+    expect(normalizePdfText(extractPdfText(triage))).toContain('executivegovernanceindication');
+  });
+});
+
+function normalizePdfText(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
+function extractPdfText(buffer: Buffer): string {
+  const raw = buffer.toString('latin1');
+  const parts: string[] = [raw];
+  const stream = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let match: RegExpExecArray | null;
+  while ((match = stream.exec(raw))) {
+    const slice = Buffer.from(match[1], 'latin1');
+    try {
+      parts.push(inflateSync(slice).toString('latin1'));
+    } catch {
+      parts.push(slice.toString('latin1'));
+    }
+  }
+  const decoded = parts.join('\n');
+  const hex = [...decoded.matchAll(/<([0-9A-Fa-f\s]+)>/g)].map((item) => {
+    const bytes = item[1].replace(/\s+/g, '');
+    if (bytes.length < 2 || bytes.length % 2 !== 0) return '';
+    const text = Buffer.from(bytes, 'hex').toString('latin1');
+    return [...text].every((ch) => ch >= ' ' && ch <= '~') ? text : '';
+  });
+  const literals = [...decoded.matchAll(/\((?:\\.|[^\\)])*\)/g)].map((item) =>
+    item[0].slice(1, -1).replace(/\\([()\\])/g, '$1').replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8))),
+  );
+  return [...hex, ...literals].join(' ');
+}

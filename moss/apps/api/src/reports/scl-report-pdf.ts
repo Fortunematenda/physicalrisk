@@ -3,6 +3,8 @@ import {
   assuranceCategoryInterpretation,
   assuranceDimensionTierLabel,
   deriveEgtAssurancePresentation,
+  formatClientEstimatedLosses,
+  formatZar,
   getRiskBand,
   rankEgtWarningIndicators,
   resolveEgtAssuranceVisual,
@@ -41,12 +43,25 @@ export type SclPdfScoringMatrixPanel = {
 export type SclPdfRenderInput = {
   brand: SclReportBrandConfig;
   logoPath?: string | null;
+  /** Product that owns this PDF. Triage keeps the Level 1 indication layout. */
+  productCode?: string | null;
   companyName: string;
   reference: string;
+  assessmentTitle?: string | null;
+  assessmentStatus?: string | null;
   assessmentDateLabel: string;
   reportTitle: string;
   isPreliminary: boolean;
   modelVersion: string;
+  analystNote?: string | null;
+  evidenceSummary?: {
+    total: number;
+    pending: number;
+    accepted: number;
+    rejected: number;
+  } | null;
+  calibrationInputs?: Array<{ label: string; value: string }>;
+  findings?: Array<{ title: string; category?: string | null; description?: string | null }>;
   overallRiskScore: number;
   maturityScore: number;
   riskBand: RiskBand | string;
@@ -114,8 +129,47 @@ type PdfScoreContext = {
   priorityCategories: Array<{ category: string; score: number }>;
 };
 
+export function isCostLeakageReport(input: { productCode?: string | null }): boolean {
+  return String(input.productCode || '') === 'SCLI_COST_LEAKAGE';
+}
+
+/** Next valid Cost Leakage states already implemented on the assessment workflow. */
+export function costLeakageNextSteps(status: string | null | undefined, isPreliminary: boolean): string[] {
+  if (!isPreliminary) {
+    return [
+      'Issue this approved report to the client when it has not yet been issued.',
+      'Keep recommendations and evidence on this assessment record.',
+    ];
+  }
+  const current = String(status || '').toUpperCase();
+  if (current === 'REVIEWED') {
+    return [
+      'Approve the assessment once scoring and evidence review are accepted.',
+      'Generate the final Security Cost Leakage report after approval.',
+    ];
+  }
+  if (current === 'APPROVED' || current === 'REPORT_GENERATED' || current === 'REPORT_ISSUED') {
+    return ['Generate or issue the final Security Cost Leakage report. This file is the preliminary indication only.'];
+  }
+  return [
+    'Continue evidence validation and accept or reject outstanding evidence.',
+    'Complete analyst review and mark the assessment reviewed.',
+    'Approve the assessment when those review steps are complete.',
+    'Generate the final Security Cost Leakage report after approval.',
+  ];
+}
+
+export function costLeakageCategoryInterpretation(category: string, score: number): string {
+  const name = String(category || 'This area').trim() || 'This area';
+  const band = getRiskBand(Number(score) || 0);
+  if (band === 'Controlled') return `${name} shows lower cost-leakage exposure on the recorded responses.`;
+  if (band === 'Moderate') return `${name} shows moderate cost-leakage exposure and should be checked against evidence.`;
+  if (band === 'High') return `${name} shows elevated cost-leakage exposure and should be prioritised in analyst review.`;
+  return `${name} shows critical cost-leakage exposure and should be treated as a priority finding.`;
+}
+
 function buildPdfScoreContext(input: SclPdfRenderInput): PdfScoreContext {
-  if (!input.isPreliminary) {
+  if (isCostLeakageReport(input) || !input.isPreliminary) {
     const visual = resolveSclClassificationVisual(input.riskBand || input.overallRiskScore);
     const rows = (input.categoryScores || []).length
       ? input.categoryScores
@@ -140,7 +194,7 @@ function buildPdfScoreContext(input: SclPdfRenderInput): PdfScoreContext {
         resolveSclClassificationVisual('High').colourHex,
         resolveSclClassificationVisual('Critical').colourHex,
       ],
-      categoryInterpretation,
+      categoryInterpretation: costLeakageCategoryInterpretation,
       dimensionValueLabel: (score) => {
         const band = getRiskBand(score);
         if (band === 'Critical') return 'Priority';
@@ -350,15 +404,23 @@ function drawPageOneBody(
   const RED = brandRed(input.brand);
   const accent = scoreContext.accentHex || RED;
 
+  const costLeakage = isCostLeakageReport(input);
   doc.fillColor(RED).font('Helvetica-Bold').fontSize(9)
-    .text('COMPLIMENTARY PRELIMINARY INDICATION', x, y, {
-      characterSpacing: 1.1,
-      lineBreak: false,
-    });
+    .text(
+      costLeakage
+        ? (input.isPreliminary ? 'PRELIMINARY SECURITY COST LEAKAGE INDICATION' : 'SECURITY COST LEAKAGE ASSESSMENT')
+        : 'COMPLIMENTARY PRELIMINARY INDICATION',
+      x,
+      y,
+      { characterSpacing: 1.1, lineBreak: false },
+    );
   y += 22;
 
-  doc.fillColor(INK).font('Helvetica-Bold').fontSize(28)
-    .text(input.isPreliminary ? 'Executive Governance Indication' : 'Security Cost Leakage Assessment Report', x, y, { width: contentW });
+  const coverTitle = costLeakage
+    ? (input.isPreliminary ? 'Security Cost Leakage Indication' : 'Security Cost Leakage Assessment Report')
+    : (input.isPreliminary ? 'Executive Governance Indication' : 'Security Cost Leakage Assessment Report');
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(costLeakage ? 24 : 28)
+    .text(coverTitle, x, y, { width: contentW });
   y = doc.y + 16;
 
   const half = contentW / 2;
@@ -371,6 +433,11 @@ function drawPageOneBody(
     ['Date', dateLabel],
     ['Reference', input.reference || '—'],
   ];
+  if (costLeakage) {
+    if (input.assessmentTitle) leftMeta.push(['Assessment', input.assessmentTitle]);
+    rightMeta.push(['Methodology', input.modelVersion || '—']);
+  }
+  const metaRows = Math.max(leftMeta.length, rightMeta.length);
   leftMeta.forEach(([label, value], i) => {
     const rowY = y + i * 16;
     doc.fillColor(MUTED).font('Helvetica').fontSize(10)
@@ -383,7 +450,7 @@ function drawPageOneBody(
       .text(`${label}: `, x + half, rowY, { continued: true, lineBreak: false });
     doc.fillColor(INK).text(value, { lineBreak: false });
   });
-  y += 48;
+  y += metaRows * 16 + 16;
 
   // Score banner — solid classification colour left / charcoal right (EGT sample layout)
   const leftW = Math.round(contentW * 0.28);
@@ -421,9 +488,13 @@ function drawPageOneBody(
   const afterTitle = doc.y + 8;
   doc.fillColor('#ececec').font('Helvetica').fontSize(9)
     .text(
-      input.isPreliminary
-        ? 'This Level 1 questionnaire indicates where governance, assurance or expenditure concerns may warrant a paid Executive Advisory Diagnostic. It is not an assessment or audit conclusion.'
-        : 'This Level 3 assessment indicates where security cost leakage requires evidence-led validation. Financial conclusions must be supported by the recorded evidence and confidence basis.',
+      costLeakage
+        ? (input.isPreliminary
+          ? 'This preliminary Security Cost Leakage indication uses this assessment’s scores and leakage result. It is not the final approved report.'
+          : 'This approved Security Cost Leakage report uses this assessment’s scores, leakage result and recorded evidence.')
+        : (input.isPreliminary
+          ? 'This Level 1 questionnaire indicates where governance, assurance or expenditure concerns may warrant a paid Executive Advisory Diagnostic. It is not an assessment or audit conclusion.'
+          : 'This Level 3 assessment indicates where security cost leakage requires evidence-led validation. Financial conclusions must be supported by the recorded evidence and confidence basis.'),
       posX,
       Math.max(afterTitle, y + 62),
       { width: posW, lineGap: 2 },
@@ -457,9 +528,10 @@ function drawPageOneBody(
   const rowH = 22;
   const barH = 10;
   const fontSize = 10;
-  const rows = scoreContext.displayCategories.length
+  const allRows = scoreContext.displayCategories.length
     ? scoreContext.displayCategories
     : [{ category: 'Overall', score: Number(scoreContext.displayScore) || 0 }];
+  const rows = costLeakage ? allRows.slice(0, 6) : allRows;
 
   rows.forEach((row) => {
     const score = Math.max(0, Math.min(100, Math.round(Number(row.score) || 0)));
@@ -494,12 +566,15 @@ function drawPageOneBody(
     title: c.category,
     description: scoreContext.categoryInterpretation(c.category, Number(c.score)),
   }));
-  while (priorities.length < 3) {
-    priorities.push({
-      title: 'Assurance',
-      description: 'Further independent validation may be warranted across the security operating model.',
-    });
+  if (!costLeakage) {
+    while (priorities.length < 3) {
+      priorities.push({
+        title: 'Assurance',
+        description: 'Further independent validation may be warranted across the security operating model.',
+      });
+    }
   }
+  if (!priorities.length) return;
 
   doc.fillColor(INK).font('Helvetica-Bold').fontSize(15)
     .text(scoreContext.prioritiesTitle, x, y);
@@ -525,6 +600,10 @@ function drawPageOneBody(
  * Page 2 — recommended next step + interpretation (exact sample structure).
  */
 function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
+  if (isCostLeakageReport(input)) {
+    drawCostLeakageNextStep(doc, input);
+    return;
+  }
   drawTopBar(doc, input.brand);
   const pageW = doc.page.width;
   const contentW = pageW - PAGE_MARGIN * 2;
@@ -600,8 +679,223 @@ function drawPageTwo(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
     );
 }
 
+function drawCostLeakageNextStep(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
+  drawTopBar(doc, input.brand);
+  const pageW = doc.page.width;
+  const contentW = pageW - PAGE_MARGIN * 2;
+  const x = PAGE_MARGIN;
+  let y = TOP_BAR_H + 48;
+
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(16).text('Next step', x, y);
+  y = doc.y + 12;
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(20)
+    .text(
+      input.isPreliminary
+        ? 'Complete review before the final Cost Leakage report.'
+        : 'This is the approved Security Cost Leakage report.',
+      x,
+      y,
+      { width: contentW },
+    );
+  y = doc.y + 14;
+  doc.fillColor(CHAR).font('Helvetica').fontSize(11)
+    .text(
+      input.isPreliminary
+        ? 'This page stays on the Security Cost Leakage assessment. The preliminary indication does not commission another product.'
+        : 'Financial conclusions must be read with the recorded evidence, calibration inputs and confidence basis on this assessment.',
+      x,
+      y,
+      { width: contentW, lineGap: 3 },
+    );
+  y = doc.y + 16;
+
+  for (const step of costLeakageNextSteps(input.assessmentStatus, input.isPreliminary)) {
+    doc.fillColor(INK).font('Helvetica').fontSize(11).text(`•  ${step}`, x, y, { width: contentW, lineGap: 2 });
+    y = doc.y + 8;
+  }
+
+  y += 12;
+  doc.moveTo(x, y).lineTo(x + contentW, y).lineWidth(1).strokeColor('#dddddd').stroke();
+  y += 20;
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(14).text('Basis of this report', x, y);
+  y = doc.y + 10;
+  doc.fillColor(CHAR).font('Helvetica').fontSize(10).text(
+    input.isPreliminary
+      ? 'This preliminary Security Cost Leakage output is generated from the questionnaire responses, calibration inputs and scoring snapshot for this assessment. It is not an Executive Advisory Diagnostic and it is not the final approved Cost Leakage report. Evidence that is still pending has not been independently accepted.'
+      : 'This report is the approved Security Cost Leakage assessment output for the organisation and reference shown on the cover. It is distinct from the preliminary indication and from Executive Advisory or Executive Governance documents.',
+    x,
+    y,
+    { width: contentW, lineGap: 2.5 },
+  );
+}
+
+function ensureRoom(doc: PDFKit.PDFDocument, brand: SclReportBrandConfig, y: number, needed: number): number {
+  if (y + needed <= doc.page.height - 42) return y;
+  doc.addPage();
+  drawTopBar(doc, brand);
+  return TOP_BAR_H + 36;
+}
+
+function drawWrapped(
+  doc: PDFKit.PDFDocument,
+  brand: SclReportBrandConfig,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  size = 10,
+): number {
+  const next = ensureRoom(doc, brand, y, 36);
+  doc.fillColor(CHAR).font('Helvetica').fontSize(size).text(text, x, next, { width, lineGap: 2 });
+  return doc.y + 8;
+}
+
+function drawSectionTitle(
+  doc: PDFKit.PDFDocument,
+  brand: SclReportBrandConfig,
+  title: string,
+  x: number,
+  y: number,
+): number {
+  const next = ensureRoom(doc, brand, y, 28);
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(13).text(title, x, next);
+  return doc.y + 8;
+}
+
+function leakageTheme(category: string): string {
+  const value = category.toLowerCase();
+  if (value.includes('contract') || value.includes('sla')) return 'Contractual and SLA';
+  if (value.includes('labour') || value.includes('deploy')) return 'Labour deployment';
+  if (value.includes('technolog') || value.includes('verif')) return 'Technology';
+  if (value.includes('expend') || value.includes('report') || value.includes('value') || value.includes('loss')) {
+    return 'Expenditure, reporting and value';
+  }
+  return 'Other recorded areas';
+}
+
+function drawCostLeakageAnnex(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
+  doc.addPage();
+  drawTopBar(doc, input.brand);
+  const contentW = doc.page.width - PAGE_MARGIN * 2;
+  const x = PAGE_MARGIN;
+  let y = TOP_BAR_H + 36;
+
+  y = drawSectionTitle(doc, input.brand, 'Cost leakage result', x, y);
+  const leakage = input.leakage;
+  const lines = [
+    `Likely leakage: ${formatZar(leakage.likelyLeakageValue)} (${Math.round(Number(leakage.likelyLeakageRate || 0) * 1000) / 10}%)`,
+    `Minimum leakage: ${formatZar(leakage.minimumLeakageValue)}`,
+    `Maximum exposure: ${formatZar(leakage.maximumExposureValue)}`,
+    `Recoverable range: ${formatZar(leakage.recoverableLow)} – ${formatZar(leakage.recoverableHigh)}`,
+    `Client-estimated losses: ${formatClientEstimatedLosses(
+      leakage.estimatedLossesLow,
+      leakage.estimatedLossesHigh,
+      leakage.estimatedLossesLowBand as never,
+      leakage.estimatedLossesHighBand as never,
+    )}`,
+    `Methodology confidence: ${Math.round(Number(input.methodologyConfidence || 0) * 100)}%`,
+    `Evidence confidence: ${Math.round(Number(input.evidenceConfidence || 0) * 100)}%`,
+  ];
+  for (const line of lines) y = drawWrapped(doc, input.brand, line, x, y, contentW);
+
+  y = drawSectionTitle(doc, input.brand, 'Assessment areas', x, y);
+  const areas = input.categoryScores?.length
+    ? input.categoryScores
+    : [{ category: 'Overall', score: input.overallRiskScore }];
+  for (const area of areas) {
+    const score = Math.round(Number(area.score) || 0);
+    y = drawWrapped(
+      doc,
+      input.brand,
+      `${area.category}: ${score}/100 (${getRiskBand(score)}) — ${leakageTheme(String(area.category))}`,
+      x,
+      y,
+      contentW,
+    );
+  }
+
+  const findings = (input.findings || []).filter((item) => item.title);
+  y = drawSectionTitle(doc, input.brand, 'Recorded findings', x, y);
+  if (!findings.length) {
+    y = drawWrapped(doc, input.brand, 'No separate finding records are stored on this assessment.', x, y, contentW);
+  } else {
+    for (const finding of findings) {
+      const category = finding.category ? ` (${finding.category})` : '';
+      y = drawWrapped(doc, input.brand, `${finding.title}${category}. ${finding.description || ''}`.trim(), x, y, contentW);
+    }
+  }
+
+  y = drawSectionTitle(doc, input.brand, 'Recommendations', x, y);
+  const recommendations = (input.recommendations || []).filter((item) => item.title);
+  if (!recommendations.length) {
+    y = drawWrapped(doc, input.brand, 'No recommendations are stored on this assessment yet.', x, y, contentW);
+  } else {
+    for (const item of recommendations) {
+      y = drawWrapped(
+        doc,
+        input.brand,
+        `${item.priority}: ${item.title}. ${item.summary || ''}${item.suggestedNextStep ? ` Next step: ${item.suggestedNextStep}` : ''}`,
+        x,
+        y,
+        contentW,
+      );
+    }
+  }
+
+  y = drawSectionTitle(doc, input.brand, 'Answered assessment areas', x, y);
+  const matrix = input.scoringMatrix || [];
+  if (!matrix.length) {
+    y = drawWrapped(doc, input.brand, 'No answered questions were available for this report.', x, y, contentW);
+  } else {
+    for (const panel of matrix) {
+      const selected = panel.rows.find((row) => row.selected) || panel.rows[0];
+      y = drawWrapped(
+        doc,
+        input.brand,
+        `${panel.code ? `${panel.code} — ` : ''}${panel.title}: ${selected?.description || 'No selection recorded'}`,
+        x,
+        y,
+        contentW,
+      );
+    }
+  }
+
+  y = drawSectionTitle(doc, input.brand, 'Evidence status', x, y);
+  const evidence = input.evidenceSummary;
+  y = drawWrapped(
+    doc,
+    input.brand,
+    evidence
+      ? `${evidence.total} file(s): ${evidence.accepted} accepted, ${evidence.rejected} rejected, ${evidence.pending} pending.`
+      : 'Evidence status was not loaded for this report.',
+    x,
+    y,
+    contentW,
+  );
+
+  y = drawSectionTitle(doc, input.brand, 'Calibration inputs', x, y);
+  const calibration = input.calibrationInputs || [];
+  if (!calibration.length) {
+    y = drawWrapped(doc, input.brand, 'No calibration inputs are stored on this assessment.', x, y, contentW);
+  } else {
+    for (const item of calibration) {
+      y = drawWrapped(doc, input.brand, `${item.label}: ${item.value || '—'}`, x, y, contentW);
+    }
+  }
+
+  y = drawSectionTitle(doc, input.brand, 'Analyst comments', x, y);
+  drawWrapped(
+    doc,
+    input.brand,
+    input.analystNote?.trim() || 'No analyst comment has been recorded.',
+    x,
+    y,
+    contentW,
+  );
+}
+
 /**
- * Renders the SCL PDF to match the approved Executive Governance Triage visual sample.
+ * Renders either the Executive Governance Triage indication or the Security Cost Leakage report.
  * Scoring values are governed inputs only — formulas are unchanged.
  */
 export function renderSclExecutivePdf(input: SclPdfRenderInput): Promise<Buffer> {
@@ -609,6 +903,7 @@ export function renderSclExecutivePdf(input: SclPdfRenderInput): Promise<Buffer>
     const doc = new PDFDocument({
       size: 'A4',
       margin: 0,
+      compress: false,
       info: {
         Title: `${input.reportTitle} — ${input.companyName}`,
         Author: input.brand.consultancyName,
@@ -633,6 +928,7 @@ export function renderSclExecutivePdf(input: SclPdfRenderInput): Promise<Buffer>
     // Page 2
     doc.addPage();
     drawPageTwo(doc, input);
+    if (isCostLeakageReport(input)) drawCostLeakageAnnex(doc, input);
 
     doc.end();
   });

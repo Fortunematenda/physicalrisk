@@ -39,6 +39,22 @@ const ADVISORY_REPORT_PRODUCTS = new Set<ProductCode>([
 
 const LEGACY_REPORT_PRODUCTS = new Set<string>(['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE']);
 
+function formatCalibrationValue(value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'object') {
+    const record = value as { label?: unknown; code?: unknown };
+    if (record.label) return String(record.label);
+    if (record.code) return String(record.code);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '—';
+    }
+  }
+  return String(value);
+}
+
 function reportEmailLabels(productCode: string) {
   const product = PHYSICAL_RISK_PRODUCTS[productCode as keyof typeof PHYSICAL_RISK_PRODUCTS];
   const productName = product?.name || 'Physical Risk';
@@ -193,7 +209,11 @@ export class ReportsService {
       (r: any) => r.includeInReport !== false,
     );
     const isPreliminary = reportType === ReportType.PRELIMINARY_EXECUTIVE;
-    const reportLabel = isPreliminary ? 'Preliminary Executive Report' : 'Approved Executive Report';
+    const productCode = String(assessment.productCode || '');
+    const isCostLeakage = productCode === 'SCLI_COST_LEAKAGE';
+    const reportLabel = isCostLeakage
+      ? (isPreliminary ? 'Preliminary Security Cost Leakage Report' : 'Security Cost Leakage Assessment Report')
+      : (isPreliminary ? 'Preliminary Executive Report' : 'Approved Executive Report');
     const meta = buildSclReportDocumentMeta({
       organisationName: assessment.organisation?.name,
       reference: assessment.reference,
@@ -230,7 +250,7 @@ export class ReportsService {
       ? [lead.firstName, lead.lastName].filter(Boolean).join(' ').trim()
       : '';
 
-    if (lead?.id) {
+    if (!isCostLeakage && lead?.id) {
       try {
         brand.ctaUrl = this.proposalTokens.buildPublicUrl(lead.id);
         brand.ctaLabel = 'Request an Executive Advisory Proposal';
@@ -239,9 +259,32 @@ export class ReportsService {
       }
     }
 
+    const evidenceRows = Array.isArray(assessment.evidence) ? assessment.evidence : [];
+    const evidenceSummary = {
+      total: evidenceRows.length,
+      pending: evidenceRows.filter((item: { status?: string }) => item.status === 'PENDING').length,
+      accepted: evidenceRows.filter((item: { status?: string }) => item.status === 'ACCEPTED').length,
+      rejected: evidenceRows.filter((item: { status?: string }) => item.status === 'REJECTED').length,
+    };
+    const calibrationInputs = (assessment.inputValues || []).map((row: any) => ({
+      label: String(row.inputDefinition?.label || row.inputDefinition?.code || 'Input'),
+      value: formatCalibrationValue(row.value),
+    }));
+
     return renderSclExecutivePdf({
       brand,
       logoPath,
+      productCode,
+      assessmentTitle: assessment.title,
+      assessmentStatus: assessment.status,
+      analystNote: assessment.reviewNote,
+      evidenceSummary,
+      calibrationInputs,
+      findings: (assessment.findings || []).map((item: any) => ({
+        title: String(item.title || ''),
+        category: item.category,
+        description: item.description,
+      })),
       companyName: meta.companyName,
       reference: meta.reference,
       assessmentDateLabel: meta.assessmentDateLabel,
@@ -298,6 +341,9 @@ export class ReportsService {
         responses: {
           select: { questionId: true, responseOptionId: true },
         },
+        evidence: { select: { status: true } },
+        findings: { select: { title: true, category: true, description: true }, orderBy: { createdAt: 'asc' } },
+        inputValues: { include: { inputDefinition: { select: { code: true, label: true } } } },
       },
     });
     if (!assessment) throw new NotFoundException('Assessment not found.');
