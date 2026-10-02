@@ -1548,8 +1548,8 @@ export function ProposalWorkspace({
                   </Badge>
                   {String(workspace?.status || '').toUpperCase() === 'DRAFT' ? (
                     <p className="m-0 mt-1.5 text-[11px] leading-snug text-slate-500">
-                      Stays in preparation until the proposal is sent or marked accepted on the
-                      diagnostic outcome.
+                      Stays in preparation until it is marked accepted on the diagnostic outcome
+                      or on the new Cost Leakage assessment screen.
                     </p>
                   ) : null}
                 </div>

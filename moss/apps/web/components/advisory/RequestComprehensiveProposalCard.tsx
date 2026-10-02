@@ -650,9 +650,16 @@ function CommercialNextStepPanel({
                 </Button>
               </>
             ) : isPreparing ? (
-              <Button asChild className="h-10 px-4">
-                <Link href={comprehensiveProposal.workspaceHref}>Continue proposal</Link>
-              </Button>
+              <>
+                {showAccept ? (
+                  <Button type="button" className="h-10 px-4" disabled={busy} onClick={onAccept}>
+                    Mark accepted
+                  </Button>
+                ) : null}
+                <Button asChild variant={showAccept ? 'outline' : 'default'} className="h-10 px-4">
+                  <Link href={comprehensiveProposal.workspaceHref}>Continue proposal</Link>
+                </Button>
+              </>
             ) : (
               <Button asChild variant="outline" className="h-10 px-4">
                 <Link href={comprehensiveProposal.workspaceHref}>Open proposal</Link>
@@ -682,7 +689,9 @@ function CommercialNextStepPanel({
             </p>
           ) : isPreparing ? (
             <p className="m-0 text-xs text-slate-500">
-              Edit and submit the proposal from the workspace. PDF preview is there too.
+              {showAccept
+                ? 'Mark the proposal accepted here. You can still continue editing it in the workspace.'
+                : 'Edit and submit the proposal from the workspace. PDF preview is there too.'}
             </p>
           ) : null}
         </div>

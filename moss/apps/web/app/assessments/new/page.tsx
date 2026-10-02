@@ -17,11 +17,37 @@ import { StatCard } from '@/components/dashboard/stat-card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { OrganisationSelect, type OrgOption } from '@/components/organisations/OrganisationSelect';
 import { filterSclActiveTriageQuestions } from '@moss/shared';
 import { apiFetch } from '../../../lib/api';
+
+type GovernancePolicy = {
+  allowed: boolean;
+  guidanceTitle?: string;
+  guidanceBody?: string;
+  completedEad?: { id: string; reference: string; outcomeHref: string };
+  proposal?: {
+    id?: string;
+    proposalNumber: string;
+    status: string;
+    publicLeadId?: string | null;
+    sentAt?: string | null;
+    acceptedAt?: string | null;
+    awaitingPo?: boolean;
+  } | null;
+  actions?: Array<{ label: string; href: string }>;
+};
 
 type QuestionnairePayload = {
   code: string;
@@ -45,20 +71,15 @@ function NewAssessmentForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [governance, setGovernance] = useState<{
-    allowed: boolean;
-    guidanceTitle?: string;
-    guidanceBody?: string;
-    completedEad?: { id: string; reference: string; outcomeHref: string };
-    proposal?: {
-      proposalNumber: string;
-      status: string;
-      sentAt?: string | null;
-      acceptedAt?: string | null;
-      awaitingPo?: boolean;
-    } | null;
-    actions?: Array<{ label: string; href: string }>;
-  } | null>(null);
+  const [governance, setGovernance] = useState<GovernancePolicy | null>(null);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [acceptBusy, setAcceptBusy] = useState(false);
+  const [acceptDraft, setAcceptDraft] = useState({
+    acceptanceDate: '',
+    acceptedByName: '',
+    acceptanceMethod: 'MANUAL_CONFIRMATION',
+    acceptanceNotes: '',
+  });
 
   useEffect(() => {
     const prefOrg = searchParams.get('org') || '';
@@ -84,20 +105,7 @@ function NewAssessmentForm() {
       return;
     }
     let cancelled = false;
-    apiFetch<{
-      allowed: boolean;
-      guidanceTitle?: string;
-      guidanceBody?: string;
-      completedEad?: { id: string; reference: string; outcomeHref: string };
-      proposal?: {
-        proposalNumber: string;
-        status: string;
-        sentAt?: string | null;
-        acceptedAt?: string | null;
-        awaitingPo?: boolean;
-      } | null;
-      actions?: Array<{ label: string; href: string }>;
-    }>(
+    apiFetch<GovernancePolicy>(
       `/advisory/governance/manual-create?organisationId=${encodeURIComponent(organisationId)}&productCode=SCLI_COST_LEAKAGE`,
     )
       .then((policy) => {
@@ -111,11 +119,69 @@ function NewAssessmentForm() {
     };
   }, [organisationId]);
 
+  const proposalStatus = String(governance?.proposal?.status || '').toUpperCase();
+  const canMarkAccepted = ['DRAFT', 'INTERNAL_REVIEW', 'APPROVED', 'SENT', 'VIEWED'].includes(proposalStatus)
+    && Boolean(governance?.proposal?.id && governance.proposal.publicLeadId);
+  const acceptedReady = proposalStatus === 'ACCEPTED' && !governance?.proposal?.awaitingPo && Boolean(governance?.proposal?.id);
+
+  async function reloadGovernance() {
+    if (!organisationId) return;
+    const policy = await apiFetch<GovernancePolicy>(
+      `/advisory/governance/manual-create?organisationId=${encodeURIComponent(organisationId)}&productCode=SCLI_COST_LEAKAGE`,
+    );
+    setGovernance(policy);
+  }
+
+  async function submitAcceptance() {
+    const proposal = governance?.proposal;
+    if (!proposal?.id || !proposal.publicLeadId) {
+      setError('Proposal commercial record is missing.');
+      return;
+    }
+    setAcceptBusy(true);
+    setError('');
+    try {
+      const form = new FormData();
+      form.append('acceptanceDate', acceptDraft.acceptanceDate);
+      form.append('acceptedByName', acceptDraft.acceptedByName);
+      form.append('acceptanceMethod', acceptDraft.acceptanceMethod);
+      form.append('acceptanceNotes', acceptDraft.acceptanceNotes);
+      await apiFetch(
+        `/triage/submissions/${proposal.publicLeadId}/proposals/${proposal.id}/accept`,
+        { method: 'POST', body: form },
+      );
+      setAcceptOpen(false);
+      await reloadGovernance();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not mark the proposal accepted.');
+    } finally {
+      setAcceptBusy(false);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError('');
     try {
+      if (acceptedReady && governance?.proposal?.id) {
+        const result = await apiFetch<{
+          results?: Array<{
+            productCode: string;
+            error: string | null;
+            engagement?: { id: string } | null;
+          }>;
+        }>(`/advisory/proposals/${governance.proposal.id}/level3-engagements`, {
+          method: 'POST',
+          body: JSON.stringify({ productCodes: ['SCLI_COST_LEAKAGE'] }),
+        });
+        const row = (result.results || []).find((item) => item.productCode === 'SCLI_COST_LEAKAGE');
+        if (row?.engagement?.id) {
+          router.push(`/assessments/${row.engagement.id}`);
+          return;
+        }
+        throw new Error(row?.error || 'Cost Leakage was not created from this proposal.');
+      }
       const created = await apiFetch<{ id: string }>('/assessments', {
         method: 'POST',
         body: JSON.stringify({
@@ -152,7 +218,16 @@ function NewAssessmentForm() {
 
       {error ? <p className="error">{error}</p> : null}
 
-      {governance && !governance.allowed ? (
+      {acceptedReady ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 px-4 py-4 text-sm text-emerald-950">
+          <p className="m-0 text-base font-semibold">Proposal accepted</p>
+          <p className="mt-2 m-0">
+            {governance?.proposal?.proposalNumber} is accepted. Create the Cost Leakage assessment below. It stays linked to this proposal.
+          </p>
+        </div>
+      ) : null}
+
+      {governance && !governance.allowed && !acceptedReady ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-4 text-sm text-amber-950">
           <p className="m-0 text-base font-semibold">
             {governance.guidanceTitle || 'Commercial acceptance required'}
@@ -176,6 +251,24 @@ function NewAssessmentForm() {
             </p>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
+            {canMarkAccepted ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={acceptBusy}
+                onClick={() => {
+                  setAcceptDraft({
+                    acceptanceDate: new Date().toISOString().slice(0, 10),
+                    acceptedByName: selectedOrg?.name || '',
+                    acceptanceMethod: 'MANUAL_CONFIRMATION',
+                    acceptanceNotes: '',
+                  });
+                  setAcceptOpen(true);
+                }}
+              >
+                Mark accepted
+              </Button>
+            ) : null}
             {(governance.actions || []).map((action) => (
               <Button key={action.href} asChild variant="outline" size="sm">
                 <Link href={action.href}>{action.label}</Link>
@@ -184,6 +277,52 @@ function NewAssessmentForm() {
           </div>
         </div>
       ) : null}
+
+      <Dialog open={acceptOpen} onOpenChange={setAcceptOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mark proposal as accepted</DialogTitle>
+            <DialogDescription>
+              Record client acceptance on {governance?.proposal?.proposalNumber || 'this proposal'}. Cost Leakage can be created as soon as it is accepted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-1">
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Acceptance date</span>
+              <Input
+                type="date"
+                value={acceptDraft.acceptanceDate}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceDate: e.target.value }))}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Accepted by</span>
+              <Input
+                value={acceptDraft.acceptedByName}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptedByName: e.target.value }))}
+                placeholder="Client signatory name"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium text-slate-700">Notes</span>
+              <Textarea
+                rows={3}
+                value={acceptDraft.acceptanceNotes}
+                onChange={(e) => setAcceptDraft((d) => ({ ...d, acceptanceNotes: e.target.value }))}
+                placeholder="Optional notes"
+              />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={acceptBusy} onClick={() => setAcceptOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={acceptBusy} onClick={() => void submitAcceptance()}>
+              {acceptBusy ? 'Saving…' : 'Mark accepted'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="dash2-kpi-row grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -256,7 +395,7 @@ function NewAssessmentForm() {
               <div className="flex flex-wrap gap-2 pt-1">
                 <Button
                   type="submit"
-                  disabled={!organisationId || saving || Boolean(governance && !governance.allowed)}
+                  disabled={!organisationId || saving || Boolean(governance && !governance.allowed && !acceptedReady)}
                   className="bg-[#c41230] hover:bg-[#a10f28]"
                 >
                   {saving ? 'Creating…' : 'Create Cost Leakage assessment'}

@@ -22,6 +22,7 @@ export type ManualCreatePolicy = {
     id: string;
     proposalNumber: string;
     status: string;
+    publicLeadId?: string | null;
     sentAt?: string | null;
     acceptedAt?: string | null;
     poRequirement?: string | null;
@@ -104,9 +105,9 @@ export async function resolveManualCreatePolicy(
   if (proposal?.status === TriageProposalStatus.ACCEPTED && !awaitingPo) {
     return {
       allowed: false,
-      guidanceTitle: 'Start from the diagnostic outcome',
+      guidanceTitle: 'Proposal accepted',
       guidanceBody:
-        'This organisation already has an accepted Executive Advisory proposal. Create the Security Cost Leakage assessment from the diagnostic outcome to preserve Triage → Diagnostic → Proposal → Acceptance lineage.',
+        'The Executive Advisory proposal is accepted. Create the Security Cost Leakage assessment here. It stays linked to this proposal.',
       reason:
         'Level 3 engagements must be created from the completed diagnostic outcome after commercial acceptance.',
       completedEad: { ...completedEad, outcomeHref },
@@ -114,6 +115,7 @@ export async function resolveManualCreatePolicy(
         id: proposal.id,
         proposalNumber: proposal.proposalNumber,
         status: proposal.status,
+        publicLeadId: proposal.publicLeadId,
         sentAt: proposal.sentAt?.toISOString() || null,
         acceptedAt: proposal.acceptedAt?.toISOString() || null,
         poRequirement: proposal.poRequirement,
@@ -139,6 +141,7 @@ export async function resolveManualCreatePolicy(
         id: proposal.id,
         proposalNumber: proposal.proposalNumber,
         status: proposal.status,
+        publicLeadId: proposal.publicLeadId,
         sentAt: proposal.sentAt?.toISOString() || null,
         acceptedAt: proposal.acceptedAt?.toISOString() || null,
         poRequirement: proposal.poRequirement,
@@ -150,11 +153,15 @@ export async function resolveManualCreatePolicy(
   }
 
   const status = proposal?.status || 'NOT_REQUESTED';
+  const preparing = ['DRAFT', 'INTERNAL_REVIEW', 'APPROVED'].includes(status);
   return {
     allowed: false,
     guidanceTitle: 'Commercial acceptance required',
-    guidanceBody:
-      'The Security Cost Leakage Assessment can begin after the associated Executive Advisory proposal has been accepted. Use the diagnostic outcome to view, resend, or mark the proposal accepted.',
+    guidanceBody: preparing
+      ? 'This Executive Advisory proposal is still in preparation. Mark it accepted here, or open the diagnostic outcome and mark it accepted there. Cost Leakage can be created once the proposal is accepted.'
+      : status === 'SENT' || status === 'VIEWED' || status === 'CHANGES_REQUESTED'
+        ? 'The Executive Advisory proposal has been sent. Mark it accepted once the client has agreed, then create the Cost Leakage assessment.'
+        : 'The Security Cost Leakage Assessment can begin after the associated Executive Advisory proposal has been accepted.',
     reason:
       'Level 3 engagements must be created from the completed diagnostic outcome after commercial acceptance. Manual creation bypasses routing and commercial governance.',
     completedEad: { ...completedEad, outcomeHref },
@@ -163,6 +170,7 @@ export async function resolveManualCreatePolicy(
           id: proposal.id,
           proposalNumber: proposal.proposalNumber,
           status,
+          publicLeadId: proposal.publicLeadId,
           sentAt: proposal.sentAt?.toISOString() || null,
           acceptedAt: proposal.acceptedAt?.toISOString() || null,
           poRequirement: proposal.poRequirement,
