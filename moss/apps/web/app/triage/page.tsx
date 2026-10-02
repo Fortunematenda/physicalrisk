@@ -120,24 +120,6 @@ const EMPTY_SUMMARY: Summary = {
 const PAGE_SIZE_OPTIONS = [8, 10, 20, 50];
 const REFRESH_MS = 45_000;
 
-function localDateInputValue(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function daysAgoLocal(days: number) {
-  const d = new Date();
-  d.setHours(12, 0, 0, 0);
-  d.setDate(d.getDate() - days);
-  return localDateInputValue(d);
-}
-
-function defaultDateRange() {
-  return { from: daysAgoLocal(30), to: localDateInputValue() };
-}
-
 function startOfLocalDay(ymd: string) {
   const [y, m, d] = ymd.split('-').map(Number);
   if (!y || !m || !d) return null;
@@ -148,6 +130,25 @@ function endOfLocalDay(ymd: string) {
   const [y, m, d] = ymd.split('-').map(Number);
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+}
+
+function activityTimestamp(row: TriageRow) {
+  const raw = row.updatedAt || row.completedAt || row.createdAt;
+  const ts = new Date(raw).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+/** Questionnaire finished and still in the Level 1 commercial queue. */
+function isQuestionnaireComplete(row: TriageRow) {
+  return Boolean(row.completedAt) && !row.convertedAt && !row.closedAt;
+}
+
+function isProposalRequest(row: TriageRow) {
+  return row.displayStatus === 'PROPOSAL_REQUESTED' || row.intent === 'PROPOSAL_REQUESTED';
+}
+
+function isDiagnosticRequest(row: TriageRow) {
+  return Boolean(row.diagnosticRequestedAt) && !row.convertedAt && !row.closedAt;
 }
 
 function matchesCommercialIntent(row: TriageRow, intent: string) {
@@ -378,8 +379,8 @@ export default function TriageSubmissionsPage() {
   const [status, setStatus] = useState('');
   const [intent, setIntent] = useState('');
   const [analystFilter, setAnalystFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => defaultDateRange().from);
-  const [dateTo, setDateTo] = useState(() => defaultDateRange().to);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedKpi, setSelectedKpi] = useState<KpiKey>('total');
   const [busy, setBusy] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -456,24 +457,18 @@ export default function TriageSubmissionsPage() {
     };
   }, [load]);
 
-  const filtered = useMemo(() => {
+  const scoped = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const fromTs = dateFrom ? startOfLocalDay(dateFrom) : null;
     const toTs = dateTo ? endOfLocalDay(dateTo) : null;
-    const rows = items.filter((row) => {
-      if (status && row.displayStatus !== status) return false;
-      if (!matchesCommercialIntent(row, intent)) return false;
-      if (analystFilter) {
-        if (analystFilter === '__unassigned__') {
-          if (row.assignedAnalystId) return false;
-        } else if (row.assignedAnalystId !== analystFilter) {
-          return false;
-        }
+    return items.filter((row) => {
+      if (analystFilter === '__unassigned__' && row.assignedAnalystId) return false;
+      if (analystFilter && analystFilter !== '__unassigned__' && row.assignedAnalystId !== analystFilter) {
+        return false;
       }
-      const activityDate = row.completedAt || row.updatedAt || row.createdAt;
-      const activityTs = new Date(activityDate).getTime();
-      if (fromTs != null && activityTs < fromTs) return false;
-      if (toTs != null && activityTs > toTs) return false;
+      const activityTs = activityTimestamp(row);
+      if (fromTs != null && (activityTs == null || activityTs < fromTs)) return false;
+      if (toTs != null && (activityTs == null || activityTs > toTs)) return false;
       if (!needle) return true;
       return [
         row.organisationName,
@@ -491,39 +486,81 @@ export default function TriageSubmissionsPage() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(needle));
     });
+  }, [items, query, analystFilter, dateFrom, dateTo]);
+
+  const counts = useMemo(() => {
+    if (!items.length) return summary;
+    return {
+      total: scoped.length,
+      inProgress: scoped.filter((row) => row.displayStatus === 'IN_PROGRESS').length,
+      completed: scoped.filter(isQuestionnaireComplete).length,
+      diagnosticRequested: scoped.filter(isDiagnosticRequest).length,
+      proposalRequested: scoped.filter(isProposalRequest).length,
+      proposalActive: summary.proposalActive,
+      notContacted: summary.notContacted,
+      converted: scoped.filter((row) => Boolean(row.convertedAt) || row.displayStatus === 'CONVERTED').length,
+      closed: scoped.filter((row) => Boolean(row.closedAt) || row.displayStatus === 'CLOSED').length,
+    };
+  }, [items.length, scoped, summary]);
+
+  const filtered = useMemo(() => {
+    const rows = scoped.filter((row) => {
+      if (status && row.displayStatus !== status) return false;
+      if (intent && !matchesCommercialIntent(row, intent)) return false;
+      if (selectedKpi === 'completed' && !status && !intent && !isQuestionnaireComplete(row)) return false;
+      return true;
+    });
     return rows.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
-  }, [items, query, status, intent, analystFilter, dateFrom, dateTo]);
+  }, [scoped, status, intent, selectedKpi]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const showingFrom = filtered.length ? (currentPage - 1) * pageSize + 1 : 0;
   const showingTo = Math.min(currentPage * pageSize, filtered.length);
-  const defaults = defaultDateRange();
-  const dateIsCustom = dateFrom !== defaults.from || dateTo !== defaults.to;
-  const hasActiveFilters = Boolean(query || status || intent || analystFilter || dateIsCustom);
+  const dateIsSet = Boolean(dateFrom || dateTo);
+  const hasActiveFilters = Boolean(query || status || intent || analystFilter || dateIsSet);
 
   useEffect(() => {
     setPage(1);
   }, [query, status, intent, analystFilter, dateFrom, dateTo, pageSize]);
 
   function clearFilters() {
-    const next = defaultDateRange();
     setQuery('');
     setStatus('');
     setIntent('');
     setAnalystFilter('');
-    setDateFrom(next.from);
-    setDateTo(next.to);
+    setDateFrom('');
+    setDateTo('');
     setSelectedKpi('total');
   }
 
-  function setKpiFilter(key: KpiKey, nextStatus: string, nextIntent: string) {
+  function setKpiFilter(key: KpiKey) {
     setSelectedKpi(key);
-    setStatus(nextStatus);
-    setIntent(nextIntent);
+    if (key === 'proposal') {
+      setStatus('');
+      setIntent('proposal');
+      return;
+    }
+    if (key === 'diagnostic') {
+      setStatus('');
+      setIntent('diagnostic');
+      return;
+    }
+    if (key === 'in_progress') {
+      setStatus('IN_PROGRESS');
+      setIntent('');
+      return;
+    }
+    if (key === 'converted') {
+      setStatus('CONVERTED');
+      setIntent('');
+      return;
+    }
+    setStatus('');
+    setIntent('');
   }
 
   function onStageChange(next: string) {
@@ -532,15 +569,13 @@ export default function TriageSubmissionsPage() {
     setSelectedKpi(
       next === 'IN_PROGRESS'
         ? 'in_progress'
-        : next === 'COMPLETED'
-          ? 'completed'
-          : next === 'CONVERTED'
-            ? 'converted'
-            : next === 'PROPOSAL_REQUESTED'
-              ? 'proposal'
-              : next === 'DIAGNOSTIC_REQUESTED'
-                ? 'diagnostic'
-                : 'total',
+        : next === 'CONVERTED'
+          ? 'converted'
+          : next === 'PROPOSAL_REQUESTED'
+            ? 'proposal'
+            : next === 'DIAGNOSTIC_REQUESTED'
+              ? 'diagnostic'
+              : 'total',
     );
   }
 
@@ -557,11 +592,11 @@ export default function TriageSubmissionsPage() {
   }
 
   function onDateFromChange(next: string) {
-    setDateFrom(next || defaultDateRange().from);
+    setDateFrom(next);
   }
 
   function onDateToChange(next: string) {
-    setDateTo(next || defaultDateRange().to);
+    setDateTo(next);
   }
 
   async function mark(row: TriageRow, next: 'REVIEWED' | 'CONTACTED' | 'CLOSED') {
@@ -658,7 +693,7 @@ export default function TriageSubmissionsPage() {
   function kpiCardClass(key: KpiKey) {
     return cn(
       'min-h-[108px] rounded-xl border bg-white shadow-none transition-[border-color,box-shadow,background-color]',
-      selectedKpi === key
+      (key === 'total' ? selectedKpi === 'total' && !status && !intent : selectedKpi === key)
         ? 'border-[#c41230]/35 bg-[#fff8f9] shadow-[inset_0_0_0_1px_rgba(196,18,48,0.08)]'
         : 'border-slate-200',
     );
@@ -704,11 +739,11 @@ export default function TriageSubmissionsPage() {
                 Submission activity
               </p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('total', '', '')}>
+                <button type="button" className="triage2-kpi-btn" onClick={() => setKpiFilter('total')}>
                   <StatCard
                     icon={ClipboardList}
                     title="Total submissions"
-                    value={summary.total}
+                    value={counts.total}
                     description="All Level 1 submissions"
                     tone="blue"
                     loading={loading && !items.length}
@@ -719,12 +754,12 @@ export default function TriageSubmissionsPage() {
                 <button
                   type="button"
                   className="triage2-kpi-btn"
-                  onClick={() => setKpiFilter('in_progress', 'IN_PROGRESS', '')}
+                  onClick={() => setKpiFilter('in_progress')}
                 >
                   <StatCard
                     icon={Send}
                     title="In progress"
-                    value={summary.inProgress}
+                    value={counts.inProgress}
                     description="Questionnaire incomplete"
                     tone="amber"
                     loading={loading && !items.length}
@@ -735,12 +770,12 @@ export default function TriageSubmissionsPage() {
                 <button
                   type="button"
                   className="triage2-kpi-btn"
-                  onClick={() => setKpiFilter('completed', 'COMPLETED', '')}
+                  onClick={() => setKpiFilter('completed')}
                 >
                   <StatCard
                     icon={FileCheck}
                     title="Completed"
-                    value={summary.completed}
+                    value={counts.completed}
                     description="Ready for review"
                     tone="violet"
                     loading={loading && !items.length}
@@ -761,12 +796,12 @@ export default function TriageSubmissionsPage() {
                 <button
                   type="button"
                   className="triage2-kpi-btn"
-                  onClick={() => setKpiFilter('proposal', '', 'proposal')}
+                  onClick={() => setKpiFilter('proposal')}
                 >
                   <StatCard
                     icon={MessageSquareWarning}
                     title="Proposal requests"
-                    value={summary.proposalRequested}
+                    value={counts.proposalRequested}
                     description="Commercial action required"
                     tone="red"
                     loading={loading && !items.length}
@@ -777,12 +812,12 @@ export default function TriageSubmissionsPage() {
                 <button
                   type="button"
                   className="triage2-kpi-btn"
-                  onClick={() => setKpiFilter('diagnostic', '', 'diagnostic')}
+                  onClick={() => setKpiFilter('diagnostic')}
                 >
                   <StatCard
                     icon={UserRound}
                     title="Diagnostic requested"
-                    value={summary.diagnosticRequested}
+                    value={counts.diagnosticRequested}
                     description="Level 2 interest"
                     tone="amber"
                     loading={loading && !items.length}
@@ -793,12 +828,12 @@ export default function TriageSubmissionsPage() {
                 <button
                   type="button"
                   className="triage2-kpi-btn"
-                  onClick={() => setKpiFilter('converted', 'CONVERTED', '')}
+                  onClick={() => setKpiFilter('converted')}
                 >
                   <StatCard
                     icon={BadgeCheck}
                     title="Converted to Level 2"
-                    value={summary.converted}
+                    value={counts.converted}
                     description="Successful conversions"
                     tone="green"
                     loading={loading && !items.length}
@@ -871,16 +906,17 @@ export default function TriageSubmissionsPage() {
                   className="h-10 w-full"
                 />
               </div>
-              <div className="triage-date-range inline-flex h-10 min-w-[240px] flex-[0_1_280px] items-center gap-2 rounded-md border border-input bg-white px-3 text-sm">
+              <div className="triage-date-range inline-flex h-10 shrink-0 items-center gap-2 rounded-md border border-input bg-white px-3 text-sm">
                 <span className="shrink-0 text-slate-400" aria-hidden="true">
                   <IconCalendar />
                 </span>
                 <input
                   type="date"
                   value={dateFrom}
+                  max={dateTo || undefined}
                   onChange={(e) => onDateFromChange(e.target.value)}
                   aria-label="From date"
-                  className="h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-slate-700 outline-none"
+                  className="triage-date-input"
                 />
                 <span className="shrink-0 text-slate-400">—</span>
                 <input
@@ -889,7 +925,7 @@ export default function TriageSubmissionsPage() {
                   min={dateFrom || undefined}
                   onChange={(e) => onDateToChange(e.target.value)}
                   aria-label="To date"
-                  className="h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-slate-700 outline-none"
+                  className="triage-date-input"
                 />
               </div>
               {hasActiveFilters ? (
@@ -1358,7 +1394,11 @@ export default function TriageSubmissionsPage() {
                 {!loading && !pageItems.length && (
                   <tr>
                     <td colSpan={8} className="muted">
-                      No triage submissions match the current filters.
+                      {items.length && dateIsSet && !query && !status && !intent && !analystFilter
+                        ? `No triage submissions between ${dateFrom || 'the start'} and ${dateTo || 'today'}. Clear the date range to see all ${items.length}.`
+                        : items.length
+                          ? 'No triage submissions match the current filters.'
+                          : 'No triage submissions yet.'}
                     </td>
                   </tr>
                 )}

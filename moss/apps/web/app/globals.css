@@ -1910,18 +1910,27 @@ input.email-composer-subject:focus-visible {
 .triage2-kpi-btn:focus:not(:focus-visible) {
   outline: none;
 }
-/* One calendar glyph for the range; hide native per-input picker icons. */
-.triage-date-range input[type="date"] {
+/* Keep each date wide enough for yyyy/mm/dd plus its calendar button. flex-shrink was clipping the end date. */
+.triage-date-range {
   position: relative;
-  min-width: 0;
 }
-.triage-date-range input[type="date"]::-webkit-calendar-picker-indicator {
-  opacity: 0;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+.triage-date-input {
+  box-sizing: content-box;
+  width: 11rem;
+  min-width: 11rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #334155;
+  font-size: 0.875rem;
+  line-height: 2rem;
+  color-scheme: light;
+}
+.triage-date-input::-webkit-calendar-picker-indicator {
   cursor: pointer;
+  margin-left: 2px;
 }
 .triage-list-table thead th {
   height:44px;
