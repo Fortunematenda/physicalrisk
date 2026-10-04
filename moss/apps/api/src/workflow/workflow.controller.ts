@@ -16,6 +16,10 @@ class ReviewNoteDto {
   @IsString() note!: string;
 }
 
+class MarkReviewedDto {
+  @IsOptional() @IsString() note?: string;
+}
+
 class ReturnDto {
   @IsString() @MinLength(3) comment!: string;
 }
@@ -74,7 +78,7 @@ export class WorkflowController {
 
   @Post('assessments/:id/mark-reviewed')
   @Roles('SUPER_ADMIN', 'ANALYST', 'REVIEWER')
-  markReviewed(@Param('id') id: string, @Body() body: ReviewNoteDto, @CurrentUser() user: AuthUser) {
+  markReviewed(@Param('id') id: string, @Body() body: MarkReviewedDto, @CurrentUser() user: AuthUser) {
     return this.workflow.markReviewed(id, user, body.note);
   }
 

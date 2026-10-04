@@ -4,10 +4,14 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Download, Loader2 } from 'lucide-react';
 import { AuthGate } from '../../../components/AuthGate';
+import { CostLeakageBreadcrumb } from '@/components/assessments/CostLeakageBreadcrumb';
 import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
 import { PdfPreviewDialog } from '@/components/triage/proposal/PdfPreviewDialog';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { apiFetch } from '../../../lib/api';
 import { formatAdvisoryReportVersion, advisoryWorkspaceHref, isExecutiveAdvisoryDiagnostic } from '@/lib/advisory-report';
 
@@ -165,6 +169,11 @@ export default function ReportPage() {
 
   const backHref = isAdvisoryReport ? '/advisory' : '/reports';
   const backLabel = isAdvisoryReport ? 'Back to diagnostics & assurance' : 'Back to Cost Leakage reports';
+  const isCostLeakageReport = Boolean(report) && productCode === 'SCLI_COST_LEAKAGE';
+  const costLeakageHeading =
+    report?.reportType === 'PRELIMINARY_EXECUTIVE'
+      ? 'Preliminary Cost Leakage report'
+      : 'Approved Cost Leakage report';
   const workHref = engagementHref(
     productCode,
     report?.assessment?.id,
@@ -197,95 +206,131 @@ export default function ReportPage() {
   return (
     <AuthGate>
       <Shell
-        title={report?.title || (isAdvisoryReport ? 'Advisory report' : 'Executive Report')}
-        hideSearch={pdfOnlyMode}
-        hideTitle={pdfOnlyMode}
+        title={
+          isCostLeakageReport
+            ? costLeakageHeading
+            : report?.title || (isAdvisoryReport ? 'Advisory report' : 'Cost leakage report')
+        }
+        hideSearch={pdfOnlyMode || isCostLeakageReport}
+        hideTitle={pdfOnlyMode || isCostLeakageReport}
+        headerLeading={
+          isCostLeakageReport && !pdfOnlyMode ? (
+            <CostLeakageBreadcrumb current={report?.assessment?.reference || 'Report'} />
+          ) : undefined
+        }
       >
-        {error && <p className="error">{error}</p>}
-        {notice && !pdfOnlyMode && <p className="notice">{notice}</p>}
+        {error ? (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        ) : null}
+        {notice && !pdfOnlyMode ? (
+          <p className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>
+        ) : null}
         {pdfOnlyMode ? (
           <div className="flex min-h-[40vh] items-center justify-center">
             {previewError ? (
               <div className="space-y-3 text-center">
-                <p className="error">{previewError}</p>
+                <p className="text-sm text-red-700">{previewError}</p>
                 <Button type="button" variant="outline" onClick={() => leavePdfPreview()}>
                   Back
                 </Button>
               </div>
             ) : previewLoading || !previewOpen ? (
-              <p className="muted flex items-center gap-2">
+              <p className="flex items-center gap-2 text-sm text-slate-500">
                 <Loader2 className="size-4 animate-spin" />
                 Opening report preview…
               </p>
             ) : null}
           </div>
         ) : report ? (
-          <div className="grid two-col">
-            <section className="card">
-              <p className="eyebrow">{report.assessment.reference}</p>
-              <h2>{report.title}</h2>
-              <p>{report.assessment.organisation.name}</p>
-              <p><StatusBadge value={report.status} /></p>
-              <p className="muted">
-                {formatAdvisoryReportVersion(report.version)}
-                {' · '}
-                Generated {report.generatedAt ? new Date(report.generatedAt).toLocaleString('en-ZA') : 'Not yet generated'}
-              </p>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-                {isAdvisoryReport ? (
-                  <Button
-                    type="button"
-                    disabled={previewLoading || !report.downloadUrl}
-                    onClick={() => setPreviewOpen(true)}
-                  >
-                    {previewLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-                    View report
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-3 p-5 sm:p-6">
+                <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {report.assessment.reference}
+                </p>
+                <h1 className="m-0 text-xl font-semibold text-slate-900">
+                  {isCostLeakageReport ? costLeakageHeading : report.title}
+                </h1>
+                <p className="m-0 text-sm text-slate-500">{report.assessment.organisation.name}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusBadge value={report.status} />
+                  <span className="text-sm text-slate-500">
+                    {formatAdvisoryReportVersion(report.version)}
+                    {' · '}
+                    Generated {report.generatedAt ? new Date(report.generatedAt).toLocaleString('en-ZA') : 'Not yet generated'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {isAdvisoryReport ? (
+                    <Button
+                      type="button"
+                      disabled={previewLoading || !report.downloadUrl}
+                      onClick={() => setPreviewOpen(true)}
+                    >
+                      {previewLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+                      View report
+                    </Button>
+                  ) : null}
+                  {report.downloadUrl ? (
+                    <Button asChild variant={isAdvisoryReport ? 'outline' : 'default'}>
+                      <a href={report.downloadUrl} target="_blank" rel="noreferrer">
+                        <Download className="size-4" />
+                        Download PDF
+                      </a>
+                    </Button>
+                  ) : null}
+                  {workHref ? (
+                    <Button asChild variant="outline">
+                      <Link href={workHref}>
+                        {productCode === 'SCLI_COST_LEAKAGE'
+                          ? 'Open assessment'
+                          : productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
+                            ? 'Open diagnostic outcome'
+                            : 'Open engagement'}
+                      </Link>
+                    </Button>
+                  ) : null}
+                  <Button asChild variant="outline">
+                    <Link href={backHref}>{backLabel}</Link>
                   </Button>
-                ) : null}
-                {report.downloadUrl && (
-                  <a className="btn secondary" href={report.downloadUrl} target="_blank" rel="noreferrer">
-                    <Download className="mr-1 inline size-4" />
-                    Download PDF
-                  </a>
-                )}
-                {workHref ? (
-                  <Link className="btn secondary" href={workHref}>
-                    {productCode === 'EXECUTIVE_ADVISORY_DIAGNOSTIC'
-                      ? 'Open diagnostic outcome'
-                      : 'Open engagement'}
-                  </Link>
-                ) : null}
-                <Link className="btn secondary" href={backHref}>
-                  {backLabel}
-                </Link>
-              </div>
-              {previewError ? <p className="error" style={{ marginTop: 12 }}>{previewError}</p> : null}
-            </section>
-            <form className="card" onSubmit={issue}>
-              <h2>Issue report</h2>
-              <p className="muted small">
-                Email the client the PDF report as an attachment, plus a secure seven-day download link. SMTP must be configured.
-              </p>
-              <div className="field">
-                <label>Recipient email</label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="client@company.com"
-                />
-                {email && (
-                  <small className="muted">Prefilled from the client organisation / lead contact. You can change it before sending.</small>
-                )}
-              </div>
-              <button className="btn" style={{ marginTop: 16 }} disabled={busy}>
-                {busy ? 'Sending…' : 'Send report'}
-              </button>
-            </form>
+                </div>
+                {previewError ? <p className="m-0 text-sm text-red-700">{previewError}</p> : null}
+              </CardContent>
+            </Card>
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <form onSubmit={issue}>
+                <CardHeader className="p-5 pb-3 sm:p-6 sm:pb-3">
+                  <CardTitle className="text-base">Issue report</CardTitle>
+                  <CardDescription>
+                    Email the client the PDF report as an attachment, plus a secure seven-day download link. SMTP must be configured.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 px-5 pb-5 sm:px-6 sm:pb-6">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="recipient-email">Recipient email</Label>
+                    <Input
+                      id="recipient-email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="client@company.com"
+                    />
+                    {email ? (
+                      <p className="m-0 text-xs text-slate-500">
+                        Prefilled from the client organisation. You can change it before sending.
+                      </p>
+                    ) : null}
+                  </div>
+                  <Button type="submit" disabled={busy}>
+                    {busy ? 'Sending…' : 'Send report'}
+                  </Button>
+                </CardContent>
+              </form>
+            </Card>
           </div>
         ) : (
-          <div className="loading-screen">Loading report…</div>
+          <p className="text-sm text-slate-500">Loading report…</p>
         )}
 
         <PdfPreviewDialog

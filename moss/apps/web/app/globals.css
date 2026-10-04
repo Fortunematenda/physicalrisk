@@ -761,8 +761,10 @@ body.sidebar-mobile-lock { overflow: hidden; }
   content:''; position:absolute; left:12px; top:50%; transform:translateY(-50%);
   width:10px; height:10px; border-radius:999px; background:#d1d5db;
 }
-.rev-workflow li.done { background:#fff5f6; border-color:#f0b4ae; color:#9e0e26; }
-.rev-workflow li.done::before { background:var(--pr-red); }
+.rev-workflow li.done { background:#ecfdf5; border-color:#a7f3d0; color:#047857; }
+.rev-workflow li.done::before { background:#059669; }
+.rev-workflow li.current { background:#fff7ed; border-color:#fdba74; color:#9a3412; }
+.rev-workflow li.current::before { background:#ea580c; }
 
 @media (max-width: 1200px) {
   .rev-layout { grid-template-columns:1fr; }

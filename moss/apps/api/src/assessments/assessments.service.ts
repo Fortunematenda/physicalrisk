@@ -420,11 +420,11 @@ export class AssessmentsService {
     if (!assessment) throw new NotFoundException('Assessment not found.');
 
     const missingInputs = assessment.questionnaireVersion.inputDefinitions.filter(def => def.required && !assessment.inputValues.some(value => value.inputDefinitionId === def.id));
-    const isScli = ['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode));
+    const isTriage = assessment.productCode === 'EXECUTIVE_GOVERNANCE_TRIAGE';
     const missingQuestions = assessment.questionnaireVersion.questions.filter((question) => {
       if (!question.required) return false;
-      // Active triage set only (Q7/Q14/Q16/Q18/Q19 retired) — match public website.
-      if (isScli && !isSclActiveTriageQuestionCode(question.code)) return false;
+      // Public triage stays on the 15-question set. Cost leakage uses the full questionnaire.
+      if (isTriage && !isSclActiveTriageQuestionCode(question.code)) return false;
       return !assessment.responses.some(
         (response) => response.questionId === question.id && response.responseOptionId,
       );
@@ -439,7 +439,7 @@ export class AssessmentsService {
 
     const scoredItems = assessment.responses
       .filter((response) => {
-        if (!isScli) return true;
+        if (!isTriage) return true;
         return isSclActiveTriageQuestionCode(response.question.code);
       })
       .map((response) => ({

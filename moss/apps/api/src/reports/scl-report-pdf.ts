@@ -60,7 +60,7 @@ export type SclPdfRenderInput = {
     accepted: number;
     rejected: number;
   } | null;
-  calibrationInputs?: Array<{ label: string; value: string }>;
+  calibrationInputs?: Array<{ label: string; value: string; percent?: number }>;
   findings?: Array<{ title: string; category?: string | null; description?: string | null }>;
   overallRiskScore: number;
   maturityScore: number;
@@ -773,125 +773,272 @@ function leakageTheme(category: string): string {
   return 'Other recorded areas';
 }
 
+function priorityTone(priority: string): { fill: string; ink: string } {
+  const value = priority.toUpperCase();
+  if (value === 'CRITICAL') return { fill: '#fde8e8', ink: '#9f1239' };
+  if (value === 'HIGH') return { fill: '#fff3d9', ink: '#9a3412' };
+  if (value === 'MEDIUM') return { fill: '#fff7ed', ink: '#c2410c' };
+  return { fill: '#e7f4ea', ink: '#1b5e20' };
+}
+
+function drawPanel(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fill: string,
+): void {
+  doc.roundedRect(x, y, w, h, 4).fill(fill);
+}
+
 function drawCostLeakageAnnex(doc: PDFKit.PDFDocument, input: SclPdfRenderInput): void {
   doc.addPage();
   drawTopBar(doc, input.brand);
   const contentW = doc.page.width - PAGE_MARGIN * 2;
   const x = PAGE_MARGIN;
   let y = TOP_BAR_H + 36;
+  const gap = 8;
+  const leakage = input.leakage;
+  const likelyPct = Math.round(Number(leakage.likelyLeakageRate || 0) * 1000) / 10;
 
   y = drawSectionTitle(doc, input.brand, 'Cost leakage result', x, y);
-  const leakage = input.leakage;
-  const lines = [
-    `Likely leakage: ${formatZar(leakage.likelyLeakageValue)} (${Math.round(Number(leakage.likelyLeakageRate || 0) * 1000) / 10}%)`,
-    `Minimum leakage: ${formatZar(leakage.minimumLeakageValue)}`,
-    `Maximum exposure: ${formatZar(leakage.maximumExposureValue)}`,
-    `Recoverable range: ${formatZar(leakage.recoverableLow)} – ${formatZar(leakage.recoverableHigh)}`,
-    `Client-estimated losses: ${formatClientEstimatedLosses(
-      leakage.estimatedLossesLow,
-      leakage.estimatedLossesHigh,
-      leakage.estimatedLossesLowBand as never,
-      leakage.estimatedLossesHighBand as never,
-    )}`,
-    `Methodology confidence: ${Math.round(Number(input.methodologyConfidence || 0) * 100)}%`,
-    `Evidence confidence: ${Math.round(Number(input.evidenceConfidence || 0) * 100)}%`,
+  const heroH = 58;
+  y = ensureRoom(doc, input.brand, y, heroH + 8);
+  drawPanel(doc, x, y, contentW, heroH, '#fff5f6');
+  doc.rect(x, y, 4, heroH).fill(brandRed(input.brand));
+  doc.fillColor(MUTED).font('Helvetica').fontSize(8).text('LIKELY LEAKAGE', x + 16, y + 10, { lineBreak: false });
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(18).text(formatZar(leakage.likelyLeakageValue), x + 16, y + 24, { lineBreak: false });
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(12)
+    .text(`${likelyPct}% of annual security spend`, x + 190, y + 28, { width: contentW - 210, align: 'right', lineBreak: false });
+  y += heroH + gap;
+
+  const halfW = (contentW - gap) / 2;
+  const statH = 48;
+  y = ensureRoom(doc, input.brand, y, statH);
+  const stats = [
+    { label: 'MINIMUM LEAKAGE', value: formatZar(leakage.minimumLeakageValue) },
+    { label: 'MAXIMUM EXPOSURE', value: formatZar(leakage.maximumExposureValue) },
   ];
-  for (const line of lines) y = drawWrapped(doc, input.brand, line, x, y, contentW);
+  stats.forEach((stat, index) => {
+    const sx = x + index * (halfW + gap);
+    drawPanel(doc, sx, y, halfW, statH, '#f6f7f8');
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(stat.label, sx + 12, y + 8, { width: halfW - 20, lineBreak: false });
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(13).text(stat.value, sx + 12, y + 24, { width: halfW - 20, lineBreak: false });
+  });
+  y += statH + gap;
+
+  y = ensureRoom(doc, input.brand, y, statH);
+  drawPanel(doc, x, y, contentW, statH, '#f6f7f8');
+  doc.fillColor(MUTED).font('Helvetica').fontSize(8).text('RECOVERABLE RANGE', x + 12, y + 8, { lineBreak: false });
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(13)
+    .text(`${formatZar(leakage.recoverableLow)}  –  ${formatZar(leakage.recoverableHigh)}`, x + 12, y + 24, { width: contentW - 24, lineBreak: false });
+  y += statH + 14;
+
+  const confidences = [
+    { label: 'Methodology confidence', pct: Math.round(Number(input.methodologyConfidence || 0) * 100) },
+    { label: 'Evidence confidence', pct: Math.round(Number(input.evidenceConfidence || 0) * 100) },
+  ];
+  for (const row of confidences) {
+    y = ensureRoom(doc, input.brand, y, 28);
+    const pct = Math.max(0, Math.min(100, row.pct));
+    doc.fillColor(INK).font('Helvetica').fontSize(9).text(row.label, x, y, { width: contentW - 40, lineBreak: false });
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(9).text(`${pct}%`, x + contentW - 36, y, { width: 36, align: 'right', lineBreak: false });
+    const barY = y + 14;
+    doc.roundedRect(x, barY, contentW, 8, 2).fill('#ececec');
+    if (pct > 0) doc.roundedRect(x, barY, Math.max(6, (contentW * pct) / 100), 8, 2).fill(resolveSclClassificationVisual(pct).colourHex);
+    y = barY + 16;
+  }
+
+  const clientLosses = formatClientEstimatedLosses(
+    leakage.estimatedLossesLow,
+    leakage.estimatedLossesHigh,
+    leakage.estimatedLossesLowBand as never,
+    leakage.estimatedLossesHighBand as never,
+  );
+  y = ensureRoom(doc, input.brand, y, 40);
+  drawPanel(doc, x, y, contentW, 36, '#f6f7f8');
+  doc.fillColor(MUTED).font('Helvetica').fontSize(8).text('CLIENT-ESTIMATED LOSSES', x + 12, y + 6, { lineBreak: false });
+  doc.fillColor(INK).font('Helvetica-Bold').fontSize(10).text(clientLosses, x + 12, y + 18, { width: contentW - 24, lineBreak: false, ellipsis: true });
+  y += 48;
 
   y = drawSectionTitle(doc, input.brand, 'Assessment areas', x, y);
   const areas = input.categoryScores?.length
     ? input.categoryScores
     : [{ category: 'Overall', score: input.overallRiskScore }];
   for (const area of areas) {
-    const score = Math.round(Number(area.score) || 0);
-    y = drawWrapped(
-      doc,
-      input.brand,
-      `${area.category}: ${score}/100 (${getRiskBand(score)}) — ${leakageTheme(String(area.category))}`,
-      x,
-      y,
-      contentW,
-    );
+    const rowH = 36;
+    y = ensureRoom(doc, input.brand, y, rowH + 6);
+    const score = Math.max(0, Math.min(100, Math.round(Number(area.score) || 0)));
+    const band = getRiskBand(score);
+    const colour = resolveSclClassificationVisual(score).colourHex;
+    doc.fillColor(INK).font('Helvetica').fontSize(9)
+      .text(String(area.category || 'Area'), x, y, { width: contentW - 78, lineBreak: false, ellipsis: true });
+    doc.fillColor(colour).font('Helvetica-Bold').fontSize(9)
+      .text(`${band}  ${score}`, x + contentW - 74, y, { width: 74, align: 'right', lineBreak: false });
+    const barY = y + 14;
+    doc.roundedRect(x, barY, contentW, 8, 2).fill('#ececec');
+    if (score > 0) doc.roundedRect(x, barY, Math.max(6, (contentW * score) / 100), 8, 2).fill(colour);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(8).text(leakageTheme(String(area.category)), x, barY + 12, { width: contentW, lineBreak: false, ellipsis: true });
+    y += rowH + 8;
   }
 
   const findings = (input.findings || []).filter((item) => item.title);
   y = drawSectionTitle(doc, input.brand, 'Recorded findings', x, y);
   if (!findings.length) {
-    y = drawWrapped(doc, input.brand, 'No separate finding records are stored on this assessment.', x, y, contentW);
+    y = ensureRoom(doc, input.brand, y, 36);
+    drawPanel(doc, x, y, contentW, 32, '#f6f7f8');
+    doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+      .text('No separate finding records are stored on this assessment.', x + 12, y + 10, { width: contentW - 24, lineBreak: false });
+    y += 44;
   } else {
     for (const finding of findings) {
-      const category = finding.category ? ` (${finding.category})` : '';
-      y = drawWrapped(doc, input.brand, `${finding.title}${category}. ${finding.description || ''}`.trim(), x, y, contentW);
+      doc.font('Helvetica').fontSize(9);
+      const body = String(finding.description || '').trim();
+      const bodyH = body ? doc.heightOfString(body, { width: contentW - 24, lineGap: 1 }) : 0;
+      const cardH = 28 + bodyH;
+      y = ensureRoom(doc, input.brand, y, cardH + 8);
+      drawPanel(doc, x, y, contentW, cardH, '#f6f7f8');
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(10)
+        .text(finding.category ? `${finding.title}  ·  ${finding.category}` : finding.title, x + 12, y + 8, { width: contentW - 24 });
+      if (body) doc.fillColor(CHAR).font('Helvetica').fontSize(9).text(body, x + 12, y + 24, { width: contentW - 24, lineGap: 1 });
+      y += cardH + 8;
     }
   }
 
   y = drawSectionTitle(doc, input.brand, 'Recommendations', x, y);
   const recommendations = (input.recommendations || []).filter((item) => item.title);
   if (!recommendations.length) {
-    y = drawWrapped(doc, input.brand, 'No recommendations are stored on this assessment yet.', x, y, contentW);
+    y = ensureRoom(doc, input.brand, y, 36);
+    drawPanel(doc, x, y, contentW, 32, '#f6f7f8');
+    doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+      .text('No recommendations are stored on this assessment yet.', x + 12, y + 10, { width: contentW - 24, lineBreak: false });
+    y += 44;
   } else {
     for (const item of recommendations) {
-      y = drawWrapped(
-        doc,
-        input.brand,
-        `${item.priority}: ${item.title}. ${item.summary || ''}${item.suggestedNextStep ? ` Next step: ${item.suggestedNextStep}` : ''}`,
-        x,
-        y,
-        contentW,
-      );
+      const tone = priorityTone(item.priority);
+      const summary = [item.summary, item.suggestedNextStep ? `Next step: ${item.suggestedNextStep}` : '']
+        .filter(Boolean)
+        .join(' ');
+      doc.font('Helvetica').fontSize(9);
+      const summaryH = summary ? doc.heightOfString(summary, { width: contentW - 28, lineGap: 1 }) : 0;
+      const cardH = 32 + summaryH;
+      y = ensureRoom(doc, input.brand, y, cardH + 8);
+      doc.font('Helvetica-Bold').fontSize(8);
+      const pillW = Math.min(84, doc.widthOfString(item.priority.toUpperCase()) + 16);
+      drawPanel(doc, x, y, contentW, cardH, '#ffffff');
+      doc.rect(x, y, 4, cardH).fill(tone.ink);
+      doc.roundedRect(x + 14, y + 8, pillW, 14, 3).fill(tone.fill);
+      doc.fillColor(tone.ink).font('Helvetica-Bold').fontSize(8)
+        .text(item.priority.toUpperCase(), x + 14, y + 11, { width: pillW, align: 'center', lineBreak: false });
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(10)
+        .text(item.title, x + 14 + pillW + 8, y + 9, { width: contentW - pillW - 40, lineBreak: false, ellipsis: true });
+      if (summary) {
+        doc.fillColor(CHAR).font('Helvetica').fontSize(9).text(summary, x + 14, y + 28, { width: contentW - 28, lineGap: 1 });
+      }
+      y += cardH + 8;
     }
   }
 
   y = drawSectionTitle(doc, input.brand, 'Answered assessment areas', x, y);
   const matrix = input.scoringMatrix || [];
   if (!matrix.length) {
-    y = drawWrapped(doc, input.brand, 'No answered questions were available for this report.', x, y, contentW);
+    y = ensureRoom(doc, input.brand, y, 36);
+    drawPanel(doc, x, y, contentW, 32, '#f6f7f8');
+    doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+      .text('No answered questions were available for this report.', x + 12, y + 10, { width: contentW - 24, lineBreak: false });
+    y += 44;
   } else {
-    for (const panel of matrix) {
-      const selected = panel.rows.find((row) => row.selected) || panel.rows[0];
-      y = drawWrapped(
-        doc,
-        input.brand,
-        `${panel.code ? `${panel.code} — ` : ''}${panel.title}: ${selected?.description || 'No selection recorded'}`,
-        x,
-        y,
-        contentW,
-      );
+    const colW = (contentW - gap) / 2;
+    const cardH = 46;
+    for (let index = 0; index < matrix.length; index += 2) {
+      y = ensureRoom(doc, input.brand, y, cardH + gap);
+      [matrix[index], matrix[index + 1]].forEach((panel, column) => {
+        if (!panel) return;
+        const sx = x + column * (colW + gap);
+        const selected = panel.rows.find((row) => row.selected) || panel.rows[0];
+        const tone = (selected && MATURITY_ROW[selected.tone]) || MATURITY_ROW.acceptable;
+        drawPanel(doc, sx, y, colW, cardH, '#f6f7f8');
+        doc.roundedRect(sx + 8, y + 8, 28, 14, 3).fill(tone.bg);
+        doc.fillColor(tone.text).font('Helvetica-Bold').fontSize(8)
+          .text(panel.code || 'Q', sx + 8, y + 11, { width: 28, align: 'center', lineBreak: false });
+        doc.fillColor(INK).font('Helvetica').fontSize(8)
+          .text(panel.title, sx + 42, y + 10, { width: colW - 52, height: 12, ellipsis: true });
+        doc.fillColor(CHAR).font('Helvetica-Bold').fontSize(8)
+          .text(selected?.description || 'No selection recorded', sx + 8, y + 28, { width: colW - 16, lineBreak: false, ellipsis: true });
+      });
+      y += cardH + gap;
     }
   }
 
   y = drawSectionTitle(doc, input.brand, 'Evidence status', x, y);
   const evidence = input.evidenceSummary;
-  y = drawWrapped(
-    doc,
-    input.brand,
-    evidence
-      ? `${evidence.total} file(s): ${evidence.accepted} accepted, ${evidence.rejected} rejected, ${evidence.pending} pending.`
-      : 'Evidence status was not loaded for this report.',
-    x,
-    y,
-    contentW,
-  );
+  const evidenceTiles = [
+    { label: 'FILES', value: String(evidence?.total ?? 0), fill: '#f6f7f8' },
+    { label: 'ACCEPTED', value: String(evidence?.accepted ?? 0), fill: '#e7f4ea' },
+    { label: 'REJECTED', value: String(evidence?.rejected ?? 0), fill: '#fde8e8' },
+    { label: 'PENDING', value: String(evidence?.pending ?? 0), fill: '#fff3d9' },
+  ];
+  const tileW = (contentW - gap * 3) / 4;
+  const tileH = 46;
+  y = ensureRoom(doc, input.brand, y, tileH + 8);
+  evidenceTiles.forEach((tile, index) => {
+    const sx = x + index * (tileW + gap);
+    drawPanel(doc, sx, y, tileW, tileH, tile.fill);
+    doc.fillColor(MUTED).font('Helvetica').fontSize(7).text(tile.label, sx + 8, y + 8, { width: tileW - 12, lineBreak: false });
+    doc.fillColor(INK).font('Helvetica-Bold').fontSize(16).text(tile.value, sx + 8, y + 20, { width: tileW - 12, lineBreak: false });
+  });
+  y += tileH + 16;
 
   y = drawSectionTitle(doc, input.brand, 'Calibration inputs', x, y);
   const calibration = input.calibrationInputs || [];
   if (!calibration.length) {
-    y = drawWrapped(doc, input.brand, 'No calibration inputs are stored on this assessment.', x, y, contentW);
+    y = ensureRoom(doc, input.brand, y, 36);
+    drawPanel(doc, x, y, contentW, 32, '#f6f7f8');
+    doc.fillColor(MUTED).font('Helvetica').fontSize(9)
+      .text('No calibration inputs are stored on this assessment.', x + 12, y + 10, { width: contentW - 24, lineBreak: false });
+    y += 44;
   } else {
-    for (const item of calibration) {
-      y = drawWrapped(doc, input.brand, `${item.label}: ${item.value || '—'}`, x, y, contentW);
+    const calW = (contentW - gap) / 2;
+    for (let index = 0; index < calibration.length; index += 2) {
+      const rowItems = [calibration[index], calibration[index + 1]].filter(Boolean);
+      const hasBar = rowItems.some((item) => typeof item.percent === 'number');
+      const cardH = hasBar ? 52 : 40;
+      y = ensureRoom(doc, input.brand, y, cardH + gap);
+      rowItems.forEach((item, column) => {
+        const sx = x + column * (calW + gap);
+        const yesNo = /^(yes|no)$/i.test(item.value.trim());
+        drawPanel(doc, sx, y, calW, cardH, '#f6f7f8');
+        doc.fillColor(MUTED).font('Helvetica').fontSize(7)
+          .text(item.label, sx + 8, y + 6, { width: calW - 16, lineBreak: false, ellipsis: true });
+        if (yesNo) {
+          const on = /^yes$/i.test(item.value.trim());
+          doc.roundedRect(sx + 8, y + 20, 36, 14, 3).fill(on ? '#e7f4ea' : '#f3f4f6');
+          doc.fillColor(on ? '#1b5e20' : MUTED).font('Helvetica-Bold').fontSize(8)
+            .text(on ? 'YES' : 'NO', sx + 8, y + 23, { width: 36, align: 'center', lineBreak: false });
+        } else {
+          doc.fillColor(INK).font('Helvetica-Bold').fontSize(9)
+            .text(item.value || '—', sx + 8, y + 20, { width: calW - 16, lineBreak: false, ellipsis: true });
+        }
+        if (typeof item.percent === 'number') {
+          const pct = Math.max(0, Math.min(100, item.percent));
+          const barY = y + cardH - 12;
+          doc.roundedRect(sx + 8, barY, calW - 16, 5, 2).fill('#e5e7eb');
+          if (pct > 0) doc.roundedRect(sx + 8, barY, Math.max(4, ((calW - 16) * pct) / 100), 5, 2).fill('#9f1239');
+        }
+      });
+      y += cardH + gap;
     }
   }
 
   y = drawSectionTitle(doc, input.brand, 'Analyst comments', x, y);
-  drawWrapped(
-    doc,
-    input.brand,
-    input.analystNote?.trim() || 'No analyst comment has been recorded.',
-    x,
-    y,
-    contentW,
-  );
+  const note = input.analystNote?.trim() || 'No analyst comment has been recorded.';
+  doc.font('Helvetica').fontSize(10);
+  const noteH = doc.heightOfString(note, { width: contentW - 24, lineGap: 2 });
+  const noteCardH = Math.max(40, noteH + 20);
+  y = ensureRoom(doc, input.brand, y, noteCardH);
+  drawPanel(doc, x, y, contentW, noteCardH, '#f6f7f8');
+  doc.fillColor(CHAR).font('Helvetica').fontSize(10).text(note, x + 12, y + 10, { width: contentW - 24, lineGap: 2 });
 }
 
 /**

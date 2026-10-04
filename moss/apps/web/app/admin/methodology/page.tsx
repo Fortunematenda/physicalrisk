@@ -9,7 +9,6 @@ import {
   SlidersHorizontal,
   TrendingUp,
 } from 'lucide-react';
-import { filterSclActiveTriageQuestions } from '@moss/shared';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { useConfirm } from '@/components/confirm-dialog';
@@ -158,10 +157,11 @@ export default function MethodologyPage() {
     void load();
   }, [load]);
 
-  const questions: Question[] = useMemo(
-    () => filterSclActiveTriageQuestions(version?.questions || []),
-    [version?.questions],
-  );
+  const questions: Question[] = useMemo(() => {
+    const rows = [...(version?.questions || [])];
+    rows.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+    return rows;
+  }, [version?.questions]);
   const inputs: InputDef[] = version?.inputDefinitions || [];
   const assumptions = version?.assumptions || [];
 

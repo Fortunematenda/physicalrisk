@@ -3,7 +3,6 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from '
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  filterSclActiveTriageQuestions,
   isMoneyRangeValue,
   isPercentRangeValue,
   isSclMoneyLossCode,
@@ -42,6 +41,8 @@ function isFilled(value: unknown) {
   return value !== undefined && value !== null && value !== '';
 }
 
+const nextIdleClass = 'bg-[#bbb] text-white shadow-none hover:bg-[#bbb] disabled:opacity-100';
+
 export default function AssessmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<any>(null);
@@ -71,10 +72,11 @@ export default function AssessmentDetailPage() {
 
   const inputMap = useMemo(() => Object.fromEntries((data?.inputValues || []).map((x: any) => [x.inputDefinitionId, x.value])), [data]);
   const responseMap = useMemo(() => Object.fromEntries((data?.responses || []).map((x: any) => [x.questionId, x])), [data]);
-  const questions = useMemo(
-    () => filterSclActiveTriageQuestions((data?.questionnaireVersion?.questions || []) as any[]),
-    [data],
-  );
+  const questions = useMemo(() => {
+    const rows = [...((data?.questionnaireVersion?.questions || []) as any[])];
+    rows.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+    return rows;
+  }, [data]);
   const inputs = data?.questionnaireVersion?.inputDefinitions || [];
 
   const progress = useMemo(() => {
@@ -103,6 +105,17 @@ export default function AssessmentDetailPage() {
     () => inputs.filter((def: any) => currentGroup?.codes.includes(def.code)),
     [inputs, currentGroup],
   );
+  const calibrationStepReady = useMemo(() => {
+    const required = groupInputs.filter((def: any) => def.required);
+    if (!required.length) return false;
+    return required.every((def: any) => {
+      const stored = inputMap[def.id];
+      if (def.code === 'C2') return isIndustryValueComplete(stored);
+      if (def.code === 'C1') return isFilled(stored) || isFilled(data?.organisation?.name);
+      return isFilled(stored);
+    });
+  }, [groupInputs, inputMap, data?.organisation?.name]);
+  const questionStepReady = !currentQuestion?.required || !!responseMap[currentQuestion?.id]?.responseOptionId;
 
   useEffect(() => {
     if (!missing.missingQuestions.length || !questions.length) return;
@@ -215,6 +228,20 @@ export default function AssessmentDetailPage() {
     }
   }
 
+  async function advanceCalibration() {
+    const c1 = groupInputs.find((def: any) => def.code === 'C1');
+    if (c1 && !isFilled(inputMap[c1.id]) && isFilled(data?.organisation?.name)) {
+      await saveInput(c1, data.organisation.name);
+    }
+    if (calStep < CALIBRATION_GROUPS.length - 1) {
+      setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1));
+      return;
+    }
+    setTab('questionnaire');
+    setQIntro(false);
+    setQIndex(0);
+  }
+
   function goNextQuestion() {
     if (!currentQuestion) return;
     const selected = responseMap[currentQuestion.id]?.responseOptionId;
@@ -241,6 +268,73 @@ export default function AssessmentDetailPage() {
       return;
     }
     setQIndex((i) => Math.max(0, i - 1));
+  }
+
+  async function handleAssessmentError(e: any) {
+    if (e instanceof ApiError && (e.details?.missingInputs || e.details?.missingQuestions)) {
+      applyMissing(
+        {
+          missingInputs: e.details.missingInputs || [],
+          missingQuestions: e.details.missingQuestions || [],
+        },
+        e.message,
+      );
+      return;
+    }
+    setError(e.message);
+  }
+
+  async function approveAssessment() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    const status = String(data?.status || '');
+    try {
+      if (!data?.scoreSnapshots?.[0]) {
+        await apiFetch(`/assessments/${id}/evaluate`, { method: 'POST' });
+      }
+      if (['DRAFT', 'IN_PROGRESS', 'AWAITING_CONTRIBUTOR'].includes(status)) {
+        await apiFetch(`/assessments/${id}/submit`, { method: 'POST' });
+      }
+      if (!['REVIEWED', 'APPROVED', 'REPORT_GENERATED', 'REPORT_ISSUED'].includes(status)) {
+        await apiFetch(`/assessments/${id}/mark-reviewed`, {
+          method: 'POST',
+          body: JSON.stringify({ note: typeof data?.reviewNote === 'string' ? data.reviewNote : '' }),
+        });
+      }
+      await apiFetch(`/assessments/${id}/approve`, { method: 'POST', body: '{}' });
+      setNotice('Assessment approved.');
+      await load();
+      setTab('results');
+    } catch (e: any) {
+      await handleAssessmentError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generatePreliminary() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    const status = String(data?.status || '');
+    try {
+      if (!data?.scoreSnapshots?.[0] || status === 'DRAFT') {
+        await apiFetch(`/assessments/${id}/evaluate`, { method: 'POST' });
+      }
+      const result: any = await apiFetch(`/reports/assessment/${id}/generate`, {
+        method: 'POST',
+        body: JSON.stringify({ reportType: 'PRELIMINARY_EXECUTIVE' }),
+      });
+      if (result?.downloadUrl) window.open(result.downloadUrl, '_blank', 'noopener,noreferrer');
+      setNotice('Preliminary Security Cost Leakage report generated.');
+      await load();
+      setTab('results');
+    } catch (e: any) {
+      await handleAssessmentError(e);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function action(path: string, message: string, requireComplete = false) {
@@ -314,6 +408,9 @@ export default function AssessmentDetailPage() {
   }
 
   const snapshot = data.scoreSnapshots?.[0];
+  const alreadyApproved = ['APPROVED', 'REPORT_GENERATED', 'REPORT_ISSUED'].includes(String(data.status));
+  const outstanding = collectMissing();
+  const assessmentComplete = outstanding.missingInputs.length === 0 && outstanding.missingQuestions.length === 0;
   const leakage = snapshot?.leakageResult as any;
   const categoryScores = (snapshot?.categoryScores || []) as any[];
   const leftover = [...missing.missingInputs, ...missing.missingQuestions];
@@ -420,6 +517,18 @@ export default function AssessmentDetailPage() {
                   style={{ width: `${progress}%` }}
                 />
               </div>
+              {assessmentComplete || alreadyApproved ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" disabled={busy || alreadyApproved} onClick={() => void approveAssessment()}>
+                    {alreadyApproved ? 'Approved' : 'Approve assessment'}
+                  </Button>
+                  {assessmentComplete ? (
+                    <Button type="button" variant="outline" disabled={busy} onClick={() => void generatePreliminary()}>
+                      Generate preliminary PDF
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -558,33 +667,24 @@ export default function AssessmentDetailPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4">
+                  {calStep > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCalStep((s) => Math.max(0, s - 1))}
+                    >
+                      Back
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
-                    variant="outline"
-                    disabled={calStep === 0}
-                    onClick={() => setCalStep((s) => Math.max(0, s - 1))}
+                    className={cn('ml-auto', calibrationStepReady ? undefined : nextIdleClass)}
+                    disabled={!calibrationStepReady}
+                    title={calibrationStepReady ? undefined : 'Complete this step to continue'}
+                    onClick={() => void advanceCalibration()}
                   >
-                    Back
+                    Next
                   </Button>
-                  {calStep < CALIBRATION_GROUPS.length - 1 ? (
-                    <Button
-                      type="button"
-                      onClick={() => setCalStep((s) => Math.min(CALIBRATION_GROUPS.length - 1, s + 1))}
-                    >
-                      Next
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        setTab('questionnaire');
-                        setQIntro(false);
-                        setQIndex(0);
-                      }}
-                    >
-                      Next
-                    </Button>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -597,7 +697,7 @@ export default function AssessmentDetailPage() {
                   <div className="space-y-5">
                     <div className="space-y-1">
                       <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Executive SCL questionnaire
+                        Cost leakage questionnaire
                       </p>
                       <h2 className="m-0 text-xl font-semibold text-slate-900">
                         Answer one focused question at a time
@@ -712,7 +812,13 @@ export default function AssessmentDetailPage() {
                         Previous
                       </Button>
                       {qIndex < questions.length - 1 ? (
-                        <Button type="button" onClick={goNextQuestion}>
+                        <Button
+                          type="button"
+                          className={questionStepReady ? undefined : nextIdleClass}
+                          disabled={!questionStepReady}
+                          title={questionStepReady ? undefined : 'Select an answer to continue'}
+                          onClick={goNextQuestion}
+                        >
                           Next question
                         </Button>
                       ) : (
@@ -727,12 +833,10 @@ export default function AssessmentDetailPage() {
                           </Button>
                           <Button
                             type="button"
-                            disabled={busy}
+                            className={questionStepReady ? undefined : nextIdleClass}
+                            disabled={busy || !questionStepReady}
+                            title={questionStepReady ? undefined : 'Select an answer to continue'}
                             onClick={() => {
-                              if (!selectedId) {
-                                setQuestionError('Please select an answer before submitting.');
-                                return;
-                              }
                               setQuestionError('');
                               action(`/assessments/${id}/submit`, 'Assessment evaluated successfully.', true);
                             }}

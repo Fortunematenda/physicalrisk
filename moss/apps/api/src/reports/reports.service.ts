@@ -25,7 +25,7 @@ import {
 } from './scl-report-branding';
 import { buildScoringMatrixPanels, renderSclExecutivePdf } from './scl-report-pdf';
 import { ProposalTokenService } from '../common/proposal-token.service';
-import { PHYSICAL_RISK_PRODUCTS } from '@moss/shared';
+import { PHYSICAL_RISK_PRODUCTS, findPercentRange, formatZar, isPercentRangeValue } from '@moss/shared';
 
 const ADVISORY_REPORT_PRODUCTS = new Set<ProductCode>([
   ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC,
@@ -39,20 +39,32 @@ const ADVISORY_REPORT_PRODUCTS = new Set<ProductCode>([
 
 const LEGACY_REPORT_PRODUCTS = new Set<string>(['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE']);
 
-function formatCalibrationValue(value: unknown): string {
-  if (value == null || value === '') return '—';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (typeof value === 'object') {
-    const record = value as { label?: unknown; code?: unknown };
-    if (record.label) return String(record.label);
-    if (record.code) return String(record.code);
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return '—';
-    }
+function formatCalibrationDisplay(value: unknown): { text: string; percent?: number } {
+  if (value == null || value === '') return { text: '—' };
+  if (isPercentRangeValue(value)) {
+    const def = findPercentRange(value.rangeCode);
+    const min = def?.min ?? value.min;
+    const max = def?.max ?? value.max;
+    return {
+      text: def?.label || `${min}–${max}%`,
+      percent: Math.max(0, Math.min(100, (Number(min) + Number(max)) / 2)),
+    };
   }
-  return String(value);
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return { text: String(value) };
+  }
+  if (typeof value === 'object') {
+    const record = value as { label?: unknown; min?: unknown; max?: unknown; unit?: unknown };
+    if (typeof record.label === 'string' && record.label.trim()) return { text: record.label };
+    if (record.unit === 'percent' && typeof record.min === 'number' && typeof record.max === 'number') {
+      return {
+        text: `${record.min}–${record.max}%`,
+        percent: Math.max(0, Math.min(100, (record.min + record.max) / 2)),
+      };
+    }
+    return { text: '—' };
+  }
+  return { text: String(value) };
 }
 
 function reportEmailLabels(productCode: string) {
@@ -266,10 +278,15 @@ export class ReportsService {
       accepted: evidenceRows.filter((item: { status?: string }) => item.status === 'ACCEPTED').length,
       rejected: evidenceRows.filter((item: { status?: string }) => item.status === 'REJECTED').length,
     };
-    const calibrationInputs = (assessment.inputValues || []).map((row: any) => ({
-      label: String(row.inputDefinition?.label || row.inputDefinition?.code || 'Input'),
-      value: formatCalibrationValue(row.value),
-    }));
+    const calibrationInputs = (assessment.inputValues || []).map((row: any) => {
+      const label = String(row.inputDefinition?.label || row.inputDefinition?.code || 'Input');
+      const shown = formatCalibrationDisplay(row.value);
+      const text =
+        /contract value|annual security losses/i.test(label) && /^\d+(\.\d+)?$/.test(shown.text)
+          ? formatZar(Number(shown.text))
+          : shown.text;
+      return { label, value: text, percent: shown.percent };
+    });
 
     return renderSclExecutivePdf({
       brand,
