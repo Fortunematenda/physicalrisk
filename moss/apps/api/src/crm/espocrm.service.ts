@@ -940,9 +940,9 @@ export class EspoCrmService {
       };
     };
 
-    const createLead = async () => {
+    const createLead = async (headers?: Record<string, string>) => {
       try {
-        return await client.post('/Lead', payload);
+        return await client.post('/Lead', payload, headers);
       } catch (error: unknown) {
         if (!(error instanceof EspoCrmHttpError) || error.code !== 'VALIDATION') throw error;
         // Phone still rejected → retry without phoneNumber
@@ -1032,7 +1032,24 @@ export class EspoCrmService {
         }
 
         const targetId = conflictingId || id;
-        await client.put(`/Lead/${targetId}`, payload, { 'X-Skip-Duplicate-Check': 'true' });
+        try {
+          await client.put(`/Lead/${targetId}`, payload, { 'X-Skip-Duplicate-Check': 'true' });
+        } catch (retryError: unknown) {
+          if (
+            !(retryError instanceof EspoCrmHttpError)
+            || !['CONFLICT', 'DUPLICATE_EMAIL'].includes(retryError.code)
+          ) {
+            throw retryError;
+          }
+          // The conflicting Espo lead belongs to someone else. Create this one anyway.
+          const created = await createLead({ 'X-Skip-Duplicate-Check': 'true' });
+          const newId = String(created.data.id);
+          await this.prisma.publicLead.update({
+            where: { id: lead.id },
+            data: { espocrmLeadId: newId },
+          });
+          return newId;
+        }
         if (targetId !== lead.espocrmLeadId) {
           await this.prisma.publicLead.update({
             where: { id: lead.id },
@@ -1071,9 +1088,14 @@ export class EspoCrmService {
               throw error;
             }
             const byConflict = await client.findByEmail<{ id: string }>('Lead', lead.email).catch(() => null);
-            if (!byConflict?.id) throw error;
-            remoteId = await updateLead(byConflict.id);
-            action = 'update';
+            if (byConflict?.id) {
+              remoteId = await updateLead(byConflict.id);
+              action = 'update';
+            } else {
+              // Espo 409'd against a different person. Create this lead anyway.
+              const created = await createLead({ 'X-Skip-Duplicate-Check': 'true' });
+              remoteId = created.data.id;
+            }
           }
         }
         await this.prisma.publicLead.update({
