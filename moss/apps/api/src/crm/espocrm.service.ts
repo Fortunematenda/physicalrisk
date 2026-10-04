@@ -33,6 +33,7 @@ import {
   ESPO_MAX_ATTEMPTS,
   addDaysIso,
   mapAssessmentStage,
+  mapEspoIndustry,
   mapRiskPriority,
   nextRetryAt,
   normalizeEspoPhone,
@@ -62,6 +63,7 @@ export class EspoCrmService {
   private lastHealthCheck: Date | null = null;
   private lastHealthOk: boolean | null = null;
   private lastHealthAuth: boolean | null = null;
+  private espoIndustryOptions: string[] | null = null;
 
   constructor(
     private readonly config: ConfigService,
@@ -104,6 +106,34 @@ export class EspoCrmService {
     await this.refreshConfig();
     assertEspoConfigured(this.cfg);
     return new EspoCrmClient(this.cfg);
+  }
+
+  /** Jobs the retry loop may run. Permanent failures have no nextRetryAt and stay out. */
+  private dueSyncFilter(now = new Date()): Prisma.CrmSyncRecordWhereInput {
+    return {
+      OR: [
+        { status: 'PENDING' },
+        { status: 'RETRYING', OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }] },
+        { status: 'FAILED', nextRetryAt: { lte: now } },
+      ],
+    };
+  }
+
+  private async industryOptions(): Promise<string[]> {
+    if (this.espoIndustryOptions) return this.espoIndustryOptions;
+    try {
+      const client = await this.client();
+      const meta = await client.get<{
+        entityDefs?: { Account?: { fields?: { industry?: { options?: unknown } } } };
+      }>('/Metadata');
+      const options = meta.data?.entityDefs?.Account?.fields?.industry?.options;
+      this.espoIndustryOptions = Array.isArray(options)
+        ? options.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    } catch {
+      this.espoIndustryOptions = [];
+    }
+    return this.espoIndustryOptions;
   }
 
   private publicUrl() {
@@ -676,17 +706,22 @@ export class EspoCrmService {
       });
     } catch (error: unknown) {
       const safe = this.asError(error);
+      const missing = error instanceof NotFoundException;
+      const premature =
+        error instanceof BadRequestException &&
+        safe.message.startsWith('Evaluate the assessment before CRM synchronisation');
+      const terminal = missing || premature;
       const attemptCount = (row.attemptCount || 0) + 1;
-      const retryable = safe.retryable && attemptCount < ESPO_MAX_ATTEMPTS;
+      const retryable = !terminal && safe.retryable && attemptCount < ESPO_MAX_ATTEMPTS;
       await this.prisma.crmSyncRecord.update({
         where: { id: syncId },
         data: {
-          status: retryable ? 'RETRYING' : 'FAILED',
+          status: terminal ? 'SKIPPED' : retryable ? 'RETRYING' : 'FAILED',
           errorMessage: safe.message,
           errorCode: safe.code,
           lastAttemptAt: new Date(),
           attemptCount,
-          nextRetryAt: nextRetryAt(attemptCount, retryable),
+          nextRetryAt: terminal ? null : nextRetryAt(attemptCount, retryable),
         },
       });
       await this.audit.record({
@@ -1124,19 +1159,8 @@ export class EspoCrmService {
       });
       return { ok: true, leadId: remoteId };
     } catch (error: unknown) {
-      const safe = this.asError(error);
-      await this.writeLog({
-        organisationId: lead.organisationId,
-        assessmentId: lead.assessmentId,
-        entityType: 'Lead',
-        localEntityId: lead.id,
-        jobType: 'ESPO_SYNC_LEAD',
-        action: 'sync',
-        payload,
-        status: 'FAILED',
-        errorMessage: safe.message,
-        errorCode: safe.code,
-      });
+      // The queue job row records the failure. A second log row stays failed forever
+      // and is what the dashboard shows as "EspoCRM sync failed".
       throw error;
     }
   }
@@ -1162,12 +1186,12 @@ export class EspoCrmService {
     };
     const sites = byCode('C1');
     const contractValue = byCode('C2');
+    const industry = mapEspoIndustry(organisation.industry, await this.industryOptions());
 
     const payload: Record<string, unknown> = {
       name: organisation.name,
       website: organisation.website || null,
       emailAddress: organisation.primaryEmail || null,
-      industry: organisation.industry || null,
       description: [
         `MOSS organisation ID: ${organisation.id}`,
         `Industry: ${organisation.industry || 'Not specified'}`,
@@ -1177,6 +1201,7 @@ export class EspoCrmService {
       assignedUserId: this.cfg.assignedUserId,
       [this.cfg.accountMossIdField]: organisation.id,
     };
+    if (industry) payload.industry = industry;
     if (this.cfg.accountFields.numberOfSites && sites != null) {
       payload[this.cfg.accountFields.numberOfSites] = sites;
     }
@@ -1301,20 +1326,8 @@ export class EspoCrmService {
         status: 'SUCCESS',
       });
       return remoteId as string;
-    } catch (error: unknown) {
-      const safe = this.asError(error);
-      await this.writeLog({
-        organisationId: lead.organisationId,
-        assessmentId: lead.assessmentId,
-        entityType: 'Contact',
-        localEntityId: lead.id,
-        jobType: 'ESPO_SYNC_CONTACT',
-        action: 'sync',
-        payload,
-        status: 'FAILED',
-        errorMessage: safe.message,
-        errorCode: safe.code,
-      });
+    } catch {
+      // Opportunity sync can continue without a contact. The queue row records a contact-job failure.
       return null;
     }
   }
@@ -1734,10 +1747,7 @@ export class EspoCrmService {
     await this.refreshConfig();
     if (!this.cfg.enabled) return { processed: 0, skipped: true };
     const due = await this.prisma.crmSyncRecord.findMany({
-      where: {
-        status: { in: ['FAILED', 'PENDING', 'RETRYING'] },
-        OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
-      },
+      where: this.dueSyncFilter(),
       take: 20,
       orderBy: { updatedAt: 'asc' },
     });
@@ -1792,10 +1802,7 @@ export class EspoCrmService {
     await this.refreshConfig();
     if (!this.cfg.enabled || !this.cfg.autoSync) return;
     const due = await this.prisma.crmSyncRecord.findMany({
-      where: {
-        status: { in: ['FAILED', 'PENDING', 'RETRYING'] },
-        OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
-      },
+      where: this.dueSyncFilter(),
       take: 10,
       orderBy: { updatedAt: 'asc' },
     });

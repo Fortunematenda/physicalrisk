@@ -11,6 +11,7 @@ import {
   mapAssessmentStage,
   mapRiskPriority,
   nextRetryAt,
+  mapEspoIndustry,
   normalizeEspoPhone,
 } from './espocrm.mapper';
 
@@ -79,6 +80,16 @@ describe('EspoCRM mapper', () => {
     expect(nextRetryAt(ESPO_MAX_ATTEMPTS, true)).toBeNull();
     expect(nextRetryAt(1, false)).toBeNull();
   });
+  it('maps MOSS industries onto EspoCRM enum options and drops unknown ones', () => {
+    const options = ['Energy', 'Finance', 'Healthcare', 'Mining', 'Telecommunications'];
+    expect(mapEspoIndustry('Energy / Utilities', options)).toBe('Energy');
+    expect(mapEspoIndustry('mining', options)).toBe('Mining');
+    expect(mapEspoIndustry('Financial Services', options)).toBe('Finance');
+    expect(mapEspoIndustry('Government / Public Infrastructure', options)).toBeNull();
+    expect(mapEspoIndustry('Other', options)).toBeNull();
+    expect(mapEspoIndustry('', options)).toBeNull();
+  });
+
   it('normalises South African phone numbers for EspoCRM', () => {
     expect(normalizeEspoPhone('0612685933')).toBe('+27612685933');
     expect(normalizeEspoPhone('+27 61 268 5933')).toBe('+27612685933');
