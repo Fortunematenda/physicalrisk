@@ -105,13 +105,6 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
         roles: ['ADMIN', 'ANALYST', 'CLIENT'],
       },
       {
-        id: 'scl-review-queue',
-        label: 'Review queue',
-        href: '/assessments/assigned',
-        icon: IconListChecks,
-        roles: ['ADMIN', 'ANALYST'],
-      },
-      {
         id: 'scl-reports',
         label: 'Cost leakage reports',
         href: '/reports',

@@ -134,7 +134,7 @@ export function AppHeader({
   onLogout,
   notificationCount = 0,
   mailCount = 0,
-  notificationHref = '/assessments/assigned',
+  notificationHref = '/assessments',
   notificationTitle = 'Notifications',
   className,
 }: AppHeaderProps) {

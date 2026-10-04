@@ -80,11 +80,9 @@ export function AppShellFrame({
     setCollapsed((value) => !value);
   }, []);
 
-  const resolvedNotifications =
-    notificationCount ?? badges.reviewQueue + badges.unreadTriageEmails;
+  const resolvedNotifications = notificationCount ?? badges.unreadTriageEmails;
   const resolvedMail = mailCount ?? badges.failedEmails;
-  const notificationHref =
-    badges.unreadTriageEmails > 0 ? '/triage' : '/assessments/assigned';
+  const notificationHref = badges.unreadTriageEmails > 0 ? '/triage' : '/assessments';
   const notificationTitle =
     badges.unreadTriageEmails > 0
       ? `${badges.unreadTriageEmails} unread triage email${badges.unreadTriageEmails === 1 ? '' : 's'}`

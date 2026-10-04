@@ -43,6 +43,7 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
         '/admin/assumptions',
       ]),
     );
+    expect(scl?.items.map((i) => i.href)).not.toContain('/assessments/assigned');
     expect(scl?.items.map((i) => i.href)).not.toContain('/assessments/new');
     expect(scl?.items.map((i) => i.href)).not.toContain('/start');
     expect(scl?.items.map((i) => i.href)).not.toContain('/moss');
