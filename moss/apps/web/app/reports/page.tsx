@@ -218,6 +218,7 @@ function statusLabel(status: string) {
 
 export default function ReportsIndexPage() {
   const confirm = useConfirm();
+  const router = useRouter();
   useReportsView();
   const [data, setData] = useState<ReportsResponse>({ items: [] });
   const [error, setError] = useState('');
@@ -636,14 +637,29 @@ export default function ReportsIndexPage() {
                       const by = displayName(r.generatedBy);
                       const detailHref = reportDetailHref(r.id);
                       return (
-                        <tr key={r.id}>
+                        <tr
+                          key={r.id}
+                          className="cursor-pointer"
+                          tabIndex={0}
+                          role="link"
+                          aria-label={`Open report ${r.reference}`}
+                          onClick={() => router.push(detailHref)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              router.push(detailHref);
+                            }
+                          }}
+                        >
                           <td>
                             <Link href={detailHref}><strong>{r.reference}</strong></Link>
                           </td>
                           <td>
                             <div className="assess2-ref-cell">
                               {r.assessment?.id ? (
-                                <Link href={engagementHref(r) || '#'}><strong>{r.assessment.reference}</strong></Link>
+                                <Link href={engagementHref(r) || '#'} onClick={(e) => e.stopPropagation()}>
+                                  <strong>{r.assessment.reference}</strong>
+                                </Link>
                               ) : <strong>—</strong>}
                               <span className="muted small">{r.assessment?.title || r.title}</span>
                             </div>
@@ -667,7 +683,7 @@ export default function ReportsIndexPage() {
                           <td className="muted small">{formatDate(r.generatedAt || r.createdAt)}</td>
                           <td className="muted small">{formatDate(r.issuedAt)}</td>
                           <td className="muted small">{r.fileSizeLabel || 'PDF'}</td>
-                          <td>
+                          <td onClick={(e) => e.stopPropagation()}>
                             <div className="reports2-actions">
                               <Link href={detailHref} className="reports2-icon-btn" title="View" aria-label="View report">
                                 <IconEye />

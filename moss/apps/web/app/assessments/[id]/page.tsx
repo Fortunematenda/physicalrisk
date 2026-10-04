@@ -415,6 +415,7 @@ export default function AssessmentDetailPage() {
   const categoryScores = (snapshot?.categoryScores || []) as any[];
   const leftover = [...missing.missingInputs, ...missing.missingQuestions];
   const answeredCount = data.responses.filter((r: any) => r.responseOptionId).length;
+  const questionnaireDone = questions.length > 0 && answeredCount >= questions.length;
   const selectedId = currentQuestion ? responseMap[currentQuestion.id]?.responseOptionId : '';
   const statusLabel = String(data.status || '').replace(/_/g, ' ');
 
@@ -735,15 +736,17 @@ export default function AssessmentDetailPage() {
                         );
                       })}
                     </div>
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        setQIntro(false);
-                        setQIndex(0);
-                      }}
-                    >
-                      {answeredCount ? 'Resume assessment' : 'Begin assessment'}
-                    </Button>
+                    {questionnaireDone ? null : (
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          setQIntro(false);
+                          setQIndex(0);
+                        }}
+                      >
+                        {answeredCount ? 'Resume assessment' : 'Begin assessment'}
+                      </Button>
+                    )}
                   </div>
                 ) : currentQuestion ? (
                   <div className="scl-triage">
