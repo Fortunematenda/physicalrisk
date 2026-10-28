@@ -64,12 +64,13 @@ export function mapEspoIndustry(value?: string | null, options: string[] = []): 
   if (!trimmed || trimmed.toLowerCase() === 'other') return null;
 
   const pool = options.map((item) => item.trim()).filter(Boolean);
+  // EspoCRM rejects any value outside its enum, so without the option list nothing can be sent safely.
+  if (!pool.length) return null;
   const exact = pool.find((item) => item.toLowerCase() === trimmed.toLowerCase());
   if (exact) return exact;
 
   const mapped = MOSS_INDUSTRY_TO_ESPO[trimmed.toLowerCase()];
   if (mapped) {
-    if (!pool.length) return mapped;
     return pool.find((item) => item.toLowerCase() === mapped.toLowerCase()) || null;
   }
 

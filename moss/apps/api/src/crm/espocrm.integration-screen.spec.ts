@@ -827,6 +827,42 @@ describe('EspoCRM sync history filters and pagination', () => {
   });
 });
 
+describe('EspoCRM account industry', () => {
+  it('retries the account without industry when EspoCRM rejects the value', async () => {
+    const { service, prisma } = build();
+    Object.assign(prisma, {
+      assessmentInputValue: { findMany: vi.fn(async () => []) },
+      organisation: { update: vi.fn(async () => ({})) },
+    });
+    vi.spyOn(EspoCrmClient.prototype, 'get').mockResolvedValue({
+      data: { entityDefs: { Account: { fields: { industry: { options: ['Energy'] } } } } },
+      statusCode: 200,
+      durationMs: 1,
+    } as never);
+    vi.spyOn(EspoCrmClient.prototype, 'findByExternalId').mockResolvedValue(null as never);
+    vi.spyOn(EspoCrmClient.prototype, 'findByExactName').mockResolvedValue(null as never);
+    const bodies: Record<string, unknown>[] = [];
+    vi.spyOn(EspoCrmClient.prototype, 'post').mockImplementation(async (_path: string, body: unknown) => {
+      bodies.push({ ...(body as Record<string, unknown>) });
+      if (bodies.length === 1) {
+        throw new EspoCrmHttpError({ retryable: false, statusCode: 400, code: 'VALIDATION', message: 'EspoCRM rejected the record: Industry is not one of the values EspoCRM allows.' });
+      }
+      return { data: { id: 'acc1' }, statusCode: 200, durationMs: 1 } as never;
+    });
+
+    const remoteId = await (service as unknown as { syncAccount: (o: unknown) => Promise<string> }).syncAccount({
+      id: 'org1',
+      name: 'Acme',
+      industry: 'Energy / Utilities',
+    });
+
+    expect(remoteId).toBe('acc1');
+    expect(bodies[0]).toHaveProperty('industry', 'Energy');
+    expect(bodies[1]).not.toHaveProperty('industry');
+    expect(prisma.records.find((r) => r.entityType === 'Account')?.status).toBe('SUCCESS');
+  });
+});
+
 describe('EspoCRM retry', () => {
   function retryable() {
     return row({ id: 'f1', status: 'FAILED', jobType: 'ESPO_SYNC_LEAD', localEntityId: 'lead-1', errorMessage: 'timeout' });

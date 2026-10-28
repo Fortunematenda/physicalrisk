@@ -4,7 +4,15 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
-import { CreateUserDialog, USER_ROLES, type CreatedUser } from '@/components/users/CreateUserDialog';
+import {
+  CreateUserDialog,
+  USER_ROLES,
+  createdUserNotice,
+  grantableRoles,
+  userProvisioning,
+  type CreatedUser,
+  type UserAdminCapabilities,
+} from '@/components/users/CreateUserDialog';
 import { useConfirm } from '@/components/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import {
@@ -34,12 +42,7 @@ type AdminUser = CreatedUser & {
   assignmentsHeld?: Array<{ role: string; assessmentId: string }>;
 };
 
-type Capabilities = {
-  keycloakEnabled: boolean;
-  legacyLoginEnabled: boolean;
-  localUserAdmin: boolean;
-  identityAdminUrl?: string | null;
-};
+type Capabilities = UserAdminCapabilities;
 
 export default function UsersAdminPage() {
   const confirm = useConfirm();
@@ -64,8 +67,12 @@ export default function UsersAdminPage() {
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const canManage = Boolean(capabilities?.localUserAdmin);
+  const provisioning = userProvisioning(capabilities);
+  const canManage = provisioning !== null;
+  const viaKeycloak = provisioning === 'keycloak';
+  const assignable = grantableRoles(capabilities);
   const identityAdminUrl = safeExternalNavUrl(capabilities?.identityAdminUrl);
+  const keycloakOnly = (u: AdminUser) => viaKeycloak && u.systemRole === 'SUPER_ADMIN';
 
   async function load() {
     setLoading(true);
@@ -158,6 +165,22 @@ export default function UsersAdminPage() {
     }
   }
 
+  async function sendPasswordEmail(user: AdminUser) {
+    const ok = await confirm({
+      title: 'Send password email',
+      description: `Email ${user.email} a link to choose a new password? Their current password keeps working until they do.`,
+      confirmLabel: 'Send email',
+    });
+    if (!ok) return;
+    setError('');
+    try {
+      await apiFetch(`/admin/users/${user.id}/password-email`, { method: 'POST' });
+      toast({ variant: 'success', title: 'Password email sent', description: user.email });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unable to send the password email.');
+    }
+  }
+
   async function resetPassword(e: FormEvent) {
     e.preventDefault();
     if (!passwordUser) return;
@@ -196,21 +219,28 @@ export default function UsersAdminPage() {
               <IconPlus />
               Add user
             </button>
-          ) : identityAdminUrl ? (
+          ) : null}
+          {canManage && !viaKeycloak ? null : identityAdminUrl ? (
             <a
-              className="btn org2-add-btn"
+              className={viaKeycloak ? 'btn secondary' : 'btn org2-add-btn'}
               href={identityAdminUrl}
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Manage users in the Keycloak admin console (opens in a new tab)"
             >
               <ExternalLink className="size-4" aria-hidden="true" />
-              Manage users in Keycloak
+              {viaKeycloak ? 'Open Keycloak' : 'Manage users in Keycloak'}
             </a>
-          ) : capabilities?.keycloakEnabled ? (
+          ) : capabilities?.keycloakEnabled && !viaKeycloak ? (
             <span className="muted small">Keycloak admin console URL not configured (KEYCLOAK_ADMIN_CONSOLE_URL).</span>
           ) : null}
         </div>
+        {viaKeycloak ? (
+          <p className="muted small">
+            Adding or editing users here updates their Keycloak sign-in account. New users get an email to set their own
+            password. Administrators are managed in Keycloak.
+          </p>
+        ) : null}
 
         <section className="dash2-card org2-filters-card">
           <div className="assess2-filters">
@@ -293,7 +323,7 @@ export default function UsersAdminPage() {
                       {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('en-ZA') : '—'}
                     </td>
                     <td className="org2-actions-cell">
-                      {canManage ? (
+                      {canManage && !keycloakOnly(u) ? (
                         <RowActionsMenu
                           open={menuOpenId === u.id}
                           onClose={() => setMenuOpenId(null)}
@@ -321,12 +351,16 @@ export default function UsersAdminPage() {
                             type="button"
                             onClick={() => {
                               setMenuOpenId(null);
+                              if (viaKeycloak) {
+                                void sendPasswordEmail(u);
+                                return;
+                              }
                               setPasswordUser(u);
                               setNewPassword('');
                               setError('');
                             }}
                           >
-                            Reset password
+                            {viaKeycloak ? 'Send password email' : 'Reset password'}
                           </button>
                           <button
                             type="button"
@@ -340,7 +374,7 @@ export default function UsersAdminPage() {
                           </button>
                         </RowActionsMenu>
                       ) : (
-                        <span className="muted small">SSO managed</span>
+                        <span className="muted small">{keycloakOnly(u) ? 'Managed in Keycloak' : 'SSO managed'}</span>
                       )}
                     </td>
                   </tr>
@@ -367,8 +401,10 @@ export default function UsersAdminPage() {
         <CreateUserDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
-          onCreated={() => {
-            toast({ variant: 'success', title: 'User created' });
+          provisioning={provisioning ?? 'local'}
+          allowedRoles={assignable}
+          onCreated={(user) => {
+            toast(createdUserNotice(user));
             void load();
           }}
         />
@@ -406,9 +442,14 @@ export default function UsersAdminPage() {
                     onChange={(e) => setEditForm({ ...editForm, systemRole: e.target.value })}
                     disabled={busy}
                   >
-                    {USER_ROLES.map((role) => (
+                    {editing && !assignable.includes(editing.systemRole as (typeof USER_ROLES)[number]) ? (
+                      <option value={editing.systemRole} disabled>
+                        {platformRoleInfo(editing.systemRole).label} (current)
+                      </option>
+                    ) : null}
+                    {assignable.map((role) => (
                       <option key={role} value={role}>
-                        {role.replaceAll('_', ' ')}
+                        {platformRoleInfo(role).label}
                       </option>
                     ))}
                   </select>

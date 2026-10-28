@@ -6,6 +6,7 @@ import {
   historyStatus,
   isRetryEligible,
   publicConnectionMessage,
+  readableEspoError,
   resolveConnectionState,
   resolveCrmAccess,
   resolveCrmAppUrl,
@@ -182,6 +183,33 @@ describe('EspoCRM sync worker and sync state', () => {
       { jobType: 'ESPO_SYNC_LEAD', entityType: 'Lead', localEntityId: 'b', updatedAt: t(-5) },
     ];
     expect(countUnresolvedFailures(failed, successes)).toBe(1);
+  });
+});
+
+describe('EspoCRM error text', () => {
+  const body = '{"messageTranslation":{"label":"validationFailure","scope":null,"data":{"field":"industry","type":"valid"}}}';
+
+  it('turns an EspoCRM validation body into a readable sentence', () => {
+    expect(readableEspoError(body)).toBe('EspoCRM rejected the record: Industry is not one of the values EspoCRM allows.');
+    expect(sanitizeErrorSummary(body)).toBe('EspoCRM rejected the record: Industry is not one of the values EspoCRM allows.');
+  });
+
+  it('humanises custom field names and keeps a leading prefix', () => {
+    const custom = '{"messageTranslation":{"label":"validationFailure","data":{"field":"cMossRiskRating","type":"required"}}}';
+    expect(readableEspoError(`Opportunity: ${custom}`)).toBe(
+      'Opportunity: EspoCRM rejected the record: Moss risk rating is required.',
+    );
+  });
+
+  it('never shows raw JSON, even when the shape is unknown', () => {
+    expect(sanitizeErrorSummary('{"foo":{"bar":1}}')).toBe('EspoCRM rejected the request.');
+    expect(sanitizeErrorSummary('{"message":"Name is too long"}')).toBe('Name is too long');
+    expect(sanitizeErrorSummary('[{"id":"abc"}]')).toBe('EspoCRM rejected the request.');
+  });
+
+  it('leaves plain messages untouched', () => {
+    expect(readableEspoError('EspoCRM request timed out.')).toBe('EspoCRM request timed out.');
+    expect(readableEspoError('broken {json')).toBe('broken {json');
   });
 });
 

@@ -204,6 +204,10 @@
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://auth.physicalrisk.com/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+      # Service account for MOSS user administration; unset = link to the Keycloak console instead.
+      KEYCLOAK_ADMIN_CLIENT_ID: ${MOSS_KEYCLOAK_ADMIN_CLIENT_ID:-}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${MOSS_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      KEYCLOAK_INVITE_REDIRECT_URL: ${MOSS_KEYCLOAK_INVITE_REDIRECT_URL:-}
       CONTACT_NOTIFICATION_TO: ${CONTACT_NOTIFICATION_TO:-sales@physicalrisk.com}
       CONTACT_FROM_EMAIL: ${CONTACT_FROM_EMAIL:-no-reply@physicalrisk.com}
       CONTACT_PROGRAMME_OPTIONS: ${CONTACT_PROGRAMME_OPTIONS:-MOSS Assessment}

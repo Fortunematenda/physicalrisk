@@ -9,7 +9,8 @@ import { UsersService } from './users.service';
 
 class CreateUserDto {
   @IsString() email!: string;
-  @IsString() @MinLength(8) password!: string;
+  /** Only for local (non-SSO) accounts; Keycloak users set their own password. */
+  @IsOptional() @IsString() @MinLength(8) password?: string;
   @IsString() firstName!: string;
   @IsString() lastName!: string;
   @IsEnum(SystemRole) systemRole!: SystemRole;
@@ -67,6 +68,12 @@ export class UsersController {
   @Roles('SUPER_ADMIN')
   reset(@Param('id') id: string, @Body() body: ResetPasswordDto, @CurrentUser() user: AuthUser) {
     return this.users.resetPassword(id, body.password, user);
+  }
+
+  @Post(':id/password-email')
+  @Roles('SUPER_ADMIN')
+  passwordEmail(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.users.sendPasswordEmail(id, user);
   }
 
   @Get(':id/audit')

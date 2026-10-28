@@ -21,32 +21,30 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { apiFetch } from '@/lib/api';
+import { platformRoleInfo } from '@/lib/role-catalogue';
+import {
+  USER_ROLES,
+  type CreatedUser,
+  type UserProvisioning,
+  type UserRole,
+} from '@/lib/user-admin';
 
-export const USER_ROLES = [
-  'SUPER_ADMIN',
-  'METHODOLOGY_ADMIN',
-  'ANALYST',
-  'REVIEWER',
-  'SALES',
-  'CLIENT_EXECUTIVE',
-  'CLIENT_CONTRIBUTOR',
-  'AUDITOR',
-] as const;
-
-export type UserRole = (typeof USER_ROLES)[number];
-
-export type CreatedUser = {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  systemRole: string;
-  isActive: boolean;
-};
+export {
+  USER_ROLES,
+  createdUserNotice,
+  grantableRoles,
+  userProvisioning,
+  type CreatedUser,
+  type UserAdminCapabilities,
+  type UserProvisioning,
+  type UserRole,
+} from '@/lib/user-admin';
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Keycloak: no password field; Keycloak emails the user to set one. */
+  provisioning?: UserProvisioning;
   /** Defaults to ANALYST (for triage “Add analyst”). */
   defaultRole?: UserRole;
   /** Restrict selectable roles (e.g. analyst-only picker). */
@@ -67,12 +65,19 @@ const emptyForm = {
 export function CreateUserDialog({
   open,
   onOpenChange,
+  provisioning = 'local',
   defaultRole = 'ANALYST',
   allowedRoles,
   title = 'Add user',
-  description = 'Create a local platform user. They can sign in with email and password when legacy login is enabled.',
+  description,
   onCreated,
 }: Props) {
+  const viaKeycloak = provisioning === 'keycloak';
+  const intro =
+    description ||
+    (viaKeycloak
+      ? 'Creates their sign-in account. They will get an email to set their own password.'
+      : 'Create a local platform user. They can sign in with email and password when legacy login is enabled.');
   const roles = allowedRoles?.length ? allowedRoles : [...USER_ROLES];
   const [form, setForm] = useState({ ...emptyForm, systemRole: defaultRole });
   const [busy, setBusy] = useState(false);
@@ -90,9 +95,10 @@ export function CreateUserDialog({
     setBusy(true);
     setError('');
     try {
+      const { password, ...rest } = form;
       const created = await apiFetch<CreatedUser>('/admin/users', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify(viaKeycloak ? rest : { ...rest, password }),
       });
       onCreated?.(created);
       onOpenChange(false);
@@ -108,7 +114,7 @@ export function CreateUserDialog({
       <DialogContent className="z-[12000] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription>{intro}</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           {error ? <p className="error">{error}</p> : null}
@@ -144,20 +150,22 @@ export function CreateUserDialog({
                 disabled={busy}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-user-password">Password</Label>
-              <Input
-                id="create-user-password"
-                required
-                type="password"
-                minLength={8}
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                disabled={busy}
-                autoComplete="new-password"
-              />
-            </div>
-            <div className="space-y-2">
+            {viaKeycloak ? null : (
+              <div className="space-y-2">
+                <Label htmlFor="create-user-password">Password</Label>
+                <Input
+                  id="create-user-password"
+                  required
+                  type="password"
+                  minLength={8}
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  disabled={busy}
+                  autoComplete="new-password"
+                />
+              </div>
+            )}
+            <div className={viaKeycloak ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
               <Label>Role</Label>
               <Select
                 value={form.systemRole}
@@ -170,7 +178,7 @@ export function CreateUserDialog({
                 <SelectContent className="z-[13000]">
                   {roles.map((role) => (
                     <SelectItem key={role} value={role}>
-                      {role.replaceAll('_', ' ')}
+                      {platformRoleInfo(role).label}
                     </SelectItem>
                   ))}
                 </SelectContent>

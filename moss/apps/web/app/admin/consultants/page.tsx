@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
-import { CreateUserDialog } from '@/components/users/CreateUserDialog';
+import {
+  CreateUserDialog,
+  createdUserNotice,
+  grantableRoles,
+  userProvisioning,
+  type UserAdminCapabilities,
+  type UserProvisioning,
+} from '@/components/users/CreateUserDialog';
 import { useToast } from '@/components/ui/toast';
 import { IconPlus } from '../../../components/NavIcons';
 import { ExternalLink } from 'lucide-react';
@@ -29,20 +36,23 @@ export default function Consultants() {
   const { toast } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   // Assume SSO-managed until capabilities load, so "Add analyst" never flashes when it cannot work.
-  const [localUserAdmin, setLocalUserAdmin] = useState(false);
+  const [provisioning, setProvisioning] = useState<UserProvisioning | null>(null);
+  const [caps, setCaps] = useState<UserAdminCapabilities | null>(null);
   const [identityAdminUrl, setIdentityAdminUrl] = useState<string | null>(null);
+  const canAddUsers = provisioning !== null;
 
   async function load() {
     try {
-      const [list, caps] = await Promise.all([
+      const [list, loadedCaps] = await Promise.all([
         apiFetch<AnalystRow[]>('/admin/users/analysts'),
-        apiFetch<{ localUserAdmin?: boolean; identityAdminUrl?: string | null }>('/admin/users/capabilities').catch(
-          () => ({ localUserAdmin: false, identityAdminUrl: null }),
+        apiFetch<UserAdminCapabilities>('/admin/users/capabilities').catch(
+          (): UserAdminCapabilities => ({ localUserAdmin: false, identityAdminUrl: null }),
         ),
       ]);
       setRows(list);
-      setLocalUserAdmin(caps.localUserAdmin === true);
-      setIdentityAdminUrl(safeExternalNavUrl(caps.identityAdminUrl));
+      setCaps(loadedCaps);
+      setProvisioning(userProvisioning(loadedCaps));
+      setIdentityAdminUrl(safeExternalNavUrl(loadedCaps.identityAdminUrl));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unable to load consultants.');
     } finally {
@@ -62,13 +72,13 @@ export default function Consultants() {
           <Link className="btn secondary" href="/admin/users">
             Open user administration
           </Link>
-          {isAdmin && localUserAdmin ? (
+          {isAdmin && canAddUsers ? (
             <button type="button" className="btn org2-add-btn" onClick={() => setCreateOpen(true)}>
               <IconPlus />
               Add analyst
             </button>
           ) : null}
-          {isAdmin && !localUserAdmin && identityAdminUrl ? (
+          {isAdmin && !canAddUsers && identityAdminUrl ? (
             <a
               className="btn org2-add-btn"
               href={identityAdminUrl}
@@ -119,12 +129,17 @@ export default function Consultants() {
         <CreateUserDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
+          provisioning={provisioning ?? 'local'}
           defaultRole="ANALYST"
-          allowedRoles={['ANALYST', 'REVIEWER']}
+          allowedRoles={grantableRoles(caps, ['ANALYST', 'REVIEWER'])}
           title="Add analyst"
-          description="Create an analyst or reviewer who can be assigned to triage and advisory engagements."
-          onCreated={() => {
-            toast({ variant: 'success', title: 'Analyst created' });
+          description={
+            provisioning === 'keycloak'
+              ? 'Add an analyst or reviewer for triage and advisory engagements. They will get an email to set their own password.'
+              : 'Create an analyst or reviewer who can be assigned to triage and advisory engagements.'
+          }
+          onCreated={(user) => {
+            toast(createdUserNotice(user));
             setError('');
             void load();
           }}

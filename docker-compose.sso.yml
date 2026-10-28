@@ -239,6 +239,10 @@
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://auth.localhost/realms/physicalrisk}
       KEYCLOAK_CLIENT_ID: ${MOSS_KEYCLOAK_CLIENT_ID:-physicalrisk-moss}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/physicalrisk/protocol/openid-connect/certs
+      # Service account for MOSS user administration; unset = link to the Keycloak console instead.
+      KEYCLOAK_ADMIN_CLIENT_ID: ${MOSS_KEYCLOAK_ADMIN_CLIENT_ID:-}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${MOSS_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      KEYCLOAK_INVITE_REDIRECT_URL: ${MOSS_KEYCLOAK_INVITE_REDIRECT_URL:-}
       ENABLE_LEGACY_LOGIN: ${ENABLE_LEGACY_LOGIN:-false}
       AUTH_EVENT_SECRET: ${AUTH_EVENT_SECRET:-${MOSS_AUTH_SECRET:-moss-local-nextauth-secret-change-me}}
     depends_on:

@@ -279,13 +279,15 @@ export class EspoCrmService {
         entityDefs?: { Account?: { fields?: { industry?: { options?: unknown } } } };
       }>('/Metadata');
       const options = meta.data?.entityDefs?.Account?.fields?.industry?.options;
-      this.espoIndustryOptions = Array.isArray(options)
+      const list = Array.isArray(options)
         ? options.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
         : [];
+      // Cache only a real list so a transient metadata failure is retried on the next sync.
+      if (list.length) this.espoIndustryOptions = list;
+      return list;
     } catch {
-      this.espoIndustryOptions = [];
+      return [];
     }
-    return this.espoIndustryOptions;
   }
 
   private publicUrl() {
@@ -1616,12 +1618,21 @@ export class EspoCrmService {
       }
     }
 
-    if (remoteId) {
-      await client.put(`/Account/${remoteId}`, payload);
-    } else {
+    const writeAccount = (body: Record<string, unknown>) =>
+      remoteId ? client.put(`/Account/${remoteId}`, body) : client.post('/Account', body);
+    let written;
+    try {
+      written = await writeAccount(payload);
+    } catch (error) {
+      // Industry is optional and also recorded in the description; never let it block the account.
+      if (!(error instanceof EspoCrmHttpError) || error.code !== 'VALIDATION' || !('industry' in payload)) throw error;
+      this.espoIndustryOptions = null;
+      delete payload.industry;
+      written = await writeAccount(payload);
+    }
+    if (!remoteId) {
       action = 'create';
-      const created = await client.post('/Account', payload);
-      remoteId = created.data.id;
+      remoteId = (written.data as { id: string }).id;
     }
 
     if (organisation.espocrmAccountId !== remoteId) {

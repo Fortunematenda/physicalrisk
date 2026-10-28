@@ -2,6 +2,7 @@ import https from 'https';
 import axios, { AxiosInstance, AxiosRequestConfig, isAxiosError } from 'axios';
 import type { EspoCrmRuntimeConfig } from './espocrm.config';
 import { redactSecrets, validateEspoBaseUrl } from './espocrm.config';
+import { readableEspoError } from './espocrm.health';
 import type {
   EspoConnectionTestResult,
   EspoHttpMethod,
@@ -53,7 +54,7 @@ export function classifyEspoError(error: unknown): EspoSafeError {
     const statusCode = err.response?.status;
     const data = err.response?.data;
     const rawMessage = String(data?.message || err.message || 'EspoCRM request failed');
-    const message = String(redactSecrets(rawMessage)).slice(0, 500);
+    const message = readableEspoError(String(redactSecrets(rawMessage))).slice(0, 500);
 
     if (err.code === 'ECONNABORTED' || /timeout/i.test(message)) {
       return { retryable: true, statusCode, code: 'TIMEOUT', message: 'EspoCRM request timed out.' };
@@ -163,7 +164,7 @@ export class EspoCrmClient {
               data?.reasonPhrase ||
               (data ? JSON.stringify(data) : '') ||
               `EspoCRM HTTP ${response.status}`;
-        const message = String(redactSecrets(raw)).slice(0, 500);
+        const message = readableEspoError(String(redactSecrets(raw))).slice(0, 500);
         const submittedEmail = String(options?.data?.emailAddress || '').trim().toLowerCase();
         const conflictRecordIds = response.status === 409 && Array.isArray(response.data)
           ? (response.data as Array<Record<string, unknown>>)

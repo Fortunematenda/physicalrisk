@@ -22,7 +22,13 @@ import {
   IconMoreVertical,
 } from '@/components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
-import { CreateUserDialog } from '@/components/users/CreateUserDialog';
+import {
+  CreateUserDialog,
+  createdUserNotice,
+  grantableRoles,
+  userProvisioning,
+  type UserAdminCapabilities,
+} from '@/components/users/CreateUserDialog';
 import { AnalystFilterSelect } from '@/components/triage/AnalystFilterSelect';
 import { EgtAssuranceBandBadge } from '@/components/triage/EgtAssuranceBandBadge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -371,6 +377,7 @@ export default function TriageSubmissionsPage() {
   const [summary, setSummary] = useState<Summary>(EMPTY_SUMMARY);
   const [analysts, setAnalysts] = useState<AnalystOption[]>([]);
   const [canCreateUsers, setCanCreateUsers] = useState(false);
+  const [userCaps, setUserCaps] = useState<UserAdminCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -398,10 +405,13 @@ export default function TriageSubmissionsPage() {
   async function loadAnalysts() {
     const [rows, caps] = await Promise.all([
       apiFetch<AnalystOption[]>('/admin/users/analysts'),
-      apiFetch<{ localUserAdmin?: boolean }>('/admin/users/capabilities').catch(() => ({ localUserAdmin: false })),
+      apiFetch<UserAdminCapabilities>('/admin/users/capabilities').catch(
+        (): UserAdminCapabilities => ({ localUserAdmin: false }),
+      ),
     ]);
     setAnalysts(rows);
-    setCanCreateUsers(Boolean(caps.localUserAdmin) && isAdmin);
+    setUserCaps(caps);
+    setCanCreateUsers(userProvisioning(caps) !== null && isAdmin);
   }
 
   const load = useCallback(async (opts?: { soft?: boolean }) => {
@@ -1478,11 +1488,17 @@ export default function TriageSubmissionsPage() {
         <CreateUserDialog
           open={createAnalystOpen}
           onOpenChange={setCreateAnalystOpen}
+          provisioning={userProvisioning(userCaps) ?? 'local'}
           defaultRole="ANALYST"
-          allowedRoles={['ANALYST', 'REVIEWER']}
+          allowedRoles={grantableRoles(userCaps, ['ANALYST', 'REVIEWER'])}
           title="Add analyst"
-          description="Create a user with the Analyst role. They will appear in the triage analyst filter and can be assigned to submissions."
+          description={
+            userProvisioning(userCaps) === 'keycloak'
+              ? 'Add an analyst. They will get an email to set their password, appear in the triage analyst filter and can be assigned to submissions.'
+              : 'Create a user with the Analyst role. They will appear in the triage analyst filter and can be assigned to submissions.'
+          }
           onCreated={(user) => {
+            toast(createdUserNotice(user));
             void loadAnalysts().then(() => setAnalystFilter(user.id));
           }}
         />

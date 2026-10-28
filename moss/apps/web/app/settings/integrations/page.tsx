@@ -353,9 +353,8 @@ export default function IntegrationsPage() {
                     {status.sync.lastFailureJob ? (
                       <p className="mt-1 text-slate-600">
                         {status.sync.lastFailureJob.currentStatus === 'success'
-                          ? 'A later attempt of that job succeeded.'
-                          : `That job is currently: ${HISTORY_COPY[status.sync.lastFailureJob.currentStatus].label}.`}{' '}
-                        This is a past job outcome; the health checks show the current connection.
+                          ? 'Resolved: a later attempt succeeded.'
+                          : `Not resolved yet (job status: ${HISTORY_COPY[status.sync.lastFailureJob.currentStatus].label}). See Sync history below.`}
                       </p>
                     ) : null}
                   </div>

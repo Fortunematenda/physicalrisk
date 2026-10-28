@@ -90,6 +90,11 @@ describe('EspoCRM mapper', () => {
     expect(mapEspoIndustry('', options)).toBeNull();
   });
 
+  it('sends no industry when the EspoCRM option list is unavailable', () => {
+    expect(mapEspoIndustry('Energy / Utilities', [])).toBeNull();
+    expect(mapEspoIndustry('Financial Services')).toBeNull();
+  });
+
   it('normalises South African phone numbers for EspoCRM', () => {
     expect(normalizeEspoPhone('0612685933')).toBe('+27612685933');
     expect(normalizeEspoPhone('+27 61 268 5933')).toBe('+27612685933');

@@ -286,6 +286,7 @@
   "smtpServer": {},
   "loginTheme": "physicalrisk",
   "accountTheme": "physicalrisk",
+  "emailTheme": "physicalrisk",
   "internationalizationEnabled": false,
   "supportedLocales": ["en"],
   "defaultLocale": "en"

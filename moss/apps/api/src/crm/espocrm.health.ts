@@ -222,10 +222,68 @@ export function countUnresolvedFailures(failed: FailureRow[], successes: Failure
 
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
-/** Short error text that is safe to show in the UI: no secrets, no email addresses, bounded length. */
+const VALIDATION_TYPE_COPY: Record<string, string> = {
+  valid: 'is not one of the values EspoCRM allows',
+  required: 'is required',
+  maxLength: 'is too long',
+  pattern: 'has an invalid format',
+  emailAddress: 'is not a valid email address',
+  phoneNumber: 'is not a valid phone number',
+  unique: 'must be unique',
+  min: 'is below the minimum',
+  max: 'is above the maximum',
+};
+
+function humanizeField(field: string) {
+  const words = field.replace(/^c(?=[A-Z])/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1).toLowerCase() : 'A field';
+}
+
+function describeEspoErrorObject(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const raw = body as Record<string, unknown>;
+  const translation = raw.messageTranslation as Record<string, unknown> | undefined;
+  if (translation && typeof translation === 'object') {
+    const data = (translation.data && typeof translation.data === 'object' ? translation.data : {}) as Record<string, unknown>;
+    const field = typeof data.field === 'string' ? data.field : null;
+    const type = typeof data.type === 'string' ? data.type : null;
+    if (field) {
+      const problem = (type && VALIDATION_TYPE_COPY[type]) || 'was rejected';
+      return `EspoCRM rejected the record: ${humanizeField(field)} ${problem}.`;
+    }
+    if (typeof translation.label === 'string') {
+      return `EspoCRM rejected the request (${humanizeField(translation.label).toLowerCase()}).`;
+    }
+  }
+  if (typeof raw.message === 'string' && raw.message.trim()) return raw.message.trim();
+  return null;
+}
+
+/**
+ * Replace raw EspoCRM JSON error bodies with a readable sentence. Text without
+ * JSON is returned unchanged; unrecognised JSON becomes a generic sentence.
+ */
+export function readableEspoError(message: string): string {
+  const start = message.search(/[{[]/);
+  if (start < 0) return message;
+  const end = Math.max(message.lastIndexOf('}'), message.lastIndexOf(']'));
+  if (end <= start) return message;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message.slice(start, end + 1));
+  } catch {
+    return message;
+  }
+  const described = describeEspoErrorObject(parsed) || 'EspoCRM rejected the request.';
+  const before = message.slice(0, start).replace(/[\s:–-]+$/, '').trim();
+  const after = message.slice(end + 1).trim();
+  return [before && !described.startsWith(before) ? `${before}:` : '', described, after].filter(Boolean).join(' ');
+}
+
+/** Short error text that is safe to show in the UI: no secrets, raw JSON or email addresses, bounded length. */
 export function sanitizeErrorSummary(message: string | null | undefined, maxLength = 200): string | null {
   if (!message) return null;
-  const redacted = String(redactSecrets(message))
+  const redacted = readableEspoError(String(redactSecrets(message)))
     .replace(/https?:\/\/[^\s]*[?#][^\s]*/gi, '[url]')
     .replace(EMAIL_PATTERN, '[email]')
     .replace(/\s+/g, ' ')
