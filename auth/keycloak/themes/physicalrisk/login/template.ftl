@@ -75,6 +75,24 @@
       </div>
     </main>
   </div>
+  <#if !(logoutConfirm??)>
+    <script>
+      (function () {
+        var pending;
+        try {
+          pending = sessionStorage.getItem('pr-pending-action');
+          sessionStorage.removeItem('pr-pending-action');
+        } catch (e) { return; }
+        if (!pending) return;
+        try {
+          var target = new URL(pending);
+          if (target.origin === location.origin && /^\/realms\/[^/]+\/login-actions\/action-token$/.test(target.pathname)) {
+            location.replace(target.href);
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </#if>
 </body>
 </html>
 </#macro>
