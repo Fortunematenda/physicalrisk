@@ -1,12 +1,13 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Activity, Cable, CheckCircle2, Clock, XCircle } from 'lucide-react';
+import { Activity, Cable, CheckCircle2, Clock } from 'lucide-react';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { IconSave, IconZap } from '../../../components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Switch } from '@/components/ui/switch';
+import { useToast } from '@/components/ui/toast';
 import { useSidebarUser } from '@/components/layout/app-sidebar';
 import { CrmSyncHistory, StatusPill, type HistoryFeedback } from '@/components/crm/CrmSyncHistory';
 import { apiFetch } from '../../../lib/api';
@@ -40,8 +41,22 @@ export default function IntegrationsPage() {
   const [status, setStatus] = useState<CrmIntegrationStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState('');
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const { toast } = useToast();
   const [testing, setTesting] = useState(false);
+
+  const setFeedback = useCallback(
+    (feedback: Feedback | null) => {
+      if (!feedback) return;
+      toast({
+        id: 'crm-feedback',
+        variant: feedback.kind,
+        title: feedback.title,
+        description: feedback.detail,
+        duration: feedback.kind === 'success' && feedback.detail ? 8000 : undefined,
+      });
+    },
+    [toast],
+  );
 
   const [settings, setSettings] = useState<CrmAdminSettings | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -176,26 +191,6 @@ export default function IntegrationsPage() {
           </section>
         ) : null}
 
-        <div aria-live="polite" className="mb-4 empty:hidden">
-          {feedback?.kind === 'success' ? (
-            <div role="status" className="flex gap-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
-              <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-700" aria-hidden="true" />
-              <div>
-                <p className="font-semibold">{feedback.title}</p>
-                {feedback.detail ? <p className="mt-1">{feedback.detail}</p> : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
-        {feedback?.kind === 'error' ? (
-          <div role="alert" className="mb-4 flex gap-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-            <XCircle className="mt-0.5 size-5 shrink-0 text-red-700" aria-hidden="true" />
-            <div>
-              <p className="font-semibold">{feedback.title}</p>
-              {feedback.detail ? <p className="mt-1">{feedback.detail}</p> : null}
-            </div>
-          </div>
-        ) : null}
         {statusError ? <p className="error mb-4" role="alert">{statusError}</p> : null}
 
         <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
