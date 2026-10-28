@@ -54,9 +54,9 @@ describe('CRM integration endpoint authorisation', () => {
     }
   });
 
-  it('limits sync history and job details to administrators and analysts', () => {
-    expect(permitted('history')).toEqual(['SUPER_ADMIN', 'ANALYST']);
-    expect(permitted('historyJob')).toEqual(['SUPER_ADMIN', 'ANALYST']);
+  it('limits sync history and job details to administrators', () => {
+    expect(permitted('history')).toEqual(['SUPER_ADMIN']);
+    expect(permitted('historyJob')).toEqual(['SUPER_ADMIN']);
   });
 
   it('limits status and the CRM link to existing internal CRM roles', () => {

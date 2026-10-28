@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AuthUser } from '../../common/current-user.decorator';
 import { INTERNAL_ROLES } from '../../common/roles';
+import { assertOrganisationInScope } from '../../common/assignment-scope';
 
 @Injectable()
 export class MossSitesService {
@@ -15,7 +16,10 @@ export class MossSitesService {
   private async requireOrgAccess(organisationId: string, user: AuthUser) {
     const org = await this.prisma.organisation.findUnique({ where: { id: organisationId }, select: { id: true } });
     if (!org) throw new NotFoundException('Organisation not found.');
-    if (INTERNAL_ROLES.has(user.role)) return;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertOrganisationInScope(this.prisma, user, organisationId);
+      return;
+    }
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId } },
     });

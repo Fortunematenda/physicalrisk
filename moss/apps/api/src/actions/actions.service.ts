@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { requireRole, isInternal } from '../common/roles';
+import { assertAssessmentInScope, assessmentScopeWhere } from '../common/assignment-scope';
 
 const ACTION_WRITE_ROLES = new Set([
   'SUPER_ADMIN',
@@ -56,6 +57,8 @@ export class ActionsService {
       if (!membership) {
         throw new ForbiddenException('You do not have access to this assessment.');
       }
+    } else {
+      await assertAssessmentInScope(this.prisma, user, assessment.id);
     }
     return assessment;
   }
@@ -85,7 +88,7 @@ export class ActionsService {
 
   async dashboard(user: AuthUser, productCode: ProductFilter = ProductCode.SCLI_COST_LEAKAGE) {
     const where = {
-      assessment: { productCode },
+      assessment: { productCode, ...(await assessmentScopeWhere(this.prisma, user)) },
       ...(isInternal(user)
         ? {}
         : { organisation: { memberships: { some: { userId: user.id } } } }),

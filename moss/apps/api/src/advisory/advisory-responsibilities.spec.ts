@@ -21,9 +21,19 @@ function build(options: { productCode?: string; users?: Record<string, { systemR
         status: 'IN_PROGRESS',
         parentAssessmentId: null,
       })),
+      findMany: vi.fn(async ({ where }: { where: { OR?: Array<Record<string, any>> } }) => {
+        const byAssignment = where.OR?.find((clause) => clause.assignments)?.assignments.some.userId;
+        if (byAssignment) {
+          return rows.some((r) => r.userId === byAssignment && r.status !== 'CANCELLED') ? [{ id: 'e1' }] : [];
+        }
+        const ids: string[] = where.OR?.find((clause) => clause.id)?.id.in || [];
+        return ids.map((id) => ({ id, organisationId: 'org-1' }));
+      }),
     },
     membership: { findUnique: vi.fn(async () => ({ id: 'm1' })) },
-    publicLead: { findFirst: vi.fn(async () => null), update: vi.fn() },
+    publicLead: { findFirst: vi.fn(async () => null), findMany: vi.fn(async () => []), update: vi.fn() },
+    somodAssessment: { findMany: vi.fn(async () => []) },
+    organisation: { findMany: vi.fn(async () => []) },
     user: {
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
         const u = users[where.id];
@@ -64,7 +74,11 @@ describe('Engagement responsibility permissions (server-side)', () => {
   beforeEach(() => {
     ctx = build({
       users: { reviewer: { systemRole: 'REVIEWER' }, analyst2: { systemRole: 'ANALYST' }, sales: { systemRole: 'SALES' } },
-      rows: [{ id: 'lead', assessmentId: 'e1', userId: 'analyst2', role: 'PRIMARY_ANALYST', status: 'ASSIGNED' }],
+      rows: [
+        { id: 'lead', assessmentId: 'e1', userId: 'analyst2', role: 'PRIMARY_ANALYST', status: 'ASSIGNED' },
+        { id: 'c-analyst', assessmentId: 'e1', userId: 'analyst', role: 'CONTRIBUTOR', status: 'ASSIGNED' },
+        { id: 'c-auditor', assessmentId: 'e1', userId: 'auditor', role: 'CONTRIBUTOR', status: 'ASSIGNED' },
+      ],
     });
   });
 
@@ -113,6 +127,12 @@ describe('Engagement responsibility permissions (server-side)', () => {
     await expect(
       ctx.service.assign('e1', { userId: 'analyst2', role: 'PRIMARY_ANALYST' as never }, AUDITOR),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('hides engagements from analysts who are not assigned to them', async () => {
+    const unassigned: AuthUser = { id: 'analyst3', email: 'analyst3@x', role: 'ANALYST' };
+    await expect(ctx.service.get('e1', unassigned)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(ctx.service.list(unassigned)).resolves.toBeDefined();
   });
 
   it('keeps clients out of engagement responsibility data', async () => {

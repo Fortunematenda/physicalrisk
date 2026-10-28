@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { assertEmailList, normalizeEmailList } from '../common/email-list';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AuthUser } from '../common/current-user.decorator';
+import { assertOrganisationInScope, isAssignmentScoped, loadAssignmentScope } from '../common/assignment-scope';
 
 /** Default industry catalogue (aligned with SCLI C2 calibration options). */
 const DEFAULT_INDUSTRIES = [
@@ -80,13 +82,15 @@ export class OrganisationsService {
     return { industry: cleaned, industries: refreshed.industries, created: true };
   }
 
-  async list() {
+  async list(user?: AuthUser) {
+    const scope = user && isAssignmentScoped(user) ? await loadAssignmentScope(this.prisma, user.id) : null;
     const organisations = await this.prisma.organisation.findMany({
+      ...(scope ? { where: { id: { in: scope.organisationIds } } } : {}),
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { assessments: true, memberships: true } },
         assessments: {
-          where: { productCode: 'SCLI_COST_LEAKAGE' },
+          where: { productCode: 'SCLI_COST_LEAKAGE', ...(scope ? { id: { in: scope.assessmentIds } } : {}) },
           orderBy: { updatedAt: 'desc' },
           select: {
             id: true,
@@ -151,7 +155,7 @@ export class OrganisationsService {
         assessments: latest ? [latest] : [],
         latestAssessment: latest,
         submissionSummary: {
-          total: org._count.assessments,
+          total: scope ? org.assessments.length : org._count.assessments,
           submitted,
           inProgress,
           completed,
@@ -182,7 +186,9 @@ export class OrganisationsService {
     });
   }
 
-  async get(id: string) {
+  async get(id: string, user?: AuthUser) {
+    if (user) await assertOrganisationInScope(this.prisma, user, id);
+    const scope = user && isAssignmentScoped(user) ? await loadAssignmentScope(this.prisma, user.id) : null;
     const organisation = await this.prisma.organisation.findUnique({
       where: { id },
       include: {
@@ -194,7 +200,7 @@ export class OrganisationsService {
           },
         },
         assessments: {
-          where: { productCode: 'SCLI_COST_LEAKAGE' },
+          where: { productCode: 'SCLI_COST_LEAKAGE', ...(scope ? { id: { in: scope.assessmentIds } } : {}) },
           orderBy: { updatedAt: 'desc' },
           include: {
             questionnaireVersion: {
@@ -234,11 +240,11 @@ export class OrganisationsService {
 
     const [leads, mossAssessments, somodAssessments] = await Promise.all([
       this.prisma.publicLead.findMany({
-        where: { organisationId: id },
+        where: { organisationId: id, ...(scope ? { id: { in: scope.leadIds } } : {}) },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.assessmentSession.findMany({
-        where: { organisationId: id, productCode: 'MOSS' },
+        where: { organisationId: id, productCode: 'MOSS', ...(scope ? { id: { in: scope.assessmentIds } } : {}) },
         orderBy: { updatedAt: 'desc' },
         include: {
           mossCatalogueVersion: { select: { id: true, version: true, title: true, status: true } },
@@ -247,7 +253,7 @@ export class OrganisationsService {
         },
       }),
       this.prisma.somodAssessment.findMany({
-        where: { organisationId: id },
+        where: { organisationId: id, ...(scope ? { id: { in: scope.somodAssessmentIds } } : {}) },
         orderBy: { updatedAt: 'desc' },
         include: {
           site: { select: { id: true, name: true, siteCode: true } },

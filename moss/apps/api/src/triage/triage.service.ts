@@ -13,6 +13,7 @@ import {
 } from '@moss/shared';
 import type { AuthUser } from '../common/current-user.decorator';
 import { INTERNAL_ROLES } from '../common/roles';
+import { assertLeadInScope, isAssignmentScoped, leadScopeWhere } from '../common/assignment-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AdvisoryService } from '../advisory/advisory.service';
@@ -98,7 +99,19 @@ export class TriageService {
   }
 
   /** Resolve by publicLead id, triage assessment id, converted EAD id, or report id. */
-  private async resolveLead(idOrKey: string) {
+  /** Throws NotFound when an assignment-scoped user asks for a lead outside their assignments. */
+  async assertLeadVisible(idOrKey: string, user: AuthUser) {
+    if (!isAssignmentScoped(user)) return;
+    await this.resolveLead(idOrKey, user);
+  }
+
+  private async resolveLead(idOrKey: string, user: AuthUser) {
+    const lead = await this.findLead(idOrKey);
+    await assertLeadInScope(this.prisma, user, lead.id);
+    return lead;
+  }
+
+  private async findLead(idOrKey: string) {
     const include = {
       assignedAnalyst: {
         select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
@@ -217,9 +230,11 @@ export class TriageService {
     const q = String(query.q || '').trim();
     const status = String(query.status || '').trim().toUpperCase();
     const intent = String(query.intent || '').trim().toLowerCase();
+    const scope = await leadScopeWhere(this.prisma, user);
 
     const leads = await this.prisma.publicLead.findMany({
       where: {
+        ...scope,
         ...(q
           ? {
               OR: [
@@ -405,7 +420,7 @@ export class TriageService {
 
   async get(id: string, user: AuthUser) {
     this.assertInternal(user);
-    let lead = await this.resolveLead(id);
+    let lead = await this.resolveLead(id, user);
     lead = await this.healLeadAnalystFromEngagement(lead);
     const list = await this.list(user, { q: lead.email });
     const item = list.items.find((row) => row.id === lead.id) || {
@@ -627,7 +642,7 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const body = input.body?.trim();
     if (!body) throw new BadRequestException('Note text is required.');
     if (body.length > 4000) throw new BadRequestException('Note text is too long (max 4000 characters).');
@@ -665,7 +680,7 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const existing = await this.prisma.triageNote.findFirst({
       where: { id: noteId, publicLeadId: lead.id, deletedAt: null },
       include: { author: { select: this.noteAuthorSelect } },
@@ -707,7 +722,7 @@ export class TriageService {
 
   async deleteNote(id: string, noteId: string, user: AuthUser) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const existing = await this.prisma.triageNote.findFirst({
       where: { id: noteId, publicLeadId: lead.id, deletedAt: null },
     });
@@ -842,7 +857,7 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const leadId = lead.id;
 
     const requestedStage = input.status?.trim().toUpperCase();
@@ -967,7 +982,7 @@ export class TriageService {
     user: AuthUser,
   ) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const leadId = lead.id;
     if (!lead.completedAt) {
       throw new BadRequestException('Complete the questionnaire before managing proposal status.');
@@ -1077,7 +1092,7 @@ export class TriageService {
 
   async convert(id: string, user: AuthUser, opts: { force?: boolean } = {}) {
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
     const leadId = lead.id;
     if (!lead.completedAt || !lead.assessmentId || !lead.organisationId) {
       throw new BadRequestException('Only completed triage submissions can be converted to a paid diagnostic.');
@@ -1162,7 +1177,7 @@ export class TriageService {
       throw new ForbiddenException('Admin permission required to delete triage submissions.');
     }
     this.assertInternal(user);
-    const lead = await this.resolveLead(id);
+    const lead = await this.resolveLead(id, user);
 
     const bundle = await this.commercial.loadCommercialBundle(lead.id);
     const storageKeys = new Set<string>();

@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { ADMIN_ROLES, INTERNAL_ROLES } from '../common/roles';
+import { assertAssessmentInScope } from '../common/assignment-scope';
 
 function slugCode(input: string) {
   return String(input || '')
@@ -819,7 +820,10 @@ export class EadDiagnosticQuestionsService {
     if (!session || session.productCode !== ProductCode.EXECUTIVE_ADVISORY_DIAGNOSTIC) {
       throw new NotFoundException('Executive Advisory Diagnostic not found.');
     }
-    if (INTERNAL_ROLES.has(user.role)) return session;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertAssessmentInScope(this.prisma, user, assessmentId);
+      return session;
+    }
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: session.organisationId } },
     });

@@ -49,7 +49,7 @@ export class CrmController {
   }
 
   @Get('history')
-  @Roles('SUPER_ADMIN', 'ANALYST')
+  @Roles('SUPER_ADMIN')
   history(
     @CurrentUser() user: AuthUser,
     @Query('page') page?: string,
@@ -77,7 +77,7 @@ export class CrmController {
   }
 
   @Get('history/:id')
-  @Roles('SUPER_ADMIN', 'ANALYST')
+  @Roles('SUPER_ADMIN')
   historyJob(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.service.getHistoryJob(id, user);
   }
@@ -144,7 +144,7 @@ export class CrmController {
   }
 
   @Get('logs')
-  @Roles('SUPER_ADMIN', 'ANALYST')
+  @Roles('SUPER_ADMIN')
   logs(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,

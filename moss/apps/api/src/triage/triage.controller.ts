@@ -24,6 +24,7 @@ import { RolesGuard } from '../common/roles.guard';
 import { Roles } from '../common/roles';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { TriageService } from './triage.service';
+import { TriageLeadScopeGuard } from './triage-lead-scope.guard';
 import { TriageCommercialService } from './triage-commercial.service';
 import { TriageCommunicationsService } from './triage-communications.service';
 import { TriageInboundImapService } from './triage-inbound-imap.service';
@@ -232,7 +233,7 @@ class UploadProposalDto {
 }
 
 @Controller('triage')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, TriageLeadScopeGuard)
 @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ANALYST', 'REVIEWER', 'SALES', 'AUDITOR')
 export class TriageController {
   constructor(

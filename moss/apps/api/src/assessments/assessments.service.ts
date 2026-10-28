@@ -26,6 +26,7 @@ import type { AuthUser } from '../common/current-user.decorator';
 import { workflowTimeline } from '../common/workflow';
 import { assertManualLevel3CreationAllowed } from '../common/l3-governance';
 import { INTERNAL_ROLES as INTERNAL_ROLE_SET } from '../common/roles';
+import { assertAssessmentInScope, assessmentScopeWhere } from '../common/assignment-scope';
 import { EspoCrmService } from '../crm/espocrm.service';
 import { generateAssessmentReference } from '../common/assessment-reference';
 import { seedScliOrganisationNameInput } from './seed-scli-org-name';
@@ -79,7 +80,10 @@ export class AssessmentsService {
     if (!assessment || !['SCLI_COST_LEAKAGE', 'EXECUTIVE_GOVERNANCE_TRIAGE'].includes(String(assessment.productCode))) {
       throw new NotFoundException('Assessment not found.');
     }
-    if (INTERNAL_ROLES.has(user.role)) return;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertAssessmentInScope(this.prisma, user, assessmentId);
+      return;
+    }
     const membership = await this.prisma.membership.findUnique({ where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } } });
     if (!membership) throw new ForbiddenException('You do not have access to this assessment.');
   }
@@ -88,7 +92,7 @@ export class AssessmentsService {
     // M3: legacy Cost Leakage list must never return MOSS sessions.
     const where = {
       productCode: 'SCLI_COST_LEAKAGE' as const,
-      ...(INTERNAL_ROLES.has(user.role) ? {} : { organisation: { memberships: { some: { userId: user.id } } } }),
+      ...(INTERNAL_ROLES.has(user.role) ? await assessmentScopeWhere(this.prisma, user) : { organisation: { memberships: { some: { userId: user.id } } } }),
     };
     const items = await this.prisma.assessmentSession.findMany({
       where,

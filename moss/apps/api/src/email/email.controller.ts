@@ -10,7 +10,7 @@ export class EmailController {
   constructor(private readonly email: EmailService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN', 'ANALYST', 'REVIEWER')
+  @Roles('SUPER_ADMIN')
   list() {
     return this.email.listDetailed();
   }
@@ -22,7 +22,7 @@ export class EmailController {
   }
 
   @Post(':id/retry')
-  @Roles('SUPER_ADMIN', 'ANALYST')
+  @Roles('SUPER_ADMIN')
   retry(@Param('id') id: string) {
     return this.email.retry(id);
   }

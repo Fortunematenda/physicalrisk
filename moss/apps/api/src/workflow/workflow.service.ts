@@ -15,6 +15,7 @@ import { AssessmentsService } from '../assessments/assessments.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { assertTransition, workflowTimeline } from '../common/workflow';
 import { ANALYST_ROLES, APPROVER_ROLES, ADMIN_ROLES, requireRole, hasRole } from '../common/roles';
+import { assessmentScopeWhere } from '../common/assignment-scope';
 import { EmailService } from '../email/email.service';
 import { ReportsService } from '../reports/reports.service';
 import { EspoCrmService } from '../crm/espocrm.service';
@@ -66,6 +67,7 @@ export class WorkflowService {
       where: {
         // Cost Leakage review queue must never include MOSS sessions.
         productCode: 'SCLI_COST_LEAKAGE',
+        ...(await assessmentScopeWhere(this.prisma, user)),
         status: {
           in: [
             AssessmentStatus.SUBMITTED,

@@ -5,6 +5,7 @@ import { StorageService } from './storage.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { ANALYST_ROLES, INTERNAL_ROLES, requireRole } from '../common/roles';
+import { assertAssessmentInScope } from '../common/assignment-scope';
 
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -50,7 +51,10 @@ export class EvidenceService {
     if (!assessment || !EVIDENCE_PRODUCTS.has(String(assessment.productCode))) {
       throw new NotFoundException('Assessment not found.');
     }
-    if (INTERNAL_ROLES.has(user.role)) return assessment;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertAssessmentInScope(this.prisma, user, assessmentId);
+      return assessment;
+    }
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } },
     });

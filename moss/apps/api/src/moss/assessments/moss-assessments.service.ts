@@ -19,6 +19,7 @@ import { AuditService } from '../../audit/audit.service';
 import type { AuthUser } from '../../common/current-user.decorator';
 import { generateAssessmentReference } from '../../common/assessment-reference';
 import { INTERNAL_ROLES, ANALYST_ROLES, hasRole } from '../../common/roles';
+import { assertAssessmentInScope, assessmentScopeWhere } from '../../common/assignment-scope';
 import { MossCatalogueService } from '../catalogue/moss-catalogue.service';
 import { MossProgressService } from '../progress/moss-progress.service';
 import { MossScoringService } from '../scoring/moss-scoring.service';
@@ -69,6 +70,8 @@ export class MossAssessmentsService {
         where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } },
       });
       if (!membership) throw new ForbiddenException('You do not have access to this assessment.');
+    } else {
+      await assertAssessmentInScope(this.prisma, user, assessment.id);
     }
     if (!assessment.mossCatalogueVersionId) {
       throw new BadRequestException('MOSS assessment is not bound to a catalogue version.');
@@ -294,7 +297,7 @@ export class MossAssessmentsService {
     const where: Prisma.AssessmentSessionWhereInput = {
       productCode: ProductCode.MOSS,
       ...(INTERNAL_ROLES.has(user.role)
-        ? {}
+        ? await assessmentScopeWhere(this.prisma, user)
         : { organisation: { memberships: { some: { userId: user.id } } } }),
     };
 

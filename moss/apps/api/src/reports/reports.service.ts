@@ -16,6 +16,7 @@ import { AssessmentsService } from '../assessments/assessments.service';
 import { EmailService } from '../email/email.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { ADMIN_ROLES, ANALYST_ROLES, APPROVER_ROLES, INTERNAL_ROLES, requireRole } from '../common/roles';
+import { assessmentScopeWhere, isAssignmentScoped, loadAssignmentScope } from '../common/assignment-scope';
 import { EspoCrmService } from '../crm/espocrm.service';
 import {
   buildSclReportDocumentMeta,
@@ -107,6 +108,10 @@ export class ReportsService {
     @Optional() @Inject(forwardRef(() => EspoCrmService)) private readonly crm?: EspoCrmService,
   ) {}
 
+  private async assignedAssessmentIds(user: AuthUser) {
+    return (await loadAssignmentScope(this.prisma, user.id)).assessmentIds;
+  }
+
   /** Cost Leakage / triage and advisory PDFs share the Report table but use different product scopes. */
   private async checkReportAccess(assessmentId: string, user: AuthUser) {
     const session = await this.prisma.assessmentSession.findUnique({
@@ -120,7 +125,12 @@ export class ReportsService {
       ADVISORY_REPORT_PRODUCTS.has(session.productCode) || LEGACY_REPORT_PRODUCTS.has(productCode);
     if (!supported) throw new NotFoundException('Report not found.');
 
-    if (INTERNAL_ROLES.has(user.role)) return;
+    if (INTERNAL_ROLES.has(user.role)) {
+      if (isAssignmentScoped(user) && !(await this.assignedAssessmentIds(user)).includes(assessmentId)) {
+        throw new NotFoundException('Report not found.');
+      }
+      return;
+    }
 
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: session.organisationId } },
@@ -138,7 +148,7 @@ export class ReportsService {
         assessment: {
           productCode: productFilter.productCode,
           ...(INTERNAL_ROLES.has(user.role)
-            ? {}
+            ? await assessmentScopeWhere(this.prisma, user)
             : { organisation: { memberships: { some: { userId: user.id } } } }),
         },
       },
@@ -675,8 +685,11 @@ export class ReportsService {
     const failed = items.filter((r) => r.uiStatus === 'failed').length;
     const pending = items.filter((r) => r.uiStatus === 'pending').length;
 
+    const visibleReportIds = isAssignmentScoped(user)
+      ? [...items, ...advisoryItems, ...triageItems].map((r) => r.id)
+      : null;
     const allEmailJobs = await this.prisma.emailJob.findMany({
-      where: { relatedType: 'Report' },
+      where: { relatedType: 'Report', ...(visibleReportIds ? { relatedId: { in: visibleReportIds } } : {}) },
       select: { status: true },
       take: 500,
     });

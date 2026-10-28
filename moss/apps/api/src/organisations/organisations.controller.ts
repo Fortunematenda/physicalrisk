@@ -51,8 +51,8 @@ export class OrganisationsController {
     private readonly sites: MossSitesService,
   ) {}
 
-  @Get() list() {
-    return this.service.list();
+  @Get() list(@CurrentUser() user: AuthUser) {
+    return this.service.list(user);
   }
 
   @Get('industries')
@@ -83,8 +83,8 @@ export class OrganisationsController {
     return this.sites.create(id, body, user);
   }
 
-  @Get(':id') get(@Param('id') id: string) {
-    return this.service.get(id);
+  @Get(':id') get(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.get(id, user);
   }
 
   @Patch(':id')

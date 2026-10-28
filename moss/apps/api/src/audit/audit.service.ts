@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AuthUser } from '../common/current-user.decorator';
+import { isAssignmentScoped, loadAssignmentScope } from '../common/assignment-scope';
 
 const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: 'Administrator',
@@ -66,9 +68,25 @@ export class AuditService {
     });
   }
 
-  async listDetailed(limit = 500) {
+  /** Assignment-scoped users only see their own actions and events on records assigned to them. */
+  private async scopedWhere(user: AuthUser): Promise<Prisma.AuditEventWhereInput | undefined> {
+    if (!isAssignmentScoped(user)) return undefined;
+    const scope = await loadAssignmentScope(this.prisma, user.id);
+    return {
+      OR: [
+        { userId: user.id },
+        { entityType: 'AssessmentSession', entityId: { in: scope.assessmentIds } },
+        { entityType: 'PublicLead', entityId: { in: scope.leadIds } },
+        { entityType: 'SomodAssessment', entityId: { in: scope.somodAssessmentIds } },
+      ],
+    };
+  }
+
+  async listDetailed(limit = 500, user?: AuthUser) {
     const take = Math.min(Math.max(limit, 1), 1000);
+    const where = user ? await this.scopedWhere(user) : undefined;
     const events = await this.prisma.auditEvent.findMany({
+      where,
       take,
       orderBy: { createdAt: 'desc' },
       include: {

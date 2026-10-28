@@ -12,6 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import type { AuthUser } from '../../common/current-user.decorator';
 import { ANALYST_ROLES, INTERNAL_ROLES, SOMOD_APPROVER_ROLES, hasRole } from '../../common/roles';
+import { assertSomodInScope, somodScopeWhere } from '../../common/assignment-scope';
 import { generateSomodReference } from '../../common/somod-reference';
 import {
   DEFAULT_SCENARIOS,
@@ -180,6 +181,8 @@ export class SomodAssessmentsService {
         },
       });
       if (!membership) throw new ForbiddenException('You cannot access this SOMOD assessment.');
+    } else {
+      await assertSomodInScope(this.prisma, user, assessment.id);
     }
 
     return assessment;
@@ -241,7 +244,7 @@ export class SomodAssessmentsService {
 
   async list(user: AuthUser) {
     const where = INTERNAL_ROLES.has(user.role)
-      ? {}
+      ? await somodScopeWhere(this.prisma, user)
       : {
           organisation: {
             memberships: { some: { userId: user.id } },

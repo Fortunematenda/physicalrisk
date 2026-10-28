@@ -3,6 +3,7 @@ import { IsBoolean, IsEnum, IsOptional, IsString, MinLength } from 'class-valida
 import { AssessmentStatus, FindingSeverity } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/roles.guard';
+import { AssessmentScopeGuard } from '../common/assessment-scope.guard';
 import { Roles } from '../common/roles';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { WorkflowService } from './workflow.service';
@@ -47,7 +48,7 @@ class UnlockDto {
 }
 
 @Controller()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, AssessmentScopeGuard)
 export class WorkflowController {
   constructor(private readonly workflow: WorkflowService) {}
 

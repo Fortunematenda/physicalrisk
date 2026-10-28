@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { ADMIN_ROLES, INTERNAL_ROLES, hasRole } from '../common/roles';
+import { assertAssessmentInScope } from '../common/assignment-scope';
 import { EspoCrmClient, EspoCrmHttpError } from './espocrm.client';
 import {
   assertEspoConfigured,
@@ -233,7 +234,10 @@ export class EspoCrmService {
     if (assessment.productCode !== 'SCLI_COST_LEAKAGE') {
       throw new NotFoundException('Assessment not found.');
     }
-    if (INTERNAL_ROLES.has(user.role)) return;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertAssessmentInScope(this.prisma, user, assessmentId);
+      return;
+    }
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: assessment.organisationId } },
     });

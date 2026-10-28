@@ -49,6 +49,7 @@ import { generateL3ProposalReference } from '../common/l3-proposal-reference';
 import { generateProposalReference } from '../common/proposal-reference';
 import { assertManualLevel3CreationAllowed, resolveManualCreatePolicy } from '../common/l3-governance';
 import { ADMIN_ROLES, INTERNAL_ROLES, WRITE_INTERNAL_ROLES, hasRole, requireRole } from '../common/roles';
+import { assertAssessmentInScope, assertLeadInScope, assessmentScopeWhere } from '../common/assignment-scope';
 import {
   ENGAGEMENT_RESPONSIBILITIES,
   eligibleResponsibilityKeys,
@@ -153,7 +154,10 @@ export class AdvisoryService {
     if (!session || !ADVISORY_PRODUCTS.has(session.productCode)) {
       throw new NotFoundException('Advisory engagement not found.');
     }
-    if (INTERNAL_ROLES.has(user.role)) return session;
+    if (INTERNAL_ROLES.has(user.role)) {
+      await assertAssessmentInScope(this.prisma, user, id);
+      return session;
+    }
     const membership = await this.prisma.membership.findUnique({
       where: { userId_organisationId: { userId: user.id, organisationId: session.organisationId } },
     });
@@ -306,10 +310,10 @@ export class AdvisoryService {
     return [...byProduct.values()].map(({ maxExposure: _max, ...row }) => row);
   }
 
-  list(user: AuthUser, productCode?: ProductCode) {
+  async list(user: AuthUser, productCode?: ProductCode) {
     const where: any = {
       productCode: productCode && ADVISORY_PRODUCTS.has(productCode) ? productCode : { in: [...ADVISORY_PRODUCTS] },
-      ...(INTERNAL_ROLES.has(user.role) ? {} : { organisation: { memberships: { some: { userId: user.id } } } }),
+      ...(INTERNAL_ROLES.has(user.role) ? await assessmentScopeWhere(this.prisma, user) : { organisation: { memberships: { some: { userId: user.id } } } }),
     };
     return this.prisma.assessmentSession
       .findMany({
@@ -2507,9 +2511,11 @@ export class AdvisoryService {
         status: true,
         contextSnapshot: true,
         sourceAdvisoryAssessmentId: true,
+        publicLeadId: true,
       },
     });
     if (!proposal) throw new NotFoundException('Proposal not found.');
+    await assertLeadInScope(this.prisma, user, proposal.publicLeadId);
 
     const engagements = await this.prisma.assessmentSession.findMany({
       where: { sourceProposalId: proposalId },

@@ -32,6 +32,7 @@ import {
   sanitizeEmailHtml,
 } from '../common/triage-communications';
 import { emailListIncludes } from '../common/email-list';
+import { assertLeadInScope, isAssignmentScoped, leadScopeWhere } from '../common/assignment-scope';
 import { EmailService } from '../email/email.service';
 import { StorageService } from '../evidence/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -129,11 +130,7 @@ export class TriageCommunicationsService {
   private async assertLeadAccess(publicLeadId: string, user: AuthUser) {
     this.assertRead(user);
     const lead = await this.getLeadOrThrow(publicLeadId);
-    if (COMMUNICATION_ADMIN_ROLES.has(user.role)) return lead;
-    if (user.role === 'AUDITOR') return lead;
-    if (lead.assignedAnalystId && lead.assignedAnalystId !== user.id) {
-      throw new ForbiddenException('This triage submission is assigned to another analyst.');
-    }
+    await assertLeadInScope(this.prisma, user, lead.id);
     return lead;
   }
 
@@ -182,10 +179,8 @@ export class TriageCommunicationsService {
       status: { not: CommunicationMessageStatus.DRAFT },
       readReceipts: { none: { userId: user.id } },
     };
-    if (!COMMUNICATION_ADMIN_ROLES.has(user.role) && user.role !== 'AUDITOR') {
-      where.publicLead = {
-        OR: [{ assignedAnalystId: null }, { assignedAnalystId: user.id }],
-      };
+    if (isAssignmentScoped(user)) {
+      where.publicLead = await leadScopeWhere(this.prisma, user);
     }
     const unreadCount = await this.prisma.communicationMessage.count({ where });
     return { unreadCount };
