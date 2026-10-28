@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { IsArray, IsBoolean, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { SystemRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -62,6 +62,12 @@ export class UsersController {
   @Roles('SUPER_ADMIN')
   update(@Param('id') id: string, @Body() body: UpdateUserDto, @CurrentUser() user: AuthUser) {
     return this.users.update(id, body, user);
+  }
+
+  @Delete(':id')
+  @Roles('SUPER_ADMIN')
+  remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.users.remove(id, user);
   }
 
   @Post(':id/reset-password')

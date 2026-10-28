@@ -407,6 +407,8 @@ model User {
   isActive     Boolean      @default(true)
   lastLoginAt  DateTime?
   lastSeenAt   DateTime?
+  /// Set when an admin deletes the user; the row stays so their history keeps its author.
+  deletedAt    DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   memberships  Membership[]

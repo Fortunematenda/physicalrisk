@@ -3,7 +3,16 @@ import { BadGatewayException, BadRequestException, ForbiddenException } from '@n
 import { UsersService } from './users.service';
 import { KeycloakAdminError } from './keycloak-admin';
 
-type Row = { id: string; email: string; firstName: string; lastName: string; systemRole: string; isActive: boolean; passwordHash?: string };
+type Row = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  systemRole: string;
+  isActive: boolean;
+  passwordHash?: string;
+  deletedAt?: Date | null;
+};
 
 const admin = { id: 'admin-1', email: 'wayne@physicalrisk.com', role: 'SUPER_ADMIN' };
 
@@ -25,9 +34,11 @@ function setup(opts: { configured?: boolean; legacy?: boolean } = {}) {
         for (const [k, v] of Object.entries(data)) if (v !== undefined) (row as Record<string, unknown>)[k] = v;
         return pick(row);
       }),
+      count: vi.fn(async () => rows.filter((r) => r.systemRole === 'SUPER_ADMIN' && r.isActive && !r.deletedAt).length - 1),
     },
     membership: { deleteMany: vi.fn(), createMany: vi.fn() },
   };
+  const ssoUsers = { forget: vi.fn() };
   const audit = { record: vi.fn() };
   const vars: Record<string, string> = {
     KEYCLOAK_ENABLED: 'true',
@@ -36,7 +47,7 @@ function setup(opts: { configured?: boolean; legacy?: boolean } = {}) {
     ...(opts.configured === false ? {} : { KEYCLOAK_ADMIN_CLIENT_ID: 'moss-user-admin', KEYCLOAK_ADMIN_CLIENT_SECRET: 'x' }),
   };
   const config = { get: (key: string) => vars[key] };
-  const service = new UsersService(prisma as never, audit as never, config as never);
+  const service = new UsersService(prisma as never, audit as never, config as never, ssoUsers as never);
   const kc = {
     findUserByEmail: vi.fn(async () => null as null | { id: string; enabled?: boolean }),
     createUser: vi.fn(async () => 'kc-new'),
@@ -48,7 +59,7 @@ function setup(opts: { configured?: boolean; legacy?: boolean } = {}) {
     sendActionsEmail: vi.fn(async () => undefined),
   };
   if (opts.configured !== false) (service as unknown as { keycloak: unknown }).keycloak = kc;
-  return { service, kc, rows, audit };
+  return { service, kc, rows, audit, prisma, ssoUsers };
 }
 
 describe('User administration through Keycloak', () => {
@@ -166,5 +177,68 @@ describe('User administration through Keycloak', () => {
     await ctx.service.sendPasswordEmail('u9', admin);
     expect(ctx.kc.sendActionsEmail).toHaveBeenCalledWith('kc-9', ['UPDATE_PASSWORD']);
     await expect(ctx.service.resetPassword('u9', 'whatever123', admin)).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('deletes the Keycloak account and marks the MOSS user deleted', async () => {
+    ctx.rows.push({ id: 'u9', email: 'ana@example.com', firstName: 'Ana', lastName: 'L', systemRole: 'ANALYST', isActive: true });
+    ctx.kc.findUserByEmail.mockResolvedValue({ id: 'kc-9' });
+    const result = await ctx.service.remove('u9', admin);
+    expect(result).toEqual({ ok: true, keycloakAccount: 'deleted' });
+    expect(ctx.kc.deleteUser).toHaveBeenCalledWith('kc-9');
+    expect(ctx.rows[0]).toMatchObject({ isActive: false, deletedAt: expect.any(Date) });
+    expect(ctx.prisma.membership.deleteMany).toHaveBeenCalledWith({ where: { userId: 'u9' } });
+    expect(ctx.ssoUsers.forget).toHaveBeenCalledWith('ana@example.com');
+    expect(ctx.audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'USER_DELETED' }));
+    await expect(ctx.service.remove('u9', admin)).rejects.toThrow('User not found.');
+  });
+
+  it('removes a user from MOSS when their Keycloak account was already deleted', async () => {
+    ctx.rows.push({ id: 'u-old', email: 'gone@example.com', firstName: 'G', lastName: 'O', systemRole: 'SUPER_ADMIN', isActive: true });
+    const result = await ctx.service.remove('u-old', admin);
+    expect(result.keycloakAccount).toBe('not_found');
+    expect(ctx.kc.deleteUser).not.toHaveBeenCalled();
+    expect(ctx.rows[0].deletedAt).toBeInstanceOf(Date);
+  });
+
+  it('will not delete Keycloak administrators or the signed-in admin', async () => {
+    ctx.rows.push({ id: 'u-boss', email: 'boss@example.com', firstName: 'B', lastName: 'S', systemRole: 'SUPER_ADMIN', isActive: true });
+    ctx.kc.findUserByEmail.mockResolvedValue({ id: 'kc-boss' });
+    ctx.kc.realmRoleNames.mockResolvedValue(['moss_admin']);
+    await expect(ctx.service.remove('u-boss', admin)).rejects.toBeInstanceOf(ForbiddenException);
+
+    ctx.rows.push({ id: 'admin-1', email: admin.email, firstName: 'W', lastName: 'A', systemRole: 'SUPER_ADMIN', isActive: true });
+    await expect(ctx.service.remove('admin-1', admin)).rejects.toBeInstanceOf(BadRequestException);
+    expect(ctx.kc.deleteUser).not.toHaveBeenCalled();
+    expect(ctx.rows.every((r) => !r.deletedAt)).toBe(true);
+  });
+
+  it('keeps the MOSS user when Keycloak cannot delete the account', async () => {
+    ctx.rows.push({ id: 'u9', email: 'ana@example.com', firstName: 'Ana', lastName: 'L', systemRole: 'ANALYST', isActive: true });
+    ctx.kc.findUserByEmail.mockResolvedValue({ id: 'kc-9' });
+    ctx.kc.deleteUser.mockRejectedValueOnce(new KeycloakAdminError('Keycloak could not be reached.', 503));
+    await expect(ctx.service.remove('u9', admin)).rejects.toBeInstanceOf(BadGatewayException);
+    expect(ctx.rows[0].deletedAt).toBeUndefined();
+  });
+
+  it('restores a deleted user when they are added again', async () => {
+    ctx.rows.push({ id: 'u9', email: 'ana@example.com', firstName: 'Old', lastName: 'Name', systemRole: 'ANALYST', isActive: false, deletedAt: new Date() });
+    const created = await ctx.service.create(
+      { email: 'ana@example.com', firstName: 'Ana', lastName: 'Lee', systemRole: 'REVIEWER' as never },
+      admin,
+    );
+    expect(ctx.rows).toHaveLength(1);
+    expect(created).toMatchObject({ id: 'u9', firstName: 'Ana', systemRole: 'REVIEWER', isActive: true });
+    expect(ctx.rows[0].deletedAt).toBeNull();
+  });
+});
+
+describe('Local user deletion (legacy login)', () => {
+  it('refuses to delete the last active administrator', async () => {
+    const ctx = setup({ legacy: true });
+    ctx.rows.push({ id: 'u-boss', email: 'boss@example.com', firstName: 'B', lastName: 'S', systemRole: 'SUPER_ADMIN', isActive: true });
+    await expect(ctx.service.remove('u-boss', admin)).rejects.toThrow('last active administrator');
+    ctx.rows.push({ id: 'u-two', email: 'two@example.com', firstName: 'T', lastName: 'W', systemRole: 'SUPER_ADMIN', isActive: true });
+    await expect(ctx.service.remove('u-boss', admin)).resolves.toEqual({ ok: true, keycloakAccount: 'not_managed' });
+    expect(ctx.kc.deleteUser).not.toHaveBeenCalled();
   });
 });

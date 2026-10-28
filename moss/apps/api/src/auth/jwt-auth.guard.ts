@@ -58,6 +58,7 @@ export class JwtAuthGuard implements CanActivate {
             firstName,
             lastName,
             role,
+            issuedAt: typeof payload.iat === 'number' ? payload.iat : undefined,
           },
           {
             ipAddress:

@@ -10,7 +10,16 @@ type SsoSyncInput = {
   firstName?: string;
   lastName?: string;
   role: string;
+  /** Token `iat` in seconds. */
+  issuedAt?: number;
 };
+
+export class DeletedUserError extends Error {
+  constructor(email: string) {
+    super(`The MOSS account for ${email} was deleted.`);
+    this.name = 'DeletedUserError';
+  }
+}
 
 type SsoSyncContext = {
   ipAddress?: string;
@@ -49,6 +58,13 @@ export class SsoUserSyncService {
     }
 
     const existing = await this.prisma.user.findUnique({ where: { email } });
+    // Tokens issued before the deletion must not bring the account back; a sign-in after it
+    // means the person was given a Keycloak account again.
+    if (existing?.deletedAt) {
+      const issuedAtMs = (input.issuedAt ?? 0) * 1000;
+      if (issuedAtMs <= existing.deletedAt.getTime()) throw new DeletedUserError(email);
+      this.logger.log(`Restoring deleted user ${email} after a new SSO sign-in`);
+    }
     if (!existing) {
       const created = await this.prisma.user.create({
         data: {
@@ -85,6 +101,7 @@ export class SsoUserSyncService {
         lastName,
         systemRole,
         isActive: true,
+        deletedAt: null,
         ...(shouldTouchLogin
           ? { lastLoginAt: new Date(), lastSeenAt: new Date() }
           : { lastSeenAt: new Date() }),
@@ -107,6 +124,10 @@ export class SsoUserSyncService {
 
     this.cache.set(email, { id: updated.id, sig, at: Date.now() });
     return updated;
+  }
+
+  forget(email: string) {
+    this.cache.delete(email.trim().toLowerCase());
   }
 
   private toSystemRole(role: string): SystemRole {

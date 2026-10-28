@@ -181,6 +181,37 @@ export default function UsersAdminPage() {
     }
   }
 
+  async function deleteUser(user: AdminUser) {
+    const ok = await confirm({
+      title: 'Delete user',
+      description: viaKeycloak
+        ? `Delete “${user.firstName} ${user.lastName}” (${user.email})? Their Keycloak sign-in account is deleted too, so they can no longer sign in. Their past work stays in MOSS.`
+        : `Delete “${user.firstName} ${user.lastName}” (${user.email})? They can no longer sign in. Their past work stays in MOSS.`,
+      confirmLabel: 'Delete user',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    setError('');
+    try {
+      const result = await apiFetch<{ keycloakAccount?: string }>(`/admin/users/${user.id}`, { method: 'DELETE' });
+      toast({
+        variant: 'success',
+        title: 'User deleted',
+        description:
+          result?.keycloakAccount === 'not_found'
+            ? `${user.email} had no Keycloak account, so they were removed from MOSS only.`
+            : user.email,
+      });
+      await load();
+    } catch (err: unknown) {
+      toast({
+        variant: 'error',
+        title: 'Could not delete user',
+        description: err instanceof Error ? err.message : 'Unable to delete the user.',
+      });
+    }
+  }
+
   async function resetPassword(e: FormEvent) {
     e.preventDefault();
     if (!passwordUser) return;
@@ -323,7 +354,34 @@ export default function UsersAdminPage() {
                       {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('en-ZA') : '—'}
                     </td>
                     <td className="org2-actions-cell">
-                      {canManage && !keycloakOnly(u) ? (
+                      {canManage && keycloakOnly(u) ? (
+                        <RowActionsMenu
+                          open={menuOpenId === u.id}
+                          onClose={() => setMenuOpenId(null)}
+                          trigger={(
+                            <button
+                              type="button"
+                              className="org2-menu-btn"
+                              aria-label={`Actions for ${u.email}`}
+                              title="Administrators are managed in Keycloak"
+                              onClick={() => setMenuOpenId((id) => (id === u.id ? null : u.id))}
+                            >
+                              <IconMoreVertical />
+                            </button>
+                          )}
+                        >
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              void deleteUser(u);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </RowActionsMenu>
+                      ) : canManage ? (
                         <RowActionsMenu
                           open={menuOpenId === u.id}
                           onClose={() => setMenuOpenId(null)}
@@ -371,6 +429,16 @@ export default function UsersAdminPage() {
                             }}
                           >
                             {u.isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              void deleteUser(u);
+                            }}
+                          >
+                            Delete
                           </button>
                         </RowActionsMenu>
                       ) : (

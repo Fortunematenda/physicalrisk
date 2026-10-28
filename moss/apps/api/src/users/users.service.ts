@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -14,6 +15,7 @@ import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { requireRole, ADMIN_ROLES, hasRole } from '../common/roles';
 import { resolveIdentityAdminUrl } from './identity-admin-url';
+import { SsoUserSyncService } from './sso-user-sync.service';
 import {
   KeycloakAdminClient,
   KeycloakAdminError,
@@ -43,6 +45,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    @Optional() private readonly ssoUsers?: SsoUserSyncService,
   ) {}
 
   private mode(): UserAdminMode {
@@ -91,6 +94,7 @@ export class UsersService {
   list(user: AuthUser) {
     requireRole(user, ADMIN_ROLES);
     return this.prisma.user.findMany({
+      where: { deletedAt: null },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -129,34 +133,27 @@ export class UsersService {
     if (!input.password || input.password.length < 8) {
       throw new BadRequestException('Password must be at least 8 characters.');
     }
-    const exists = await this.prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
-    if (exists) throw new BadRequestException('Email already registered.');
+    const email = input.email.trim().toLowerCase();
+    const exists = await this.prisma.user.findUnique({ where: { email } });
+    if (exists && !exists.deletedAt) throw new BadRequestException('Email already registered.');
     const passwordHash = await argon2.hash(input.password);
-    const created = await this.prisma.user.create({
-      data: {
-        email: input.email.trim().toLowerCase(),
-        passwordHash,
-        firstName: input.firstName.trim(),
-        lastName: input.lastName.trim(),
-        systemRole: input.systemRole,
-        memberships: input.organisationIds?.length
-          ? {
-              create: input.organisationIds.map((organisationId) => ({
-                organisationId,
-                role: input.systemRole,
-              })),
-            }
-          : undefined,
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        systemRole: true,
-        isActive: true,
-      },
-    });
+    const fields = {
+      passwordHash,
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      systemRole: input.systemRole,
+    };
+    const created = exists
+      ? await this.prisma.user.update({
+          where: { id: exists.id },
+          data: { ...fields, isActive: true, deletedAt: null },
+          select: USER_SELECT,
+        })
+      : await this.prisma.user.create({
+          data: { email, ...fields },
+          select: USER_SELECT,
+        });
+    if (input.organisationIds) await this.replaceMemberships(created.id, input.organisationIds, created.systemRole);
     await this.audit.record({
       userId: actor.id,
       action: 'USER_CREATED',
@@ -182,7 +179,7 @@ export class UsersService {
     if (this.mode() === 'keycloak') return this.updateInKeycloak(id, input, actor);
     this.assertLocalUserAdminAllowed();
     const existing = await this.prisma.user.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('User not found.');
+    if (!existing || existing.deletedAt) throw new NotFoundException('User not found.');
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
@@ -244,7 +241,7 @@ export class UsersService {
       throw new BadRequestException('Password emails are only available when MOSS manages Keycloak users.');
     }
     const existing = await this.prisma.user.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('User not found.');
+    if (!existing || existing.deletedAt) throw new NotFoundException('User not found.');
     await this.withKeycloak(async (kc) => {
       const kcUser = await this.requireManageableKeycloakUser(kc, existing.email);
       await kc.sendActionsEmail(kcUser.id, ['UPDATE_PASSWORD']);
@@ -257,6 +254,55 @@ export class UsersService {
       metadata: { via: 'keycloak' },
     });
     return { ok: true };
+  }
+
+  /**
+   * Removes a user from MOSS and, when MOSS manages Keycloak, deletes their Keycloak account.
+   * A Keycloak account that is already gone (deleted in the Keycloak console) is not an error.
+   * The row is kept, marked deleted, so assessments and proposals keep their author.
+   */
+  async remove(id: string, actor: AuthUser) {
+    requireRole(actor, ADMIN_ROLES);
+    const mode = this.mode();
+    if (mode === 'console') {
+      throw new ForbiddenException('Users are managed in Keycloak SSO. Delete the account in the identity provider.');
+    }
+    const existing = await this.prisma.user.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) throw new NotFoundException('User not found.');
+    if (existing.id === actor.id || existing.email === (actor.email || '').toLowerCase()) {
+      throw new BadRequestException('You cannot delete your own account.');
+    }
+
+    let keycloakAccount: 'deleted' | 'not_found' | 'not_managed' = 'not_managed';
+    if (mode === 'keycloak') {
+      keycloakAccount = await this.withKeycloak(async (kc) => {
+        const kcUser = await kc.findUserByEmail(existing.email);
+        if (!kcUser) return 'not_found' as const;
+        await this.assertNotProtected(kc, kcUser.id);
+        await kc.deleteUser(kcUser.id);
+        return 'deleted' as const;
+      });
+    } else if (existing.systemRole === SystemRole.SUPER_ADMIN) {
+      const otherAdmins = await this.prisma.user.count({
+        where: { id: { not: id }, systemRole: SystemRole.SUPER_ADMIN, isActive: true, deletedAt: null },
+      });
+      if (!otherAdmins) throw new BadRequestException('You cannot delete the last active administrator.');
+    }
+
+    await this.prisma.membership.deleteMany({ where: { userId: id } });
+    await this.prisma.user.update({
+      where: { id },
+      data: { isActive: false, deletedAt: new Date(), lastSeenAt: null },
+    });
+    this.ssoUsers?.forget(existing.email);
+    await this.audit.record({
+      userId: actor.id,
+      action: 'USER_DELETED',
+      entityType: 'User',
+      entityId: id,
+      metadata: { email: existing.email, role: existing.systemRole, via: mode, keycloakAccount },
+    });
+    return { ok: true, keycloakAccount };
   }
 
   private async createInKeycloak(
@@ -298,7 +344,11 @@ export class UsersService {
     const user = local
       ? await this.prisma.user.update({
           where: { id: local.id },
-          data: { systemRole: input.systemRole, isActive: outcome.enabled },
+          data: {
+            systemRole: input.systemRole,
+            isActive: outcome.enabled,
+            ...(local.deletedAt ? { firstName, lastName, deletedAt: null } : {}),
+          },
           select: USER_SELECT,
         })
       : await this.prisma.user.create({
@@ -337,7 +387,7 @@ export class UsersService {
     actor: AuthUser,
   ) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('User not found.');
+    if (!existing || existing.deletedAt) throw new NotFoundException('User not found.');
     if (existing.systemRole === SystemRole.SUPER_ADMIN) {
       throw new ForbiddenException('Administrator accounts are managed in the Keycloak admin console.');
     }
