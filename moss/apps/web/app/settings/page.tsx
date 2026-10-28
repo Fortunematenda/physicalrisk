@@ -6,10 +6,12 @@ import {
   Building2,
   Calculator,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardList,
   Database,
   HardDrive,
+  History,
   Mail,
   Plug,
   Save,
@@ -119,6 +121,7 @@ export default function SettingsPage() {
   const [headerSearch, setHeaderSearch] = useState('');
   const [mainTab, setMainTab] = useState<MainTab>('email');
   const [emailFailCount, setEmailFailCount] = useState(0);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   const [smtpForm, setSmtpForm] = useState({
     host: '',
@@ -169,6 +172,7 @@ export default function SettingsPage() {
     const requested = new URLSearchParams(window.location.search).get('tab');
     if (requested && MAIN_TABS.some((t) => t.id === requested)) setMainTab(requested as MainTab);
     if (window.location.hash === '#audit-logs') {
+      setAuditOpen(true);
       window.setTimeout(() => document.getElementById('audit-logs')?.scrollIntoView({ block: 'start' }), 300);
     }
   }, []);
@@ -468,7 +472,7 @@ export default function SettingsPage() {
 
           <TabsContent value="system" className="mt-0 space-y-6">
             <div className="grid gap-6 xl:grid-cols-2">
-              <Card>
+              <Card className={cn(auditOpen && 'xl:col-span-2')}>
                 <CardHeader>
                   <CardTitle>System Summary</CardTitle>
                   <CardDescription>Runtime environment and portfolio counts.</CardDescription>
@@ -516,7 +520,28 @@ export default function SettingsPage() {
                       label="Last Backup"
                       value={formatBackup(summary?.lastBackupAt)}
                     />
+                    <li className="border-b border-moss-border/60 last:border-0">
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-3 py-3 text-left"
+                        aria-expanded={auditOpen}
+                        aria-controls="audit-logs"
+                        onClick={() => setAuditOpen((open) => !open)}
+                      >
+                        <span className="text-moss-muted"><History className="size-4" /></span>
+                        <span className="flex-1 text-sm text-moss-muted">Audit Logs</span>
+                        <span className="inline-flex items-center gap-1 text-sm font-semibold text-moss-text">
+                          {auditOpen ? 'Hide' : 'View'}
+                          <ChevronDown className={cn('size-4 transition-transform', auditOpen && 'rotate-180')} />
+                        </span>
+                      </button>
+                    </li>
                   </ul>
+                  {auditOpen && (
+                    <div className="mt-4 border-t border-moss-border/60 pt-4">
+                      <AuditLogPanel />
+                    </div>
+                  )}
                 </CardContent>
                 <CardFooter>
                   <Button
@@ -570,8 +595,6 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             </div>
-
-            <AuditLogPanel />
           </TabsContent>
         </Tabs>
       </Shell>
