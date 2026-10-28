@@ -155,7 +155,13 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     expect(analystIds).toContain('espocrm-open');
     expect(analystIds).not.toContain('espocrm');
     const system = NAV_SECTIONS.find((s) => s.id === 'system')!;
-    expect(sectionHasActiveItem('/settings/integrations', { ...system, items: [item!] })).toBe(false);
+    expect(sectionHasActiveItem('/settings', { ...system, items: [item!] })).toBe(false);
+  });
+
+  it('keeps EspoCRM Integration and Audit Logs inside Settings, not the sidebar', () => {
+    const ids = NAV_SECTIONS.flatMap((s) => s.items.map((i) => i.id));
+    expect(ids).not.toContain('espocrm');
+    expect(ids).not.toContain('audit-logs');
   });
 
   it('only accepts HTTPS external URLs (HTTP for loopback dev hosts only)', () => {

@@ -5,7 +5,6 @@ import {
   IconCalculator,
   IconClipboardList,
   IconFileText,
-  IconHistory,
   IconLayers,
   IconLayoutDashboard,
   IconListChecks,
@@ -224,27 +223,13 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
       { id: 'consultants', label: 'Consultants & Analysts', href: '/admin/consultants', icon: IconBuilding2, roles: ['ADMIN', 'ANALYST'] },
       { id: 'users', label: 'User administration', href: '/admin/users', icon: IconUsers, roles: ['ADMIN'] },
       {
-        id: 'espocrm',
-        label: 'EspoCRM Integration',
-        href: '/settings/integrations',
-        icon: IconCable,
-        roles: ['ADMIN'],
-      },
-      {
         // Shown only when /integrations/espocrm/access (role-checked server-side) returns a safe URL.
         id: 'espocrm-open',
         label: 'CRM',
-        href: '/settings/integrations',
+        href: '/settings?tab=integrations',
         icon: IconCable,
         roles: ['ADMIN', 'ANALYST'],
         external: 'espocrm',
-      },
-      {
-        id: 'audit-logs',
-        label: 'Audit Logs',
-        href: '/admin/audit-logs',
-        icon: IconHistory,
-        roles: ['ADMIN'],
       },
       {
         id: 'settings',

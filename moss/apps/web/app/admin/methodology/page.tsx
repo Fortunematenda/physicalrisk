@@ -1089,7 +1089,7 @@ export default function MethodologyPage() {
                     <li><button type="button" onClick={exportQuestionnaire}><IconDownload /> Export Questionnaire</button></li>
                     <li><button type="button" onClick={() => setTab('sections')}><IconGripVertical /> Reorder Sections</button></li>
                     <li><button type="button" onClick={() => setTab('library')}><IconBookOpen /> Question Library</button></li>
-                    <li><Link href="/admin/audit-logs"><IconHistory2 /> View Change History</Link></li>
+                    <li><Link href="/settings?tab=system#audit-logs"><IconHistory2 /> View Change History</Link></li>
                   </ul>
                 </section>
 

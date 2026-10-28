@@ -35,6 +35,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsTrigger } from '@/components/ui/tabs';
+import { EspoCrmIntegrationPanel } from '@/components/crm/EspoCrmIntegrationPanel';
+import { AuditLogPanel } from '@/components/settings/AuditLogPanel';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -163,6 +165,14 @@ export default function SettingsPage() {
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (requested && MAIN_TABS.some((t) => t.id === requested)) setMainTab(requested as MainTab);
+    if (window.location.hash === '#audit-logs') {
+      window.setTimeout(() => document.getElementById('audit-logs')?.scrollIntoView({ block: 'start' }), 300);
+    }
+  }, []);
+
   const filteredTabs = useMemo(() => {
     const q = headerSearch.trim().toLowerCase();
     if (!q) return MAIN_TABS;
@@ -243,7 +253,7 @@ export default function SettingsPage() {
       <Shell
         title="Settings"
         hideEyebrow
-        subtitle="Lean MVP configuration — email, integrations, and system status."
+        subtitle="Email, integrations, system status and audit logs."
         searchPlaceholder="Search settings…"
         searchValue={headerSearch}
         onSearch={setHeaderSearch}
@@ -419,27 +429,7 @@ export default function SettingsPage() {
           </TabsContent>
 
           <TabsContent value="integrations" className="mt-0 space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>EspoCRM</CardTitle>
-                <CardDescription>
-                  Sync organisations, leads, contacts, opportunities and tasks with EspoCRM.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-moss-muted">
-                  Manage connection status, sync queue, and failed jobs on the dedicated integrations page.
-                </p>
-              </CardContent>
-              <CardFooter>
-                <Button asChild>
-                  <Link href="/settings/integrations">
-                    Open EspoCRM Integration
-                    <ChevronRight className="size-4" />
-                  </Link>
-                </Button>
-              </CardFooter>
-            </Card>
+            <EspoCrmIntegrationPanel />
 
             <Card>
               <CardHeader>
@@ -580,6 +570,8 @@ export default function SettingsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            <AuditLogPanel />
           </TabsContent>
         </Tabs>
       </Shell>
