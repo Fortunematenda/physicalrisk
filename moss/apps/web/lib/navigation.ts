@@ -9,7 +9,6 @@ import {
   IconLayers,
   IconLayoutDashboard,
   IconListChecks,
-  IconMail,
   IconSettings,
   IconShieldCheck,
   IconSlidersHorizontal,
@@ -224,13 +223,6 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     items: [
       { id: 'consultants', label: 'Consultants & Analysts', href: '/admin/consultants', icon: IconBuilding2, roles: ['ADMIN', 'ANALYST'] },
       { id: 'users', label: 'User administration', href: '/admin/users', icon: IconUsers, roles: ['ADMIN'] },
-      {
-        id: 'emails',
-        label: 'Email Logs',
-        href: '/admin/emails',
-        icon: IconMail,
-        roles: ['ADMIN'],
-      },
       {
         id: 'espocrm',
         label: 'EspoCRM Integration',

@@ -340,7 +340,7 @@ export function TriageCommercialPanel({
       },
       {
         title: 'Proposal sent successfully',
-        description: `Email delivered to ${recipient}. If it is missing, check Email Logs and the junk folder.`,
+        description: `Email delivered to ${recipient}. If it is missing, ask them to check their junk folder.`,
       },
     );
   }

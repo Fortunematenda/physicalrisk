@@ -30,7 +30,6 @@ function PersistentShell({ children }: { children: React.ReactNode }) {
       onSearch={chrome?.onSearch}
       searchValue={chrome?.searchValue}
       notificationCount={chrome?.notificationCount}
-      mailCount={chrome?.mailCount}
     >
       {children}
     </AppShellFrame>

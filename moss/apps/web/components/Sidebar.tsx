@@ -30,7 +30,6 @@ type SidebarProps = {
 
 type NavBadges = {
   reviewQueue: number;
-  failedEmails: number;
 };
 
 function initials(name: string) {
@@ -51,7 +50,7 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname() || '';
   const [user, setUser] = useState<StoredUser | null>(null);
-  const [badges, setBadges] = useState<NavBadges>({ reviewQueue: 0, failedEmails: 0 });
+  const [badges, setBadges] = useState<NavBadges>({ reviewQueue: 0 });
   const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -66,16 +65,12 @@ export function Sidebar({
       role === 'ADMIN' || role === 'ANALYST'
         ? apiFetch<{ awaitingReview?: unknown[]; summary?: { totalInQueue?: number } }>('/analyst/queue').catch(() => ({ awaitingReview: [] as unknown[], summary: undefined as { totalInQueue?: number } | undefined }))
         : Promise.resolve({ awaitingReview: [] as unknown[], summary: undefined as { totalInQueue?: number } | undefined }),
-      role === 'ADMIN'
-        ? apiFetch<Array<{ status: string }>>('/admin/emails').catch(() => [])
-        : Promise.resolve([]),
-    ]).then(([queue, emails]) => {
+    ]).then(([queue]) => {
       const queueCount = typeof queue.summary?.totalInQueue === 'number'
         ? queue.summary.totalInQueue
         : (Array.isArray(queue.awaitingReview) ? queue.awaitingReview.length : 0);
       setBadges({
         reviewQueue: queueCount,
-        failedEmails: Array.isArray(emails) ? emails.filter((e) => e.status === 'FAILED').length : 0,
       });
     });
   }, []);
@@ -131,9 +126,6 @@ export function Sidebar({
   function renderBadge(itemId: string) {
     if ((itemId === 'review-queue' || itemId === 'scl-review-queue' || itemId === 'scli-review-queue') && badges.reviewQueue > 0) {
       return <span className="sidebar-badge danger">{badges.reviewQueue}</span>;
-    }
-    if (itemId === 'emails' && badges.failedEmails > 0) {
-      return <span className="sidebar-badge warn">{badges.failedEmails}</span>;
     }
     return null;
   }

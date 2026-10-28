@@ -13,7 +13,6 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
-  Mail,
   PanelLeft,
   ScrollText,
   Settings,
@@ -85,7 +84,6 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
   reports: FileText,
   methodology: SlidersHorizontal,
   assumptions: Calculator,
-  emails: Mail,
   users: Users,
   espocrm: Cable,
   'espocrm-open': Cable,
@@ -95,14 +93,12 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
 
 export type NavBadges = {
   reviewQueue: number;
-  failedEmails: number;
   unreadTriageEmails: number;
 };
 
 export function useNavBadges(): NavBadges {
   const [badges, setBadges] = useState<NavBadges>({
     reviewQueue: 0,
-    failedEmails: 0,
     unreadTriageEmails: 0,
   });
 
@@ -127,15 +123,12 @@ export function useNavBadges(): NavBadges {
               awaitingReview: [] as unknown[],
               summary: undefined as { totalInQueue?: number } | undefined,
             }),
-        role === 'ADMIN'
-          ? apiFetch<Array<{ status: string }>>('/admin/emails', pollOpts).catch(() => [])
-          : Promise.resolve([]),
         apiFetch<{ unreadCount?: number }>('/triage/communications/unread-summary', pollOpts).catch(
           () => ({
             unreadCount: 0,
           }),
         ),
-      ]).then(([queue, emails, triageUnread]) => {
+      ]).then(([queue, triageUnread]) => {
         if (cancelled) return;
         const queueCount =
           typeof queue.summary?.totalInQueue === 'number'
@@ -146,9 +139,6 @@ export function useNavBadges(): NavBadges {
 
         setBadges({
           reviewQueue: queueCount,
-          failedEmails: Array.isArray(emails)
-            ? emails.filter((e) => e.status === 'FAILED').length
-            : 0,
           unreadTriageEmails: Number(triageUnread?.unreadCount || 0),
         });
       });
@@ -228,13 +218,6 @@ function renderNavBadge(itemId: string, badges: NavBadges) {
     return (
       <Badge variant="danger" className="ml-auto shrink-0">
         {badges.reviewQueue}
-      </Badge>
-    );
-  }
-  if (itemId === 'emails' && badges.failedEmails > 0) {
-    return (
-      <Badge variant="warning" className="ml-auto shrink-0">
-        {badges.failedEmails}
       </Badge>
     );
   }

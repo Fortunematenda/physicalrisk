@@ -4,7 +4,7 @@ import { AppShell } from '@/components/layout/app-shell';
 
 /**
  * Backward-compatible Shell wrapper.
- * Always uses the uniform AppHeader (search, notifications, mail, avatar).
+ * Always uses the uniform AppHeader (search, notifications, avatar).
  * Do not pass legacy dash2-header-actions via `actions` — use onSearch instead.
  */
 export function Shell({
@@ -21,7 +21,6 @@ export function Shell({
   onSearch,
   searchValue,
   notificationCount,
-  mailCount,
 }: {
   title: string;
   subtitle?: string;
@@ -36,7 +35,6 @@ export function Shell({
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
-  mailCount?: number;
 }) {
   return (
     <AppShell
@@ -50,7 +48,6 @@ export function Shell({
       onSearch={onSearch}
       searchValue={searchValue}
       notificationCount={notificationCount}
-      mailCount={mailCount}
     >
       {children}
     </AppShell>

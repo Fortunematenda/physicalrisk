@@ -9,7 +9,7 @@ import { StatCard } from '@/components/dashboard/stat-card';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { useSidebarUser } from '@/components/layout/app-sidebar';
-import { CrmSyncHistory, StatusPill, type HistoryFeedback } from '@/components/crm/CrmSyncHistory';
+import { StatusPill, type HistoryFeedback } from '@/components/crm/CrmSyncHistory';
 import { apiFetch } from '../../../lib/api';
 import { safeExternalNavUrl } from '../../../lib/navigation';
 import {
@@ -151,10 +151,6 @@ export default function IntegrationsPage() {
     }
   }
 
-  const onJobSettled = useCallback(() => {
-    void loadStatus();
-  }, [loadStatus]);
-
   const crmUrl = access?.available ? safeExternalNavUrl(access.url) : null;
   const connection = status ? CONNECTION_COPY[status.connection.state] : null;
   const sync = status ? SYNC_COPY[status.sync.state] : null;
@@ -180,7 +176,7 @@ export default function IntegrationsPage() {
       <Shell
         title="EspoCRM Integration"
         hideEyebrow
-        subtitle="Connection, sync health and sync history for MOSS and EspoCRM."
+        subtitle="Connection and sync health for MOSS and EspoCRM. Records sync automatically in the background."
         actions={openCrmAction}
       >
         {!accessLoading && !crmUrl ? (
@@ -349,7 +345,7 @@ export default function IntegrationsPage() {
                       <p className="mt-1 text-slate-600">
                         {status.sync.lastFailureJob.currentStatus === 'success'
                           ? 'Resolved: a later attempt succeeded.'
-                          : `Not resolved yet (job status: ${HISTORY_COPY[status.sync.lastFailureJob.currentStatus].label}). See Sync history below.`}
+                          : `Not resolved yet (job status: ${HISTORY_COPY[status.sync.lastFailureJob.currentStatus].label}).`}
                       </p>
                     ) : null}
                   </div>
@@ -363,7 +359,6 @@ export default function IntegrationsPage() {
           </section>
         </div>
 
-        <CrmSyncHistory onFeedback={setFeedback} onJobSettled={onJobSettled} />
 
         {isAdmin ? (
           <details className="dash2-card group">

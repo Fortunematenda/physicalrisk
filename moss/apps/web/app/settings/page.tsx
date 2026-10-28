@@ -414,12 +414,6 @@ export default function SettingsPage() {
                   <Mail className="size-4" />
                   {testingSmtp ? 'Sending…' : 'Test Email Settings'}
                 </Button>
-                <Button asChild variant="outline">
-                  <Link href="/admin/emails">
-                    Email Logs
-                    <ChevronRight className="size-4" />
-                  </Link>
-                </Button>
               </CardFooter>
             </Card>
           </TabsContent>
@@ -579,15 +573,6 @@ export default function SettingsPage() {
                       <span className="inline-flex items-center gap-2">
                         <ClipboardList className="size-4" />
                         Assumptions
-                      </span>
-                      <ChevronRight className="size-4" />
-                    </Link>
-                  </Button>
-                  <Button asChild variant="outline" className="w-full justify-between">
-                    <Link href="/admin/emails">
-                      <span className="inline-flex items-center gap-2">
-                        <Mail className="size-4" />
-                        Email Logs
                       </span>
                       <ChevronRight className="size-4" />
                     </Link>

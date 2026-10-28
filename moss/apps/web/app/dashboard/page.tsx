@@ -496,7 +496,6 @@ export default function DashboardPage() {
         searchValue={search}
         onSearch={setSearch}
         notificationCount={notificationCount}
-        mailCount={summary.failedEmails}
       >
         {error && (
           <ErrorState message={error} onRetry={loadData} className="mb-6" />
@@ -938,9 +937,6 @@ export default function DashboardPage() {
                 <CardTitle className="text-base">System Alerts</CardTitle>
                 <CardDescription>Email, CRM and review signals</CardDescription>
               </div>
-              <Button asChild variant="link" size="sm" className="shrink-0 px-0">
-                <Link href="/admin/emails">Email logs</Link>
-              </Button>
             </CardHeader>
             <CardContent>
               <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">

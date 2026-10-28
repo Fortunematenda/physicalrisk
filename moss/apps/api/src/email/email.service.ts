@@ -148,7 +148,7 @@ export class EmailService {
     if (!result.ok) {
       throw new BadRequestException(
         result.error
-          || 'Failed to deliver the proposal email. Check Email Logs and SMTP settings.',
+          || 'Failed to deliver the proposal email. Check the SMTP settings.',
       );
     }
     return result.job;

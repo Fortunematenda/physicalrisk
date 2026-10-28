@@ -10,7 +10,6 @@ import {
   ClipboardList,
   FileText,
   LogOut,
-  Mail,
   Menu,
   Search,
 } from 'lucide-react';
@@ -60,7 +59,6 @@ type AppHeaderProps = {
   onMenuClick?: () => void;
   onLogout?: () => void;
   notificationCount?: number;
-  mailCount?: number;
   notificationHref?: string;
   notificationTitle?: string;
   className?: string;
@@ -133,7 +131,6 @@ export function AppHeader({
   onMenuClick,
   onLogout,
   notificationCount = 0,
-  mailCount = 0,
   notificationHref = '/assessments',
   notificationTitle = 'Notifications',
   className,
@@ -552,28 +549,6 @@ export function AppHeader({
                   className="absolute -right-0.5 -top-0.5 flex size-5 items-center justify-center rounded-full p-0 text-[10px]"
                 >
                   {notificationCount > 99 ? '99+' : notificationCount}
-                </Badge>
-              )}
-            </Link>
-          </Button>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="relative shrink-0 text-moss-muted hover:text-moss-text"
-            aria-label="Email logs"
-            title="Email logs"
-            asChild
-          >
-            <Link href="/admin/emails">
-              <Mail className="size-5" />
-              {mailCount > 0 && (
-                <Badge
-                  variant="danger"
-                  className="absolute -right-0.5 -top-0.5 flex size-5 items-center justify-center rounded-full p-0 text-[10px]"
-                >
-                  {mailCount > 99 ? '99+' : mailCount}
                 </Badge>
               )}
             </Link>

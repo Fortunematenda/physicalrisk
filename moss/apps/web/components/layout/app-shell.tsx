@@ -27,7 +27,6 @@ export type AppShellProps = {
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
-  mailCount?: number;
 };
 
 function readCollapsed(): boolean {
@@ -52,7 +51,6 @@ export function AppShellFrame({
   onSearch,
   searchValue,
   notificationCount,
-  mailCount,
 }: AppShellProps) {
   const badges = useNavBadges();
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -81,7 +79,6 @@ export function AppShellFrame({
   }, []);
 
   const resolvedNotifications = notificationCount ?? badges.unreadTriageEmails;
-  const resolvedMail = mailCount ?? badges.failedEmails;
   const notificationHref = badges.unreadTriageEmails > 0 ? '/triage' : '/assessments';
   const notificationTitle =
     badges.unreadTriageEmails > 0
@@ -117,7 +114,6 @@ export function AppShellFrame({
           onMenuClick={() => setMobileOpen(true)}
           onLogout={logout}
           notificationCount={resolvedNotifications}
-          mailCount={resolvedMail}
           notificationHref={notificationHref}
           notificationTitle={notificationTitle}
         />
@@ -145,7 +141,6 @@ export function AppShell({
   onSearch,
   searchValue,
   notificationCount,
-  mailCount,
 }: AppShellProps) {
   const ctx = useShellChrome();
   const setChrome = ctx?.setChrome;
@@ -163,7 +158,6 @@ export function AppShell({
       onSearch,
       searchValue,
       notificationCount,
-      mailCount,
     });
   }, [
     setChrome,
@@ -177,7 +171,6 @@ export function AppShell({
     onSearch,
     searchValue,
     notificationCount,
-    mailCount,
   ]);
 
   if (ctx) {
@@ -196,7 +189,6 @@ export function AppShell({
       onSearch={onSearch}
       searchValue={searchValue}
       notificationCount={notificationCount}
-      mailCount={mailCount}
     >
       {children}
     </AppShellFrame>

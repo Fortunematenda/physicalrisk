@@ -22,7 +22,6 @@ export type ShellChromeState = {
   onSearch?: (value: string) => void;
   searchValue?: string;
   notificationCount?: number;
-  mailCount?: number;
 };
 
 type ShellChromeContextValue = {
@@ -51,7 +50,6 @@ export function ShellChromeProvider({ children }: { children: ReactNode }) {
       onSearch: undefined,
       searchValue: undefined,
       notificationCount: undefined,
-      mailCount: undefined,
       hideSearch: false,
       hideTitle: false,
       searchPlaceholder: 'Search…',
