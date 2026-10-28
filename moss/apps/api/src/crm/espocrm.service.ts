@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   BadGatewayException,
   BadRequestException,
@@ -47,11 +48,17 @@ import type {
   EspoJobType,
   EspoLogQuery,
   EspoPublicConnectionTest,
+  EspoSyncAttemptItem,
   EspoSyncHistoryItem,
   EspoSyncHistoryPage,
+  EspoSyncHistoryQuery,
+  EspoSyncJobDetail,
 } from './espocrm.types';
 import {
   ESPO_WORKER_INTERVAL_MS,
+  HISTORY_PAGE_SIZES,
+  HISTORY_RECORD_TYPES,
+  HISTORY_STATUS_FILTER,
   classifyConnectionTest,
   countUnresolvedFailures,
   crmRecordUrl,
@@ -63,6 +70,8 @@ import {
   resolveSyncState,
   resolveWorkerState,
   sanitizeErrorSummary,
+  sastDayBounds,
+  syncRecordKey,
   type EspoCheckState,
   type EspoCrmAccess,
   type EspoLastConnectionTest,
@@ -77,13 +86,39 @@ const SYNC_DIRECTION = 'Outbound (MOSS → EspoCRM)';
 const SUCCESS_STATUSES: SyncStatus[] = ['SUCCESS', 'SYNCED'];
 /** A PROCESSING row older than this is treated as abandoned when checking for duplicate work. */
 const PROCESSING_STALE_MS = 15 * 60_000;
-const HISTORY_STATUS_FILTER: Record<string, SyncStatus[]> = {
-  success: ['SUCCESS', 'SYNCED'],
-  failed: ['FAILED'],
-  pending: ['PENDING', 'RETRYING'],
-  processing: ['PROCESSING'],
-  skipped: ['SKIPPED', 'CANCELLED'],
+/** Sync jobs are the rows with no parent; rows written while a job ran hang off it. */
+const TOP_LEVEL = { parentId: null } satisfies Prisma.CrmSyncRecordWhereInput;
+const MAX_SEARCH_LENGTH = 100;
+
+type SyncTrigger = 'automatic' | 'manual';
+
+type JobSpec = {
+  jobType: EspoJobType;
+  entityType: string;
+  localEntityId: string;
+  organisationId?: string | null;
+  assessmentId?: string | null;
 };
+
+const REMOTE_ID_FIELD: Record<string, string> = {
+  Lead: 'leadId',
+  Account: 'accountId',
+  Contact: 'contactId',
+  Opportunity: 'opportunityId',
+};
+
+/** The EspoCRM id a job's handler reports for the job's own record type. */
+function remoteIdOf(entityType: string, value: unknown): string | null {
+  const field = REMOTE_ID_FIELD[entityType];
+  if (!field || !value || typeof value !== 'object') return null;
+  const id = (value as Record<string, unknown>)[field];
+  return typeof id === 'string' && id ? id : null;
+}
+
+function attemptOutcome(status: SyncStatus): 'failed' | 'retrying' | 'skipped' {
+  if (status === 'SKIPPED') return 'skipped';
+  return status === 'RETRYING' ? 'retrying' : 'failed';
+}
 
 function parseConnectionTest(value: unknown): EspoLastConnectionTest | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -124,7 +159,11 @@ type HistoryRow = {
   errorMessage: string | null;
   attemptCount: number;
   nextRetryAt: Date | null;
+  lastAttemptAt: Date | null;
   assessmentId: string | null;
+  parentId: string | null;
+  attemptsTracked: boolean;
+  createdAt: Date;
   updatedAt: Date;
   organisation: { name: string } | null;
   assessment: { reference: string } | null;
@@ -140,11 +179,24 @@ const HISTORY_SELECT = {
   errorMessage: true,
   attemptCount: true,
   nextRetryAt: true,
+  lastAttemptAt: true,
   assessmentId: true,
+  parentId: true,
+  attemptsTracked: true,
+  createdAt: true,
   updatedAt: true,
   organisation: { select: { name: true } },
   assessment: { select: { reference: true } },
 } satisfies Prisma.CrmSyncRecordSelect;
+
+function historyReference(row: {
+  entityType: string;
+  localEntityId: string;
+  organisation: { name: string } | null;
+  assessment: { reference: string } | null;
+}) {
+  return row.assessment?.reference || row.organisation?.name || `${row.entityType} …${row.localEntityId.slice(-6)}`;
+}
 
 type LeakageResult = {
   minimumLeakageValue?: number;
@@ -161,6 +213,8 @@ export class EspoCrmService {
   private readonly logger = new Logger(EspoCrmService.name);
   private cfg: EspoCrmRuntimeConfig;
   private espoIndustryOptions: string[] | null = null;
+  /** Set while a sync job runs, so every record written during it is attached to that job. */
+  private readonly jobScope = new AsyncLocalStorage<{ jobId: string }>();
 
   constructor(
     private readonly config: ConfigService,
@@ -208,6 +262,7 @@ export class EspoCrmService {
   /** Jobs the retry loop may run. Permanent failures have no nextRetryAt and stay out. */
   private dueSyncFilter(now = new Date()): Prisma.CrmSyncRecordWhereInput {
     return {
+      ...TOP_LEVEL,
       OR: [
         { status: 'PENDING' },
         { status: 'RETRYING', OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }] },
@@ -447,28 +502,41 @@ export class EspoCrmService {
       this.workerHeartbeat(),
       // A PENDING row's lastAttemptAt is its queue time, not an attempt.
       records.findFirst({
-        where: { status: { not: 'PENDING' }, lastAttemptAt: { not: null } },
+        where: { ...TOP_LEVEL, status: { not: 'PENDING' }, lastAttemptAt: { not: null } },
         orderBy: { lastAttemptAt: 'desc' },
         select: { lastAttemptAt: true },
       }),
       records.findFirst({
-        where: { status: { in: SUCCESS_STATUSES } },
+        where: { ...TOP_LEVEL, status: { in: SUCCESS_STATUSES } },
         orderBy: { updatedAt: 'desc' },
         select: { updatedAt: true },
       }),
-      records.findFirst({
-        where: { status: 'FAILED' },
-        orderBy: { updatedAt: 'desc' },
-        select: { updatedAt: true, errorMessage: true },
+      // Attempts outlive a retry, which clears the job's own error, so the latest failure comes from them.
+      this.prisma.crmSyncAttempt.findFirst({
+        where: { outcome: { in: ['failed', 'retrying'] }, completedAt: { not: null } },
+        orderBy: { completedAt: 'desc' },
+        select: {
+          completedAt: true,
+          errorMessage: true,
+          syncRecord: {
+            select: {
+              status: true,
+              entityType: true,
+              localEntityId: true,
+              organisation: { select: { name: true } },
+              assessment: { select: { reference: true } },
+            },
+          },
+        },
       }),
-      records.count({ where: { status: 'PENDING' } }),
-      records.count({ where: { status: 'PROCESSING' } }),
-      records.count({ where: { status: 'RETRYING' } }),
-      records.count({ where: { status: 'FAILED' } }),
-      records.count({ where: { status: { in: SUCCESS_STATUSES } } }),
-      records.count({ where: { status: { in: ['SKIPPED', 'CANCELLED'] } } }),
+      records.count({ where: { ...TOP_LEVEL, status: 'PENDING' } }),
+      records.count({ where: { ...TOP_LEVEL, status: 'PROCESSING' } }),
+      records.count({ where: { ...TOP_LEVEL, status: 'RETRYING' } }),
+      records.count({ where: { ...TOP_LEVEL, status: 'FAILED' } }),
+      records.count({ where: { ...TOP_LEVEL, status: { in: SUCCESS_STATUSES } } }),
+      records.count({ where: { ...TOP_LEVEL, status: { in: ['SKIPPED', 'CANCELLED'] } } }),
       records.findMany({
-        where: { status: 'FAILED' },
+        where: { ...TOP_LEVEL, status: 'FAILED' },
         orderBy: { updatedAt: 'desc' },
         take: 500,
         select: { jobType: true, entityType: true, localEntityId: true, updatedAt: true },
@@ -479,7 +547,7 @@ export class EspoCrmService {
     const [laterSuccesses, byType] = await Promise.all([
       failedIds.length
         ? records.findMany({
-            where: { status: { in: SUCCESS_STATUSES }, localEntityId: { in: failedIds } },
+            where: { ...TOP_LEVEL, status: { in: SUCCESS_STATUSES }, localEntityId: { in: failedIds } },
             select: { jobType: true, entityType: true, localEntityId: true, updatedAt: true },
           })
         : Promise.resolve([]),
@@ -529,8 +597,15 @@ export class EspoCrmService {
         direction: SYNC_DIRECTION,
         lastAttemptAt: lastAttempt?.lastAttemptAt?.toISOString() ?? null,
         lastSuccessAt: lastSuccess?.updatedAt.toISOString() ?? null,
-        lastFailureAt: lastFailure?.updatedAt.toISOString() ?? null,
+        lastFailureAt: lastFailure?.completedAt?.toISOString() ?? null,
         lastFailureSummary: sanitizeErrorSummary(lastFailure?.errorMessage),
+        lastFailureJob: lastFailure
+          ? {
+              recordType: lastFailure.syncRecord.entityType,
+              reference: historyReference(lastFailure.syncRecord),
+              currentStatus: historyStatus(lastFailure.syncRecord.status),
+            }
+          : null,
         counts: { pending, processing, retrying, failedUnresolved, failedTotal, succeeded, skipped },
         succeededByType: byType
           .map((row) => ({ recordType: row.entityType, count: row._count._all }))
@@ -581,15 +656,19 @@ export class EspoCrmService {
           detail: 'Certificate verification is turned off in the deployment configuration.',
         };
 
-    const workerCopy: Record<EspoIntegrationStatus['worker']['state'], Pick<EspoHealthCheck, 'result' | 'detail'>> = {
-      running: {
-        result: 'passed',
-        detail: heartbeat
-          ? `Last run processed ${heartbeat.processed} job(s): ${heartbeat.succeeded} succeeded, ${heartbeat.failed} failed.`
-          : 'The sync worker has run recently.',
-      },
+    const lastRun = !heartbeat
+      ? 'No run details recorded.'
+      : heartbeat.processed === 0
+        ? 'Last run processed 0 jobs. A run with no jobs does not confirm delivery to EspoCRM.'
+        : `Last run processed ${heartbeat.processed} job(s): ${heartbeat.succeeded} succeeded, ${heartbeat.failed} failed.`;
+    const workerCopy: Record<
+      EspoIntegrationStatus['worker']['state'],
+      Pick<EspoHealthCheck, 'result' | 'detail' | 'statusLabel'>
+    > = {
+      running: { result: 'passed', statusLabel: 'Running', detail: `Worker running — ${lastRun.charAt(0).toLowerCase()}${lastRun.slice(1)}` },
       stale: {
         result: 'failed',
+        statusLabel: 'Not running',
         detail: `The sync worker has not run for over ${(3 * ESPO_WORKER_INTERVAL_MS) / 60_000} minutes.`,
       },
       not_recorded: { result: 'not_checked', detail: 'No sync worker run has been recorded yet.' },
@@ -699,8 +778,115 @@ export class EspoCrmService {
         attemptCount: input.attemptCount ?? 1,
         nextRetryAt: input.nextRetryAt ?? null,
         lastAttemptAt: new Date(),
+        parentId: this.jobScope.getStore()?.jobId ?? null,
       },
     });
+  }
+
+  /**
+   * Run one attempt of a claimed job: record the attempt, run the handler inside the
+   * job scope, then store the outcome on both the attempt and the job.
+   */
+  private async runAttempt<T>(
+    job: { id: string; attemptCount: number; entityType: string; localEntityId: string; jobType: string | null },
+    trigger: SyncTrigger,
+    userId: string | null,
+    work: () => Promise<T>,
+  ): Promise<{ status: SyncStatus; value?: T; error?: unknown }> {
+    const attemptNumber = (job.attemptCount || 0) + 1;
+    const attempt = await this.prisma.crmSyncAttempt
+      .create({
+        data: { syncRecordId: job.id, attemptNumber, trigger, triggeredById: userId, startedAt: new Date() },
+      })
+      .catch((err: unknown) => {
+        this.logger.warn(`Could not record CRM sync attempt: ${(err as Error)?.message || err}`);
+        return null;
+      });
+    const finishAttempt = async (data: Prisma.CrmSyncAttemptUpdateInput) => {
+      if (!attempt) return;
+      await this.prisma.crmSyncAttempt
+        .update({ where: { id: attempt.id }, data: { completedAt: new Date(), ...data } })
+        .catch(() => undefined);
+    };
+
+    try {
+      const value = await this.jobScope.run({ jobId: job.id }, work);
+      const remoteId = remoteIdOf(job.entityType, value);
+      await this.prisma.crmSyncRecord.update({
+        where: { id: job.id },
+        data: {
+          status: 'SUCCESS',
+          errorMessage: null,
+          errorCode: null,
+          lastAttemptAt: new Date(),
+          attemptCount: attemptNumber,
+          nextRetryAt: null,
+          ...(remoteId ? { remoteEntityId: remoteId } : {}),
+        },
+      });
+      await finishAttempt({ outcome: 'success', remoteEntityId: remoteId });
+      return { status: 'SUCCESS', value };
+    } catch (error: unknown) {
+      const safe = this.asError(error);
+      const missing = error instanceof NotFoundException;
+      const premature =
+        error instanceof BadRequestException &&
+        safe.message.startsWith('Evaluate the assessment before CRM synchronisation');
+      const terminal = missing || premature;
+      const retryable = !terminal && safe.retryable && attemptNumber < ESPO_MAX_ATTEMPTS;
+      const finalStatus: SyncStatus = terminal ? 'SKIPPED' : retryable ? 'RETRYING' : 'FAILED';
+      await this.prisma.crmSyncRecord.update({
+        where: { id: job.id },
+        data: {
+          status: finalStatus,
+          errorMessage: safe.message,
+          errorCode: safe.code,
+          lastAttemptAt: new Date(),
+          attemptCount: attemptNumber,
+          nextRetryAt: terminal ? null : nextRetryAt(attemptNumber, retryable),
+        },
+      });
+      await finishAttempt({ outcome: attemptOutcome(finalStatus), errorCode: safe.code, errorMessage: safe.message });
+      await this.audit.record({
+        userId: userId ?? undefined,
+        action: 'ESPOCRM_SYNC_FAILED',
+        entityType: job.entityType,
+        entityId: job.localEntityId,
+        metadata: { syncId: job.id, code: safe.code, jobType: job.jobType, attempt: attemptNumber },
+      });
+      return { status: finalStatus, error };
+    }
+  }
+
+  /**
+   * A sync started directly (not from the queue) becomes its own job with one attempt.
+   * Inside a running job it simply does the work, so nested calls never create jobs.
+   */
+  private async runDirectJob<T>(
+    spec: JobSpec,
+    trigger: SyncTrigger,
+    user: AuthUser | undefined,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    if (this.jobScope.getStore()) return work();
+    const job = await this.prisma.crmSyncRecord.create({
+      data: {
+        organisationId: spec.organisationId || undefined,
+        assessmentId: spec.assessmentId || undefined,
+        entityType: spec.entityType,
+        localEntityId: spec.localEntityId,
+        jobType: spec.jobType,
+        action: 'sync',
+        payload: { jobType: spec.jobType, trigger, requestedAt: new Date().toISOString() },
+        status: 'PROCESSING',
+        attemptCount: 0,
+        lastAttemptAt: new Date(),
+      },
+    });
+    const result = await this.runAttempt(job, trigger, user?.id ?? null, work);
+    if (result.status === 'SUCCESS') return result.value as T;
+    const error = result.error;
+    throw error instanceof EspoCrmHttpError ? new BadGatewayException(this.asError(error).message) : error;
   }
 
   private asError(error: unknown): { message: string; code: string; retryable: boolean } {
@@ -729,6 +915,7 @@ export class EspoCrmService {
 
     const existing = await this.prisma.crmSyncRecord.findFirst({
       where: {
+        ...TOP_LEVEL,
         jobType: input.jobType,
         localEntityId: input.localEntityId,
         status: { in: ['PENDING', 'PROCESSING', 'RETRYING'] },
@@ -822,41 +1009,29 @@ export class EspoCrmService {
       return { synced: false, reason: 'not_configured' as const };
     }
 
+    const existing = await this.prisma.crmSyncRecord.findFirst({
+      where: {
+        ...TOP_LEVEL,
+        jobType: 'ESPO_SYNC_LEAD',
+        localEntityId: leadId,
+        status: { in: ['PENDING', 'PROCESSING', 'RETRYING'] },
+      },
+      select: { id: true },
+    });
+    if (existing) return { synced: false, reason: 'queued_retry' as const };
+
     try {
-      const result = await this.syncLead(leadId, overrides);
+      const result = await this.runDirectJob(
+        { jobType: 'ESPO_SYNC_LEAD', entityType: 'Lead', localEntityId: leadId },
+        'automatic',
+        undefined,
+        () => this.syncLead(leadId, overrides),
+      );
       return { synced: true, leadId: result.leadId };
     } catch (error: unknown) {
-      this.logger.warn(
-        `Immediate EspoCRM lead sync failed for ${leadId}; queueing retry: ${(error as Error)?.message || error}`,
-      );
-      // Force a retry job even if AUTO_SYNC is off — contact form must eventually create the lead
-      const existing = await this.prisma.crmSyncRecord.findFirst({
-        where: {
-          jobType: 'ESPO_SYNC_LEAD',
-          localEntityId: leadId,
-          status: { in: ['PENDING', 'PROCESSING', 'RETRYING'] },
-        },
-      });
-      if (!existing) {
-        const row = await this.prisma.crmSyncRecord.create({
-          data: {
-            entityType: 'Lead',
-            localEntityId: leadId,
-            jobType: 'ESPO_SYNC_LEAD',
-            action: 'queue',
-            payload: {
-              jobType: 'ESPO_SYNC_LEAD',
-              queuedAt: new Date().toISOString(),
-              reason: 'contact_form_retry',
-            },
-            status: 'PENDING',
-            lastAttemptAt: new Date(),
-            nextRetryAt: new Date(Date.now() + 60_000),
-          },
-        });
-        void this.processQueuedSync(row.id).catch(() => undefined);
-      }
-      return { synced: false, reason: 'queued_retry' as const };
+      // The failed job itself is scheduled for retry when the error is retryable.
+      this.logger.warn(`Immediate EspoCRM lead sync failed for ${leadId}: ${(error as Error)?.message || error}`);
+      return { synced: false, reason: 'sync_failed' as const };
     }
   }
 
@@ -878,17 +1053,25 @@ export class EspoCrmService {
     });
   }
 
-  /** Runs one queued job. Returns its final status, or null if it was missing or already claimed. */
-  async processQueuedSync(syncId: string): Promise<SyncStatus | null> {
+  /**
+   * Runs one queued job. Returns its final status, or null if it was missing or already
+   * claimed. `claimed` is for callers that have already moved the job to PROCESSING.
+   */
+  async processQueuedSync(
+    syncId: string,
+    opts: { trigger?: SyncTrigger; userId?: string | null; claimed?: boolean } = {},
+  ): Promise<SyncStatus | null> {
     const row = await this.prisma.crmSyncRecord.findUnique({ where: { id: syncId } });
-    if (!row) return null;
+    if (!row || row.parentId) return null;
 
-    // Conditional claim: only one caller (cron, retry or enqueue) can move a job into PROCESSING.
-    const claimed = await this.prisma.crmSyncRecord.updateMany({
-      where: { id: syncId, status: { in: ['PENDING', 'RETRYING', 'FAILED'] } },
-      data: { status: 'PROCESSING', lastAttemptAt: new Date() },
-    });
-    if (claimed.count === 0) return null;
+    if (!opts.claimed) {
+      // Conditional claim: only one caller (cron, retry or enqueue) can move a job into PROCESSING.
+      const claimed = await this.prisma.crmSyncRecord.updateMany({
+        where: { id: syncId, ...TOP_LEVEL, status: { in: ['PENDING', 'RETRYING', 'FAILED'] } },
+        data: { status: 'PROCESSING', lastAttemptAt: new Date() },
+      });
+      if (claimed.count === 0) return null;
+    }
 
     const systemUser = await this.prisma.user.findFirst({
       where: { systemRole: 'SUPER_ADMIN', isActive: true },
@@ -897,78 +1080,48 @@ export class EspoCrmService {
       ? { id: systemUser.id, email: systemUser.email, role: String(systemUser.systemRole) }
       : null;
 
-    try {
-      const jobType = (row.jobType ||
-        (row.entityType === 'Opportunity'
-          ? 'ESPO_SYNC_OPPORTUNITY'
-          : row.entityType === 'Lead'
-            ? 'ESPO_SYNC_LEAD'
-            : row.entityType === 'Account'
-              ? 'ESPO_SYNC_ACCOUNT'
-              : null)) as EspoJobType | null;
+    const result = await this.runAttempt(row, opts.trigger ?? 'automatic', opts.userId ?? null, () =>
+      this.runJobHandler(row, authUser),
+    );
+    return result.status;
+  }
 
-      if (jobType === 'ESPO_SYNC_LEAD') {
-        await this.syncLead(row.localEntityId, authUser || undefined);
-      } else if (jobType === 'ESPO_SYNC_ACCOUNT') {
-        await this.syncOrganisation(row.localEntityId, authUser || undefined);
-      } else if (jobType === 'ESPO_SYNC_CONTACT') {
-        await this.syncContactByLeadId(row.localEntityId, authUser || undefined);
-      } else if (jobType === 'ESPO_UPDATE_REPORT' && row.assessmentId) {
-        await this.updateReportOnOpportunity(row.assessmentId, authUser || undefined);
-      } else if (row.assessmentId || jobType === 'ESPO_SYNC_OPPORTUNITY') {
-        if (!authUser) throw new BadRequestException('System user required for CRM sync.');
-        await this.syncAssessment(row.assessmentId || row.localEntityId, authUser, {
-          skipAccessCheck: true,
-        });
-      } else {
-        throw new BadRequestException(`Unsupported CRM job for ${row.entityType}`);
-      }
+  private async runJobHandler(
+    row: { jobType: string | null; entityType: string; localEntityId: string; assessmentId: string | null },
+    authUser: AuthUser | null,
+  ): Promise<unknown> {
+    const jobType = (row.jobType ||
+      (row.entityType === 'Opportunity'
+        ? 'ESPO_SYNC_OPPORTUNITY'
+        : row.entityType === 'Lead'
+          ? 'ESPO_SYNC_LEAD'
+          : row.entityType === 'Account'
+            ? 'ESPO_SYNC_ACCOUNT'
+            : null)) as EspoJobType | null;
 
-      await this.prisma.crmSyncRecord.update({
-        where: { id: syncId },
-        data: {
-          status: 'SUCCESS',
-          errorMessage: null,
-          errorCode: null,
-          lastAttemptAt: new Date(),
-          attemptCount: { increment: 1 },
-          nextRetryAt: null,
-        },
-      });
-      return 'SUCCESS';
-    } catch (error: unknown) {
-      const safe = this.asError(error);
-      const missing = error instanceof NotFoundException;
-      const premature =
-        error instanceof BadRequestException &&
-        safe.message.startsWith('Evaluate the assessment before CRM synchronisation');
-      const terminal = missing || premature;
-      const attemptCount = (row.attemptCount || 0) + 1;
-      const retryable = !terminal && safe.retryable && attemptCount < ESPO_MAX_ATTEMPTS;
-      const finalStatus: SyncStatus = terminal ? 'SKIPPED' : retryable ? 'RETRYING' : 'FAILED';
-      await this.prisma.crmSyncRecord.update({
-        where: { id: syncId },
-        data: {
-          status: finalStatus,
-          errorMessage: safe.message,
-          errorCode: safe.code,
-          lastAttemptAt: new Date(),
-          attemptCount,
-          nextRetryAt: terminal ? null : nextRetryAt(attemptCount, retryable),
-        },
-      });
-      await this.audit.record({
-        userId: authUser?.id,
-        action: 'ESPOCRM_SYNC_FAILED',
-        entityType: row.entityType,
-        entityId: row.localEntityId,
-        metadata: { syncId, code: safe.code, jobType: row.jobType },
-      });
-      return finalStatus;
+    if (jobType === 'ESPO_SYNC_LEAD') return this.syncLead(row.localEntityId, authUser || undefined);
+    if (jobType === 'ESPO_SYNC_ACCOUNT') return this.syncOrganisation(row.localEntityId, authUser || undefined);
+    if (jobType === 'ESPO_SYNC_CONTACT') return this.syncContactByLeadId(row.localEntityId, authUser || undefined);
+    if (jobType === 'ESPO_UPDATE_REPORT' && row.assessmentId) {
+      return this.updateReportOnOpportunity(row.assessmentId, authUser || undefined);
     }
+    if (row.assessmentId || jobType === 'ESPO_SYNC_OPPORTUNITY') {
+      if (!authUser) throw new BadRequestException('System user required for CRM sync.');
+      return this.syncAssessment(row.assessmentId || row.localEntityId, authUser, { skipAccessCheck: true });
+    }
+    throw new BadRequestException(`Unsupported CRM job for ${row.entityType}`);
   }
 
   async syncOrganisation(organisationId: string, user?: AuthUser) {
+    return this.runDirectJob(
+      { jobType: 'ESPO_SYNC_ACCOUNT', entityType: 'Account', localEntityId: organisationId, organisationId },
+      'manual',
+      user,
+      () => this.syncOrganisationNow(organisationId, user),
+    );
+  }
+
+  private async syncOrganisationNow(organisationId: string, user?: AuthUser) {
     await this.refreshConfig();
     assertEspoConfigured(this.cfg);
     const organisation = await this.prisma.organisation.findUnique({ where: { id: organisationId } });
@@ -985,6 +1138,15 @@ export class EspoCrmService {
   }
 
   async syncContactByLeadId(leadId: string, user?: AuthUser) {
+    return this.runDirectJob(
+      { jobType: 'ESPO_SYNC_CONTACT', entityType: 'Contact', localEntityId: leadId },
+      'manual',
+      user,
+      () => this.syncContactByLeadIdNow(leadId, user),
+    );
+  }
+
+  private async syncContactByLeadIdNow(leadId: string, user?: AuthUser) {
     await this.refreshConfig();
     assertEspoConfigured(this.cfg);
     const lead = await this.prisma.publicLead.findUnique({ where: { id: leadId } });
@@ -995,7 +1157,7 @@ export class EspoCrmService {
       if (org) accountId = await this.syncAccount(org);
     }
     if (!accountId) throw new BadRequestException('Organisation Account must exist before Contact sync.');
-    const contactId = await this.syncContact(lead, accountId);
+    const contactId = await this.syncContact(lead, accountId, true);
     await this.audit.record({
       userId: user?.id,
       action: 'ESPOCRM_CONTACT_SYNCED',
@@ -1496,6 +1658,7 @@ export class EspoCrmService {
       espocrmLeadId?: string | null;
     },
     accountId: string,
+    required = false,
   ) {
     const client = await this.client();
     // Legacy rows stored Contact id in espocrmLeadId before Lead sync existed.
@@ -1560,8 +1723,9 @@ export class EspoCrmService {
         status: 'SUCCESS',
       });
       return remoteId as string;
-    } catch {
-      // Opportunity sync can continue without a contact. The queue row records a contact-job failure.
+    } catch (error: unknown) {
+      // Opportunity sync can continue without a contact; a Contact job itself must fail.
+      if (required) throw error;
       return null;
     }
   }
@@ -1570,7 +1734,14 @@ export class EspoCrmService {
     assessmentId: string,
     user: AuthUser,
     opts?: { skipAccessCheck?: boolean },
-  ) {
+  ): Promise<{
+    ok: boolean;
+    accountId: string;
+    contactId: string | null;
+    opportunityId: string | null;
+    taskId: string | null;
+    syncRecordId: string;
+  }> {
     if (!['SUPER_ADMIN', 'ANALYST', 'REVIEWER', 'SALES'].includes(user.role)) {
       throw new ForbiddenException('Internal sales or review permission required.');
     }
@@ -1578,6 +1749,24 @@ export class EspoCrmService {
     assertEspoConfigured(this.cfg);
     if (!opts?.skipAccessCheck) {
       await this.checkAssessmentAccess(assessmentId, user);
+    }
+    if (!this.jobScope.getStore()) {
+      const owner = await this.prisma.assessmentSession.findUnique({
+        where: { id: assessmentId },
+        select: { organisationId: true },
+      });
+      return this.runDirectJob(
+        {
+          jobType: 'ESPO_SYNC_OPPORTUNITY',
+          entityType: 'Opportunity',
+          localEntityId: assessmentId,
+          assessmentId,
+          organisationId: owner?.organisationId,
+        },
+        'manual',
+        user,
+        () => this.syncAssessment(assessmentId, user, { skipAccessCheck: true }),
+      );
     }
 
     const assessment = await this.prisma.assessmentSession.findUnique({
@@ -1744,19 +1933,13 @@ export class EspoCrmService {
         syncRecordId: sync.id,
       };
     } catch (error: unknown) {
+      // This row belongs to the running job; the job decides whether and when to retry.
       const safe = this.asError(error);
       await this.prisma.crmSyncRecord.update({
         where: { id: sync.id },
-        data: {
-          status: safe.retryable ? 'RETRYING' : 'FAILED',
-          errorMessage: safe.message,
-          errorCode: safe.code,
-          nextRetryAt: nextRetryAt(1, safe.retryable),
-        },
+        data: { status: 'FAILED', errorMessage: safe.message, errorCode: safe.code, nextRetryAt: null },
       });
-      throw error instanceof EspoCrmHttpError
-        ? new BadGatewayException(safe.message)
-        : error;
+      throw error;
     }
   }
 
@@ -1999,55 +2182,187 @@ export class EspoCrmService {
     return { processed, skipped: false };
   }
 
-  private toHistoryItem(row: HistoryRow, crmAppUrl: string | null, canManage: boolean): EspoSyncHistoryItem {
+  private toHistoryItem(
+    row: HistoryRow,
+    crmAppUrl: string | null,
+    canManage: boolean,
+    supersededAt: Date | null,
+  ): EspoSyncHistoryItem {
     const status = historyStatus(row.status);
+    const eligible = isRetryEligible(row);
+    let retryNote: string | null = null;
+    if (status === 'failed' || status === 'retrying') {
+      if (!eligible) retryNote = 'This job type cannot be retried from here.';
+      else if (supersededAt) retryNote = 'A newer sync of this record exists, so this job is not retried.';
+      else if (!canManage) retryNote = 'Only administrators can retry jobs.';
+    }
     return {
       id: row.id,
-      at: row.updatedAt.toISOString(),
+      lastActivityAt: row.updatedAt.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      lastAttemptAt: row.status === 'PENDING' ? null : row.lastAttemptAt?.toISOString() ?? null,
       recordType: row.entityType,
-      reference:
-        row.assessment?.reference
-        || row.organisation?.name
-        || `${row.entityType} …${row.localEntityId.slice(-6)}`,
+      reference: historyReference(row),
       status,
       attempts: row.attemptCount,
       nextRetryAt: row.status === 'RETRYING' ? row.nextRetryAt?.toISOString() ?? null : null,
       errorSummary: status === 'success' ? null : sanitizeErrorSummary(row.errorMessage),
       crmUrl: crmRecordUrl(crmAppUrl, row.entityType, row.remoteEntityId),
-      canRetry: canManage && isRetryEligible(row),
+      canRetry: canManage && eligible && !supersededAt,
+      retryNote,
+      legacy: !row.attemptsTracked,
+      supersededAt: supersededAt?.toISOString() ?? null,
     };
   }
 
-  /** Safe projection of the sync job log: no payloads, responses or raw errors. */
-  async listHistory(
-    query: { page?: number; pageSize?: number; status?: string },
-    user: AuthUser,
-  ): Promise<EspoSyncHistoryPage> {
+  /** For each job, when a later job for the same record was created, if any. */
+  private async supersededMap(rows: Array<Pick<HistoryRow, 'id' | 'jobType' | 'entityType' | 'localEntityId' | 'createdAt'>>) {
+    const result = new Map<string, Date | null>();
+    if (!rows.length) return result;
+    const groups = await this.prisma.crmSyncRecord.groupBy({
+      by: ['jobType', 'entityType', 'localEntityId'],
+      where: { ...TOP_LEVEL, localEntityId: { in: [...new Set(rows.map((r) => r.localEntityId))] } },
+      _max: { createdAt: true },
+    });
+    const newest = new Map<string, number>();
+    for (const g of groups) {
+      const key = syncRecordKey(g);
+      const at = g._max.createdAt?.getTime() ?? 0;
+      if ((newest.get(key) ?? 0) < at) newest.set(key, at);
+    }
+    for (const row of rows) {
+      const latest = newest.get(syncRecordKey(row)) ?? 0;
+      result.set(row.id, latest > row.createdAt.getTime() ? new Date(latest) : null);
+    }
+    return result;
+  }
+
+  /** Filters shared by the job count and the job page, so both always describe the same set. */
+  private historyWhere(query: EspoSyncHistoryQuery): Prisma.CrmSyncRecordWhereInput {
+    const where: Prisma.CrmSyncRecordWhereInput = { ...TOP_LEVEL };
+    if (query.status) {
+      const statuses = HISTORY_STATUS_FILTER[query.status];
+      if (!statuses) throw new BadRequestException('Unknown status filter.');
+      where.status = { in: statuses as SyncStatus[] };
+    }
+    if (query.recordType) {
+      if (!(HISTORY_RECORD_TYPES as readonly string[]).includes(query.recordType)) {
+        throw new BadRequestException('Unknown record type filter.');
+      }
+      where.entityType = query.recordType;
+    }
+    if (query.organisationId) where.organisationId = query.organisationId;
+
+    const from = query.dateFrom ? sastDayBounds(query.dateFrom) : null;
+    const to = query.dateTo ? sastDayBounds(query.dateTo) : null;
+    if ((query.dateFrom && !from) || (query.dateTo && !to)) {
+      throw new BadRequestException('Dates must be in YYYY-MM-DD format.');
+    }
+    if (from && to && from.start > to.end) {
+      throw new BadRequestException('The start date must be on or before the end date.');
+    }
+    if (from || to) {
+      where.updatedAt = { ...(from ? { gte: from.start } : {}), ...(to ? { lte: to.end } : {}) };
+    }
+
+    const search = query.search?.trim().slice(0, MAX_SEARCH_LENGTH);
+    if (search) {
+      where.OR = [
+        { assessment: { reference: { contains: search, mode: 'insensitive' } } },
+        { organisation: { name: { contains: search, mode: 'insensitive' } } },
+        { localEntityId: { contains: search, mode: 'insensitive' } },
+        { remoteEntityId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    return where;
+  }
+
+  /**
+   * One row per sync job (never per record written during a job), newest activity first.
+   * Safe projection: no payloads, responses or raw errors.
+   */
+  async listHistory(query: EspoSyncHistoryQuery, user: AuthUser): Promise<EspoSyncHistoryPage> {
     await this.refreshConfig();
     const page = Math.max(1, Math.floor(Number(query.page) || 1));
-    const pageSize = Math.min(50, Math.max(1, Math.floor(Number(query.pageSize) || 20)));
-    const statuses = query.status ? HISTORY_STATUS_FILTER[query.status] : undefined;
-    if (query.status && !statuses) throw new BadRequestException('Unknown status filter.');
-    const where: Prisma.CrmSyncRecordWhereInput = statuses ? { status: { in: statuses } } : {};
+    const requestedSize = Math.floor(Number(query.pageSize) || 0);
+    const pageSize = (HISTORY_PAGE_SIZES as readonly number[]).includes(requestedSize) ? requestedSize : HISTORY_PAGE_SIZES[0];
+    const where = this.historyWhere(query);
+    const skip = (page - 1) * pageSize;
 
     const [total, rows] = await Promise.all([
       this.prisma.crmSyncRecord.count({ where }),
       this.prisma.crmSyncRecord.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * pageSize,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip,
         take: pageSize,
         select: HISTORY_SELECT,
       }),
     ]);
+    const superseded = await this.supersededMap(rows);
     const crmAppUrl = resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()).url;
     const canManage = hasRole(user, ADMIN_ROLES);
     return {
-      items: rows.map((row) => this.toHistoryItem(row, crmAppUrl, canManage)),
+      items: rows.map((row) => this.toHistoryItem(row, crmAppUrl, canManage, superseded.get(row.id) ?? null)),
       total,
       page,
       pageSize,
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      rangeStart: rows.length ? skip + 1 : 0,
+      rangeEnd: skip + rows.length,
+    };
+  }
+
+  private async historyItem(id: string, user: AuthUser) {
+    const row = await this.prisma.crmSyncRecord.findUnique({ where: { id }, select: HISTORY_SELECT });
+    if (!row || row.parentId) throw new NotFoundException('Sync job not found.');
+    await this.refreshConfig();
+    const crmAppUrl = resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()).url;
+    const superseded = await this.supersededMap([row]);
+    return { row, crmAppUrl, item: this.toHistoryItem(row, crmAppUrl, hasRole(user, ADMIN_ROLES), superseded.get(row.id) ?? null) };
+  }
+
+  /** One job with its recorded attempts and the CRM records written while it ran. */
+  async getHistoryJob(id: string, user: AuthUser): Promise<EspoSyncJobDetail> {
+    const { row, crmAppUrl, item } = await this.historyItem(id, user);
+    const [attempts, children] = await Promise.all([
+      this.prisma.crmSyncAttempt.findMany({ where: { syncRecordId: id }, orderBy: { attemptNumber: 'asc' } }),
+      this.prisma.crmSyncRecord.findMany({
+        where: { parentId: id },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 100,
+        select: { id: true, entityType: true, action: true, status: true, updatedAt: true, errorMessage: true, remoteEntityId: true },
+      }),
+    ]);
+    const latestNumber = attempts.reduce((max, a) => Math.max(max, a.attemptNumber), 0);
+    const recorded = attempts.filter((a) => a.attemptNumber <= row.attemptCount).length;
+    return {
+      job: item,
+      attempts: attempts.map((a): EspoSyncAttemptItem => {
+        const running = !a.outcome && !a.completedAt && row.status === 'PROCESSING' && a.attemptNumber === latestNumber;
+        return {
+          attemptNumber: a.attemptNumber,
+          trigger: a.trigger === 'automatic' || a.trigger === 'manual' ? a.trigger : null,
+          startedAt: a.startedAt?.toISOString() ?? null,
+          completedAt: a.completedAt?.toISOString() ?? null,
+          outcome: running ? 'running' : (a.outcome as EspoSyncAttemptItem['outcome']),
+          errorSummary: a.outcome === 'success' ? null : sanitizeErrorSummary(a.errorMessage),
+          crmUrl: crmRecordUrl(crmAppUrl, row.entityType, a.remoteEntityId),
+        };
+      }),
+      unrecordedAttempts: Math.max(0, row.attemptCount - recorded),
+      records: children.map((c) => {
+        const childStatus = historyStatus(c.status);
+        return {
+          id: c.id,
+          recordType: c.entityType,
+          action: c.action,
+          status: childStatus,
+          at: c.updatedAt.toISOString(),
+          errorSummary: childStatus === 'success' ? null : sanitizeErrorSummary(c.errorMessage),
+          crmUrl: crmRecordUrl(crmAppUrl, c.entityType, c.remoteEntityId),
+        };
+      }),
     };
   }
 
@@ -2056,32 +2371,46 @@ export class EspoCrmService {
    * same record is queued or in flight, and the PENDING claim is conditional so
    * concurrent requests cannot both start it.
    */
-  async retry(id: string, user: AuthUser): Promise<EspoSyncHistoryItem> {
+  async retry(id: string, user: AuthUser, opts: { wait?: boolean } = {}): Promise<EspoSyncHistoryItem> {
     const row = await this.prisma.crmSyncRecord.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException('Sync record not found.');
+    if (!row || row.parentId) throw new NotFoundException('Sync job not found.');
     if (!isRetryEligible(row)) {
       throw new ConflictException('Only failed sync jobs can be retried.');
     }
 
-    const inFlight = await this.prisma.crmSyncRecord.findFirst({
-      where: {
-        id: { not: id },
-        localEntityId: row.localEntityId,
-        ...(row.jobType ? { jobType: row.jobType } : { entityType: row.entityType }),
-        OR: [
-          { status: 'PENDING' },
-          { status: 'PROCESSING', updatedAt: { gte: new Date(Date.now() - PROCESSING_STALE_MS) } },
-        ],
-      },
-      select: { id: true },
-    });
+    const sameRecord = {
+      ...TOP_LEVEL,
+      id: { not: id },
+      localEntityId: row.localEntityId,
+      ...(row.jobType ? { jobType: row.jobType } : { entityType: row.entityType }),
+    } satisfies Prisma.CrmSyncRecordWhereInput;
+    const [newer, inFlight] = await Promise.all([
+      this.prisma.crmSyncRecord.findFirst({
+        where: { ...sameRecord, createdAt: { gt: row.createdAt } },
+        select: { id: true },
+      }),
+      this.prisma.crmSyncRecord.findFirst({
+        where: {
+          ...sameRecord,
+          OR: [
+            { status: 'PENDING' },
+            { status: 'PROCESSING', updatedAt: { gte: new Date(Date.now() - PROCESSING_STALE_MS) } },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
     if (inFlight) {
       throw new ConflictException('A sync for this record is already queued or in progress.');
     }
+    if (newer) {
+      throw new ConflictException('A newer sync of this record exists. Retry that job instead.');
+    }
 
+    // Claiming straight into PROCESSING means neither a second request nor the worker can start it too.
     const claimed = await this.prisma.crmSyncRecord.updateMany({
-      where: { id, status: { in: ['FAILED', 'RETRYING'] } },
-      data: { status: 'PENDING', errorMessage: null, errorCode: null, nextRetryAt: null },
+      where: { id, ...TOP_LEVEL, status: { in: ['FAILED', 'RETRYING'] } },
+      data: { status: 'PROCESSING', errorMessage: null, errorCode: null, nextRetryAt: null, lastAttemptAt: new Date() },
     });
     if (claimed.count === 0) {
       throw new ConflictException('This sync job is already being retried.');
@@ -2094,21 +2423,18 @@ export class EspoCrmService {
       entityId: row.localEntityId,
       metadata: { syncId: id },
     });
-    await this.processQueuedSync(id);
+    const run = this.processQueuedSync(id, { trigger: 'manual', userId: user.id, claimed: true }).catch((err: unknown) => {
+      this.logger.warn(`CRM retry ${id} did not complete: ${(err as Error)?.message || err}`);
+      return null;
+    });
+    if (opts.wait) await run;
 
-    await this.refreshConfig();
-    const updated = await this.prisma.crmSyncRecord.findUnique({ where: { id }, select: HISTORY_SELECT });
-    if (!updated) throw new NotFoundException('Sync record not found.');
-    return this.toHistoryItem(
-      updated,
-      resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()).url,
-      hasRole(user, ADMIN_ROLES),
-    );
+    return (await this.historyItem(id, user)).item;
   }
 
   async retryFailed(user: AuthUser) {
     const failed = await this.prisma.crmSyncRecord.findMany({
-      where: { status: { in: ['FAILED', 'RETRYING'] } },
+      where: { ...TOP_LEVEL, status: { in: ['FAILED', 'RETRYING'] } },
       take: 50,
       orderBy: { updatedAt: 'asc' },
     });
@@ -2120,7 +2446,7 @@ export class EspoCrmService {
         continue;
       }
       try {
-        await this.retry(row.id, user);
+        await this.retry(row.id, user, { wait: true });
         processed += 1;
       } catch (error) {
         if (!(error instanceof ConflictException)) throw error;

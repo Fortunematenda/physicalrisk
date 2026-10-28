@@ -1,50 +1,31 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { Activity, Cable, CheckCircle2, Clock, ExternalLink, History, RefreshCw, XCircle } from 'lucide-react';
+import { Activity, Cable, CheckCircle2, Clock, XCircle } from 'lucide-react';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { IconSave, IconZap } from '../../../components/NavIcons';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Switch } from '@/components/ui/switch';
 import { useSidebarUser } from '@/components/layout/app-sidebar';
-import { ApiError, apiFetch } from '../../../lib/api';
+import { CrmSyncHistory, StatusPill, type HistoryFeedback } from '@/components/crm/CrmSyncHistory';
+import { apiFetch } from '../../../lib/api';
 import { safeExternalNavUrl } from '../../../lib/navigation';
 import {
   CHECK_COPY,
   CONNECTION_COPY,
-  CRM_PAGE_INTRO,
   HISTORY_COPY,
   SYNC_COPY,
-  TONE_CLASSES,
   describeSync,
   formatDateTime,
+  formatDateTimeFull,
   type CrmAccess,
   type CrmAdminSettings,
   type CrmConnectionTestResult,
-  type CrmHistoryPage,
   type CrmIntegrationStatus,
-  type Tone,
 } from '../../../lib/crm-integration';
 
-type Feedback = { kind: 'success' | 'error'; title: string; detail?: string };
-
-const HISTORY_FILTERS = [
-  { value: '', label: 'All statuses' },
-  { value: 'success', label: 'Success' },
-  { value: 'failed', label: 'Failed' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'processing', label: 'Processing' },
-  { value: 'skipped', label: 'Skipped' },
-];
-
-function StatusPill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return (
-    <span className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${TONE_CLASSES[tone]}`}>
-      {children}
-    </span>
-  );
-}
+type Feedback = HistoryFeedback;
 
 function errorMessage(e: unknown, fallback: string) {
   return e instanceof Error && e.message ? e.message : fallback;
@@ -68,14 +49,6 @@ export default function IntegrationsPage() {
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [settingsError, setSettingsError] = useState('');
-
-  const [history, setHistory] = useState<CrmHistoryPage | null>(null);
-  const [historyHidden, setHistoryHidden] = useState(false);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyError, setHistoryError] = useState('');
-  const [historyPage, setHistoryPage] = useState(1);
-  const [historyFilter, setHistoryFilter] = useState('');
-  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const loadAccess = useCallback(async () => {
     setAccessLoading(true);
@@ -102,22 +75,6 @@ export default function IntegrationsPage() {
     }
   }, []);
 
-  const loadHistory = useCallback(async (page: number, filter: string) => {
-    setHistoryLoading(true);
-    setHistoryError('');
-    try {
-      const params = new URLSearchParams({ page: String(page), pageSize: '20' });
-      if (filter) params.set('status', filter);
-      setHistory(await apiFetch<CrmHistoryPage>(`/integrations/espocrm/history?${params}`));
-    } catch (e) {
-      setHistory(null);
-      if (e instanceof ApiError && e.status === 403) setHistoryHidden(true);
-      else setHistoryError(errorMessage(e, 'Sync history could not be loaded.'));
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
   const applySettings = (s: CrmAdminSettings) => {
     setSettings(s);
     setEnabled(s.enabled);
@@ -129,10 +86,6 @@ export default function IntegrationsPage() {
     void loadAccess();
     void loadStatus();
   }, [loadAccess, loadStatus]);
-
-  useEffect(() => {
-    void loadHistory(historyPage, historyFilter);
-  }, [loadHistory, historyPage, historyFilter]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -183,27 +136,9 @@ export default function IntegrationsPage() {
     }
   }
 
-  async function retryJob(id: string) {
-    setRetryingId(id);
-    setFeedback(null);
-    try {
-      const item = await apiFetch<{ status: keyof typeof HISTORY_COPY }>(`/integrations/espocrm/retry/${encodeURIComponent(id)}`, {
-        method: 'POST',
-        body: '{}',
-      });
-      const outcome = HISTORY_COPY[item.status]?.label ?? item.status;
-      setFeedback(
-        item.status === 'success'
-          ? { kind: 'success', title: 'Retry succeeded.', detail: 'The record was sent to EspoCRM.' }
-          : { kind: 'error', title: `Retry finished with status: ${outcome}.`, detail: 'See the error summary in the history below.' },
-      );
-    } catch (e) {
-      setFeedback({ kind: 'error', title: 'Retry not started', detail: errorMessage(e, 'The retry could not be started.') });
-    } finally {
-      setRetryingId(null);
-      await Promise.all([loadHistory(historyPage, historyFilter), loadStatus()]);
-    }
-  }
+  const onJobSettled = useCallback(() => {
+    void loadStatus();
+  }, [loadStatus]);
 
   const crmUrl = access?.available ? safeExternalNavUrl(access.url) : null;
   const connection = status ? CONNECTION_COPY[status.connection.state] : null;
@@ -233,14 +168,13 @@ export default function IntegrationsPage() {
         subtitle="Connection, sync health and sync history for MOSS and EspoCRM."
         actions={openCrmAction}
       >
-        <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-700" aria-label="About this page">
-          <p>{CRM_PAGE_INTRO}</p>
-          {!accessLoading && !crmUrl ? (
-            <p id="crm-access-reason" className="mt-2 font-medium text-amber-800">
+        {!accessLoading && !crmUrl ? (
+          <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm" aria-label="EspoCRM access">
+            <p id="crm-access-reason" className="font-medium text-amber-800">
               {access?.message || 'The EspoCRM link is not available to your account.'}
             </p>
-          ) : null}
-        </section>
+          </section>
+        ) : null}
 
         <div aria-live="polite" className="mb-4 empty:hidden">
           {feedback?.kind === 'success' ? (
@@ -349,7 +283,7 @@ export default function IntegrationsPage() {
                         </p>
                       </div>
                       <StatusPill tone={testing && check.id !== 'worker' ? 'slate' : copy.tone}>
-                        {testing && check.id !== 'worker' ? 'Checking…' : copy.label}
+                        {testing && check.id !== 'worker' ? 'Checking…' : check.statusLabel ?? copy.label}
                       </StatusPill>
                     </li>
                   );
@@ -401,14 +335,33 @@ export default function IntegrationsPage() {
                 )}
                 <p className="mt-4 text-sm text-slate-600">
                   {status.worker.lastRunAt
-                    ? `Sync worker runs every ${status.worker.intervalMinutes} minutes. Last run ${formatDateTime(status.worker.lastRunAt)}: ${status.worker.lastProcessed ?? 0} job(s) processed.`
+                    ? `Sync worker runs every ${status.worker.intervalMinutes} minutes. Last run ${formatDateTime(status.worker.lastRunAt)} processed ${status.worker.lastProcessed ?? 0} job(s).`
                     : `Sync worker runs every ${status.worker.intervalMinutes} minutes when automatic sync is on. No run recorded yet.`}
                 </p>
-                {status.sync.lastFailureSummary ? (
-                  <p className="mt-2 text-sm text-slate-600">
-                    Most recent failure: <span className="text-red-800">{status.sync.lastFailureSummary}</span>
-                  </p>
-                ) : null}
+                <h3 className="mt-4 text-sm font-semibold text-slate-900">Most recent failed attempt</h3>
+                {status.sync.lastFailureAt ? (
+                  <div className="mt-1 text-sm text-slate-700">
+                    <p>
+                      <time dateTime={status.sync.lastFailureAt} title={formatDateTimeFull(status.sync.lastFailureAt)}>
+                        {formatDateTime(status.sync.lastFailureAt)}
+                      </time>
+                      {status.sync.lastFailureJob
+                        ? ` · ${status.sync.lastFailureJob.recordType} ${status.sync.lastFailureJob.reference}`
+                        : null}
+                    </p>
+                    {status.sync.lastFailureSummary ? <p className="text-red-800">{status.sync.lastFailureSummary}</p> : null}
+                    {status.sync.lastFailureJob ? (
+                      <p className="mt-1 text-slate-600">
+                        {status.sync.lastFailureJob.currentStatus === 'success'
+                          ? 'A later attempt of that job succeeded.'
+                          : `That job is currently: ${HISTORY_COPY[status.sync.lastFailureJob.currentStatus].label}.`}{' '}
+                        This is a past job outcome; the health checks show the current connection.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-slate-600">No failed attempt recorded.</p>
+                )}
               </>
             ) : (
               <p className="py-3 text-sm text-slate-600">{statusLoading ? 'Loading activity…' : 'Sync activity is unavailable.'}</p>
@@ -416,128 +369,7 @@ export default function IntegrationsPage() {
           </section>
         </div>
 
-        {!historyHidden ? (
-          <section className="dash2-card mb-6" aria-labelledby="crm-history-heading">
-            <div className="dash2-card-head flex-wrap gap-3">
-              <div>
-                <h2 id="crm-history-heading" className="flex items-center gap-2">
-                  <History className="size-4" aria-hidden="true" /> Sync history
-                </h2>
-                <p>Recorded sync jobs, newest first.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <label htmlFor="crm-history-filter" className="text-sm text-slate-600">Status</label>
-                <select
-                  id="crm-history-filter"
-                  value={historyFilter}
-                  onChange={(e) => {
-                    setHistoryFilter(e.target.value);
-                    setHistoryPage(1);
-                  }}
-                >
-                  {HISTORY_FILTERS.map((f) => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {historyError ? <p className="error" role="alert">{historyError}</p> : null}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm" aria-busy={historyLoading}>
-                <caption className="sr-only">EspoCRM sync history</caption>
-                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                  <tr>
-                    <th scope="col" className="py-2 pr-3">Date / time</th>
-                    <th scope="col" className="py-2 pr-3">Record type</th>
-                    <th scope="col" className="py-2 pr-3">Reference</th>
-                    <th scope="col" className="py-2 pr-3">Status</th>
-                    <th scope="col" className="py-2 pr-3">Error summary</th>
-                    <th scope="col" className="py-2">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {history?.items.length ? (
-                    history.items.map((item) => {
-                      const copy = HISTORY_COPY[item.status];
-                      return (
-                        <tr key={item.id}>
-                          <td className="whitespace-nowrap py-2 pr-3">{formatDateTime(item.at)}</td>
-                          <td className="py-2 pr-3">{item.recordType}</td>
-                          <td className="py-2 pr-3">{item.reference}</td>
-                          <td className="py-2 pr-3">
-                            <StatusPill tone={copy.tone}>{copy.label}</StatusPill>
-                            {item.nextRetryAt ? (
-                              <span className="mt-1 block text-xs text-slate-500">Retry {formatDateTime(item.nextRetryAt)}</span>
-                            ) : null}
-                          </td>
-                          <td className="max-w-xs py-2 pr-3 text-slate-600">{item.errorSummary ?? '—'}</td>
-                          <td className="py-2">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              {item.crmUrl && safeExternalNavUrl(item.crmUrl) ? (
-                                <a
-                                  href={safeExternalNavUrl(item.crmUrl)!}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-sm font-medium text-[#c41230] hover:underline"
-                                  aria-label={`View ${item.recordType} ${item.reference} in EspoCRM (opens in a new tab)`}
-                                >
-                                  View <ExternalLink className="size-3.5" aria-hidden="true" />
-                                </a>
-                              ) : null}
-                              {item.canRetry ? (
-                                <button
-                                  type="button"
-                                  className="btn secondary"
-                                  onClick={() => void retryJob(item.id)}
-                                  disabled={retryingId !== null}
-                                  aria-label={`Retry ${item.recordType} ${item.reference}`}
-                                >
-                                  <RefreshCw className={`size-3.5 ${retryingId === item.id ? 'animate-spin' : ''}`} aria-hidden="true" />
-                                  {retryingId === item.id ? 'Retrying…' : 'Retry'}
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center text-slate-600">
-                        {historyLoading ? 'Loading history…' : 'No sync jobs recorded.'}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {history && history.totalPages > 1 ? (
-              <nav className="mt-3 flex items-center justify-between gap-2" aria-label="Sync history pages">
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                  disabled={historyLoading || history.page <= 1}
-                >
-                  Previous
-                </button>
-                <span className="text-sm text-slate-600" aria-live="polite">
-                  Page {history.page} of {history.totalPages} · {history.total} job(s)
-                </span>
-                <button
-                  type="button"
-                  className="btn secondary"
-                  onClick={() => setHistoryPage((p) => p + 1)}
-                  disabled={historyLoading || history.page >= history.totalPages}
-                >
-                  Next
-                </button>
-              </nav>
-            ) : null}
-          </section>
-        ) : null}
+        <CrmSyncHistory onFeedback={setFeedback} onJobSettled={onJobSettled} />
 
         {isAdmin ? (
           <details className="dash2-card group">

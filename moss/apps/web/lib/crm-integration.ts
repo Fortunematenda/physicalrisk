@@ -4,7 +4,7 @@ export type CrmCheckResult = 'passed' | 'failed' | 'not_checked';
 export type CrmConnectionState = 'disabled' | 'not_configured' | 'untested' | 'connected' | 'failed';
 export type CrmWorkerState = 'disabled' | 'not_scheduled' | 'not_recorded' | 'running' | 'stale';
 export type CrmSyncState = 'disabled' | 'not_configured' | 'errors' | 'processing' | 'pending' | 'idle' | 'unknown';
-export type CrmHistoryStatus = 'success' | 'failed' | 'pending' | 'processing' | 'skipped' | 'cancelled';
+export type CrmHistoryStatus = 'success' | 'failed' | 'retrying' | 'pending' | 'processing' | 'skipped' | 'cancelled';
 
 export type CrmAccess = {
   available: boolean;
@@ -17,6 +17,7 @@ export type CrmHealthCheck = {
   id: 'api' | 'auth' | 'tls' | 'worker';
   label: string;
   result: CrmCheckResult;
+  statusLabel?: string;
   checkedAt: string | null;
   detail: string;
 };
@@ -47,6 +48,7 @@ export type CrmIntegrationStatus = {
     lastSuccessAt: string | null;
     lastFailureAt: string | null;
     lastFailureSummary: string | null;
+    lastFailureJob: { recordType: string; reference: string; currentStatus: CrmHistoryStatus } | null;
     counts: {
       pending: number;
       processing: number;
@@ -72,7 +74,9 @@ export type CrmAdminSettings = {
 
 export type CrmHistoryItem = {
   id: string;
-  at: string;
+  lastActivityAt: string;
+  createdAt: string;
+  lastAttemptAt: string | null;
   recordType: string;
   reference: string;
   status: CrmHistoryStatus;
@@ -81,6 +85,9 @@ export type CrmHistoryItem = {
   errorSummary: string | null;
   crmUrl: string | null;
   canRetry: boolean;
+  retryNote: string | null;
+  legacy: boolean;
+  supersededAt: string | null;
 };
 
 export type CrmHistoryPage = {
@@ -89,7 +96,66 @@ export type CrmHistoryPage = {
   page: number;
   pageSize: number;
   totalPages: number;
+  rangeStart: number;
+  rangeEnd: number;
 };
+
+export type CrmAttemptOutcome = 'success' | 'failed' | 'retrying' | 'skipped' | 'running';
+
+export type CrmSyncAttempt = {
+  attemptNumber: number;
+  trigger: 'automatic' | 'manual' | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  outcome: CrmAttemptOutcome | null;
+  errorSummary: string | null;
+  crmUrl: string | null;
+};
+
+export type CrmSyncJobDetail = {
+  job: CrmHistoryItem;
+  attempts: CrmSyncAttempt[];
+  unrecordedAttempts: number;
+  records: Array<{
+    id: string;
+    recordType: string;
+    action: string | null;
+    status: CrmHistoryStatus;
+    at: string;
+    errorSummary: string | null;
+    crmUrl: string | null;
+  }>;
+};
+
+export type CrmHistoryFilters = {
+  status: string;
+  recordType: string;
+  dateFrom: string;
+  dateTo: string;
+  search: string;
+};
+
+export const EMPTY_HISTORY_FILTERS: CrmHistoryFilters = { status: '', recordType: '', dateFrom: '', dateTo: '', search: '' };
+
+export const HISTORY_PAGE_SIZES = [10, 20, 50] as const;
+
+export function historyQuery(filters: CrmHistoryFilters, page: number, pageSize: number): string {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  for (const [key, value] of Object.entries(filters)) {
+    const trimmed = value.trim();
+    if (trimmed) params.set(key, trimmed);
+  }
+  return params.toString();
+}
+
+export function hasActiveFilters(filters: CrmHistoryFilters): boolean {
+  return Object.values(filters).some((v) => v.trim() !== '');
+}
+
+/** Jobs whose state can still change on their own; the row is refreshed until it settles. */
+export function isJobInFlight(status: CrmHistoryStatus): boolean {
+  return status === 'pending' || status === 'processing';
+}
 
 export type CrmConnectionTestResult = {
   success: boolean;
@@ -100,9 +166,6 @@ export type CrmConnectionTestResult = {
 };
 
 export type Tone = 'green' | 'red' | 'amber' | 'slate' | 'blue';
-
-export const CRM_PAGE_INTRO =
-  'This page manages the connection between MOSS and EspoCRM. Open EspoCRM to manage contacts, leads and opportunities. Separate sign-in may be required.';
 
 export const CONNECTION_COPY: Record<CrmConnectionState, { label: string; tone: Tone }> = {
   connected: { label: 'Verified', tone: 'green' },
@@ -131,23 +194,85 @@ export const CHECK_COPY: Record<CrmCheckResult, { label: string; tone: Tone }> =
 export const HISTORY_COPY: Record<CrmHistoryStatus, { label: string; tone: Tone }> = {
   success: { label: 'Success', tone: 'green' },
   failed: { label: 'Failed', tone: 'red' },
-  pending: { label: 'Pending', tone: 'blue' },
+  retrying: { label: 'Awaiting retry', tone: 'amber' },
+  pending: { label: 'Queued', tone: 'blue' },
   processing: { label: 'Processing', tone: 'blue' },
   skipped: { label: 'Skipped', tone: 'slate' },
   cancelled: { label: 'Cancelled', tone: 'slate' },
 };
 
-export function formatDateTime(iso?: string | null, fallback = 'Not recorded') {
-  if (!iso) return fallback;
+export const ATTEMPT_COPY: Record<CrmAttemptOutcome, { label: string; tone: Tone }> = {
+  success: { label: 'Succeeded', tone: 'green' },
+  failed: { label: 'Failed', tone: 'red' },
+  retrying: { label: 'Failed, retry scheduled', tone: 'amber' },
+  skipped: { label: 'Skipped', tone: 'slate' },
+  running: { label: 'Running', tone: 'blue' },
+};
+
+export const HISTORY_STATUS_OPTIONS = [
+  { value: '', label: 'All statuses' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'retrying', label: 'Awaiting retry' },
+  { value: 'pending', label: 'Queued' },
+  { value: 'processing', label: 'Processing' },
+  { value: 'success', label: 'Success' },
+  { value: 'skipped', label: 'Skipped' },
+];
+
+export const HISTORY_RECORD_TYPE_OPTIONS = [
+  { value: '', label: 'All record types' },
+  { value: 'Lead', label: 'Lead' },
+  { value: 'Account', label: 'Account' },
+  { value: 'Contact', label: 'Contact' },
+  { value: 'Opportunity', label: 'Opportunity' },
+];
+
+const TIME_ZONE = 'Africa/Johannesburg';
+
+function parseDate(iso?: string | null): Date | null {
+  if (!iso) return null;
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return date.toLocaleString('en-ZA', {
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Compact South African time, e.g. "28 Oct 2026, 12:59 SAST". Storage stays UTC. */
+export function formatDateTime(iso?: string | null, fallback = 'Not recorded') {
+  const date = parseDate(iso);
+  if (!date) return fallback;
+  const text = date.toLocaleString('en-ZA', {
+    timeZone: TIME_ZONE,
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
   });
+  return `${text} SAST`;
+}
+
+/** Full timestamp for details and tooltips, with seconds and the UTC value. */
+export function formatDateTimeFull(iso?: string | null, fallback = 'Not recorded') {
+  const date = parseDate(iso);
+  if (!date) return fallback;
+  const text = date.toLocaleString('en-ZA', {
+    timeZone: TIME_ZONE,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  return `${text} SAST (${date.toISOString().replace('.000Z', 'Z')} UTC)`;
+}
+
+export function triggerLabel(trigger: CrmSyncAttempt['trigger']): string {
+  if (trigger === 'manual') return 'Manual';
+  if (trigger === 'automatic') return 'Automatic';
+  return 'Not recorded';
 }
 
 /** One-line explanation of the sync state, built only from the counts and timestamps provided. */

@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   CHECK_COPY,
   CONNECTION_COPY,
-  CRM_PAGE_INTRO,
+  EMPTY_HISTORY_FILTERS,
+  HISTORY_COPY,
   SYNC_COPY,
   describeSync,
   formatDateTime,
+  formatDateTimeFull,
+  hasActiveFilters,
+  historyQuery,
+  isJobInFlight,
   type CrmIntegrationStatus,
 } from './crm-integration';
 
@@ -24,6 +29,7 @@ function status(partial: Partial<CrmIntegrationStatus['sync']> = {}, workerState
       lastSuccessAt: null,
       lastFailureAt: null,
       lastFailureSummary: null,
+      lastFailureJob: null,
       counts: { pending: 0, processing: 0, retrying: 0, failedUnresolved: 0, failedTotal: 0, succeeded: 0, skipped: 0 },
       succeededByType: [],
       ...partial,
@@ -32,12 +38,6 @@ function status(partial: Partial<CrmIntegrationStatus['sync']> = {}, workerState
 }
 
 describe('CRM integration copy', () => {
-  it('uses the agreed explanatory text', () => {
-    expect(CRM_PAGE_INTRO).toBe(
-      'This page manages the connection between MOSS and EspoCRM. Open EspoCRM to manage contacts, leads and opportunities. Separate sign-in may be required.',
-    );
-  });
-
   it('never presents an untested connection as connected or healthy', () => {
     expect(CONNECTION_COPY.untested.label).toBe('Not checked');
     expect(CONNECTION_COPY.connected.label).toBe('Verified');
@@ -49,6 +49,35 @@ describe('CRM integration copy', () => {
   it('shows Not recorded rather than inventing a time', () => {
     expect(formatDateTime(null)).toBe('Not recorded');
     expect(formatDateTime('garbage')).toBe('Not recorded');
+    expect(formatDateTimeFull(undefined)).toBe('Not recorded');
+  });
+
+  it('shows UTC timestamps in Johannesburg time, labelled SAST, whatever the browser zone', () => {
+    // 22:30 UTC on 27 Oct is 00:30 on 28 Oct in South Africa.
+    const text = formatDateTime('2026-10-27T22:30:00Z');
+    expect(text).toMatch(/28 Oct 2026/);
+    expect(text).toMatch(/00:30 SAST$/);
+    const full = formatDateTimeFull('2026-10-27T22:30:05Z');
+    expect(full).toMatch(/00:30:05 SAST/);
+    expect(full).toContain('2026-10-27T22:30:05Z UTC');
+  });
+});
+
+describe('CRM sync history helpers', () => {
+  it('sends only filters that are set, with page and page size', () => {
+    const query = new URLSearchParams(historyQuery({ ...EMPTY_HISTORY_FILTERS, status: 'failed', search: '  SCL-1 ' }, 2, 20));
+    expect(Object.fromEntries(query)).toEqual({ page: '2', pageSize: '20', status: 'failed', search: 'SCL-1' });
+    expect(hasActiveFilters(EMPTY_HISTORY_FILTERS)).toBe(false);
+    expect(hasActiveFilters({ ...EMPTY_HISTORY_FILTERS, dateTo: '2026-10-28' })).toBe(true);
+  });
+
+  it('labels awaiting-retry separately from queued work, and treats only queued or running jobs as in flight', () => {
+    expect(HISTORY_COPY.retrying.label).toBe('Awaiting retry');
+    expect(HISTORY_COPY.pending.label).toBe('Queued');
+    expect(isJobInFlight('processing')).toBe(true);
+    expect(isJobInFlight('pending')).toBe(true);
+    expect(isJobInFlight('retrying')).toBe(false);
+    expect(isJobInFlight('failed')).toBe(false);
   });
 
   it('describes unknown sync without implying failure or success', () => {

@@ -58,6 +58,8 @@ export type EspoHealthCheck = {
   id: 'api' | 'auth' | 'tls' | 'worker';
   label: string;
   result: EspoCheckResult;
+  /** Factual label replacing the generic result label, e.g. "Running" for the worker. */
+  statusLabel?: string;
   checkedAt: string | null;
   detail: string;
 };
@@ -92,8 +94,15 @@ export type EspoIntegrationStatus = {
     direction: string;
     lastAttemptAt: string | null;
     lastSuccessAt: string | null;
+    /** Most recent failed attempt of any job. Historical: says nothing about the current connection. */
     lastFailureAt: string | null;
     lastFailureSummary: string | null;
+    lastFailureJob: {
+      recordType: string;
+      reference: string;
+      /** That job's status now; 'success' only if a later attempt of the same job succeeded. */
+      currentStatus: EspoSyncJobStatus;
+    } | null;
     counts: {
       pending: number;
       processing: number;
@@ -118,17 +127,37 @@ export type EspoAdminSettings = {
   verifySsl: boolean;
 };
 
+export type EspoSyncJobStatus =
+  | 'success'
+  | 'failed'
+  | 'retrying'
+  | 'pending'
+  | 'processing'
+  | 'skipped'
+  | 'cancelled';
+
+/** One logical sync job. Rows written while the job ran are reported under it, not beside it. */
 export type EspoSyncHistoryItem = {
   id: string;
-  at: string;
+  /** Latest activity on the job (UTC ISO). */
+  lastActivityAt: string;
+  createdAt: string;
+  lastAttemptAt: string | null;
   recordType: string;
   reference: string;
-  status: 'success' | 'failed' | 'pending' | 'processing' | 'skipped' | 'cancelled';
+  status: EspoSyncJobStatus;
+  /** The job's own attempt counter. */
   attempts: number;
   nextRetryAt: string | null;
   errorSummary: string | null;
   crmUrl: string | null;
   canRetry: boolean;
+  /** Why a failed job offers no retry; null when retry is offered or not relevant. */
+  retryNote: string | null;
+  /** Recorded before job tracking: its parent job, if any, is unknown. */
+  legacy: boolean;
+  /** A later job for the same record exists. This job's own status is unchanged. */
+  supersededAt: string | null;
 };
 
 export type EspoSyncHistoryPage = {
@@ -137,6 +166,50 @@ export type EspoSyncHistoryPage = {
   page: number;
   pageSize: number;
   totalPages: number;
+  /** 1-based range shown on this page; 0 when there are no matches. */
+  rangeStart: number;
+  rangeEnd: number;
+};
+
+export type EspoSyncHistoryQuery = {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  recordType?: string;
+  /** YYYY-MM-DD, interpreted in Africa/Johannesburg time. */
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  organisationId?: string;
+};
+
+export type EspoSyncAttemptItem = {
+  attemptNumber: number;
+  trigger: 'automatic' | 'manual' | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  outcome: 'success' | 'failed' | 'retrying' | 'skipped' | 'running' | null;
+  errorSummary: string | null;
+  crmUrl: string | null;
+};
+
+export type EspoSyncChildRecord = {
+  id: string;
+  recordType: string;
+  action: string | null;
+  status: EspoSyncJobStatus;
+  at: string;
+  errorSummary: string | null;
+  crmUrl: string | null;
+};
+
+export type EspoSyncJobDetail = {
+  job: EspoSyncHistoryItem;
+  attempts: EspoSyncAttemptItem[];
+  /** Attempts the job counted but that were never stored individually. */
+  unrecordedAttempts: number;
+  /** CRM records written while this job ran. */
+  records: EspoSyncChildRecord[];
 };
 
 export type EspoLogQuery = {

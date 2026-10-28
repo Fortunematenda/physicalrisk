@@ -12,6 +12,8 @@ import {
   resolveSyncState,
   resolveWorkerState,
   sanitizeErrorSummary,
+  sastDayBounds,
+  syncRecordKey,
 } from './espocrm.health';
 
 describe('EspoCRM connection health', () => {
@@ -186,9 +188,24 @@ describe('EspoCRM sync worker and sync state', () => {
 describe('EspoCRM sync history helpers', () => {
   it('maps job statuses to user-facing history states', () => {
     expect(historyStatus('SYNCED')).toBe('success');
-    expect(historyStatus('RETRYING')).toBe('pending');
+    expect(historyStatus('RETRYING')).toBe('retrying');
+    expect(historyStatus('PENDING')).toBe('pending');
     expect(historyStatus('PROCESSING')).toBe('processing');
     expect(historyStatus('FAILED')).toBe('failed');
+  });
+
+  it('converts filter dates to SAST day bounds and rejects impossible dates', () => {
+    const bounds = sastDayBounds('2026-10-28')!;
+    expect(bounds.start.toISOString()).toBe('2026-10-27T22:00:00.000Z');
+    expect(bounds.end.toISOString()).toBe('2026-10-28T21:59:59.999Z');
+    expect(sastDayBounds('2026-02-30')).toBeNull();
+    expect(sastDayBounds('28/10/2026')).toBeNull();
+    expect(sastDayBounds('2026-10-28T00:00')).toBeNull();
+  });
+
+  it('keys records by job type and MOSS id, falling back to entity type', () => {
+    expect(syncRecordKey({ jobType: 'ESPO_SYNC_LEAD', entityType: 'Lead', localEntityId: 'x' })).toBe('ESPO_SYNC_LEAD:x');
+    expect(syncRecordKey({ jobType: null, entityType: 'Lead', localEntityId: 'x' })).toBe('Lead:x');
   });
 
   it('sanitises error summaries', () => {
@@ -211,5 +228,7 @@ describe('EspoCRM sync history helpers', () => {
     expect(isRetryEligible({ ...row, jobType: 'ESPO_SYNC_TASK' })).toBe(false);
     expect(isRetryEligible({ ...row, jobType: 'ESPO_UPDATE_REPORT' })).toBe(false);
     expect(isRetryEligible({ ...row, jobType: 'ESPO_UPDATE_REPORT', assessmentId: 'as1' })).toBe(true);
+    // A record written inside a job is re-sent only by retrying that job.
+    expect(isRetryEligible({ ...row, parentId: 'job-1' })).toBe(false);
   });
 });

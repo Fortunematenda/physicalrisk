@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
+import { useToast } from '@/components/ui/toast';
 import { IconPlus } from '../../../components/NavIcons';
 import { ExternalLink } from 'lucide-react';
 import { apiFetch } from '../../../lib/api';
@@ -23,8 +24,9 @@ type AnalystRow = {
 export default function Consultants() {
   const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
   const [rows, setRows] = useState<AnalystRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const { toast } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   // Assume SSO-managed until capabilities load, so "Add analyst" never flashes when it cannot work.
   const [localUserAdmin, setLocalUserAdmin] = useState(false);
@@ -43,6 +45,8 @@ export default function Consultants() {
       setIdentityAdminUrl(safeExternalNavUrl(caps.identityAdminUrl));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unable to load consultants.');
+    } finally {
+      setLoaded(true);
     }
   }
 
@@ -54,14 +58,6 @@ export default function Consultants() {
     <AuthGate>
       <Shell title="Consultants & Analysts" hideEyebrow subtitle="Resources available for Level 2 and Level 3 assignment.">
         {error && <p className="error">{error}</p>}
-        {notice && <p className="notice">{notice}</p>}
-        {!localUserAdmin && isAdmin ? (
-          <p className="notice" style={{ marginBottom: 16 }}>
-            Analysts and reviewers sign in through Keycloak SSO. To add one, create the person in Keycloak and assign
-            the <strong>moss_analyst</strong> or <strong>moss_reviewer</strong> realm role; they appear here after their
-            first sign-in. Engagement responsibilities are then assigned on each engagement.
-          </p>
-        ) : null}
         <div className="org2-actions-row">
           <Link className="btn secondary" href="/admin/users">
             Open user administration
@@ -112,7 +108,7 @@ export default function Consultants() {
                 {!rows.length && (
                   <tr>
                     <td colSpan={4} className="muted">
-                      No analysts available yet.
+                      {loaded ? 'No analysts available yet.' : 'Loading analysts…'}
                     </td>
                   </tr>
                 )}
@@ -128,7 +124,7 @@ export default function Consultants() {
           title="Add analyst"
           description="Create an analyst or reviewer who can be assigned to triage and advisory engagements."
           onCreated={() => {
-            setNotice('Analyst created.');
+            toast({ variant: 'success', title: 'Analyst created' });
             setError('');
             void load();
           }}

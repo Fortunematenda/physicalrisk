@@ -55,11 +55,31 @@ export class CrmController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('status') status?: string,
+    @Query('recordType') recordType?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('search') search?: string,
+    @Query('organisationId') organisationId?: string,
   ) {
     return this.service.listHistory(
-      { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined, status },
+      {
+        page: page ? Number(page) : undefined,
+        pageSize: pageSize ? Number(pageSize) : undefined,
+        status,
+        recordType,
+        dateFrom,
+        dateTo,
+        search,
+        organisationId,
+      },
       user,
     );
+  }
+
+  @Get('history/:id')
+  @Roles('SUPER_ADMIN', 'ANALYST')
+  historyJob(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.getHistoryJob(id, user);
   }
 
   @Get('mapping')

@@ -6,6 +6,7 @@ import { Shell } from '../../../components/Shell';
 import { StatusBadge } from '../../../components/Ui';
 import { CreateUserDialog, USER_ROLES, type CreatedUser } from '@/components/users/CreateUserDialog';
 import { useConfirm } from '@/components/confirm-dialog';
+import { useToast } from '@/components/ui/toast';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { RowActionsMenu } from '../../../components/RowActionsMenu';
 import {
+  IconMoreVertical,
   IconPlus,
   IconRotateCcw,
   IconSearch,
@@ -40,15 +43,16 @@ type Capabilities = {
 
 export default function UsersAdminPage() {
   const confirm = useConfirm();
+  const { toast } = useToast();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [editForm, setEditForm] = useState({
     firstName: '',
@@ -109,7 +113,6 @@ export default function UsersAdminPage() {
       systemRole: user.systemRole || 'ANALYST',
       isActive: Boolean(user.isActive),
     });
-    setNotice('');
     setError('');
   }
 
@@ -123,7 +126,7 @@ export default function UsersAdminPage() {
         method: 'PATCH',
         body: JSON.stringify(editForm),
       });
-      setNotice('User updated.');
+      toast({ variant: 'success', title: 'User updated', description: editing.email });
       setEditing(null);
       await load();
     } catch (err: unknown) {
@@ -148,7 +151,7 @@ export default function UsersAdminPage() {
         method: 'PATCH',
         body: JSON.stringify({ isActive: next }),
       });
-      setNotice(next ? 'User activated.' : 'User deactivated.');
+      toast({ variant: 'success', title: next ? 'User activated' : 'User deactivated', description: user.email });
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unable to update user status.');
@@ -165,7 +168,7 @@ export default function UsersAdminPage() {
         method: 'POST',
         body: JSON.stringify({ password: newPassword }),
       });
-      setNotice(`Password reset for ${passwordUser.email}.`);
+      toast({ variant: 'success', title: 'Password reset', description: passwordUser.email });
       setPasswordUser(null);
       setNewPassword('');
     } catch (err: unknown) {
@@ -183,24 +186,6 @@ export default function UsersAdminPage() {
         subtitle="Platform users, their effective roles, and engagement responsibilities."
       >
         {error && <p className="error">{error}</p>}
-        {notice && <p className="notice">{notice}</p>}
-
-        {capabilities?.keycloakEnabled ? (
-          <section className="notice" style={{ marginBottom: 16 }} aria-labelledby="sso-admin-help">
-            <p id="sso-admin-help">
-              <strong>Identities and platform roles are managed in Keycloak (SSO).</strong>{' '}
-              {capabilities.localUserAdmin
-                ? 'Legacy login is also on, so local users can be edited here, but Keycloak roles overwrite local roles at each SSO sign-in.'
-                : 'Create the person in Keycloak, then assign one MOSS realm role: moss_admin (Administrator), moss_reviewer (Senior Reviewer), moss_analyst (Analyst) or moss_client (Client Executive). They appear here after their first sign-in.'}
-            </p>
-            <p style={{ marginTop: 8 }}>
-              Role changes take effect after the person signs out of MOSS and signs in again. Engagement
-              responsibilities (Engagement lead, Consultant, Reviewer, Approver) are assigned on each engagement and
-              do not change platform access.
-            </p>
-          </section>
-        ) : null}
-
         <div className="org2-actions-row">
           <button type="button" className="btn secondary org2-export-btn" onClick={() => void load()} disabled={loading}>
             <IconRotateCcw />
@@ -309,21 +294,51 @@ export default function UsersAdminPage() {
                     </td>
                     <td className="org2-actions-cell">
                       {canManage ? (
-                        <div className="triage-admin-actions">
-                          <button type="button" className="btn secondary" onClick={() => openEdit(u)}>
+                        <RowActionsMenu
+                          open={menuOpenId === u.id}
+                          onClose={() => setMenuOpenId(null)}
+                          trigger={(
+                            <button
+                              type="button"
+                              className="org2-menu-btn"
+                              aria-label={`Actions for ${u.email}`}
+                              onClick={() => setMenuOpenId((id) => (id === u.id ? null : u.id))}
+                            >
+                              <IconMoreVertical />
+                            </button>
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              openEdit(u);
+                            }}
+                          >
                             Edit
                           </button>
-                          <button type="button" className="btn secondary" onClick={() => {
-                            setPasswordUser(u);
-                            setNewPassword('');
-                            setError('');
-                          }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              setPasswordUser(u);
+                              setNewPassword('');
+                              setError('');
+                            }}
+                          >
                             Reset password
                           </button>
-                          <button type="button" className="btn secondary" onClick={() => void toggleActive(u)}>
+                          <button
+                            type="button"
+                            className={u.isActive ? 'danger' : undefined}
+                            onClick={() => {
+                              setMenuOpenId(null);
+                              void toggleActive(u);
+                            }}
+                          >
                             {u.isActive ? 'Deactivate' : 'Activate'}
                           </button>
-                        </div>
+                        </RowActionsMenu>
                       ) : (
                         <span className="muted small">SSO managed</span>
                       )}
@@ -353,7 +368,7 @@ export default function UsersAdminPage() {
           open={createOpen}
           onOpenChange={setCreateOpen}
           onCreated={() => {
-            setNotice('User created.');
+            toast({ variant: 'success', title: 'User created' });
             void load();
           }}
         />

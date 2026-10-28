@@ -209,19 +209,15 @@ export function resolveSyncState(input: {
 
 type FailureRow = { jobType: string | null; entityType: string; localEntityId: string; updatedAt: Date };
 
-function recordKey(row: { jobType: string | null; entityType: string; localEntityId: string }) {
-  return `${row.jobType || row.entityType}:${row.localEntityId}`;
-}
-
 /** Failed rows that no later successful sync of the same record has superseded. */
 export function countUnresolvedFailures(failed: FailureRow[], successes: FailureRow[]): number {
   const latestSuccess = new Map<string, number>();
   for (const row of successes) {
-    const key = recordKey(row);
+    const key = syncRecordKey(row);
     const at = row.updatedAt.getTime();
     if ((latestSuccess.get(key) ?? 0) < at) latestSuccess.set(key, at);
   }
-  return failed.filter((row) => (latestSuccess.get(recordKey(row)) ?? 0) < row.updatedAt.getTime()).length;
+  return failed.filter((row) => (latestSuccess.get(syncRecordKey(row)) ?? 0) < row.updatedAt.getTime()).length;
 }
 
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -238,7 +234,7 @@ export function sanitizeErrorSummary(message: string | null | undefined, maxLeng
   return redacted.length > maxLength ? `${redacted.slice(0, maxLength - 1)}…` : redacted;
 }
 
-export type EspoHistoryStatus = 'success' | 'failed' | 'pending' | 'processing' | 'skipped' | 'cancelled';
+export type EspoHistoryStatus = 'success' | 'failed' | 'retrying' | 'pending' | 'processing' | 'skipped' | 'cancelled';
 
 export function historyStatus(status: string): EspoHistoryStatus {
   switch (status) {
@@ -247,6 +243,8 @@ export function historyStatus(status: string): EspoHistoryStatus {
       return 'success';
     case 'FAILED':
       return 'failed';
+    case 'RETRYING':
+      return 'retrying';
     case 'PROCESSING':
       return 'processing';
     case 'SKIPPED':
@@ -256,6 +254,40 @@ export function historyStatus(status: string): EspoHistoryStatus {
     default:
       return 'pending';
   }
+}
+
+export const HISTORY_STATUS_FILTER: Record<string, string[]> = {
+  success: ['SUCCESS', 'SYNCED'],
+  failed: ['FAILED'],
+  retrying: ['RETRYING'],
+  pending: ['PENDING'],
+  processing: ['PROCESSING'],
+  skipped: ['SKIPPED', 'CANCELLED'],
+};
+
+export const HISTORY_RECORD_TYPES = ['Lead', 'Account', 'Contact', 'Opportunity', 'Task'] as const;
+export const HISTORY_PAGE_SIZES = [10, 20, 50] as const;
+
+/** South Africa has no daylight saving, so SAST is a fixed UTC+02:00. */
+const SAST_OFFSET = '+02:00';
+
+/**
+ * UTC bounds for a YYYY-MM-DD date in Africa/Johannesburg time. Returns null for
+ * anything that is not a real calendar date.
+ */
+export function sastDayBounds(value: string): { start: Date; end: Date } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const start = new Date(`${value}T00:00:00.000${SAST_OFFSET}`);
+  const end = new Date(`${value}T23:59:59.999${SAST_OFFSET}`);
+  if (Number.isNaN(start.getTime())) return null;
+  // Rejects dates such as 2026-02-30, which Date silently rolls over.
+  if (new Date(start.getTime() + 2 * 3_600_000).toISOString().slice(0, 10) !== value) return null;
+  return { start, end };
+}
+
+/** Records are the same logical target when they share job type (or entity type) and MOSS id. */
+export function syncRecordKey(row: { jobType: string | null; entityType: string; localEntityId: string }) {
+  return `${row.jobType || row.entityType}:${row.localEntityId}`;
 }
 
 const RETRYABLE_JOB_TYPES = new Set([
@@ -274,8 +306,11 @@ export function isRetryEligible(row: {
   jobType: string | null;
   entityType: string;
   assessmentId: string | null;
+  parentId?: string | null;
 }): boolean {
   if (row.status !== 'FAILED' && row.status !== 'RETRYING') return false;
+  // Records written inside a job are re-sent by retrying that job, never on their own.
+  if (row.parentId) return false;
   if (row.jobType) {
     if (row.jobType === 'ESPO_UPDATE_REPORT') return Boolean(row.assessmentId);
     return RETRYABLE_JOB_TYPES.has(row.jobType);

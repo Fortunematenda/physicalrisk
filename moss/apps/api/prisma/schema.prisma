@@ -1297,14 +1297,42 @@ model CrmSyncRecord {
   attemptCount   Int        @default(0)
   nextRetryAt    DateTime?
   lastAttemptAt  DateTime?
+  /// Set on records written while a sync job ran; null for the jobs themselves.
+  parentId       String?
+  /// False for rows written before per-attempt tracking, whose parent job cannot be identified.
+  attemptsTracked Boolean   @default(true)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   organisation   Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   assessment     AssessmentSession? @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  parent         CrmSyncRecord?  @relation("CrmSyncRecordChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children       CrmSyncRecord[] @relation("CrmSyncRecordChildren")
+  attempts       CrmSyncAttempt[]
   @@index([entityType, localEntityId])
   @@index([status])
   @@index([status, nextRetryAt])
   @@index([jobType, status])
+  @@index([parentId, updatedAt])
+}
+
+/// One execution of a CrmSyncRecord job.
+model CrmSyncAttempt {
+  id             String        @id @default(cuid())
+  syncRecordId   String
+  attemptNumber  Int
+  /// automatic | manual; null when the trigger was not recorded
+  trigger        String?
+  triggeredById  String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  /// success | failed | retrying | skipped; null while running
+  outcome        String?
+  errorCode      String?
+  errorMessage   String?
+  remoteEntityId String?
+  createdAt      DateTime      @default(now())
+  syncRecord     CrmSyncRecord @relation(fields: [syncRecordId], references: [id], onDelete: Cascade)
+  @@unique([syncRecordId, attemptNumber])
 }
 
 model EmailJob {
