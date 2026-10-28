@@ -7,6 +7,7 @@ import {
   Calculator,
   Cable,
   ClipboardList,
+  ExternalLink,
   FileText,
   Layers,
   LayoutDashboard,
@@ -44,8 +45,10 @@ import {
   filterNavSections,
   isNavItemActive,
   NAV_SECTIONS,
+  safeExternalNavUrl,
   sectionHasActiveItem,
   splitNavHref,
+  type NavItemConfig,
   type NavSectionConfig,
 } from '@/lib/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -85,6 +88,7 @@ export const NAV_ICON_MAP: Record<string, LucideIcon> = {
   emails: Mail,
   users: Users,
   espocrm: Cable,
+  'espocrm-open': Cable,
   'audit-logs': ScrollText,
   settings: Settings,
 };
@@ -189,6 +193,30 @@ export function userInitials(name: string): string {
   );
 }
 
+type ExternalNavUrls = Partial<Record<NonNullable<NavItemConfig['external']>, string>>;
+
+/** Resolves external app links from validated server config; unresolved items stay hidden. */
+function useExternalNavUrls(sections: NavSectionConfig[]): ExternalNavUrls {
+  const wantsEspo = sections.some((section) => section.items.some((item) => item.external === 'espocrm'));
+  const [urls, setUrls] = useState<ExternalNavUrls>({});
+
+  useEffect(() => {
+    if (!wantsEspo) return;
+    let cancelled = false;
+    apiFetch<{ url?: string | null }>('/integrations/espocrm/access', { skipAuthRedirect: true })
+      .then((access) => {
+        const url = safeExternalNavUrl(access?.url);
+        if (!cancelled && url) setUrls((prev) => ({ ...prev, espocrm: url }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [wantsEspo]);
+
+  return urls;
+}
+
 export function useFilteredNavSections(): NavSectionConfig[] {
   const user = useSidebarUser();
   const mvpRole = resolveMvpNavRole(user?.role || 'CLIENT_EXECUTIVE');
@@ -254,6 +282,7 @@ export function SidebarNavList({
   const searchParams = useSearchParams();
   const search = searchParams?.toString() ? `?${searchParams.toString()}` : '';
   const sections = useFilteredNavSections();
+  const externalUrls = useExternalNavUrls(sections);
   const badges = useNavBadges();
   const [manualOpen, setManualOpen] = useState<Record<string, boolean>>({});
 
@@ -351,8 +380,44 @@ export function SidebarNavList({
               {open && (
                 <ul className={cn('space-y-0.5', isProductCard && 'px-1.5 pb-1.5')}>
                   {section.items.map((item) => {
-                    const active = isNavItemActive(pathname, item.href, hash, search);
                     const Icon = NAV_ICON_MAP[item.id] ?? LayoutDashboard;
+                    if (item.external) {
+                      const url = externalUrls[item.external];
+                      if (!url) return null;
+                      const externalLink = (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`${item.label} (opens in a new tab)`}
+                          onClick={() => onNavigate?.()}
+                          className={cn(
+                            'relative z-10 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-colors',
+                            'text-white/75 hover:bg-white/[0.08] hover:text-white',
+                            collapsed && 'justify-center px-2',
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" aria-hidden="true" />
+                          {!collapsed && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+                          {!collapsed && <ExternalLink className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />}
+                        </a>
+                      );
+                      return (
+                        <li key={item.id}>
+                          {collapsed ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>{externalLink}</TooltipTrigger>
+                              <TooltipContent side="right" className="border-white/10 bg-[#111318] text-white">
+                                {item.label} (new tab)
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            externalLink
+                          )}
+                        </li>
+                      );
+                    }
+                    const active = isNavItemActive(pathname, item.href, hash, search);
                     const { path: itemPath, hashId } = splitNavHref(item.href);
                     const link = (
                       <Link

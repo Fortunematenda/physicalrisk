@@ -44,6 +44,7 @@ import { AuthGate } from '@/components/AuthGate';
 import { AdvisoryBreadcrumb } from '@/components/advisory/AdvisoryBreadcrumb';
 import { BusinessConsequenceSelector } from '@/components/advisory/BusinessConsequenceSelector';
 import { EadDiagnosticPanel } from '@/components/advisory/EadDiagnosticPanel';
+import { EngagementResponsibilitiesCard } from '@/components/advisory/EngagementResponsibilitiesCard';
 import type { AssessmentDiagnosticQuestion } from '@/components/advisory/ManageDiagnosticQuestionsDialog';
 import { RecommendedProductsSelector } from '@/components/advisory/RecommendedProductsSelector';
 import { RichTextField } from '@/components/advisory/RichTextField';
@@ -1155,6 +1156,7 @@ export default function AdvisoryDetail() {
       'Assigned'
     : null;
   const isAdmin = resolveMvpNavRole(getStoredUser()?.role || '') === 'ADMIN';
+  const isClientViewer = resolveMvpNavRole(getStoredUser()?.role || '') === 'CLIENT';
   const canChangePrimary = Boolean(primaryName) && (isAdmin || (!locked && !primaryAnalystLocked));
   const canAssignPrimary = !primaryName && (isAdmin || (!locked && !primaryAnalystLocked));
   const canManagePrimary = canAssignPrimary || canChangePrimary;
@@ -1385,6 +1387,8 @@ export default function AdvisoryDetail() {
               </div>
             </div>
           </div>
+
+          {!isClientViewer ? <EngagementResponsibilitiesCard engagementId={id} onChanged={load} /> : null}
 
           {(locked || reportReady) ? (
             <Card className="mb-4 rounded-xl border-slate-200 shadow-sm">

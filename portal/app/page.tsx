@@ -115,7 +115,7 @@ function HomeInner() {
               </p>
               <h2 className="mb-3 text-2xl font-semibold tracking-tight text-white">MOSS</h2>
               <p className="text-sm leading-relaxed text-white/55">
-                Management Operating Security System — assessments, evidence, risk scoring, and
+                Management Oversight Security Standard — assessments, evidence, risk scoring, and
                 executive reporting.
               </p>
             </div>
@@ -166,7 +166,7 @@ function HomeInner() {
       title: 'MOSS',
       eyebrow: 'Assessments & reporting',
       description:
-        'Management Operating Security System — assessments, evidence, risk scoring, and executive reporting.',
+        'Management Oversight Security Standard — assessments, evidence, risk scoring, and executive reporting.',
       icon: Shield,
       accent: 'from-[#c41230]/25 via-transparent to-transparent',
       iconClass: 'bg-[#c41230] text-white shadow-[#c41230]/40',

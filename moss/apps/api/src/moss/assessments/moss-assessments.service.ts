@@ -359,7 +359,7 @@ export class MossAssessmentsService {
 
     return {
       product: 'MOSS',
-      productName: 'Management of Security Systems',
+      productName: 'Management Oversight Security Standard',
       catalogue,
       counts: { active: assessments.length, draft, completed },
       recent: assessments.slice(0, 8),

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   NAV_SECTIONS,
+  PRODUCT_CONTEXT_LABELS,
   filterNavSections,
   isNavItemActive,
   activeDiagnosticProduct,
+  safeExternalNavUrl,
+  sectionHasActiveItem,
 } from './navigation';
 
 describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
@@ -119,6 +122,51 @@ describe('Cost Leakage / MOSS / SOMOD navigation separation', () => {
     expect(filtered.some((s) => s.id === 'scl')).toBe(true);
     expect(filtered.some((s) => s.id === 'moss')).toBe(true);
     expect(filtered.some((s) => s.id === 'somod')).toBe(true);
+  });
+
+  it('uses the correct MOSS and SOMOD names in the sidebar', () => {
+    const moss = NAV_SECTIONS.find((s) => s.id === 'moss');
+    const somod = NAV_SECTIONS.find((s) => s.id === 'somod');
+    expect(moss?.description).toBe('Management Oversight Security Standard');
+    expect(somod?.description).toBe('Security Operating Model Optimisation Diagnostic');
+  });
+
+  it('selects the SOMOD section — not MOSS — on direct navigation and refresh of /somod', () => {
+    const somod = NAV_SECTIONS.find((s) => s.id === 'somod')!;
+    const moss = NAV_SECTIONS.find((s) => s.id === 'moss')!;
+    for (const path of ['/somod', '/somod/assessments', '/somod/assessments/abc']) {
+      expect(sectionHasActiveItem(path, somod)).toBe(true);
+      expect(sectionHasActiveItem(path, moss)).toBe(false);
+      expect(activeDiagnosticProduct(path)).toBe('SOMOD');
+    }
+    expect(PRODUCT_CONTEXT_LABELS.SOMOD).toMatch(/^SOMOD/);
+    expect(isNavItemActive('/somod', '/somod')).toBe(true);
+    expect(isNavItemActive('/somod/assessments', '/somod')).toBe(false);
+  });
+
+  it('shows the CRM link to internal staff only, as an external link', () => {
+    const item = NAV_SECTIONS.find((s) => s.id === 'system')?.items.find((i) => i.id === 'espocrm-open');
+    expect(item?.label).toBe('CRM');
+    expect(item?.external).toBe('espocrm');
+    expect(item?.roles).toEqual(['ADMIN', 'ANALYST']);
+    const clientIds = filterNavSections(NAV_SECTIONS, 'CLIENT').flatMap((s) => s.items.map((i) => i.id));
+    expect(clientIds).not.toContain('espocrm-open');
+    const analystIds = filterNavSections(NAV_SECTIONS, 'ANALYST').flatMap((s) => s.items.map((i) => i.id));
+    expect(analystIds).toContain('espocrm-open');
+    expect(analystIds).not.toContain('espocrm');
+    const system = NAV_SECTIONS.find((s) => s.id === 'system')!;
+    expect(sectionHasActiveItem('/settings/integrations', { ...system, items: [item!] })).toBe(false);
+  });
+
+  it('only accepts HTTPS external URLs (HTTP for loopback dev hosts only)', () => {
+    expect(safeExternalNavUrl('https://crm.physicalrisk.com/')).toBe('https://crm.physicalrisk.com/');
+    expect(safeExternalNavUrl('http://crm.physicalrisk.com/')).toBeNull();
+    expect(safeExternalNavUrl('http://crm.localhost:8080/')).toBe('http://crm.localhost:8080/');
+    expect(safeExternalNavUrl('javascript:alert(1)')).toBeNull();
+    expect(safeExternalNavUrl('data:text/html,x')).toBeNull();
+    expect(safeExternalNavUrl('https://user:pw@crm.example.com/')).toBeNull();
+    expect(safeExternalNavUrl('')).toBeNull();
+    expect(safeExternalNavUrl('not a url')).toBeNull();
   });
 
   it('keeps advisory PDFs under Diagnostics & assurance, not Cost Leakage reports', () => {

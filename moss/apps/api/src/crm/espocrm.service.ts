@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -16,7 +17,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
-import { INTERNAL_ROLES } from '../common/roles';
+import { ADMIN_ROLES, INTERNAL_ROLES, hasRole } from '../common/roles';
 import { EspoCrmClient, EspoCrmHttpError } from './espocrm.client';
 import {
   assertEspoConfigured,
@@ -40,11 +41,110 @@ import {
   todayIso,
 } from './espocrm.mapper';
 import type {
-  EspoConnectionTestResult,
+  EspoAdminSettings,
+  EspoHealthCheck,
   EspoIntegrationStatus,
   EspoJobType,
   EspoLogQuery,
+  EspoPublicConnectionTest,
+  EspoSyncHistoryItem,
+  EspoSyncHistoryPage,
 } from './espocrm.types';
+import {
+  ESPO_WORKER_INTERVAL_MS,
+  classifyConnectionTest,
+  countUnresolvedFailures,
+  crmRecordUrl,
+  historyStatus,
+  isRetryEligible,
+  publicConnectionMessage,
+  resolveConnectionState,
+  resolveCrmAccess,
+  resolveSyncState,
+  resolveWorkerState,
+  sanitizeErrorSummary,
+  type EspoCheckState,
+  type EspoCrmAccess,
+  type EspoLastConnectionTest,
+  type EspoWorkerHeartbeat,
+} from './espocrm.health';
+
+/** Persisted health evidence, kept apart from the `espocrm` row that holds the API key. */
+export const ESPOCRM_CONNECTION_TEST_KEY = 'espocrm.connectionTest';
+export const ESPOCRM_WORKER_HEARTBEAT_KEY = 'espocrm.workerHeartbeat';
+
+const SYNC_DIRECTION = 'Outbound (MOSS → EspoCRM)';
+const SUCCESS_STATUSES: SyncStatus[] = ['SUCCESS', 'SYNCED'];
+/** A PROCESSING row older than this is treated as abandoned when checking for duplicate work. */
+const PROCESSING_STALE_MS = 15 * 60_000;
+const HISTORY_STATUS_FILTER: Record<string, SyncStatus[]> = {
+  success: ['SUCCESS', 'SYNCED'],
+  failed: ['FAILED'],
+  pending: ['PENDING', 'RETRYING'],
+  processing: ['PROCESSING'],
+  skipped: ['SKIPPED', 'CANCELLED'],
+};
+
+function parseConnectionTest(value: unknown): EspoLastConnectionTest | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const at = typeof raw.at === 'string' ? new Date(raw.at) : null;
+  if (!at || Number.isNaN(at.getTime()) || typeof raw.success !== 'boolean') return null;
+  const checks = (raw.checks && typeof raw.checks === 'object' ? raw.checks : {}) as Record<string, unknown>;
+  const state = (v: unknown): EspoCheckState => (typeof v === 'boolean' ? v : null);
+  return {
+    at,
+    success: raw.success,
+    errorCode: typeof raw.errorCode === 'string' ? raw.errorCode : null,
+    message: typeof raw.message === 'string' ? raw.message : publicConnectionMessage({ success: raw.success }),
+    responseTimeMs: typeof raw.responseTimeMs === 'number' ? raw.responseTimeMs : null,
+    checks: {
+      apiReachable: state(checks.apiReachable),
+      authValid: state(checks.authValid),
+      sslValid: state(checks.sslValid),
+    },
+  };
+}
+
+function parseWorkerHeartbeat(value: unknown): EspoWorkerHeartbeat | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.lastRunAt !== 'string') return null;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return { lastRunAt: raw.lastRunAt, processed: n(raw.processed), succeeded: n(raw.succeeded), failed: n(raw.failed) };
+}
+
+type HistoryRow = {
+  id: string;
+  entityType: string;
+  localEntityId: string;
+  remoteEntityId: string | null;
+  jobType: string | null;
+  status: SyncStatus;
+  errorMessage: string | null;
+  attemptCount: number;
+  nextRetryAt: Date | null;
+  assessmentId: string | null;
+  updatedAt: Date;
+  organisation: { name: string } | null;
+  assessment: { reference: string } | null;
+};
+
+const HISTORY_SELECT = {
+  id: true,
+  entityType: true,
+  localEntityId: true,
+  remoteEntityId: true,
+  jobType: true,
+  status: true,
+  errorMessage: true,
+  attemptCount: true,
+  nextRetryAt: true,
+  assessmentId: true,
+  updatedAt: true,
+  organisation: { select: { name: true } },
+  assessment: { select: { reference: true } },
+} satisfies Prisma.CrmSyncRecordSelect;
 
 type LeakageResult = {
   minimumLeakageValue?: number;
@@ -60,9 +160,6 @@ type CategoryScore = { category: string; score: number | string };
 export class EspoCrmService {
   private readonly logger = new Logger(EspoCrmService.name);
   private cfg: EspoCrmRuntimeConfig;
-  private lastHealthCheck: Date | null = null;
-  private lastHealthOk: boolean | null = null;
-  private lastHealthAuth: boolean | null = null;
   private espoIndustryOptions: string[] | null = null;
 
   constructor(
@@ -143,21 +240,49 @@ export class EspoCrmService {
     );
   }
 
-  private buildStatusSnapshot() {
-    return {
-      enabled: this.cfg.enabled,
-      configured: Boolean(this.cfg.baseUrl && this.cfg.apiKey),
-      baseUrlConfigured: Boolean(this.cfg.baseUrl),
-      apiKeyConfigured: Boolean(this.cfg.apiKey),
-      baseUrl: this.cfg.baseUrl || null,
-      mode: 'Outbound REST API using a dedicated EspoCRM API User',
-      source: this.cfg.baseUrl || this.cfg.apiKey ? 'merged' : 'none',
-    };
+  private nodeEnv() {
+    return this.config.get<string>('NODE_ENV') || 'development';
   }
 
-  async status() {
+  private async readSetting(key: string): Promise<unknown> {
+    const row = await this.prisma.systemSetting.findUnique({ where: { key } });
+    return row?.value ?? null;
+  }
+
+  private async writeSetting(key: string, value: Record<string, unknown>) {
+    const json = value as unknown as Prisma.InputJsonValue;
+    await this.prisma.systemSetting.upsert({
+      where: { key },
+      create: { key, value: json },
+      update: { value: json },
+    });
+  }
+
+  private async lastConnectionTest() {
+    return parseConnectionTest(await this.readSetting(ESPOCRM_CONNECTION_TEST_KEY));
+  }
+
+  private async workerHeartbeat() {
+    return parseWorkerHeartbeat(await this.readSetting(ESPOCRM_WORKER_HEARTBEAT_KEY));
+  }
+
+  /** Link to the EspoCRM interface for authorised users. Grants nothing in EspoCRM itself. */
+  async access(): Promise<EspoCrmAccess> {
     await this.refreshConfig();
-    return this.buildStatusSnapshot();
+    return resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv());
+  }
+
+  async getSettings(): Promise<EspoAdminSettings> {
+    await this.refreshConfig();
+    return {
+      enabled: this.cfg.enabled,
+      baseUrl: this.cfg.baseUrl || null,
+      apiKeyConfigured: Boolean(this.cfg.apiKey),
+      timeoutSeconds: Math.round(this.cfg.timeoutMs / 1000),
+      syncDirection: SYNC_DIRECTION,
+      autoSync: this.cfg.autoSync,
+      verifySsl: this.cfg.verifySsl,
+    };
   }
 
   async updateConnectionSettings(
@@ -167,7 +292,8 @@ export class EspoCrmService {
     const row = await this.prisma.systemSetting.findUnique({ where: { key: ESPOCRM_SETTING_KEY } });
     const existing = parseEspoStoredConnection(row?.value);
     const env = loadEspoCrmConfig(this.config);
-    const nodeEnv = this.config.get<string>('NODE_ENV') || 'development';
+    const nodeEnv = this.nodeEnv();
+    const replacementKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
 
     const next: EspoCrmStoredConnection = { ...existing };
     if (typeof input.enabled === 'boolean') next.enabled = input.enabled;
@@ -176,8 +302,9 @@ export class EspoCrmService {
       if (trimmed) validateEspoBaseUrl(trimmed, nodeEnv);
       next.baseUrl = trimmed;
     }
-    if (typeof input.apiKey === 'string' && input.apiKey.length > 0) {
-      next.apiKey = input.apiKey;
+    // A blank replacement keeps the current key.
+    if (replacementKey) {
+      next.apiKey = replacementKey;
     }
 
     const merged = applyEspoConnectionOverrides(env, next);
@@ -206,12 +333,20 @@ export class EspoCrmService {
       metadata: {
         enabled: next.enabled,
         baseUrl: next.baseUrl,
-        apiKeyUpdated: typeof input.apiKey === 'string' && input.apiKey.length > 0,
+        apiKeyUpdated: Boolean(replacementKey),
       },
     });
 
-    await this.refreshConfig();
-    return this.integrationStatus();
+    const connectionChanged =
+      (typeof input.baseUrl === 'string' && next.baseUrl !== existing.baseUrl)
+      || Boolean(replacementKey)
+      || (typeof input.enabled === 'boolean' && next.enabled !== existing.enabled);
+    if (connectionChanged) {
+      // The previous result no longer describes this connection.
+      await this.prisma.systemSetting.deleteMany({ where: { key: ESPOCRM_CONNECTION_TEST_KEY } });
+    }
+
+    return this.getSettings();
   }
 
   async getMapping() {
@@ -289,132 +424,219 @@ export class EspoCrmService {
     };
   }
 
-  async integrationStatus(): Promise<EspoIntegrationStatus> {
+  async integrationStatus(now = new Date()): Promise<EspoIntegrationStatus> {
     await this.refreshConfig();
-    const lastSuccess = await this.prisma.crmSyncRecord.findFirst({
-      where: { status: { in: ['SUCCESS', 'SYNCED'] } },
-      orderBy: { updatedAt: 'desc' },
-    });
-    const lastFailed = await this.prisma.crmSyncRecord.findFirst({
-      where: { status: 'FAILED' },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const records = this.prisma.crmSyncRecord;
+    const configured = Boolean(this.cfg.baseUrl && this.cfg.apiKey);
+
     const [
-      failedCount,
-      pendingCount,
-      retryingCount,
-      successCount,
-      accountCount,
-      opportunityCount,
-      contactCount,
-      taskCount,
-      leadCount,
+      lastTest,
+      heartbeat,
+      lastAttempt,
+      lastSuccess,
+      lastFailure,
+      pending,
+      processing,
+      retrying,
+      failedTotal,
+      succeeded,
+      skipped,
+      failedRows,
     ] = await Promise.all([
-      this.prisma.crmSyncRecord.count({ where: { status: 'FAILED' } }),
-      this.prisma.crmSyncRecord.count({ where: { status: { in: ['PENDING', 'PROCESSING'] } } }),
-      this.prisma.crmSyncRecord.count({ where: { status: 'RETRYING' } }),
-      this.prisma.crmSyncRecord.count({ where: { status: { in: ['SUCCESS', 'SYNCED'] } } }),
-      this.prisma.crmSyncRecord.count({
-        where: { entityType: 'Account', status: { in: ['SUCCESS', 'SYNCED'] } },
+      this.lastConnectionTest(),
+      this.workerHeartbeat(),
+      // A PENDING row's lastAttemptAt is its queue time, not an attempt.
+      records.findFirst({
+        where: { status: { not: 'PENDING' }, lastAttemptAt: { not: null } },
+        orderBy: { lastAttemptAt: 'desc' },
+        select: { lastAttemptAt: true },
       }),
-      this.prisma.crmSyncRecord.count({
-        where: { entityType: 'Opportunity', status: { in: ['SUCCESS', 'SYNCED'] } },
+      records.findFirst({
+        where: { status: { in: SUCCESS_STATUSES } },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true },
       }),
-      this.prisma.crmSyncRecord.count({
-        where: { entityType: 'Contact', status: { in: ['SUCCESS', 'SYNCED'] } },
+      records.findFirst({
+        where: { status: 'FAILED' },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true, errorMessage: true },
       }),
-      this.prisma.crmSyncRecord.count({
-        where: { entityType: 'Task', status: { in: ['SUCCESS', 'SYNCED'] } },
-      }),
-      this.prisma.crmSyncRecord.count({
-        where: { entityType: 'Lead', status: { in: ['SUCCESS', 'SYNCED'] } },
+      records.count({ where: { status: 'PENDING' } }),
+      records.count({ where: { status: 'PROCESSING' } }),
+      records.count({ where: { status: 'RETRYING' } }),
+      records.count({ where: { status: 'FAILED' } }),
+      records.count({ where: { status: { in: SUCCESS_STATUSES } } }),
+      records.count({ where: { status: { in: ['SKIPPED', 'CANCELLED'] } } }),
+      records.findMany({
+        where: { status: 'FAILED' },
+        orderBy: { updatedAt: 'desc' },
+        take: 500,
+        select: { jobType: true, entityType: true, localEntityId: true, updatedAt: true },
       }),
     ]);
 
-    const configured = Boolean(this.cfg.baseUrl && this.cfg.apiKey);
-    const connected = this.cfg.enabled && configured && this.lastHealthOk !== false;
+    const failedIds = [...new Set(failedRows.map((row) => row.localEntityId))];
+    const [laterSuccesses, byType] = await Promise.all([
+      failedIds.length
+        ? records.findMany({
+            where: { status: { in: SUCCESS_STATUSES }, localEntityId: { in: failedIds } },
+            select: { jobType: true, entityType: true, localEntityId: true, updatedAt: true },
+          })
+        : Promise.resolve([]),
+      records.groupBy({
+        by: ['entityType'],
+        where: { status: { in: SUCCESS_STATUSES } },
+        _count: { _all: true },
+      }),
+    ]);
+    const failedUnresolved = countUnresolvedFailures(failedRows, laterSuccesses);
 
-    const recentAlerts = await this.prisma.crmSyncRecord.findMany({
-      where: { status: { in: ['FAILED', 'RETRYING', 'SUCCESS', 'SYNCED'] } },
-      orderBy: { updatedAt: 'desc' },
-      take: 6,
-      select: {
-        id: true,
-        entityType: true,
-        status: true,
-        errorMessage: true,
-        updatedAt: true,
-        localEntityId: true,
-      },
+    const connectionState = resolveConnectionState({ enabled: this.cfg.enabled, configured, lastTest });
+    const workerState = resolveWorkerState({
+      enabled: this.cfg.enabled,
+      autoSync: this.cfg.autoSync,
+      heartbeat,
+      now,
+    });
+    const syncState = resolveSyncState({
+      enabled: this.cfg.enabled,
+      configured,
+      counts: { pending, processing, retrying, failedUnresolved },
+      worker: workerState,
     });
 
-    const entityTotals = {
-      Account: accountCount,
-      Contact: contactCount,
-      Lead: leadCount,
-      Opportunity: opportunityCount,
-      Task: taskCount,
-    };
-    const maxEntity = Math.max(1, ...Object.values(entityTotals));
-
-    let healthMessage = 'Integration disabled';
-    if (this.cfg.enabled && !configured) healthMessage = 'Enabled but missing base URL or API key';
-    else if (this.cfg.enabled && failedCount > 0) healthMessage = `${failedCount} failed sync job(s) need attention`;
-    else if (this.cfg.enabled && pendingCount > 0) healthMessage = `${pendingCount} job(s) pending`;
-    else if (this.cfg.enabled) healthMessage = 'Outbound sync ready';
-
     return {
-      ...this.buildStatusSnapshot(),
-      connected,
-      verifySsl: this.cfg.verifySsl,
-      timeoutSeconds: Math.round(this.cfg.timeoutMs / 1000),
-      autoSync: this.cfg.enabled && this.cfg.autoSync,
-      syncDirection: 'Outbound (MOSS → EspoCRM)',
-      lastSuccessfulSync: lastSuccess?.updatedAt || null,
-      lastFailedSync: lastFailed?.updatedAt || null,
-      lastFailedError: lastFailed?.errorMessage || null,
-      failedCount,
-      pendingCount,
-      retryingCount,
-      successCount,
-      accountsSynced: accountCount,
-      opportunitiesSynced: opportunityCount,
-      contactsSynced: contactCount,
-      tasksSynced: taskCount,
-      leadsSynced: leadCount,
-      // Live connection checks only (matches Settings → Connection Health list).
-      // Sync backlog is surfaced via failedCount/pendingCount, not this gauge.
-      healthScore: (() => {
-        const apiReachable = configured && this.lastHealthOk !== false;
-        const authValid = Boolean(this.cfg.apiKey) && this.lastHealthAuth !== false;
-        const queueWorkerRunning = this.cfg.enabled;
-        const sslValid = this.cfg.verifySsl ? this.lastHealthOk !== false : true;
-        const passed = [apiReachable, authValid, queueWorkerRunning, sslValid].filter(Boolean).length;
-        return Math.round((passed / 4) * 100);
-      })(),
-      healthMessage,
-      lastHealthCheck: this.lastHealthCheck,
-      apiReachable: this.lastHealthOk,
-      authValid: this.lastHealthAuth,
-      sslValid: this.cfg.verifySsl ? this.lastHealthOk : true,
-      queueWorkerRunning: this.cfg.enabled,
-      recentAlerts,
-      entityBreakdown: Object.entries(entityTotals).map(([name, value]) => ({
-        name,
-        value,
-        pct: Math.round((value / maxEntity) * 100),
-      })),
+      enabled: this.cfg.enabled,
+      configured,
+      access: resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()),
+      connection: {
+        state: connectionState,
+        checkedAt: lastTest?.at.toISOString() ?? null,
+        message: lastTest?.message ?? null,
+        responseTimeMs: lastTest?.responseTimeMs ?? null,
+      },
+      checks: this.healthChecks(lastTest, workerState, heartbeat),
+      worker: {
+        state: workerState,
+        lastRunAt: heartbeat?.lastRunAt ?? null,
+        lastProcessed: heartbeat?.processed ?? null,
+        lastSucceeded: heartbeat?.succeeded ?? null,
+        lastFailed: heartbeat?.failed ?? null,
+        intervalMinutes: ESPO_WORKER_INTERVAL_MS / 60_000,
+      },
+      sync: {
+        state: syncState,
+        direction: SYNC_DIRECTION,
+        lastAttemptAt: lastAttempt?.lastAttemptAt?.toISOString() ?? null,
+        lastSuccessAt: lastSuccess?.updatedAt.toISOString() ?? null,
+        lastFailureAt: lastFailure?.updatedAt.toISOString() ?? null,
+        lastFailureSummary: sanitizeErrorSummary(lastFailure?.errorMessage),
+        counts: { pending, processing, retrying, failedUnresolved, failedTotal, succeeded, skipped },
+        succeededByType: byType
+          .map((row) => ({ recordType: row.entityType, count: row._count._all }))
+          .sort((a, b) => b.count - a.count),
+      },
     };
   }
 
-  async testConnection(user?: AuthUser): Promise<EspoConnectionTestResult> {
+  private healthChecks(
+    lastTest: EspoLastConnectionTest | null,
+    workerState: EspoIntegrationStatus['worker']['state'],
+    heartbeat: EspoWorkerHeartbeat | null,
+  ): EspoHealthCheck[] {
+    const testedAt = lastTest?.at.toISOString() ?? null;
+    const fromTest = (
+      id: EspoHealthCheck['id'],
+      label: string,
+      state: EspoCheckState | undefined,
+      passed: string,
+      failed: string,
+    ): EspoHealthCheck => {
+      if (state === true) return { id, label, result: 'passed', checkedAt: testedAt, detail: passed };
+      if (state === false) return { id, label, result: 'failed', checkedAt: testedAt, detail: failed };
+      return {
+        id,
+        label,
+        result: 'not_checked',
+        checkedAt: null,
+        detail: lastTest
+          ? 'The last connection test could not determine this.'
+          : 'No connection test has been recorded.',
+      };
+    };
+
+    const tls: EspoHealthCheck = this.cfg.verifySsl
+      ? fromTest(
+          'tls',
+          'TLS certificate',
+          lastTest?.checks.sslValid,
+          'The CRM certificate was verified.',
+          'The CRM certificate could not be verified.',
+        )
+      : {
+          id: 'tls',
+          label: 'TLS certificate',
+          result: 'not_checked',
+          checkedAt: null,
+          detail: 'Certificate verification is turned off in the deployment configuration.',
+        };
+
+    const workerCopy: Record<EspoIntegrationStatus['worker']['state'], Pick<EspoHealthCheck, 'result' | 'detail'>> = {
+      running: {
+        result: 'passed',
+        detail: heartbeat
+          ? `Last run processed ${heartbeat.processed} job(s): ${heartbeat.succeeded} succeeded, ${heartbeat.failed} failed.`
+          : 'The sync worker has run recently.',
+      },
+      stale: {
+        result: 'failed',
+        detail: `The sync worker has not run for over ${(3 * ESPO_WORKER_INTERVAL_MS) / 60_000} minutes.`,
+      },
+      not_recorded: { result: 'not_checked', detail: 'No sync worker run has been recorded yet.' },
+      not_scheduled: { result: 'not_checked', detail: 'Automatic sync is turned off, so the worker does not run.' },
+      disabled: { result: 'not_checked', detail: 'The integration is disabled.' },
+    };
+
+    return [
+      fromTest(
+        'api',
+        'API reachable',
+        lastTest?.checks.apiReachable,
+        'MOSS reached the EspoCRM API.',
+        'MOSS could not reach the EspoCRM API.',
+      ),
+      fromTest(
+        'auth',
+        'Integration key accepted',
+        lastTest?.checks.authValid,
+        'EspoCRM accepted the integration API key.',
+        'EspoCRM rejected the integration API key.',
+      ),
+      tls,
+      {
+        id: 'worker',
+        label: 'Sync worker',
+        checkedAt: heartbeat?.lastRunAt ?? null,
+        ...workerCopy[workerState],
+      },
+    ];
+  }
+
+  async testConnection(user?: AuthUser): Promise<EspoPublicConnectionTest> {
     await this.refreshConfig();
     assertEspoConfigured(this.cfg);
     const client = new EspoCrmClient(this.cfg);
     const result = await client.testConnection();
-    this.lastHealthCheck = new Date();
-    this.lastHealthOk = result.success;
-    this.lastHealthAuth = result.success && result.errorCode !== 'AUTH_FAILED';
+    const checkedAt = new Date();
+    const message = publicConnectionMessage(result);
+    await this.writeSetting(ESPOCRM_CONNECTION_TEST_KEY, {
+      at: checkedAt.toISOString(),
+      success: result.success,
+      errorCode: result.errorCode || null,
+      message,
+      responseTimeMs: result.responseTimeMs,
+      checks: classifyConnectionTest(result, this.cfg.verifySsl),
+    });
     await this.audit.record({
       userId: user?.id,
       action: 'ESPOCRM_CONNECTION_TEST',
@@ -428,9 +650,15 @@ export class EspoCrmService {
       },
     });
     if (!result.success) {
-      throw new BadGatewayException(result.message);
+      throw new BadGatewayException(message);
     }
-    return result;
+    return {
+      success: true,
+      checkedAt: checkedAt.toISOString(),
+      responseTimeMs: result.responseTimeMs,
+      message,
+      errorCode: null,
+    };
   }
 
   private async writeLog(input: {
@@ -650,14 +878,17 @@ export class EspoCrmService {
     });
   }
 
-  async processQueuedSync(syncId: string) {
+  /** Runs one queued job. Returns its final status, or null if it was missing or already claimed. */
+  async processQueuedSync(syncId: string): Promise<SyncStatus | null> {
     const row = await this.prisma.crmSyncRecord.findUnique({ where: { id: syncId } });
-    if (!row) return;
+    if (!row) return null;
 
-    await this.prisma.crmSyncRecord.update({
-      where: { id: syncId },
+    // Conditional claim: only one caller (cron, retry or enqueue) can move a job into PROCESSING.
+    const claimed = await this.prisma.crmSyncRecord.updateMany({
+      where: { id: syncId, status: { in: ['PENDING', 'RETRYING', 'FAILED'] } },
       data: { status: 'PROCESSING', lastAttemptAt: new Date() },
     });
+    if (claimed.count === 0) return null;
 
     const systemUser = await this.prisma.user.findFirst({
       where: { systemRole: 'SUPER_ADMIN', isActive: true },
@@ -704,6 +935,7 @@ export class EspoCrmService {
           nextRetryAt: null,
         },
       });
+      return 'SUCCESS';
     } catch (error: unknown) {
       const safe = this.asError(error);
       const missing = error instanceof NotFoundException;
@@ -713,10 +945,11 @@ export class EspoCrmService {
       const terminal = missing || premature;
       const attemptCount = (row.attemptCount || 0) + 1;
       const retryable = !terminal && safe.retryable && attemptCount < ESPO_MAX_ATTEMPTS;
+      const finalStatus: SyncStatus = terminal ? 'SKIPPED' : retryable ? 'RETRYING' : 'FAILED';
       await this.prisma.crmSyncRecord.update({
         where: { id: syncId },
         data: {
-          status: terminal ? 'SKIPPED' : retryable ? 'RETRYING' : 'FAILED',
+          status: finalStatus,
           errorMessage: safe.message,
           errorCode: safe.code,
           lastAttemptAt: new Date(),
@@ -731,6 +964,7 @@ export class EspoCrmService {
         entityId: row.localEntityId,
         metadata: { syncId, code: safe.code, jobType: row.jobType },
       });
+      return finalStatus;
     }
   }
 
@@ -1765,38 +1999,138 @@ export class EspoCrmService {
     return { processed, skipped: false };
   }
 
-  async retry(id: string, user?: AuthUser) {
+  private toHistoryItem(row: HistoryRow, crmAppUrl: string | null, canManage: boolean): EspoSyncHistoryItem {
+    const status = historyStatus(row.status);
+    return {
+      id: row.id,
+      at: row.updatedAt.toISOString(),
+      recordType: row.entityType,
+      reference:
+        row.assessment?.reference
+        || row.organisation?.name
+        || `${row.entityType} …${row.localEntityId.slice(-6)}`,
+      status,
+      attempts: row.attemptCount,
+      nextRetryAt: row.status === 'RETRYING' ? row.nextRetryAt?.toISOString() ?? null : null,
+      errorSummary: status === 'success' ? null : sanitizeErrorSummary(row.errorMessage),
+      crmUrl: crmRecordUrl(crmAppUrl, row.entityType, row.remoteEntityId),
+      canRetry: canManage && isRetryEligible(row),
+    };
+  }
+
+  /** Safe projection of the sync job log: no payloads, responses or raw errors. */
+  async listHistory(
+    query: { page?: number; pageSize?: number; status?: string },
+    user: AuthUser,
+  ): Promise<EspoSyncHistoryPage> {
+    await this.refreshConfig();
+    const page = Math.max(1, Math.floor(Number(query.page) || 1));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(Number(query.pageSize) || 20)));
+    const statuses = query.status ? HISTORY_STATUS_FILTER[query.status] : undefined;
+    if (query.status && !statuses) throw new BadRequestException('Unknown status filter.');
+    const where: Prisma.CrmSyncRecordWhereInput = statuses ? { status: { in: statuses } } : {};
+
+    const [total, rows] = await Promise.all([
+      this.prisma.crmSyncRecord.count({ where }),
+      this.prisma.crmSyncRecord.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: HISTORY_SELECT,
+      }),
+    ]);
+    const crmAppUrl = resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()).url;
+    const canManage = hasRole(user, ADMIN_ROLES);
+    return {
+      items: rows.map((row) => this.toHistoryItem(row, crmAppUrl, canManage)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
+  /**
+   * Re-run one failed job. Only retry-eligible jobs, never while another run of the
+   * same record is queued or in flight, and the PENDING claim is conditional so
+   * concurrent requests cannot both start it.
+   */
+  async retry(id: string, user: AuthUser): Promise<EspoSyncHistoryItem> {
     const row = await this.prisma.crmSyncRecord.findUnique({ where: { id } });
     if (!row) throw new NotFoundException('Sync record not found.');
-    await this.prisma.crmSyncRecord.update({
-      where: { id },
+    if (!isRetryEligible(row)) {
+      throw new ConflictException('Only failed sync jobs can be retried.');
+    }
+
+    const inFlight = await this.prisma.crmSyncRecord.findFirst({
+      where: {
+        id: { not: id },
+        localEntityId: row.localEntityId,
+        ...(row.jobType ? { jobType: row.jobType } : { entityType: row.entityType }),
+        OR: [
+          { status: 'PENDING' },
+          { status: 'PROCESSING', updatedAt: { gte: new Date(Date.now() - PROCESSING_STALE_MS) } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (inFlight) {
+      throw new ConflictException('A sync for this record is already queued or in progress.');
+    }
+
+    const claimed = await this.prisma.crmSyncRecord.updateMany({
+      where: { id, status: { in: ['FAILED', 'RETRYING'] } },
       data: { status: 'PENDING', errorMessage: null, errorCode: null, nextRetryAt: null },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException('This sync job is already being retried.');
+    }
+
     await this.audit.record({
-      userId: user?.id,
+      userId: user.id,
       action: 'ESPOCRM_SYNC_RETRIED',
       entityType: row.entityType,
       entityId: row.localEntityId,
       metadata: { syncId: id },
     });
     await this.processQueuedSync(id);
-    return this.prisma.crmSyncRecord.findUnique({ where: { id } });
+
+    await this.refreshConfig();
+    const updated = await this.prisma.crmSyncRecord.findUnique({ where: { id }, select: HISTORY_SELECT });
+    if (!updated) throw new NotFoundException('Sync record not found.');
+    return this.toHistoryItem(
+      updated,
+      resolveCrmAccess(this.cfg.baseUrl, this.nodeEnv()).url,
+      hasRole(user, ADMIN_ROLES),
+    );
   }
 
-  async retryFailed(user?: AuthUser) {
+  async retryFailed(user: AuthUser) {
     const failed = await this.prisma.crmSyncRecord.findMany({
       where: { status: { in: ['FAILED', 'RETRYING'] } },
       take: 50,
       orderBy: { updatedAt: 'asc' },
     });
     let processed = 0;
+    let skipped = 0;
     for (const row of failed) {
-      await this.retry(row.id, user);
-      processed += 1;
+      if (!isRetryEligible(row)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await this.retry(row.id, user);
+        processed += 1;
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        skipped += 1;
+      }
     }
-    return { processed };
+    return { processed, skipped };
   }
 
+  /** The sync worker. Each run records a heartbeat so the UI can report real worker status. */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async retryFailedCron() {
     await this.refreshConfig();
@@ -1806,8 +2140,21 @@ export class EspoCrmService {
       take: 10,
       orderBy: { updatedAt: 'asc' },
     });
+    let processed = 0;
+    let succeeded = 0;
+    let failed = 0;
     for (const row of due) {
-      await this.processQueuedSync(row.id).catch(() => undefined);
+      const outcome = await this.processQueuedSync(row.id).catch(() => 'FAILED' as const);
+      if (!outcome) continue;
+      processed += 1;
+      if (outcome === 'SUCCESS') succeeded += 1;
+      else if (outcome === 'FAILED' || outcome === 'RETRYING') failed += 1;
     }
+    await this.writeSetting(ESPOCRM_WORKER_HEARTBEAT_KEY, {
+      lastRunAt: new Date().toISOString(),
+      processed,
+      succeeded,
+      failed,
+    }).catch((err) => this.logger.warn(`Could not record CRM worker heartbeat: ${(err as Error)?.message || err}`));
   }
 }

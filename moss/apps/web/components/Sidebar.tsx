@@ -193,6 +193,7 @@ export function Sidebar({
               {open && (
                 <ul className="sidebar-list">
                   {section.items.map((item) => {
+                    if (item.external) return null;
                     const active = isNavItemActive(pathname, item.href);
                     const Icon = item.icon;
                     return (

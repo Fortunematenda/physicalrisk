@@ -1134,7 +1134,7 @@ export default function TriageSubmissionsPage() {
                                 ))}
                               </select>
                             </div>
-                          ) : (
+                          ) : canCreateUsers ? (
                             <button
                               type="button"
                               className="triage-assign-link"
@@ -1145,6 +1145,10 @@ export default function TriageSubmissionsPage() {
                             >
                               + Assign analyst
                             </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400" title="Analysts are added in Keycloak SSO">
+                              No analysts available
+                            </span>
                           )}
                         </td>
                         <td>

@@ -27,6 +27,11 @@ export type NavItemConfig = {
   href: string;
   icon: NavIconComponent;
   roles: MvpNavRole[];
+  /**
+   * Opens a separately hosted application in a new tab. The URL is resolved at
+   * runtime from validated server config; the item is hidden when none is available.
+   */
+  external?: 'espocrm';
 };
 
 export type NavSectionConfig = {
@@ -48,7 +53,7 @@ export type NavSectionConfig = {
 /**
  * Sidebar navigation — Cost Leakage and MOSS as separate collapsible product groups.
  * Cost Leakage = SCLI_COST_LEAKAGE (/dashboard, /assessments, …)
- * MOSS = Master Operating Security System (/moss/…)
+ * MOSS = Management Oversight Security Standard (/moss/…)
  */
 export const NAV_SECTIONS: NavSectionConfig[] = [
   {
@@ -131,7 +136,7 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     id: 'moss',
     label: 'MOSS',
     level: 'Enterprise',
-    description: 'Operating security maturity',
+    description: 'Management Oversight Security Standard',
     group: 'enterprise',
     groupLabel: 'Enterprise programmes',
     collapsible: true,
@@ -177,7 +182,7 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
     id: 'somod',
     label: 'SOMOD',
     level: 'Enterprise',
-    description: 'Security operations model diagnostic',
+    description: 'Security Operating Model Optimisation Diagnostic',
     group: 'enterprise',
     collapsible: true,
     items: [
@@ -232,6 +237,15 @@ export const NAV_SECTIONS: NavSectionConfig[] = [
         href: '/settings/integrations',
         icon: IconCable,
         roles: ['ADMIN'],
+      },
+      {
+        // Shown only when /integrations/espocrm/access (role-checked server-side) returns a safe URL.
+        id: 'espocrm-open',
+        label: 'CRM',
+        href: '/settings/integrations',
+        icon: IconCable,
+        roles: ['ADMIN', 'ANALYST'],
+        external: 'espocrm',
       },
       {
         id: 'audit-logs',
@@ -421,7 +435,29 @@ export function isNavItemActive(pathname: string, href: string, hash = '', searc
 
 /** True when any item in the section matches the current path. */
 export function sectionHasActiveItem(pathname: string, section: NavSectionConfig, hash = '', search = ''): boolean {
-  return section.items.some((item) => isNavItemActive(pathname, item.href, hash, search));
+  return section.items.some((item) => !item.external && isNavItemActive(pathname, item.href, hash, search));
+}
+
+function isLoopbackHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host.endsWith('.localhost');
+}
+
+/**
+ * HTTPS URL for an external nav target, or null. Plain HTTP is accepted only for
+ * loopback hosts (local development); credentials and other schemes are refused.
+ */
+export function safeExternalNavUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.username || url.password) return null;
+    if (url.protocol === 'https:') return url.toString();
+    if (url.protocol === 'http:' && isLoopbackHost(url.hostname)) return url.toString();
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function filterNavSections(sections: NavSectionConfig[], userRole: MvpNavRole): NavSectionConfig[] {

@@ -48,7 +48,15 @@ import { generateAssessmentReference } from '../common/assessment-reference';
 import { generateL3ProposalReference } from '../common/l3-proposal-reference';
 import { generateProposalReference } from '../common/proposal-reference';
 import { assertManualLevel3CreationAllowed, resolveManualCreatePolicy } from '../common/l3-governance';
-import { INTERNAL_ROLES } from '../common/roles';
+import { ADMIN_ROLES, INTERNAL_ROLES, WRITE_INTERNAL_ROLES, hasRole, requireRole } from '../common/roles';
+import {
+  ENGAGEMENT_RESPONSIBILITIES,
+  eligibleResponsibilityKeys,
+  isEligibleForResponsibility,
+  responsibilityCatalogue,
+  responsibilityForAssignmentRole,
+  validateResponsibilitySet,
+} from '../common/engagement-responsibilities';
 import { StorageService } from '../evidence/storage.service';
 import { EmailService } from '../email/email.service';
 import { buildDefaultContentSnapshot, resolveTemplateConfig } from '../triage/proposal/proposal-content-builder';
@@ -1385,13 +1393,19 @@ export class AdvisoryService {
   async assign(id: string, input: { userId: string; role?: AssignmentRole; notes?: string }, actor: AuthUser) {
     await this.assertAccess(id, actor);
     this.assertConsultant(actor);
+    if (!hasRole(actor, WRITE_INTERNAL_ROLES)) {
+      throw new ForbiddenException('Your role cannot change engagement assignments.');
+    }
+    const role = input.role || AssignmentRole.PRIMARY_ANALYST;
+    if (role !== AssignmentRole.PRIMARY_ANALYST && !hasRole(actor, ADMIN_ROLES)) {
+      throw new ForbiddenException('Only administrators can assign engagement responsibilities other than the engagement lead.');
+    }
     const engagement = await this.prisma.assessmentSession.findUnique({
       where: { id },
       select: { status: true, parentAssessmentId: true },
     });
     if (!engagement) throw new NotFoundException('Advisory engagement not found.');
 
-    const role = input.role || AssignmentRole.PRIMARY_ANALYST;
     const lockedTriageAnalystId = await this.resolveLockedTriageAnalystId(id, engagement.parentAssessmentId);
     const existingPrimary = await this.prisma.assessmentAssignment.findFirst({
       where: {
@@ -1416,9 +1430,14 @@ export class AdvisoryService {
     }
 
     const assignee = await this.prisma.user.findUnique({ where: { id: input.userId } });
-    const assignableRoles: SystemRole[] = [SystemRole.ANALYST, SystemRole.REVIEWER, SystemRole.SUPER_ADMIN];
-    if (!assignee || !assignee.isActive || !assignableRoles.includes(assignee.systemRole)) {
+    const responsibility = responsibilityForAssignmentRole(role);
+    if (!assignee || !assignee.isActive || !responsibility) {
       throw new BadRequestException('Select an active analyst or reviewer.');
+    }
+    if (!isEligibleForResponsibility(assignee.systemRole, responsibility)) {
+      throw new BadRequestException(
+        `${responsibility.label} requires one of these platform roles: ${responsibility.eligibleSystemRoles.join(', ')}.`,
+      );
     }
     if (role === AssignmentRole.PRIMARY_ANALYST) {
       await this.prisma.assessmentAssignment.updateMany({
@@ -1440,6 +1459,111 @@ export class AdvisoryService {
       metadata: { assessmentId: id, assigneeId: input.userId, role },
     });
     return assignment;
+  }
+
+  /** Engagement-scoped responsibilities: who holds what on this engagement, plus eligible people. */
+  async listResponsibilities(id: string, actor: AuthUser) {
+    await this.assertAccess(id, actor);
+    this.assertConsultant(actor);
+    const [rows, candidates] = await Promise.all([
+      this.prisma.assessmentAssignment.findMany({
+        where: { assessmentId: id, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+        orderBy: { assignedAt: 'asc' },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true, systemRole: true, isActive: true } },
+        },
+      }),
+      this.prisma.user.findMany({
+        where: { isActive: true, systemRole: { in: [SystemRole.ANALYST, SystemRole.REVIEWER, SystemRole.SUPER_ADMIN] } },
+        select: { id: true, firstName: true, lastName: true, email: true, systemRole: true },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      }),
+    ]);
+
+    const holders = new Map<string, { user: (typeof rows)[number]['user']; responsibilities: string[] }>();
+    for (const row of rows) {
+      const responsibility = responsibilityForAssignmentRole(row.role);
+      if (!responsibility) continue;
+      const entry = holders.get(row.userId) ?? { user: row.user, responsibilities: [] };
+      if (!entry.responsibilities.includes(responsibility.key)) entry.responsibilities.push(responsibility.key);
+      holders.set(row.userId, entry);
+    }
+
+    return {
+      catalogue: responsibilityCatalogue(),
+      canManage: hasRole(actor, ADMIN_ROLES),
+      holders: [...holders.values()],
+      candidates: candidates.map((user) => ({ ...user, eligible: eligibleResponsibilityKeys(user.systemRole) })),
+    };
+  }
+
+  /**
+   * Replace one person's responsibilities on an engagement (administrators only).
+   * Engagement lead changes go through assign() so triage locking and lead sync stay consistent.
+   */
+  async setResponsibilities(id: string, userId: string, requested: string[], actor: AuthUser) {
+    requireRole(actor, ADMIN_ROLES, 'Only administrators can change engagement responsibilities.');
+    await this.assertAccess(id, actor);
+
+    const assignee = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!assignee || !assignee.isActive) throw new BadRequestException('Select an active internal user.');
+
+    let desired: string[];
+    try {
+      desired = validateResponsibilitySet(assignee.systemRole, requested);
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
+
+    const current = await this.prisma.assessmentAssignment.findMany({
+      where: { assessmentId: id, userId, status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+    });
+    const currentKeys = new Set(
+      current.map((row) => responsibilityForAssignmentRole(row.role)?.key).filter(Boolean) as string[],
+    );
+
+    if (currentKeys.has('ENGAGEMENT_LEAD') && !desired.includes('ENGAGEMENT_LEAD')) {
+      throw new BadRequestException(
+        'An engagement must keep an engagement lead. Assign the lead to another person instead of removing it.',
+      );
+    }
+
+    const toRemove = current.filter((row) => {
+      const key = responsibilityForAssignmentRole(row.role)?.key;
+      return key && !desired.includes(key);
+    });
+    const toAdd = ENGAGEMENT_RESPONSIBILITIES.filter((r) => desired.includes(r.key) && !currentKeys.has(r.key));
+
+    if (toRemove.length) {
+      await this.prisma.assessmentAssignment.updateMany({
+        where: { id: { in: toRemove.map((row) => row.id) } },
+        data: { status: 'CANCELLED', completedAt: new Date() },
+      });
+    }
+    for (const responsibility of toAdd) {
+      if (responsibility.key === 'ENGAGEMENT_LEAD') {
+        await this.assign(id, { userId, role: AssignmentRole.PRIMARY_ANALYST }, actor);
+        continue;
+      }
+      await this.prisma.assessmentAssignment.create({
+        data: { assessmentId: id, userId, role: responsibility.assignmentRole, assignedById: actor.id },
+      });
+    }
+
+    if (toRemove.length || toAdd.length) {
+      await this.audit.record({
+        userId: actor.id,
+        action: 'ADVISORY_RESPONSIBILITIES_UPDATED',
+        entityType: 'AssessmentSession',
+        entityId: id,
+        metadata: {
+          assigneeId: userId,
+          added: toAdd.map((r) => r.key),
+          removed: toRemove.map((row) => responsibilityForAssignmentRole(row.role)?.key),
+        },
+      });
+    }
+    return this.listResponsibilities(id, actor);
   }
 
   /**

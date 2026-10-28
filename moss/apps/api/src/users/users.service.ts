@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 import { requireRole, ADMIN_ROLES, hasRole } from '../common/roles';
+import { resolveIdentityAdminUrl } from './identity-admin-url';
 
 @Injectable()
 export class UsersService {
@@ -32,13 +33,19 @@ export class UsersService {
     }
   }
 
-  capabilities() {
+  capabilities(actor?: AuthUser) {
     const keycloakOn = this.config.get<string>('KEYCLOAK_ENABLED') === 'true';
     const legacyOn = this.config.get<string>('ENABLE_LEGACY_LOGIN') === 'true';
     return {
       keycloakEnabled: keycloakOn,
       legacyLoginEnabled: legacyOn,
       localUserAdmin: !keycloakOn || legacyOn,
+      identityAdminUrl: keycloakOn && actor && hasRole(actor, ADMIN_ROLES)
+        ? resolveIdentityAdminUrl({
+            explicit: this.config.get<string>('KEYCLOAK_ADMIN_CONSOLE_URL'),
+            issuer: this.config.get<string>('KEYCLOAK_ISSUER'),
+          })
+        : null,
     };
   }
 
@@ -57,6 +64,10 @@ export class UsersService {
         createdAt: true,
         memberships: {
           include: { organisation: { select: { id: true, name: true } } },
+        },
+        assignmentsHeld: {
+          where: { status: { in: ['ASSIGNED', 'IN_PROGRESS'] } },
+          select: { role: true, assessmentId: true },
         },
       },
     });

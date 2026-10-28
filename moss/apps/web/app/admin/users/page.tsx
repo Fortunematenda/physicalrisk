@@ -19,18 +19,23 @@ import {
   IconRotateCcw,
   IconSearch,
 } from '../../../components/NavIcons';
+import { ExternalLink } from 'lucide-react';
 import { apiFetch } from '../../../lib/api';
+import { safeExternalNavUrl } from '../../../lib/navigation';
+import { platformRoleInfo, summariseResponsibilities } from '../../../lib/role-catalogue';
 
 type AdminUser = CreatedUser & {
   lastLoginAt?: string | null;
   createdAt?: string;
   memberships?: Array<{ organisation?: { id: string; name: string } }>;
+  assignmentsHeld?: Array<{ role: string; assessmentId: string }>;
 };
 
 type Capabilities = {
   keycloakEnabled: boolean;
   legacyLoginEnabled: boolean;
   localUserAdmin: boolean;
+  identityAdminUrl?: string | null;
 };
 
 export default function UsersAdminPage() {
@@ -56,6 +61,7 @@ export default function UsersAdminPage() {
   const [busy, setBusy] = useState(false);
 
   const canManage = Boolean(capabilities?.localUserAdmin);
+  const identityAdminUrl = safeExternalNavUrl(capabilities?.identityAdminUrl);
 
   async function load() {
     setLoading(true);
@@ -174,18 +180,25 @@ export default function UsersAdminPage() {
       <Shell
         title="User administration"
         hideEyebrow
-        subtitle="Create and manage platform users, roles, and access status."
+        subtitle="Platform users, their effective roles, and engagement responsibilities."
       >
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
 
         {capabilities?.keycloakEnabled ? (
-          <p className="notice" style={{ marginBottom: 16 }}>
-            <strong>SSO is enabled.</strong>
-            {capabilities.localUserAdmin
-              ? ' Legacy login is also on — you can create and edit local users here. Keycloak accounts still sync on SSO sign-in.'
-              : ' Manage accounts and roles in Keycloak. Local create/edit is disabled while legacy login is off.'}
-          </p>
+          <section className="notice" style={{ marginBottom: 16 }} aria-labelledby="sso-admin-help">
+            <p id="sso-admin-help">
+              <strong>Identities and platform roles are managed in Keycloak (SSO).</strong>{' '}
+              {capabilities.localUserAdmin
+                ? 'Legacy login is also on, so local users can be edited here, but Keycloak roles overwrite local roles at each SSO sign-in.'
+                : 'Create the person in Keycloak, then assign one MOSS realm role: moss_admin (Administrator), moss_reviewer (Senior Reviewer), moss_analyst (Analyst) or moss_client (Client Executive). They appear here after their first sign-in.'}
+            </p>
+            <p style={{ marginTop: 8 }}>
+              Role changes take effect after the person signs out of MOSS and signs in again. Engagement
+              responsibilities (Engagement lead, Consultant, Reviewer, Approver) are assigned on each engagement and
+              do not change platform access.
+            </p>
+          </section>
         ) : null}
 
         <div className="org2-actions-row">
@@ -198,6 +211,19 @@ export default function UsersAdminPage() {
               <IconPlus />
               Add user
             </button>
+          ) : identityAdminUrl ? (
+            <a
+              className="btn org2-add-btn"
+              href={identityAdminUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Manage users in the Keycloak admin console (opens in a new tab)"
+            >
+              <ExternalLink className="size-4" aria-hidden="true" />
+              Manage users in Keycloak
+            </a>
+          ) : capabilities?.keycloakEnabled ? (
+            <span className="muted small">Keycloak admin console URL not configured (KEYCLOAK_ADMIN_CONSOLE_URL).</span>
           ) : null}
         </div>
 
@@ -212,11 +238,11 @@ export default function UsersAdminPage() {
                 aria-label="Search users"
               />
             </label>
-            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Role">
+            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Platform role">
               <option value="">All roles</option>
               {USER_ROLES.map((role) => (
                 <option key={role} value={role}>
-                  {role.replaceAll('_', ' ')}
+                  {platformRoleInfo(role).label}
                 </option>
               ))}
             </select>
@@ -247,7 +273,8 @@ export default function UsersAdminPage() {
                 <tr>
                   <th>Name</th>
                   <th>Email</th>
-                  <th>Role</th>
+                  <th>Platform role (effective)</th>
+                  <th>Engagement responsibilities</th>
                   <th>Status</th>
                   <th>Last login</th>
                   <th />
@@ -262,7 +289,18 @@ export default function UsersAdminPage() {
                       </strong>
                     </td>
                     <td>{u.email}</td>
-                    <td>{u.systemRole.replaceAll('_', ' ')}</td>
+                    <td>
+                      <strong>{platformRoleInfo(u.systemRole).label}</strong>
+                      <span className="muted small" style={{ display: 'block' }}>
+                        {platformRoleInfo(u.systemRole).description}
+                      </span>
+                      {platformRoleInfo(u.systemRole).keycloakRole ? (
+                        <span className="muted small" style={{ display: 'block' }}>
+                          Keycloak: {platformRoleInfo(u.systemRole).keycloakRole}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="muted small">{summariseResponsibilities(u.assignmentsHeld) || '—'}</td>
                     <td>
                       <StatusBadge value={u.isActive ? 'ACTIVE' : 'INACTIVE'} />
                     </td>
@@ -294,14 +332,14 @@ export default function UsersAdminPage() {
                 ))}
                 {!loading && !filtered.length && (
                   <tr>
-                    <td colSpan={6} className="muted">
+                    <td colSpan={7} className="muted">
                       No users match the current filters.
                     </td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
-                    <td colSpan={6} className="muted">
+                    <td colSpan={7} className="muted">
                       Loading users…
                     </td>
                   </tr>

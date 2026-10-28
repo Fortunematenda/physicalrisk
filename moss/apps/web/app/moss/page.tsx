@@ -75,7 +75,7 @@ export default function MossDashboardPage() {
       <Shell title="MOSS" subtitle="Master Catalogue control assessments">
         <div className="mb-5">
           <p className="text-sm text-slate-500">
-            {data?.productName || 'Management of Security Systems'}
+            {data?.productName || 'Management Oversight Security Standard'}
             {data?.catalogue.version ? ` · Catalogue v${data.catalogue.version}` : ''}
           </p>
             <p className="mt-1 text-sm text-slate-500">

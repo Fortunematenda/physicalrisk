@@ -52,7 +52,7 @@ export class MossReportsService {
       doc.rect(0, 0, doc.page.width, 120).fill(BRAND);
       doc.fillColor('#ffffff').fontSize(11).text('PHYSICAL RISK', 48, 36);
       doc.fontSize(22).text('MOSS', 48, 54);
-      doc.fontSize(10).text('Master Catalogue Control Assessment', 48, 82);
+      doc.fontSize(10).text('Management Oversight Security Standard — Master Catalogue Control Assessment', 48, 82);
 
       doc.fillColor('#111111').fontSize(20).text(reportLabel, 48, 160);
       doc.moveDown(0.5).fontSize(12).fillColor('#555555')

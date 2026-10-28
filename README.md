@@ -7,7 +7,7 @@ Unified development environment for the Physical Risk platform applications with
 | Application | Description | Port |
 |-------------|-------------|------|
 | **Portal** | Application launcher (SSO entry point) | 3000 |
-| **MOSS** | Management Operating Security System | 3001 / 4001 |
+| **MOSS** | Management Oversight Security Standard | 3001 / 4001 |
 | **Enterprise Repository** | Document repository gateway | 3002 / 4002 |
 
 ## Architecture

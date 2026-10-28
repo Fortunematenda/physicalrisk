@@ -29,10 +29,37 @@ class UpdateEspoConnectionDto {
 export class CrmController {
   constructor(private readonly service: EspoCrmService) {}
 
+  /** Link to the EspoCRM interface. EspoCRM still requires its own sign-in. */
+  @Get('access')
+  @Roles('SUPER_ADMIN', 'ANALYST', 'REVIEWER', 'SALES')
+  access() {
+    return this.service.access();
+  }
+
   @Get('status')
   @Roles('SUPER_ADMIN', 'ANALYST', 'REVIEWER', 'SALES')
   status() {
     return this.service.integrationStatus();
+  }
+
+  @Get('settings')
+  @Roles('SUPER_ADMIN')
+  settings() {
+    return this.service.getSettings();
+  }
+
+  @Get('history')
+  @Roles('SUPER_ADMIN', 'ANALYST')
+  history(
+    @CurrentUser() user: AuthUser,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.service.listHistory(
+      { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined, status },
+      user,
+    );
   }
 
   @Get('mapping')

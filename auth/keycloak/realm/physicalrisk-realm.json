@@ -123,7 +123,7 @@
     {
       "clientId": "physicalrisk-moss",
       "name": "MOSS Application",
-      "description": "Management Operating Security System",
+      "description": "Management Oversight Security Standard",
       "enabled": true,
       "rootUrl": "https://moss.physicalrisk.com",
       "baseUrl": "/",

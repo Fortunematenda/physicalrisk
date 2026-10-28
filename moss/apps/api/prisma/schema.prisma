@@ -138,6 +138,9 @@ enum AssignmentRole {
   PRIMARY_ANALYST
   SENIOR_REVIEWER
   CONTRIBUTOR
+  /// Named sign-off owner for one engagement. Records responsibility only; approval
+  /// permission still comes from the platform role (see engagement-responsibilities.ts).
+  APPROVER
 }
 
 enum AssignmentStatus {

@@ -6,8 +6,11 @@ import { AuthGate } from '../../../components/AuthGate';
 import { Shell } from '../../../components/Shell';
 import { CreateUserDialog } from '@/components/users/CreateUserDialog';
 import { IconPlus } from '../../../components/NavIcons';
+import { ExternalLink } from 'lucide-react';
 import { apiFetch } from '../../../lib/api';
 import { getStoredUser, resolveMvpNavRole } from '../../../lib/auth-user';
+import { safeExternalNavUrl } from '../../../lib/navigation';
+import { platformRoleInfo } from '../../../lib/role-catalogue';
 
 type AnalystRow = {
   id: string;
@@ -23,18 +26,21 @@ export default function Consultants() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [localUserAdmin, setLocalUserAdmin] = useState(true);
+  // Assume SSO-managed until capabilities load, so "Add analyst" never flashes when it cannot work.
+  const [localUserAdmin, setLocalUserAdmin] = useState(false);
+  const [identityAdminUrl, setIdentityAdminUrl] = useState<string | null>(null);
 
   async function load() {
     try {
       const [list, caps] = await Promise.all([
         apiFetch<AnalystRow[]>('/admin/users/analysts'),
-        apiFetch<{ localUserAdmin?: boolean }>('/admin/users/capabilities').catch(() => ({
-          localUserAdmin: true,
-        })),
+        apiFetch<{ localUserAdmin?: boolean; identityAdminUrl?: string | null }>('/admin/users/capabilities').catch(
+          () => ({ localUserAdmin: false, identityAdminUrl: null }),
+        ),
       ]);
       setRows(list);
-      setLocalUserAdmin(caps.localUserAdmin !== false);
+      setLocalUserAdmin(caps.localUserAdmin === true);
+      setIdentityAdminUrl(safeExternalNavUrl(caps.identityAdminUrl));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Unable to load consultants.');
     }
@@ -51,19 +57,32 @@ export default function Consultants() {
         {notice && <p className="notice">{notice}</p>}
         {!localUserAdmin && isAdmin ? (
           <p className="notice" style={{ marginBottom: 16 }}>
-            Local user create is disabled while SSO is exclusive. Enable legacy login, or create analysts in Keycloak /
-            User administration.
+            Analysts and reviewers sign in through Keycloak SSO. To add one, create the person in Keycloak and assign
+            the <strong>moss_analyst</strong> or <strong>moss_reviewer</strong> realm role; they appear here after their
+            first sign-in. Engagement responsibilities are then assigned on each engagement.
           </p>
         ) : null}
         <div className="org2-actions-row">
           <Link className="btn secondary" href="/admin/users">
             Open user administration
           </Link>
-          {isAdmin ? (
+          {isAdmin && localUserAdmin ? (
             <button type="button" className="btn org2-add-btn" onClick={() => setCreateOpen(true)}>
               <IconPlus />
               Add analyst
             </button>
+          ) : null}
+          {isAdmin && !localUserAdmin && identityAdminUrl ? (
+            <a
+              className="btn org2-add-btn"
+              href={identityAdminUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Add analyst in the Keycloak admin console (opens in a new tab)"
+            >
+              <ExternalLink className="size-4" aria-hidden="true" />
+              Add analyst in Keycloak
+            </a>
           ) : null}
         </div>
         <section className="dash2-card org2-table-card">
@@ -86,7 +105,7 @@ export default function Consultants() {
                       </strong>
                     </td>
                     <td>{r.email}</td>
-                    <td>{r.systemRole.replaceAll('_', ' ')}</td>
+                    <td>{platformRoleInfo(r.systemRole).label}</td>
                     <td>Yes</td>
                   </tr>
                 ))}

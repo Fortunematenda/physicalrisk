@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 
 import { getToken } from '../lib/api';
 import { ensureSsoUser } from '../lib/auth-user';
+import { currentReturnPath } from '../lib/return-path';
 import {
   clearLogoutGuard,
   hasSsoSession,
@@ -73,7 +74,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
       redirectStarted.current = true;
       if (!cancelled) setMessage('Redirecting to sign-in…');
-      await redirectToLogin(path || '/triage');
+      await redirectToLogin(currentReturnPath(window.location, path));
     }
 
     check().catch(() => {

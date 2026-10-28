@@ -37,51 +37,106 @@ export type EspoConnectionTestResult = {
   success: boolean;
   statusCode?: number;
   responseTimeMs: number;
+  /** Internal only: never returned to the browser. */
   authenticatedUserName?: string | null;
   message: string;
   errorCode?: string;
 };
 
+/** What the browser receives after a connection test. */
+export type EspoPublicConnectionTest = {
+  success: boolean;
+  checkedAt: string;
+  responseTimeMs: number;
+  message: string;
+  errorCode: string | null;
+};
+
+export type EspoCheckResult = 'passed' | 'failed' | 'not_checked';
+
+export type EspoHealthCheck = {
+  id: 'api' | 'auth' | 'tls' | 'worker';
+  label: string;
+  result: EspoCheckResult;
+  checkedAt: string | null;
+  detail: string;
+};
+
+/** Health and sync evidence. Safe for every role allowed to read status: no settings or secrets. */
 export type EspoIntegrationStatus = {
   enabled: boolean;
   configured: boolean;
-  connected: boolean;
+  access: {
+    available: boolean;
+    url: string | null;
+    reason: string | null;
+    message: string | null;
+  };
+  connection: {
+    state: 'disabled' | 'not_configured' | 'untested' | 'connected' | 'failed';
+    checkedAt: string | null;
+    message: string | null;
+    responseTimeMs: number | null;
+  };
+  checks: EspoHealthCheck[];
+  worker: {
+    state: 'disabled' | 'not_scheduled' | 'not_recorded' | 'running' | 'stale';
+    lastRunAt: string | null;
+    lastProcessed: number | null;
+    lastSucceeded: number | null;
+    lastFailed: number | null;
+    intervalMinutes: number;
+  };
+  sync: {
+    state: 'disabled' | 'not_configured' | 'errors' | 'processing' | 'pending' | 'idle' | 'unknown';
+    direction: string;
+    lastAttemptAt: string | null;
+    lastSuccessAt: string | null;
+    lastFailureAt: string | null;
+    lastFailureSummary: string | null;
+    counts: {
+      pending: number;
+      processing: number;
+      retrying: number;
+      failedUnresolved: number;
+      failedTotal: number;
+      succeeded: number;
+      skipped: number;
+    };
+    succeededByType: Array<{ recordType: string; count: number }>;
+  };
+};
+
+/** Technical connection settings. Administrator-only; never contains the API key itself. */
+export type EspoAdminSettings = {
+  enabled: boolean;
   baseUrl: string | null;
-  baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
-  verifySsl: boolean;
   timeoutSeconds: number;
-  autoSync: boolean;
   syncDirection: string;
-  mode: string;
-  lastSuccessfulSync: Date | string | null;
-  lastFailedSync: Date | string | null;
-  lastFailedError: string | null;
-  pendingCount: number;
-  failedCount: number;
-  retryingCount: number;
-  successCount: number;
-  accountsSynced: number;
-  contactsSynced: number;
-  opportunitiesSynced: number;
-  tasksSynced: number;
-  leadsSynced: number;
-  healthScore: number;
-  healthMessage: string;
-  lastHealthCheck: Date | string | null;
-  apiReachable: boolean | null;
-  authValid: boolean | null;
-  sslValid: boolean | null;
-  queueWorkerRunning: boolean;
-  recentAlerts: Array<{
-    id: string;
-    entityType: string;
-    status: string;
-    errorMessage: string | null;
-    updatedAt: Date;
-    localEntityId: string;
-  }>;
-  entityBreakdown: Array<{ name: string; value: number; pct: number }>;
+  autoSync: boolean;
+  verifySsl: boolean;
+};
+
+export type EspoSyncHistoryItem = {
+  id: string;
+  at: string;
+  recordType: string;
+  reference: string;
+  status: 'success' | 'failed' | 'pending' | 'processing' | 'skipped' | 'cancelled';
+  attempts: number;
+  nextRetryAt: string | null;
+  errorSummary: string | null;
+  crmUrl: string | null;
+  canRetry: boolean;
+};
+
+export type EspoSyncHistoryPage = {
+  items: EspoSyncHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 };
 
 export type EspoLogQuery = {

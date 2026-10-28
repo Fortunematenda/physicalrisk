@@ -98,7 +98,11 @@ CRM failures never block assessment, scoring, approval, or report workflows.
 
 | Method | Path | Roles |
 |---|---|---|
+| GET | `/api/integrations/espocrm/access` | SUPER_ADMIN, ANALYST, REVIEWER, SALES |
 | GET | `/api/integrations/espocrm/status` | SUPER_ADMIN, ANALYST, REVIEWER, SALES |
+| GET | `/api/integrations/espocrm/settings` | SUPER_ADMIN |
+| PATCH | `/api/integrations/espocrm/settings` | SUPER_ADMIN |
+| GET | `/api/integrations/espocrm/history` | SUPER_ADMIN, ANALYST |
 | POST | `/api/integrations/espocrm/test` | SUPER_ADMIN |
 | POST | `/api/integrations/espocrm/sync/organisation/:id` | SUPER_ADMIN |
 | POST | `/api/integrations/espocrm/sync/contact/:id` | SUPER_ADMIN |
@@ -111,7 +115,18 @@ CRM failures never block assessment, scoring, approval, or report workflows.
 
 CLIENT users have no CRM configuration access.
 
-Status/logs responses never include the API key.
+Status, settings, history and logs responses never include the API key. Settings report only `apiKeyConfigured`; a blank `apiKey` on PATCH keeps the stored key.
+
+### Health evidence
+
+- **CRM link** (`access`): HTTPS only (HTTP allowed for loopback hosts outside production); URLs with credentials are refused. EspoCRM keeps its own sign-in, and no MOSS credentials are passed.
+- **Connection check**: each test result is stored in `SystemSetting` `espocrm.connectionTest` with its timestamp, and cleared when the URL, key or enabled flag changes. A test never writes `CrmSyncRecord`, so it cannot change "last successful sync".
+- **Sync worker**: the 10-minute retry cron writes a heartbeat to `SystemSetting` `espocrm.workerHeartbeat` on every run. With no heartbeat the worker shows "Not checked"; after 30 minutes without one it shows "Failed" (stale).
+- **Sync state**: unresolved failures are FAILED jobs with no later success for the same record. With no queued work it shows "Up to date" only when the worker has run recently, otherwise "Unknown".
+
+### Retry
+
+Only FAILED/RETRYING jobs for lead, account, contact, opportunity and report-update handlers can be retried. Task rows have no standalone handler; re-sync the opportunity instead. A retry is refused while the same record has a PENDING job or a PROCESSING job updated in the last 15 minutes. Moving a job to PENDING, and then to PROCESSING, uses a conditional update, so concurrent requests or the cron cannot run it twice.
 
 ## EspoCRM administrator setup
 

@@ -1,6 +1,6 @@
 # MOSS Platform — Lean Revenue MVP
 
-MOSS is a standalone Management Operating Security System for Physical Risk Consultancy. It runs on its own VPS and integrates with the client's separately hosted EspoCRM instance.
+MOSS (Management Oversight Security Standard) is a standalone platform for Physical Risk Consultancy. It runs on its own VPS and integrates with the client's separately hosted EspoCRM instance.
 
 This repository implements the **Lean Revenue MVP** (not the future full enterprise assurance platform): public lead capture → assessment → scoring → basic analyst review → approval → executive PDF → email → EspoCRM follow-up.
 

@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { IsArray, IsBoolean, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AdvisoryRoutePriority, AssignmentRole, ProductCode } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -19,6 +19,13 @@ class AssignDto {
   @IsString() userId!: string;
   @IsOptional() @IsEnum(AssignmentRole) role?: AssignmentRole;
   @IsOptional() @IsString() notes?: string;
+}
+
+class SetResponsibilitiesDto {
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  responsibilities!: string[];
 }
 
 class ConfirmedRouteDto {
@@ -147,6 +154,23 @@ export class AdvisoryController {
   @Post(':id/assign')
   assign(@Param('id') id: string, @Body() body: AssignDto, @CurrentUser() user: AuthUser) {
     return this.service.assign(id, body, user);
+  }
+
+  @Get(':id/responsibilities')
+  @Roles('SUPER_ADMIN', 'METHODOLOGY_ADMIN', 'ANALYST', 'REVIEWER', 'SALES', 'AUDITOR')
+  responsibilities(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.service.listResponsibilities(id, user);
+  }
+
+  @Put(':id/responsibilities/:userId')
+  @Roles('SUPER_ADMIN')
+  setResponsibilities(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() body: SetResponsibilitiesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.setResponsibilities(id, userId, body.responsibilities, user);
   }
 
   @Post(':id/generate-report')

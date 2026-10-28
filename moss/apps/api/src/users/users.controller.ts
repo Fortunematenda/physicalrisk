@@ -41,8 +41,8 @@ export class UsersController {
 
   @Get('capabilities')
   @Roles('SUPER_ADMIN', 'REVIEWER', 'ANALYST')
-  capabilities() {
-    return this.users.capabilities();
+  capabilities(@CurrentUser() user: AuthUser) {
+    return this.users.capabilities(user);
   }
 
   @Get('analysts')

@@ -20,7 +20,7 @@ const nunitoSans = Nunito_Sans({
 
 export const metadata: Metadata = {
   title: 'MOSS',
-  description: 'Management Operating Security System — Physical Risk Consultancy',
+  description: 'Management Oversight Security Standard — Physical Risk Consultancy',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

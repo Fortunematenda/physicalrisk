@@ -11,38 +11,14 @@
 
 import { signIn, signOut, getSession } from 'next-auth/react';
 
-export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || 'https://apps.physicalrisk.com';
+import { DEFAULT_HOME_PATH, currentReturnPath, sanitizeReturnPath } from './return-path';
 
-/** Default post-login / app-home route — Executive Governance Triage, not Cost Leakage. */
-export const DEFAULT_HOME_PATH = '/triage';
+export { DEFAULT_HOME_PATH, currentReturnPath, sanitizeReturnPath };
+
+export const PORTAL_URL = process.env.NEXT_PUBLIC_PORTAL_URL || 'https://apps.physicalrisk.com';
 
 const LOGOUT_FLAG = 'moss_sso_logging_out';
 let signInInFlight: Promise<void> | null = null;
-
-/** Safe in-app return path after SSO (never auth/login intermediates). */
-export function sanitizeReturnPath(raw?: string | null): string {
-  if (!raw) return DEFAULT_HOME_PATH;
-  let path = raw;
-  if (path.startsWith('http')) {
-    try {
-      path = new URL(path).pathname || DEFAULT_HOME_PATH;
-    } catch {
-      return DEFAULT_HOME_PATH;
-    }
-  }
-  if (!path.startsWith('/') || path.startsWith('//')) return DEFAULT_HOME_PATH;
-  const lower = path.toLowerCase();
-  if (
-    lower === '/login' ||
-    lower.startsWith('/login?') ||
-    lower === '/auth/complete' ||
-    lower.startsWith('/auth/complete?') ||
-    lower.startsWith('/api/auth')
-  ) {
-    return DEFAULT_HOME_PATH;
-  }
-  return path;
-}
 
 export function isLoggingOut(): boolean {
   if (typeof window === 'undefined') return false;
@@ -165,7 +141,7 @@ export async function startKeycloakSignIn(callbackUrl: string) {
 }
 
 export async function redirectToLogin(returnPath?: string, force = false) {
-  const next = sanitizeReturnPath(returnPath || window.location.pathname || DEFAULT_HOME_PATH);
+  const next = returnPath ? sanitizeReturnPath(returnPath) : currentReturnPath(window.location);
   if (isLoggingOut()) return;
   if (!force && (await hasSsoSession())) return;
   if (await isSsoEnabled()) {
