@@ -404,6 +404,125 @@ body.login-pf,
   border: 1px solid #bfdbfe;
 }
 
+/* ── Password pages ───────────────────────────────── */
+.pr-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
+}
+
+.pr-password {
+  position: relative;
+}
+
+.pr-password .pr-input {
+  padding-right: 4.5rem;
+}
+
+.pr-password__toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  transform: translateY(-50%);
+  appearance: none;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--pr-ink-soft);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pr-password__toggle:hover {
+  background: var(--pr-surface);
+  color: var(--pr-red);
+}
+
+.pr-password__toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--pr-red-soft);
+}
+
+.pr-input[aria-invalid="true"] {
+  border-color: var(--pr-red);
+  background: #fffafa;
+}
+
+.pr-hint {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--pr-muted);
+}
+
+.pr-match:empty {
+  display: none;
+}
+
+.pr-match--ok {
+  color: #047857;
+  font-weight: 600;
+}
+
+.pr-match--no {
+  color: #b45309;
+}
+
+.pr-check--block {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--pr-line);
+  border-radius: 0.7rem;
+  background: var(--pr-white);
+}
+
+.pr-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.25rem;
+}
+
+.pr-btn--ghost {
+  background: transparent;
+  color: var(--pr-ink-soft);
+  border: 1px solid var(--pr-line);
+  box-shadow: none;
+}
+
+.pr-btn--ghost:hover {
+  background: var(--pr-white);
+  color: var(--pr-ink);
+  box-shadow: none;
+}
+
+.pr-btn--block {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
+.pr-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.pr-info__text {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--pr-ink-soft);
+}
+
 .pr-register {
   margin: 1.25rem 0 0;
   font-size: 0.9rem;
