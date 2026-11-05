@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '../../../../lib/api';
 import {
@@ -188,6 +189,15 @@ export default function MossWorkspacePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [promotingFinding, setPromotingFinding] = useState(false);
   const [notice, setNotice] = useState('');
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (error) toast({ id: 'moss-workspace-error', variant: 'error', title: error });
+  }, [error, toast]);
+
+  useEffect(() => {
+    if (notice) toast({ id: 'moss-workspace-notice', variant: 'success', title: notice });
+  }, [notice, toast]);
   const initialResumeDone = useRef(false);
 
   const saveSeq = useRef(0);
@@ -351,7 +361,12 @@ export default function MossWorkspacePage() {
       ?? !Boolean(workspace?.isSubmitted || workspace?.assessment?.submittedAt);
     if (!editable) return false;
     if (assessorScore != null) return false;
-    setError('Select a maturity score (0–4) on this control before continuing.');
+    toast({
+      id: 'moss-workspace-score-required',
+      variant: 'warning',
+      title: 'Maturity score required',
+      description: 'Select a maturity score (0–4) on this control before continuing.',
+    });
     return true;
   }
 
@@ -611,12 +626,7 @@ export default function MossWorkspacePage() {
 
   return (
     <div className="w-full min-w-0 space-y-5">
-      {error ? <p className="error">{error}</p> : null}
-      {notice && !error ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {notice}
-        </p>
-      ) : null}
+      {!workspace && error ? <p className="error">{error}</p> : null}
       {!workspace && !error ? <p className="text-sm text-slate-500">Loading workspace…</p> : null}
 
       {workspace ? (
