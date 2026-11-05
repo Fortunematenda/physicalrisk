@@ -370,9 +370,18 @@ export default function MossWorkspacePage() {
     return true;
   }
 
+  function isPreviousOrPopulated(nextCode: string, nextDomainCode?: string): boolean {
+    const targetIndex = flatControls.findIndex((c) => c.controlCode === nextCode);
+    if (targetIndex >= 0 && targetIndex < currentIndex) return true;
+    if (flatControls[targetIndex]?.hasScore) return true;
+    const domain = workspace?.domains.find((d) => d.domainCode === nextDomainCode);
+    return Boolean(domain && domain.domainCode !== activeDomain?.domainCode
+      && domain.controls.some((c) => c.hasScore));
+  }
+
   async function navigateToControl(nextCode: string, nextDomainCode?: string) {
     if (!nextCode || nextCode === controlCode) return;
-    if (mustSelectScoreBeforeLeaving()) return;
+    if (!isPreviousOrPopulated(nextCode, nextDomainCode) && mustSelectScoreBeforeLeaving()) return;
     if (dirtyRef.current) await save();
     if (nextDomainCode) setDomainCode(nextDomainCode);
     await loadControl(nextCode);
