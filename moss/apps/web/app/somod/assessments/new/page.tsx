@@ -6,6 +6,7 @@ import {
   Building2,
   Layers,
   MapPin,
+  Pencil,
   Shield,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -27,10 +28,16 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 import { OrganisationSelect, type OrgOption } from '@/components/organisations/OrganisationSelect';
 import { apiFetch } from '../../../../lib/api';
 import { somodApiErrorMessage } from '../../../../lib/somod';
-import { SOMOD_ENGINE_CAPABILITIES, availabilityBadgeClass } from '../../../../lib/somod-engines';
+import {
+  SOMOD_ENGINE_CAPABILITIES,
+  availabilityBadgeClass,
+  engineWorkspaceHref,
+  type SomodEngineKey,
+} from '../../../../lib/somod-engines';
 
 type Site = { id: string; name: string; siteCode: string };
 type MossOption = {
@@ -46,6 +53,7 @@ const ADD_NEW_SITE = '__add_new_site__';
 function NewSomodAssessmentForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { toast } = useToast();
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [mossOptions, setMossOptions] = useState<MossOption[]>([]);
@@ -147,6 +155,19 @@ function NewSomodAssessmentForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    await createAssessment();
+  }
+
+  async function createAssessment(engine?: SomodEngineKey) {
+    if (!organisationId && engine) {
+      toast({
+        id: 'somod-new-org-required',
+        variant: 'warning',
+        title: 'Organisation required',
+        description: 'Select an organisation before editing an engine.',
+      });
+      return;
+    }
     if (!organisationId) {
       setError('Organisation is required.');
       return;
@@ -164,7 +185,7 @@ function NewSomodAssessmentForm() {
           notes: notes.trim() || undefined,
         }),
       });
-      router.push(`/somod/assessments/${created.id}`);
+      router.push(engine ? engineWorkspaceHref(created.id, engine) : `/somod/assessments/${created.id}`);
     } catch (e: unknown) {
       setError(somodApiErrorMessage(e, 'Unable to create SOMOD assessment.'));
       setSaving(false);
@@ -373,8 +394,8 @@ function NewSomodAssessmentForm() {
                     Engine workspace
                   </CardTitle>
                   <CardDescription>
-                    Create the assessment first. Its engines and financial Screens A–E then open
-                    from the assessment workspace (Engines and Financial tabs).
+                    Click Edit on an engine to create the assessment and open that engine. The
+                    financial Screens A–E are on the assessment&apos;s Financial tab.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -385,12 +406,30 @@ function NewSomodAssessmentForm() {
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium text-slate-900">{engine.name}</span>
-                        <Badge
-                          variant="outline"
-                          className={`shrink-0 text-[10px] ${availabilityBadgeClass(engine.availability)}`}
-                        >
-                          {engine.statusLabel}
-                        </Badge>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] ${availabilityBadgeClass(engine.availability)}`}
+                          >
+                            {engine.statusLabel}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={saving}
+                            title={
+                              organisationId
+                                ? `Create the assessment and edit ${engine.name}`
+                                : 'Select an organisation first'
+                            }
+                            onClick={() => void createAssessment(engine.key)}
+                          >
+                            <Pencil className="size-3" aria-hidden="true" />
+                            Edit
+                          </Button>
+                        </div>
                       </div>
                       <p className="m-0 mt-1 text-xs leading-relaxed text-slate-500">
                         {engine.explanation}

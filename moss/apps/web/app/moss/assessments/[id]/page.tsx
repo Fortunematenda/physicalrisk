@@ -817,7 +817,7 @@ export default function MossWorkspacePage() {
                 <CardTitle className="text-base">Domains</CardTitle>
                 <CardDescription>Select a domain to score</CardDescription>
               </CardHeader>
-              <CardContent className="max-h-[calc(75vh-5.5rem)] space-y-2 overflow-y-auto pb-4">
+              <CardContent className="relative max-h-[calc(75vh-5.5rem)] space-y-2 overflow-y-auto pb-4">
                 {workspace.domains.map((d) => {
                   const assessed = d.assessedControls ?? d.scored;
                   const total = d.totalControls ?? d.total;
@@ -862,7 +862,7 @@ export default function MossWorkspacePage() {
                   {activeDomain?.name || 'Select a domain'}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="max-h-[calc(75vh-5.5rem)] space-y-2 overflow-y-auto pb-4">
+              <CardContent className="relative max-h-[calc(75vh-5.5rem)] space-y-2 overflow-y-auto pb-4">
                 {(activeDomain?.controls || []).map((c) => {
                   const active = c.controlCode === controlCode;
                   return (
@@ -893,7 +893,7 @@ export default function MossWorkspacePage() {
             </Card>
 
             <Card className="max-h-[75vh] min-w-0 overflow-hidden rounded-xl border-slate-200 shadow-sm">
-              <CardContent className="max-h-[75vh] space-y-4 overflow-y-auto p-5">
+              <CardContent className="relative max-h-[75vh] space-y-4 overflow-y-auto p-5">
                 {!controlState ? (
                   <p className="text-sm text-slate-500">Select a control.</p>
                 ) : (
