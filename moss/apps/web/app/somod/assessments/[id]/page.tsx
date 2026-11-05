@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   Archive,
   ArrowLeft,
@@ -28,8 +28,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/components/ui/toast';
 import { apiFetch } from '../../../../lib/api';
 import { formatSomodStatus, somodApiErrorMessage } from '../../../../lib/somod';
+import {
+  availabilityBadgeClass,
+  enginePayload,
+  engineCapability,
+  workspaceQuery,
+} from '../../../../lib/somod-engines';
 import { SomodFinancialPanels } from './SomodFinancialPanels';
 
 type Engine = {
@@ -159,12 +166,26 @@ export default function SomodAssessmentWorkspacePage() {
   const router = useRouter();
   const confirm = useConfirm();
   const [data, setData] = useState<Workspace | null>(null);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const { toast, dismiss } = useToast();
+  const setError = useCallback(
+    (message: string) => {
+      if (message) toast({ variant: 'error', title: message, id: 'somod-workspace-error' });
+      else dismiss('somod-workspace-error');
+    },
+    [toast, dismiss],
+  );
+  const setNotice = useCallback(
+    (message: string) => {
+      if (message) toast({ variant: 'success', title: message });
+    },
+    [toast],
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [panel, setPanel] = useState<Panel>('financial');
-  const [activeEngine, setActiveEngine] = useState('RISK_REQUIREMENT');
+  const searchParams = useSearchParams();
+  const initialQuery = workspaceQuery(searchParams);
+  const [panel, setPanel] = useState<Panel>(initialQuery.panel ?? (initialQuery.engine ? 'engines' : 'financial'));
+  const [activeEngine, setActiveEngine] = useState<string>(initialQuery.engine ?? 'RISK_REQUIREMENT');
   const [engineForm, setEngineForm] = useState<Record<string, string>>({});
   const [mossOptions, setMossOptions] = useState<MossOption[]>([]);
   const [mossDraftId, setMossDraftId] = useState('');
@@ -364,11 +385,7 @@ export default function SomodAssessmentWorkspacePage() {
     setError('');
     setNotice('');
     try {
-      const payload: Record<string, unknown> = { ...engineForm };
-      for (const [k, v] of Object.entries(payload)) {
-        if (k === 'notes' || k === 'preferredBalance') continue;
-        payload[k] = Number(v);
-      }
+      const payload = enginePayload(engineForm);
       const workspace = await apiFetch<Workspace>(
         `/somod/assessments/${data.id}/engines/${selectedEngine.key}`,
         { method: 'PATCH', body: JSON.stringify({ data: payload }) },
@@ -432,13 +449,6 @@ export default function SomodAssessmentWorkspacePage() {
               </Button>
             </div>
           </div>
-
-          {error ? <p className="error">{error}</p> : null}
-          {notice ? (
-            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              {notice}
-            </p>
-          ) : null}
 
           {loading ? (
             <p className="text-sm text-slate-500">Loading workspace…</p>
@@ -580,9 +590,17 @@ export default function SomodAssessmentWorkspacePage() {
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{engine.name}</p>
                             <p className="mt-0.5 text-xs text-slate-500">{engine.description}</p>
+                            {engineCapability(engine.key) ? (
+                              <Badge
+                                variant="outline"
+                                className={`mt-1.5 text-[10px] ${availabilityBadgeClass(engineCapability(engine.key)?.availability)}`}
+                              >
+                                {engineCapability(engine.key)?.statusLabel}
+                              </Badge>
+                            ) : null}
                           </div>
                           <Badge variant="outline" className="shrink-0 text-[10px]">
-                            {engine.configured ? 'Set' : 'Empty'}
+                            {engine.configured ? 'Inputs saved' : 'No inputs yet'}
                           </Badge>
                         </button>
                       ))}
@@ -600,8 +618,14 @@ export default function SomodAssessmentWorkspacePage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                        Enter structured inputs for this engine. Derived results are produced when
-                        configuration for this engine is approved.
+                        {selectedEngine && engineCapability(selectedEngine.key) ? (
+                          <>
+                            <strong>{engineCapability(selectedEngine.key)?.statusLabel}.</strong>{' '}
+                            {engineCapability(selectedEngine.key)?.explanation}
+                          </>
+                        ) : (
+                          'Enter structured inputs for this engine.'
+                        )}
                       </p>
                       {selectedEngine?.key === 'RISK_REQUIREMENT' ? (
                         <div className="grid gap-4 sm:grid-cols-2">
@@ -1061,7 +1085,9 @@ export default function SomodAssessmentWorkspacePage() {
                 </div>
               ) : null}
             </>
-          ) : null}
+          ) : (
+            <p className="text-sm text-slate-500">This SOMOD assessment could not be loaded.</p>
+          )}
         </div>
       </Shell>
     </AuthGate>

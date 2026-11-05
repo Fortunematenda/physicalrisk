@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,7 +9,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { StorageService } from '../../evidence/storage.service';
 import type { AuthUser } from '../../common/current-user.decorator';
+import { ANALYST_ROLES, hasRole } from '../../common/roles';
 import { MossAssessmentsService } from '../assessments/moss-assessments.service';
+
+/** Matches workflow.isEditable in MossAssessmentsService.workspace. */
+const EDITABLE_STATUSES = new Set(['DRAFT', 'IN_PROGRESS', 'AWAITING_CONTRIBUTOR']);
 
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -49,31 +54,46 @@ export class MossEvidenceService {
     return { access, control };
   }
 
+  private canRemove(
+    access: { lockedAt: Date | null; status: string },
+    doc: { uploadedById: string | null },
+    user: AuthUser,
+  ) {
+    if (access.lockedAt || !EDITABLE_STATUSES.has(access.status)) return false;
+    return hasRole(user, ANALYST_ROLES) || (doc.uploadedById != null && doc.uploadedById === user.id);
+  }
+
   async list(assessmentId: string, controlCode: string, user: AuthUser) {
-    const { control } = await this.requireControl(assessmentId, controlCode, user);
-    const mca = await this.prisma.mossControlAssessment.findUnique({
-      where: { assessmentId_mossControlId: { assessmentId, mossControlId: control.id } },
-    });
+    const { access, control } = await this.requireControl(assessmentId, controlCode, user);
     const evidence = await this.prisma.evidenceDocument.findMany({
       where: {
         assessmentId,
-        OR: [
-          mca ? { mossControlAssessmentId: mca.id } : undefined,
-          // also match by questionCode misuse prevention: only mossControlAssessmentId for MOSS
-        ].filter(Boolean) as any,
+        mossControlAssessment: { assessmentId, mossControlId: control.id },
+        status: { not: 'OUTDATED' },
       },
       orderBy: { uploadedAt: 'desc' },
     });
-    // If no MCA yet, return empty (lazy) — no SCLI question evidence.
+    const uploaderIds = [...new Set(evidence.map((e) => e.uploadedById).filter((id): id is string => Boolean(id)))];
+    const uploaders = uploaderIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: uploaderIds } },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        })
+      : [];
+    const uploaderName = new Map(
+      uploaders.map((u) => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ').trim() || u.email]),
+    );
     return {
       controlCode: control.controlCode,
       evidenceStandards: control.evidenceStandards,
-      evidence: mca
-        ? evidence
-        : await this.prisma.evidenceDocument.findMany({
-            where: { assessmentId, mossControlAssessmentId: { not: null }, mossControlAssessment: { mossControlId: control.id } },
-            orderBy: { uploadedAt: 'desc' },
-          }),
+      evidence: evidence.map((doc) => {
+        const { storageKey: _storageKey, ...rest } = doc;
+        return {
+          ...rest,
+          uploadedByName: doc.uploadedById ? uploaderName.get(doc.uploadedById) ?? null : null,
+          canRemove: this.canRemove(access, doc, user),
+        };
+      }),
     };
   }
 
@@ -163,6 +183,7 @@ export class MossEvidenceService {
     };
   }
 
+  /** Soft removal: the record and stored file are kept for audit; the item leaves the evidence list. */
   async archive(assessmentId: string, controlCode: string, evidenceId: string, user: AuthUser) {
     const { access, control } = await this.requireControl(assessmentId, controlCode, user);
     const doc = await this.prisma.evidenceDocument.findFirst({
@@ -170,9 +191,16 @@ export class MossEvidenceService {
         id: evidenceId,
         assessmentId,
         mossControlAssessment: { mossControlId: control.id },
+        status: { not: 'OUTDATED' },
       },
     });
     if (!doc) throw new NotFoundException('Evidence not found for this MOSS control.');
+    if (access.lockedAt || !EDITABLE_STATUSES.has(access.status)) {
+      throw new BadRequestException('Evidence can only be removed while the assessment is editable.');
+    }
+    if (!this.canRemove(access, doc, user)) {
+      throw new ForbiddenException('You can only remove evidence you uploaded.');
+    }
     const updated = await this.prisma.evidenceDocument.update({
       where: { id: evidenceId },
       data: { status: 'OUTDATED' },

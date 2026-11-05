@@ -464,20 +464,27 @@ export function SidebarNavList({
 
 type SidebarBrandProps = {
   collapsed?: boolean;
+  onNavigate?: () => void;
 };
 
-export function SidebarBrand({ collapsed = false }: SidebarBrandProps) {
+export function SidebarBrand({ collapsed = false, onNavigate }: SidebarBrandProps) {
   return (
-    <div
-      className={cn('flex min-w-0 flex-col items-start', collapsed && 'items-center')}
-      title="Physical Risk"
+    <Link
+      href="/"
+      onClick={onNavigate}
+      aria-label="Physical Risk — go to home"
+      title="Go to home"
+      className={cn(
+        'flex min-w-0 flex-col items-start rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60',
+        collapsed && 'items-center',
+      )}
     >
       <img
         src="/physical_risk_logo_main.png"
         alt="Physical Risk"
         className={cn('brand-logo', collapsed && 'brand-logo-collapsed')}
       />
-    </div>
+    </Link>
   );
 }
 

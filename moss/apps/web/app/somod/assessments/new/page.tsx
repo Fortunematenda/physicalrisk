@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { OrganisationSelect, type OrgOption } from '@/components/organisations/OrganisationSelect';
 import { apiFetch } from '../../../../lib/api';
 import { somodApiErrorMessage } from '../../../../lib/somod';
+import { SOMOD_ENGINE_CAPABILITIES, availabilityBadgeClass } from '../../../../lib/somod-engines';
 
 type Site = { id: string; name: string; siteCode: string };
 type MossOption = {
@@ -41,14 +42,6 @@ type MossOption = {
 };
 
 const ADD_NEW_SITE = '__add_new_site__';
-
-const ENGINE_PREVIEWS = [
-  { key: 'risk', name: 'Risk / Requirement' },
-  { key: 'deployment', name: 'Deployment / Capability' },
-  { key: 'technology', name: 'Technology' },
-  { key: 'cost', name: 'Cost / Efficiency' },
-  { key: 'optimisation', name: 'Optimisation / Trade-off' },
-] as const;
 
 function NewSomodAssessmentForm() {
   const router = useRouter();
@@ -214,7 +207,7 @@ function NewSomodAssessmentForm() {
               icon={SlidersHorizontal}
               title="Engines"
               value={5}
-              description="Editable inputs"
+              description="Open after creation"
               tone="blue"
               loading={loading}
             />
@@ -380,20 +373,28 @@ function NewSomodAssessmentForm() {
                     Engine workspace
                   </CardTitle>
                   <CardDescription>
-                    Five engines plus financial Screens A–E (setup, penalties, mappings, scenario
-                    outputs, CFO dashboard) on the assessment workspace.
+                    Create the assessment first. Its engines and financial Screens A–E then open
+                    from the assessment workspace (Engines and Financial tabs).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {ENGINE_PREVIEWS.map((engine) => (
+                  {SOMOD_ENGINE_CAPABILITIES.map((engine) => (
                     <div
                       key={engine.key}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2"
+                      className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2"
                     >
-                      <span className="text-sm font-medium text-slate-900">{engine.name}</span>
-                      <Badge variant="outline" className="text-[10px]">
-                        Editable
-                      </Badge>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-slate-900">{engine.name}</span>
+                        <Badge
+                          variant="outline"
+                          className={`shrink-0 text-[10px] ${availabilityBadgeClass(engine.availability)}`}
+                        >
+                          {engine.statusLabel}
+                        </Badge>
+                      </div>
+                      <p className="m-0 mt-1 text-xs leading-relaxed text-slate-500">
+                        {engine.explanation}
+                      </p>
                     </div>
                   ))}
                   <p className="mb-0 pt-1 text-xs leading-relaxed text-slate-500">

@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiFetch } from '../../lib/api';
 import { formatSomodStatus, somodApiErrorMessage } from '../../lib/somod';
+import { availabilityBadgeClass, engineCapability } from '../../lib/somod-engines';
 
 type RecentRow = {
   id: string;
@@ -254,24 +255,35 @@ export default function SomodDashboardPage() {
                   Engines
                 </CardTitle>
                 <CardDescription>
-                  Editable inputs that feed the governed financial layer (Screens A–E)
+                  Open an assessment to work on its engines. Status shows what each engine does in
+                  this release.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {(data?.engines || []).map((engine) => (
-                  <div
-                    key={engine.key}
-                    className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">{engine.name}</p>
-                      <Badge variant="outline" className="text-[10px]">
-                        Ready
-                      </Badge>
+                {(data?.engines || []).map((engine) => {
+                  const capability = engineCapability(engine.key);
+                  return (
+                    <div
+                      key={engine.key}
+                      className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-900">{engine.name}</p>
+                        {capability ? (
+                          <Badge
+                            variant="outline"
+                            className={`shrink-0 text-[10px] ${availabilityBadgeClass(capability.availability)}`}
+                          >
+                            {capability.statusLabel}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {capability?.explanation || engine.description}
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">{engine.description}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
 

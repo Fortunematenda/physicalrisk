@@ -172,7 +172,11 @@ export class SomodFinancialService {
         note: 'Create financial setup before calculating.',
       };
     }
-    return { exists: true, financialModel: this.mapFinancialModel(row) };
+    return {
+      exists: true,
+      financialModel: this.mapFinancialModel(row),
+      validationIssues: validateFinancialSetup(this.toCostVariables(row)),
+    };
   }
 
   async upsertFinancialModel(
@@ -183,42 +187,36 @@ export class SomodFinancialService {
     const assessment = await this.loadAssessment(assessmentId, user);
     this.assertFinancialEditable(assessment as any);
 
-    const cost: CostVariables = {
+    const field = (snake: string, camel: string) => {
+      const raw = body[snake] ?? body[camel];
+      if (raw == null || raw === '') return null;
+      return typeof raw === 'number' ? raw : Number(raw);
+    };
+    const candidate = {
       currency: String(body.currency || 'ZAR').trim().toUpperCase() || 'ZAR',
-      monthlyGuardCost: moneyNumber(body.monthly_guard_cost ?? body.monthlyGuardCost),
-      monthlySupervisorCost: moneyNumber(
-        body.monthly_supervisor_cost ?? body.monthlySupervisorCost,
+      monthlyGuardCost: field('monthly_guard_cost', 'monthlyGuardCost'),
+      monthlySupervisorCost: field('monthly_supervisor_cost', 'monthlySupervisorCost'),
+      daysPerMonth: field('days_per_month', 'daysPerMonth'),
+      shiftHours: field('shift_hours', 'shiftHours'),
+      responseDelayCostRate: field('response_delay_cost_rate', 'responseDelayCostRate'),
+      defaultIncidentSeverityMultiplier: field(
+        'default_incident_severity_multiplier',
+        'defaultIncidentSeverityMultiplier',
       ),
-      daysPerMonth: Math.round(moneyNumber(body.days_per_month ?? body.daysPerMonth)),
-      shiftHours: moneyNumber(body.shift_hours ?? body.shiftHours),
-      responseDelayCostRate: moneyNumber(
-        body.response_delay_cost_rate ?? body.responseDelayCostRate,
-      ),
-      defaultIncidentSeverityMultiplier: moneyNumber(
-        body.default_incident_severity_multiplier ??
-          body.defaultIncidentSeverityMultiplier,
-      ),
-      monthlyContractValue: moneyNumber(
-        body.monthly_contract_value ?? body.monthlyContractValue,
-      ),
-      patrolValuePerMiss: moneyNumber(
-        body.patrol_value_per_miss ?? body.patrolValuePerMiss ?? 0,
-      ),
-      technologyCapexTotal: moneyNumber(
-        body.technology_capex_total ?? body.technologyCapexTotal ?? 0,
-      ),
-      technologyMonthlyOpex: moneyNumber(
-        body.technology_monthly_opex ?? body.technologyMonthlyOpex ?? 0,
-      ),
-      technologyLifespanMonths: (() => {
-        const raw = body.technology_lifespan_months ?? body.technologyLifespanMonths;
-        if (raw == null || raw === '') return null;
-        return Math.round(moneyNumber(raw));
-      })(),
+      monthlyContractValue: field('monthly_contract_value', 'monthlyContractValue'),
+      patrolValuePerMiss: field('patrol_value_per_miss', 'patrolValuePerMiss'),
+      technologyCapexTotal: field('technology_capex_total', 'technologyCapexTotal'),
+      technologyMonthlyOpex: field('technology_monthly_opex', 'technologyMonthlyOpex'),
+      technologyLifespanMonths: field('technology_lifespan_months', 'technologyLifespanMonths'),
     };
 
-    const errors = validateFinancialSetup(cost);
+    const errors = validateFinancialSetup(candidate as unknown as Partial<CostVariables>);
     if (errors.length) throw new BadRequestException(errors.join(' '));
+    const cost: CostVariables = {
+      ...(candidate as unknown as CostVariables),
+      technologyCapexTotal: candidate.technologyCapexTotal ?? 0,
+      technologyMonthlyOpex: candidate.technologyMonthlyOpex ?? 0,
+    };
 
     const data = {
       currency: cost.currency,
@@ -730,6 +728,10 @@ export class SomodFinancialService {
       throw new BadRequestException('Calculation must produce a Current scenario output.');
     }
     const moneyOrZero = (v: number | null | undefined) => (v == null ? 0 : v);
+    const layerStatus =
+      current.calculationStatus === 'CALCULATED'
+        ? SomodFinancialLayerStatus.CALCULATED
+        : SomodFinancialLayerStatus.DRAFT;
 
     await this.prisma.$transaction(async (tx) => {
       for (const scenario of result.scenarios) {
@@ -805,7 +807,7 @@ export class SomodFinancialService {
       await tx.somodAssessment.update({
         where: { id: assessmentId },
         data: {
-          financialLayerStatus: SomodFinancialLayerStatus.CALCULATED,
+          financialLayerStatus: layerStatus,
           financialStale: false,
           financialCalculatedAt: new Date(),
         },
@@ -831,7 +833,7 @@ export class SomodFinancialService {
       scenarios: result.scenarios,
       cfoDashboard: result.cfo,
       methodology: result.methodology,
-      financialLayerStatus: SomodFinancialLayerStatus.CALCULATED,
+      financialLayerStatus: layerStatus,
       financialStale: false,
     };
   }
@@ -958,6 +960,21 @@ export class SomodFinancialService {
     if ((assessment as any).financialLayerStatus !== SomodFinancialLayerStatus.CALCULATED) {
       throw new BadRequestException('Calculate financials before submitting for review.');
     }
+    const currentOutput = await this.prisma.somodScenarioFinancialOutput.findUnique({
+      where: {
+        somodAssessmentId_scenarioType: {
+          somodAssessmentId: assessmentId,
+          scenarioType: 'CURRENT' as SomodScenarioType,
+        },
+      },
+    });
+    if (!currentOutput || currentOutput.calculationStatus !== 'CALCULATED') {
+      const detail = currentOutput?.detailJson as { message?: string } | null;
+      throw new BadRequestException(
+        detail?.message ||
+          'The Current scenario has not been calculated. Complete the required engine inputs and recalculate before submitting.',
+      );
+    }
     await this.prisma.somodAssessment.update({
       where: { id: assessmentId },
       data: { financialLayerStatus: SomodFinancialLayerStatus.IN_REVIEW },
@@ -987,8 +1004,11 @@ export class SomodFinancialService {
     });
     const current = outputs.find((o) => o.scenarioType === 'CURRENT');
     if (!current || (current as any).calculationStatus !== 'CALCULATED') {
+      const detail = current?.detailJson as { message?: string } | null;
       throw new BadRequestException(
-        'Cannot approve without a CALCULATED Current scenario. Methodology-required scenarios cannot be approved as calculated results.',
+        `Cannot approve: the Current scenario has not been calculated.${
+          detail?.message ? ` ${detail.message}` : ''
+        } Return the financial layer to the analyst to complete it.`,
       );
     }
     const falselyCalculated = outputs.filter(

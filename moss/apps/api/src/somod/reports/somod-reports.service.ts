@@ -11,14 +11,18 @@ import { DEFAULT_SCENARIOS } from '../engines/somod-engines';
 
 const BRAND = '#c41230';
 
-function moneyZar(n: unknown) {
+function formatMoney(n: unknown, currency: string) {
   const v = typeof n === 'number' ? n : Number(n);
   if (!Number.isFinite(v)) return '—';
-  return new Intl.NumberFormat('en-ZA', {
-    style: 'currency',
-    currency: 'ZAR',
-    maximumFractionDigits: 0,
-  }).format(v);
+  try {
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 0,
+    }).format(v);
+  } catch {
+    return `${currency} ${Math.round(v).toLocaleString('en-ZA')}`;
+  }
 }
 
 @Injectable()
@@ -38,6 +42,7 @@ export class SomodReportsService {
     siteLabel: string | null;
     mossReference: string | null;
     notes: string | null;
+    currency: string;
     scenarios: Array<{
       scenarioType: string;
       label: string;
@@ -70,6 +75,7 @@ export class SomodReportsService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
+      const money = (n: unknown) => formatMoney(n, input.currency);
       const isApproved = input.status === SomodAssessmentStatus.APPROVED;
       const reportLabel = isApproved
         ? 'Approved Optimisation Summary'
@@ -101,15 +107,15 @@ export class SomodReportsService {
         doc.text('No CFO snapshot. Run calculate-financials first.');
       } else {
         const c = input.cfo;
-        doc.text(`Current monthly spend: ${moneyZar(c.currentMonthlySpend)}`);
-        doc.text(`Recommended Optimal monthly spend: ${moneyZar(c.optimalMonthlySpend)}`);
-        doc.text(`Monthly savings: ${moneyZar(c.monthlySavings)}`);
-        doc.text(`Annual savings: ${moneyZar(c.annualSavings)}`);
+        doc.text(`Current monthly spend: ${money(c.currentMonthlySpend)}`);
+        doc.text(`Recommended Optimal monthly spend: ${money(c.optimalMonthlySpend)}`);
+        doc.text(`Monthly savings: ${money(c.monthlySavings)}`);
+        doc.text(`Annual savings: ${money(c.annualSavings)}`);
         doc.text(
-          `Leakage (Current → Optimal): ${moneyZar(c.currentMonthlyLeakage)} → ${moneyZar(c.optimalMonthlyLeakage)}`,
+          `Leakage (Current → Optimal): ${money(c.currentMonthlyLeakage)} → ${money(c.optimalMonthlyLeakage)}`,
         );
-        doc.text(`Recoverable value: ${moneyZar(c.monthlyRecoverableValue)}`);
-        doc.text(`Required capital investment: ${moneyZar(c.requiredCapitalInvestment)}`);
+        doc.text(`Recoverable value: ${money(c.monthlyRecoverableValue)}`);
+        doc.text(`Required capital investment: ${money(c.requiredCapitalInvestment)}`);
         doc.text(`Payback months: ${c.paybackMonths == null ? '—' : c.paybackMonths}`);
       }
 
@@ -118,9 +124,9 @@ export class SomodReportsService {
       for (const row of input.scenarios) {
         doc.fillColor('#111111').fontSize(12).text(row.label);
         doc.moveDown(0.2).fontSize(10).fillColor('#333333');
-        doc.text(`Monthly total security cost: ${moneyZar(row.monthlyTotalSecurityCost)}`);
-        doc.text(`Monthly operational leakage: ${moneyZar(row.monthlyOperationalLeakage)}`);
-        doc.text(`Monthly recoverable value: ${moneyZar(row.monthlyRecoverableValue)}`);
+        doc.text(`Monthly total security cost: ${money(row.monthlyTotalSecurityCost)}`);
+        doc.text(`Monthly operational leakage: ${money(row.monthlyOperationalLeakage)}`);
+        doc.text(`Monthly recoverable value: ${money(row.monthlyRecoverableValue)}`);
         doc.text(`Effectiveness: ${row.effectivenessScore ?? '—'}`);
         doc.text(`Risk position: ${row.riskPosition ?? '—'}`);
         doc.moveDown(0.6);
@@ -167,6 +173,7 @@ export class SomodReportsService {
         : null,
       mossReference: assessment.mossAssessment?.reference || null,
       notes: assessment.notes,
+      currency: cfo?.currency || 'ZAR',
       scenarios: outputs.map((o) => ({
         scenarioType: o.scenarioType,
         label: labels.get(o.scenarioType as any) || o.scenarioType,

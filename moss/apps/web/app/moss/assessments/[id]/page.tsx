@@ -35,6 +35,14 @@ import {
   mossApiErrorMessage,
   scoringGuidanceFor,
 } from '../../../../lib/moss';
+import {
+  MOSS_EVIDENCE_ACCEPT,
+  evidenceFileProblem,
+  evidenceFileTypeLabel,
+  formatEvidenceDate,
+  formatFileSize,
+  type MossEvidenceItem,
+} from '../../../../lib/moss-evidence';
 
 type Workspace = {
   assessment: {
@@ -168,10 +176,16 @@ export default function MossWorkspacePage() {
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [returnComment, setReturnComment] = useState('');
   const [showReturnBox, setShowReturnBox] = useState(false);
-  const [evidence, setEvidence] = useState<any[]>([]);
+  const [evidence, setEvidence] = useState<MossEvidenceItem[]>([]);
   const [evidenceStandards, setEvidenceStandards] = useState<unknown>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const evidenceSeq = useRef(0);
+  const activeControlRef = useRef('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [promotingFinding, setPromotingFinding] = useState(false);
   const [notice, setNotice] = useState('');
   const initialResumeDone = useRef(false);
@@ -192,6 +206,12 @@ export default function MossWorkspacePage() {
   const loadControl = useCallback(async (code: string) => {
     if (!code) return;
     const data = await apiFetch<ControlState>(`/moss/assessments/${assessmentId}/controls/${code}`);
+    activeControlRef.current = code;
+    setEvidence([]);
+    setEvidenceStandards(null);
+    setEvidenceError('');
+    setNotice('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
     setControlState(data);
     setControlCode(code);
     setAssessorScore(data.assessment.controlAssessment.assessorScore);
@@ -435,43 +455,92 @@ export default function MossWorkspacePage() {
 
   async function loadEvidence(code: string) {
     if (!code) return;
+    const seq = ++evidenceSeq.current;
+    setEvidenceLoading(true);
     try {
-      const res = await apiFetch<{ evidence: any[]; evidenceStandards: unknown }>(
+      const res = await apiFetch<{ evidence: MossEvidenceItem[]; evidenceStandards: unknown }>(
         `/moss/assessments/${assessmentId}/controls/${code}/evidence`,
       );
+      if (seq !== evidenceSeq.current || activeControlRef.current !== code) return;
       setEvidence(res.evidence || []);
       setEvidenceStandards(res.evidenceStandards);
-    } catch {
+      setEvidenceError('');
+    } catch (e) {
+      if (seq !== evidenceSeq.current || activeControlRef.current !== code) return;
       setEvidence([]);
+      setEvidenceError(mossApiErrorMessage(e, `Unable to load evidence for ${code}.`));
+    } finally {
+      if (seq === evidenceSeq.current) setEvidenceLoading(false);
     }
   }
 
   async function uploadEvidence(file: File | null) {
-    if (!file || !controlCode) return;
-    setUploading(true);
-    setError('');
+    const code = controlCode;
+    if (!file || !code) return;
+    setEvidenceError('');
     setNotice('');
+    const problem = evidenceFileProblem(file);
+    if (problem) {
+      setEvidenceError(problem);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setUploading(true);
     try {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('title', file.name);
-      await apiFetch(`/moss/assessments/${assessmentId}/controls/${controlCode}/evidence`, {
+      await apiFetch(`/moss/assessments/${assessmentId}/controls/${code}/evidence`, {
         method: 'POST',
         body: fd,
       });
-      await loadEvidence(controlCode);
-      setNotice('Evidence uploaded.');
+      if (activeControlRef.current === code) {
+        await loadEvidence(code);
+        setNotice(`Evidence uploaded to ${code}: ${file.name}.`);
+      } else {
+        setNotice(`Evidence uploaded to ${code}: ${file.name}. Open ${code} to see it.`);
+      }
     } catch (e) {
-      setError(mossApiErrorMessage(e, 'Evidence upload failed.'));
+      const message = mossApiErrorMessage(e, 'Evidence upload failed.');
+      setEvidenceError(
+        activeControlRef.current === code ? `Upload failed: ${message}` : `Upload to ${code} failed: ${message}`,
+      );
     } finally {
       setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
-  async function downloadEvidence(ev: { id: string; fileName?: string; title?: string }) {
+  async function removeEvidence(ev: MossEvidenceItem) {
+    const code = controlCode;
+    if (!code) return;
+    const ok = await confirm({
+      title: 'Remove evidence',
+      description: `Remove “${ev.fileName}” from ${code}? The file is kept in the audit history but no longer counts as evidence for this control.`,
+      confirmLabel: 'Remove',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    setRemovingId(ev.id);
+    setEvidenceError('');
+    setNotice('');
+    try {
+      await apiFetch(`/moss/assessments/${assessmentId}/controls/${code}/evidence/${ev.id}`, {
+        method: 'DELETE',
+      });
+      if (activeControlRef.current === code) await loadEvidence(code);
+      setNotice(`Removed ${ev.fileName} from ${code}.`);
+    } catch (e) {
+      setEvidenceError(mossApiErrorMessage(e, 'Unable to remove evidence.'));
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  async function downloadEvidence(ev: { id: string; fileName?: string; title?: string | null }) {
     if (!controlCode) return;
     setDownloadingId(ev.id);
-    setError('');
+    setEvidenceError('');
     try {
       const res = await apiFetch<{ url?: string; downloadUrl?: string }>(
         `/moss/assessments/${assessmentId}/controls/${controlCode}/evidence/${ev.id}/download`,
@@ -480,7 +549,7 @@ export default function MossWorkspacePage() {
       if (!url) throw new Error('Download link unavailable.');
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (e) {
-      setError(mossApiErrorMessage(e, 'Evidence download failed.'));
+      setEvidenceError(mossApiErrorMessage(e, 'Evidence download failed.'));
     } finally {
       setDownloadingId(null);
     }
@@ -1035,51 +1104,108 @@ export default function MossWorkspacePage() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div
+                      key={controlCode}
+                      className="rounded-xl border border-slate-200 bg-slate-50/70 p-4"
+                    >
                       <div className="mb-3 flex items-center gap-2">
                         <FileUp className="size-4 text-slate-500" aria-hidden="true" />
-                        <h4 className="m-0 text-sm font-bold text-slate-900">Evidence</h4>
+                        <h4 className="m-0 text-sm font-bold text-slate-900">
+                          Evidence · {controlCode}
+                        </h4>
                       </div>
-                      <div className="mb-3">
+                      <div className="mb-4">
                         <MethodologyBlock
-                          title="Evidence Standards (catalogue methodology)"
+                          title="Evidence standards (expected by the MOSS catalogue)"
                           value={evidenceStandards ?? controlState?.control.evidenceStandards}
                           defaultOpen
                         />
                       </div>
+                      <h5 className="m-0 mb-1 text-xs font-bold uppercase tracking-wide text-slate-600">
+                        Uploaded evidence for {controlCode}
+                      </h5>
                       <p className="mb-3 text-xs text-slate-500">
-                        Uploaded files are actual evidence — not the same as catalogue standards.
+                        Files actually uploaded for this assessment and control. Choosing a file
+                        uploads it straight away; it only appears below once the upload succeeds.
                       </p>
+                      <label htmlFor={`evidence-file-${controlCode}`} className="sr-only">
+                        Upload evidence for {controlCode}
+                      </label>
                       <input
+                        id={`evidence-file-${controlCode}`}
+                        ref={fileInputRef}
                         type="file"
+                        accept={MOSS_EVIDENCE_ACCEPT}
                         disabled={uploading || !isEditable}
                         onChange={(e) => void uploadEvidence(e.target.files?.[0] || null)}
                         className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-200 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-300"
                       />
-                      {uploading ? <p className="mt-2 text-sm text-slate-500">Uploading…</p> : null}
-                      <ul className="mt-3 m-0 list-none space-y-2 p-0">
+                      <p className="mt-1 mb-0 text-xs text-slate-500">
+                        PDF, image, Word, Excel or text file, up to 25 MB.
+                      </p>
+                      {uploading ? (
+                        <p className="mt-2 mb-0 text-sm text-slate-500" role="status">
+                          Uploading…
+                        </p>
+                      ) : null}
+                      {evidenceError ? (
+                        <p className="mt-2 mb-0 text-sm font-medium text-[#c41230]" role="alert">
+                          {evidenceError}
+                        </p>
+                      ) : null}
+                      <ul className="mt-3 m-0 list-none space-y-2 p-0" aria-busy={evidenceLoading}>
                         {evidence.map((ev) => (
                           <li
                             key={ev.id}
                             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
                           >
                             <span className="min-w-0 text-sm">
-                              <strong className="text-slate-900">{ev.title || ev.fileName}</strong>
-                              <span className="text-slate-500"> · {ev.status}</span>
+                              <strong className="block break-all text-slate-900">{ev.fileName}</strong>
+                              <span className="block text-xs text-slate-500">
+                                {[
+                                  evidenceFileTypeLabel(ev.mimeType, ev.fileName),
+                                  formatFileSize(ev.sizeBytes),
+                                  ev.uploadedAt ? `Uploaded ${formatEvidenceDate(ev.uploadedAt)}` : '',
+                                  ev.uploadedByName ? `by ${ev.uploadedByName}` : '',
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </span>
                             </span>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={downloadingId === ev.id}
-                              onClick={() => void downloadEvidence(ev)}
-                            >
-                              {downloadingId === ev.id ? 'Opening…' : 'Download'}
-                            </Button>
+                            <span className="flex shrink-0 gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={downloadingId === ev.id}
+                                onClick={() => void downloadEvidence(ev)}
+                                aria-label={`Download ${ev.fileName}`}
+                              >
+                                {downloadingId === ev.id ? 'Opening…' : 'Download'}
+                              </Button>
+                              {ev.canRemove && isEditable ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-[#c41230]"
+                                  disabled={removingId === ev.id}
+                                  onClick={() => void removeEvidence(ev)}
+                                  aria-label={`Remove ${ev.fileName}`}
+                                >
+                                  {removingId === ev.id ? 'Removing…' : 'Remove'}
+                                </Button>
+                              ) : null}
+                            </span>
                           </li>
                         ))}
-                        {!evidence.length ? (
-                          <li className="text-sm text-slate-500">No evidence uploaded yet.</li>
+                        {evidenceLoading && !evidence.length ? (
+                          <li className="text-sm text-slate-500">Loading evidence…</li>
+                        ) : null}
+                        {!evidenceLoading && !evidenceError && !evidence.length ? (
+                          <li className="text-sm text-slate-500">
+                            No evidence uploaded for {controlCode} yet.
+                          </li>
                         ) : null}
                       </ul>
                     </div>

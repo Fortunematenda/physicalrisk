@@ -133,6 +133,76 @@ describe('validateFinancialSetup', () => {
   it('accepts handoff example variables', () => {
     expect(validateFinancialSetup(validCost)).toEqual([]);
   });
+
+  it('rejects a severity multiplier outside 1–5', () => {
+    for (const bad of [9, 0, 5.01, 0.5]) {
+      expect(
+        validateFinancialSetup({ ...validCost, defaultIncidentSeverityMultiplier: bad }),
+      ).toEqual(['Default incident severity multiplier must be between 1 and 5.']);
+    }
+    expect(validateFinancialSetup({ ...validCost, defaultIncidentSeverityMultiplier: 5 })).toEqual([]);
+    expect(validateFinancialSetup({ ...validCost, defaultIncidentSeverityMultiplier: 1.5 })).toEqual([]);
+  });
+
+  it('accepts contract values in the millions and rejects values beyond the money limit', () => {
+    expect(validateFinancialSetup({ ...validCost, monthlyContractValue: 2_500_000 })).toEqual([]);
+    expect(validateFinancialSetup({ ...validCost, monthlyContractValue: 750_000_000.55 })).toEqual([]);
+    expect(validateFinancialSetup({ ...validCost, monthlyContractValue: 1e15 })).toEqual([
+      'Monthly contract value must not exceed 999,999,999,999.99.',
+    ]);
+  });
+
+  it('accepts exact amounts that are not multiples of the UI increment', () => {
+    expect(
+      validateFinancialSetup({ ...validCost, monthlyGuardCost: 12_347.5, monthlySupervisorCost: 18_003 }),
+    ).toEqual([]);
+  });
+
+  it('rejects more than two decimal places on money', () => {
+    expect(validateFinancialSetup({ ...validCost, patrolValuePerMiss: 10.555 })).toEqual([
+      'Patrol value per miss allows at most 2 decimal places.',
+    ]);
+  });
+
+  it('requires whole numbers for days and lifespan instead of silently rounding', () => {
+    expect(validateFinancialSetup({ ...validCost, daysPerMonth: 29.5 })).toEqual([
+      'Days per month must be a whole number.',
+    ]);
+    expect(validateFinancialSetup({ ...validCost, technologyLifespanMonths: 12.5 })).toEqual([
+      'Technology lifespan months must be a whole number.',
+    ]);
+  });
+
+  it('reports missing, NaN and infinite values', () => {
+    const errors = validateFinancialSetup({
+      ...validCost,
+      monthlyGuardCost: null as unknown as number,
+      responseDelayCostRate: Number.NaN,
+      patrolValuePerMiss: Number.POSITIVE_INFINITY,
+    });
+    expect(errors).toEqual([
+      'Monthly guard cost is required.',
+      'Response delay cost rate must be a valid number.',
+      'Patrol value per miss must be a valid number.',
+    ]);
+  });
+
+  it('rejects negative rates and unsupported currencies', () => {
+    expect(validateFinancialSetup({ ...validCost, responseDelayCostRate: -1 })).toEqual([
+      'Response delay cost rate must be between 0 and 999,999,999,999.99.',
+    ]);
+    expect(validateFinancialSetup({ ...validCost, currency: 'XYZ' })[0]).toMatch(/^Currency must be one of ZAR/);
+    expect(validateFinancialSetup({ ...validCost, currency: 'usd' })).toEqual([]);
+  });
+
+  it('requires a lifespan when CAPEX is entered', () => {
+    expect(
+      validateFinancialSetup({ ...validCost, technologyLifespanMonths: null }),
+    ).toEqual(['Technology lifespan months is mandatory when technology CAPEX is entered.']);
+    expect(
+      validateFinancialSetup({ ...validCost, technologyCapexTotal: 0, technologyLifespanMonths: null }),
+    ).toEqual([]);
+  });
 });
 
 describe('validateControlMapping', () => {

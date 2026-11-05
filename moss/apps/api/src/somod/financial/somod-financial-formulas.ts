@@ -115,26 +115,90 @@ export function evaluateGovernedExpression(
   return evaluateSafeExpression(expression, context);
 }
 
+/** Currencies offered for SOMOD financial setup; matches the proposal workspace list. */
+export const SOMOD_SUPPORTED_CURRENCIES = ['ZAR', 'USD', 'EUR', 'GBP', 'AUD', 'CHF', 'CAD', 'NAD'] as const;
+
+/** Upper bound for monetary inputs; well inside the Decimal(18,2) columns. */
+export const SOMOD_MAX_MONEY = 999_999_999_999.99;
+
+type SetupFieldRule = {
+  key: Exclude<keyof CostVariables, 'currency'>;
+  label: string;
+  required: boolean;
+  min: number;
+  /** When true the minimum itself is not allowed (value must be greater than min). */
+  minExclusive?: boolean;
+  max: number;
+  integer?: boolean;
+  /** Maximum decimal places for non-integer fields (database scale is 2). */
+  decimals?: number;
+};
+
+/**
+ * Units follow the governed formulas: response delay cost rate is money per minute of delay
+ * (response_delay_minutes * rate * severity) and patrol value is money per missed patrol.
+ */
+export const FINANCIAL_SETUP_RULES: readonly SetupFieldRule[] = [
+  { key: 'monthlyContractValue', label: 'Monthly contract value', required: true, min: 0, minExclusive: true, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'monthlyGuardCost', label: 'Monthly guard cost', required: true, min: 0, minExclusive: true, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'monthlySupervisorCost', label: 'Monthly supervisor cost', required: true, min: 0, minExclusive: true, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'daysPerMonth', label: 'Days per month', required: true, min: 28, max: 31, integer: true },
+  { key: 'shiftHours', label: 'Shift hours', required: true, min: 0, minExclusive: true, max: 24, decimals: 2 },
+  { key: 'responseDelayCostRate', label: 'Response delay cost rate', required: true, min: 0, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'defaultIncidentSeverityMultiplier', label: 'Default incident severity multiplier', required: true, min: 1, max: 5, decimals: 2 },
+  { key: 'patrolValuePerMiss', label: 'Patrol value per miss', required: true, min: 0, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'technologyCapexTotal', label: 'Technology CAPEX total', required: false, min: 0, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'technologyMonthlyOpex', label: 'Technology monthly OPEX', required: false, min: 0, max: SOMOD_MAX_MONEY, decimals: 2 },
+  { key: 'technologyLifespanMonths', label: 'Technology lifespan months', required: false, min: 1, max: 600, integer: true },
+];
+
+function hasAtMostDecimals(value: number, decimals: number) {
+  const scaled = value * 10 ** decimals;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-6;
+}
+
+function formatLimit(n: number) {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
 export function validateFinancialSetup(input: Partial<CostVariables>): string[] {
   const errors: string[] = [];
   const currency = String(input.currency || '').trim().toUpperCase();
   if (!currency) errors.push('Currency is required.');
-  if (!(num(input.monthlyContractValue) > 0)) errors.push('Monthly contract value must be greater than 0.');
-  if (!(num(input.monthlyGuardCost) > 0)) errors.push('Monthly guard cost must be greater than 0.');
-  if (!(num(input.monthlySupervisorCost) > 0)) errors.push('Monthly supervisor cost must be greater than 0.');
-  const days = num(input.daysPerMonth);
-  if (days < 28 || days > 31) errors.push('Days per month must be between 28 and 31 inclusive.');
-  const shift = num(input.shiftHours);
-  if (!(shift > 0) || shift > 24) errors.push('Shift hours must be greater than 0 and not exceed 24.');
-  if (num(input.responseDelayCostRate) < 0) errors.push('Response delay cost rate must be >= 0.');
-  const severity = num(input.defaultIncidentSeverityMultiplier);
-  if (severity < 1 || severity > 5) errors.push('Default incident severity multiplier must be between 1 and 5.');
-  if (num(input.patrolValuePerMiss) < 0) errors.push('Patrol value per miss must be >= 0.');
-  if (num(input.technologyCapexTotal) < 0) errors.push('Technology CAPEX must be >= 0.');
-  if (num(input.technologyMonthlyOpex) < 0) errors.push('Technology monthly OPEX must be >= 0.');
+  else if (!(SOMOD_SUPPORTED_CURRENCIES as readonly string[]).includes(currency)) {
+    errors.push(`Currency must be one of ${SOMOD_SUPPORTED_CURRENCIES.join(', ')}.`);
+  }
+  for (const rule of FINANCIAL_SETUP_RULES) {
+    const raw = input[rule.key];
+    if (raw == null) {
+      if (rule.required) errors.push(`${rule.label} is required.`);
+      continue;
+    }
+    const value = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(value)) {
+      errors.push(`${rule.label} must be a valid number.`);
+      continue;
+    }
+    if (rule.minExclusive && value <= rule.min) {
+      errors.push(`${rule.label} must be greater than ${formatLimit(rule.min)}.`);
+      continue;
+    }
+    if (value < rule.min || value > rule.max) {
+      errors.push(
+        rule.minExclusive
+          ? `${rule.label} must not exceed ${formatLimit(rule.max)}.`
+          : `${rule.label} must be between ${formatLimit(rule.min)} and ${formatLimit(rule.max)}.`,
+      );
+      continue;
+    }
+    if (rule.integer && !Number.isInteger(value)) {
+      errors.push(`${rule.label} must be a whole number.`);
+    } else if (!rule.integer && rule.decimals != null && !hasAtMostDecimals(value, rule.decimals)) {
+      errors.push(`${rule.label} allows at most ${rule.decimals} decimal places.`);
+    }
+  }
   const capex = num(input.technologyCapexTotal);
-  const lifespan = input.technologyLifespanMonths == null ? null : num(input.technologyLifespanMonths);
-  if (capex > 0 && (lifespan == null || lifespan < 1)) {
+  if (capex > 0 && input.technologyLifespanMonths == null) {
     errors.push('Technology lifespan months is mandatory when technology CAPEX is entered.');
   }
   return errors;

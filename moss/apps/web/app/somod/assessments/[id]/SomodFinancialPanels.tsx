@@ -10,20 +10,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { apiFetch } from '../../../../lib/api';
 import { somodApiErrorMessage, formatSomodCalculationStatus } from '../../../../lib/somod';
+import {
+  SETUP_FIELDS,
+  SOMOD_CURRENCY_OPTIONS,
+  formatCurrency,
+  setupPayload,
+  validateSetup,
+  type SetupFieldKey,
+  type SetupValues,
+} from '../../../../lib/somod-financial';
+import { FinancialNumberField } from '../../../../components/somod/FinancialNumberField';
 
 type FinancialSubPanel = 'setup' | 'penalties' | 'mappings' | 'outputs' | 'cfo';
 
-function money(n: unknown) {
-  const v = typeof n === 'number' ? n : Number(n);
-  if (!Number.isFinite(v)) return '—';
-  return new Intl.NumberFormat('en-ZA', {
-    style: 'currency',
-    currency: 'ZAR',
-    maximumFractionDigits: 0,
-  }).format(v);
-}
+const LOCKED_LAYER_STATUSES = new Set(['IN_REVIEW', 'APPROVED', 'LOCKED']);
 
-const DEFAULT_SETUP = {
+const DEFAULT_SETUP: SetupValues = {
   currency: 'ZAR',
   monthly_contract_value: '',
   monthly_guard_cost: '',
@@ -66,7 +68,12 @@ export function SomodFinancialPanels({
   setBusy,
 }: Props) {
   const [sub, setSub] = useState<FinancialSubPanel>('setup');
-  const [setup, setSetup] = useState(DEFAULT_SETUP);
+  const [setup, setSetup] = useState<SetupValues>(DEFAULT_SETUP);
+  const [savedCurrency, setSavedCurrency] = useState('ZAR');
+  const [touched, setTouched] = useState<Partial<Record<SetupFieldKey, boolean>>>({});
+  const [saveAttempted, setSaveAttempted] = useState(false);
+  const [storedIssues, setStoredIssues] = useState<string[]>([]);
+  const [returnComment, setReturnComment] = useState('');
   const [derived, setDerived] = useState<Record<string, number> | null>(null);
   const [penalties, setPenalties] = useState<Array<Record<string, unknown>>>([]);
   const [mappings, setMappings] = useState<Array<Record<string, unknown>>>([]);
@@ -85,9 +92,11 @@ export function SomodFinancialPanels({
       apiFetch<{
         exists: boolean;
         financialModel?: {
+          currency?: string;
           costVariables: Record<string, number | null>;
           derivedVariables: Record<string, number>;
         } | null;
+        validationIssues?: string[];
       }>(`/somod/${assessmentId}/financial-model`),
       apiFetch<{ penalties: Array<Record<string, unknown>> }>(
         `/somod/${assessmentId}/penalties`,
@@ -114,8 +123,13 @@ export function SomodFinancialPanels({
 
     if (modelRes.exists && modelRes.financialModel) {
       const cv = modelRes.financialModel.costVariables;
+      const currency = modelRes.financialModel.currency || 'ZAR';
+      setSavedCurrency(currency);
+      setStoredIssues(modelRes.validationIssues || []);
+      setTouched({});
+      setSaveAttempted(false);
       setSetup({
-        currency: 'ZAR',
+        currency,
         monthly_contract_value: String(cv.monthly_contract_value ?? ''),
         monthly_guard_cost: String(cv.monthly_guard_cost ?? ''),
         monthly_supervisor_cost: String(cv.monthly_supervisor_cost ?? ''),
@@ -156,17 +170,17 @@ export function SomodFinancialPanels({
   }, [loadAll, onError]);
 
   async function saveSetup() {
+    setSaveAttempted(true);
+    if (Object.keys(setupErrors).length) {
+      onError('Fix the highlighted financial setup fields before saving.');
+      return;
+    }
     setBusy(true);
     onError('');
     try {
-      const payload: Record<string, unknown> = { currency: setup.currency };
-      for (const [key, value] of Object.entries(setup)) {
-        if (key === 'currency') continue;
-        payload[key] = value === '' ? null : Number(value);
-      }
       await apiFetch(`/somod/${assessmentId}/financial-model`, {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(setupPayload(setup)),
       });
       onNotice('Financial setup saved. Governed penalties and mappings seeded if new.');
       await loadAll();
@@ -182,13 +196,23 @@ export function SomodFinancialPanels({
     setBusy(true);
     onError('');
     try {
-      await apiFetch(`/somod/${assessmentId}/calculate-financials`, {
+      const result = await apiFetch<{
+        scenarios?: { scenarioType: string; calculationStatus: string; detail?: { message?: string } }[];
+      }>(`/somod/${assessmentId}/calculate-financials`, {
         method: 'POST',
         body: JSON.stringify({}),
       });
-      onNotice('Financial calculation complete — scenario outputs and CFO snapshot stored.');
+      const current = result.scenarios?.find((s) => s.scenarioType === 'CURRENT');
       await loadAll();
       await onRefresh();
+      if (current && current.calculationStatus !== 'CALCULATED') {
+        onError(
+          current.detail?.message ||
+            'The Current scenario could not be calculated. Complete the required engine inputs and recalculate.',
+        );
+        return;
+      }
+      onNotice('Financial calculation complete — scenario outputs and CFO snapshot stored.');
       setSub('cfo');
     } catch (e) {
       onError(somodApiErrorMessage(e, 'Unable to calculate financials.'));
@@ -230,23 +254,51 @@ export function SomodFinancialPanels({
     }
   }
 
-  const fields: Array<{ key: keyof typeof DEFAULT_SETUP; label: string; required?: boolean }> = [
-    { key: 'monthly_contract_value', label: 'Monthly contract value', required: true },
-    { key: 'monthly_guard_cost', label: 'Monthly guard cost', required: true },
-    { key: 'monthly_supervisor_cost', label: 'Monthly supervisor cost', required: true },
-    { key: 'days_per_month', label: 'Days per month (28–31)', required: true },
-    { key: 'shift_hours', label: 'Shift hours', required: true },
-    { key: 'response_delay_cost_rate', label: 'Response delay cost rate', required: true },
-    {
-      key: 'default_incident_severity_multiplier',
-      label: 'Default incident severity multiplier (1–5)',
-      required: true,
-    },
-    { key: 'patrol_value_per_miss', label: 'Patrol value per miss', required: true },
-    { key: 'technology_capex_total', label: 'Technology CAPEX total' },
-    { key: 'technology_monthly_opex', label: 'Technology monthly OPEX' },
-    { key: 'technology_lifespan_months', label: 'Technology lifespan months' },
-  ];
+  async function returnFinancial() {
+    const comment = returnComment.trim();
+    if (comment.length < 2) {
+      onError('Add a comment explaining what the analyst must fix before returning.');
+      return;
+    }
+    setBusy(true);
+    onError('');
+    try {
+      await apiFetch(`/somod/${assessmentId}/financial-return`, {
+        method: 'POST',
+        body: JSON.stringify({ comment }),
+      });
+      setReturnComment('');
+      onNotice('Financial layer returned to the analyst.');
+      await onRefresh();
+      await loadAll();
+    } catch (e) {
+      onError(somodApiErrorMessage(e, 'Unable to return financial layer.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const setupErrors = validateSetup(setup);
+  const layerStatus = financial?.layerStatus || 'DRAFT';
+  const setupEditable = editable && !LOCKED_LAYER_STATUSES.has(layerStatus);
+  const canSubmit = layerStatus === 'CALCULATED' && !financial?.stale;
+  const currentOutput = outputs.find((o) => o.scenarioType === 'CURRENT');
+  const currentCalculated = currentOutput?.calculationStatus === 'CALCULATED';
+  const currentBlocker =
+    (currentOutput?.detail as { message?: string } | null | undefined)?.message ||
+    'The Current scenario has not been calculated.';
+  const canApprove = layerStatus === 'IN_REVIEW' && currentCalculated && !financial?.stale;
+  const approveHint =
+    layerStatus !== 'IN_REVIEW'
+      ? 'Only a financial layer in review can be approved.'
+      : `Cannot approve: ${currentBlocker} Return it to the analyst.`;
+  const submitHint =
+    layerStatus === 'IN_REVIEW'
+      ? 'Already submitted — awaiting reviewer approval or return.'
+      : layerStatus === 'APPROVED' || layerStatus === 'LOCKED'
+        ? 'The financial layer is already approved.'
+        : 'Calculate financials successfully before submitting.';
+  const money = (n: unknown) => formatCurrency(n, savedCurrency);
 
   return (
     <div className="space-y-4">
@@ -264,7 +316,7 @@ export function SomodFinancialPanels({
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
-                disabled={busy || !editable}
+                disabled={busy || !setupEditable}
                 className="bg-[#c41230] hover:bg-[#a10f28]"
                 onClick={() => void calculate()}
               >
@@ -274,7 +326,8 @@ export function SomodFinancialPanels({
               <Button
                 type="button"
                 variant="outline"
-                disabled={busy || !editable || financial?.stale}
+                disabled={busy || !editable || !canSubmit}
+                title={canSubmit ? undefined : submitHint}
                 onClick={() => void submitFinancial()}
               >
                 Submit financial
@@ -282,13 +335,44 @@ export function SomodFinancialPanels({
               <Button
                 type="button"
                 variant="outline"
-                disabled={busy}
+                disabled={busy || !canApprove}
+                title={canApprove ? undefined : approveHint}
                 onClick={() => void approveFinancial()}
               >
                 Approve financial
               </Button>
             </div>
           </div>
+          {layerStatus === 'IN_REVIEW' && !currentCalculated ? (
+            <p
+              role="status"
+              className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+            >
+              This financial layer cannot be approved: {currentBlocker} Return it to the analyst
+              with a comment so the engine inputs can be completed and financials recalculated.
+            </p>
+          ) : null}
+          {layerStatus === 'IN_REVIEW' ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="somod-financial-return-comment">Return comment (reviewer)</Label>
+                <Input
+                  id="somod-financial-return-comment"
+                  value={returnComment}
+                  placeholder="What must the analyst fix?"
+                  onChange={(e) => setReturnComment(e.target.value)}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void returnFinancial()}
+              >
+                Return to analyst
+              </Button>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {(
@@ -332,27 +416,66 @@ export function SomodFinancialPanels({
           <CardHeader className="pb-3">
             <CardTitle className="text-lg">Screen A — Financial setup</CardTitle>
             <CardDescription>
-              Editable cost and contract variables; derived values are read-only.
+              Cost and contract variables used by the governed formulas; derived values are
+              read-only. Fields marked * are required.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {!setupEditable && editable ? (
+              <p className="m-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                The financial layer is {financial?.layerStatus?.replace('_', ' ').toLowerCase()} —
+                setup is read-only until it is returned or reopened.
+              </p>
+            ) : null}
+            {storedIssues.length ? (
+              <div
+                role="status"
+                className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              >
+                <p className="m-0 font-semibold">The saved setup no longer meets the validation rules.</p>
+                <p className="m-0 mt-1">
+                  The stored values have not been changed. Correct them and save to recalculate:
+                </p>
+                <ul className="m-0 mt-1 list-disc pl-5">
+                  {storedIssues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="max-w-xs space-y-1.5">
+              <Label htmlFor="somod-currency">Currency *</Label>
+              <select
+                id="somod-currency"
+                className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm disabled:opacity-50"
+                value={setup.currency}
+                disabled={!setupEditable || busy}
+                onChange={(e) => setSetup((prev) => ({ ...prev, currency: e.target.value }))}
+              >
+                {SOMOD_CURRENCY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="m-0 text-xs text-slate-500">
+                Changing the currency relabels the amounts; it does not convert them.
+              </p>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {fields.map((field) => (
-                <div key={field.key} className="space-y-2">
-                  <Label htmlFor={field.key}>
-                    {field.label}
-                    {field.required ? ' *' : ''}
-                  </Label>
-                  <Input
-                    id={field.key}
-                    type="number"
-                    disabled={!editable || busy}
-                    value={setup[field.key]}
-                    onChange={(e) =>
-                      setSetup((prev) => ({ ...prev, [field.key]: e.target.value }))
-                    }
-                  />
-                </div>
+              {SETUP_FIELDS.map((field) => (
+                <FinancialNumberField
+                  key={field.key}
+                  field={field}
+                  currency={setup.currency}
+                  value={setup[field.key]}
+                  disabled={!setupEditable || busy}
+                  error={saveAttempted || touched[field.key] ? setupErrors[field.key] : null}
+                  onChange={(value) => {
+                    setSetup((prev) => ({ ...prev, [field.key]: value }));
+                    setTouched((prev) => ({ ...prev, [field.key]: true }));
+                  }}
+                />
               ))}
             </div>
             {derived ? (
@@ -379,8 +502,8 @@ export function SomodFinancialPanels({
                 </div>
               </div>
             ) : null}
-            <Button type="button" disabled={!editable || busy} onClick={() => void saveSetup()}>
-              Save financial setup
+            <Button type="button" disabled={!setupEditable || busy} onClick={() => void saveSetup()}>
+              {busy ? 'Saving…' : 'Save financial setup'}
             </Button>
           </CardContent>
         </Card>

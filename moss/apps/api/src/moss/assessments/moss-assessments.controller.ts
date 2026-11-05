@@ -370,6 +370,16 @@ export class MossAssessmentsController {
     return this.evidence.downloadUrl(assessmentId, controlCode, evidenceId, user);
   }
 
+  @Delete('assessments/:assessmentId/controls/:controlCode/evidence/:evidenceId')
+  removeEvidence(
+    @Param('assessmentId') assessmentId: string,
+    @Param('controlCode') controlCode: string,
+    @Param('evidenceId') evidenceId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.evidence.archive(assessmentId, controlCode, evidenceId, user);
+  }
+
   @Get('assessments/:id/domains/:domainCode')
   getDomain(
     @Param('id') id: string,

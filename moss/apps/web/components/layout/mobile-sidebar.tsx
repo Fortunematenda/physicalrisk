@@ -31,7 +31,7 @@ export function MobileSidebar({ open, onOpenChange, onLogout }: MobileSidebarPro
       >
         <SheetTitle className="sr-only">Navigation menu</SheetTitle>
         <div className="border-b border-white/10 px-4 py-4">
-          <SidebarBrand />
+          <SidebarBrand onNavigate={handleNavigate} />
         </div>
         <div className="flex min-h-0 flex-1 flex-col px-2 py-3">
           <SidebarNavList onNavigate={handleNavigate} />
