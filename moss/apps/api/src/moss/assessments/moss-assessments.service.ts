@@ -5,9 +5,14 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   AssessmentStatus,
+  AssignmentRole,
+  AssignmentStatus,
+  SystemRole,
   MossControlAssessmentStatus,
   Prisma,
   ProductCode,
@@ -16,6 +21,7 @@ import {
 import { formatMossScoreDisplay } from '@moss/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
+import { EmailService } from '../../email/email.service';
 import type { AuthUser } from '../../common/current-user.decorator';
 import { generateAssessmentReference } from '../../common/assessment-reference';
 import { INTERNAL_ROLES, ANALYST_ROLES, hasRole } from '../../common/roles';
@@ -46,7 +52,87 @@ export class MossAssessmentsService {
     private readonly audit: AuditService,
     @Inject(forwardRef(() => MossScoringService))
     private readonly scoring: MossScoringService,
+    @Optional() private readonly email?: EmailService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
+
+  /** Assigned reviewers/approvers first; otherwise every active reviewer and super admin. */
+  private async notifyReviewersOfSubmission(
+    assessmentId: string,
+    submitter: AuthUser,
+    progress: { assessed: number; total: number; incomplete: boolean },
+  ) {
+    if (!this.email) return;
+    const session = await this.prisma.assessmentSession.findUnique({
+      where: { id: assessmentId },
+      select: {
+        reference: true,
+        title: true,
+        organisationId: true,
+        organisation: { select: { name: true } },
+        assignments: {
+          where: {
+            role: { in: [AssignmentRole.SENIOR_REVIEWER, AssignmentRole.APPROVER] },
+            status: { not: AssignmentStatus.CANCELLED },
+          },
+          select: { user: { select: { email: true, firstName: true, isActive: true, deletedAt: true } } },
+        },
+      },
+    });
+    if (!session) return;
+
+    let recipients = session.assignments
+      .map((a) => a.user)
+      .filter((u) => u.isActive && !u.deletedAt);
+    if (recipients.length === 0) {
+      recipients = await this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          deletedAt: null,
+          systemRole: { in: [SystemRole.REVIEWER, SystemRole.SUPER_ADMIN] },
+        },
+        select: { email: true, firstName: true, isActive: true, deletedAt: true },
+      });
+    }
+
+    const base = (
+      this.config?.get<string>('PUBLIC_URL') ||
+      this.config?.get<string>('WEB_URL') ||
+      this.config?.get<string>('MOSS_WEB_URL') ||
+      ''
+    ).replace(/\/$/, '');
+    const url = base ? `${base}/moss/assessments/${assessmentId}` : undefined;
+    const submitterRow = await this.prisma.user.findUnique({
+      where: { id: submitter.id },
+      select: { firstName: true, lastName: true },
+    });
+    const submittedBy =
+      [submitterRow?.firstName, submitterRow?.lastName].filter(Boolean).join(' ') || submitter.email;
+
+    const seen = new Set<string>();
+    for (const r of recipients) {
+      const address = r.email?.trim().toLowerCase();
+      if (!address || seen.has(address)) continue;
+      seen.add(address);
+      await this.email.enqueue({
+        recipient: r.email,
+        subject: `MOSS assessment pending review: ${session.reference}`,
+        template: 'moss_review_pending',
+        relatedType: 'AssessmentSession',
+        relatedId: assessmentId,
+        organisationId: session.organisationId,
+        payload: {
+          firstName: r.firstName,
+          reference: session.reference,
+          title: session.title,
+          organisationName: session.organisation?.name,
+          submittedBy,
+          url,
+          ...progress,
+        },
+      });
+    }
+  }
 
   async requireMossAssessment(assessmentId: string, user: AuthUser) {
     const assessment = await this.prisma.assessmentSession.findUnique({
@@ -616,6 +702,16 @@ export class MossAssessmentsService {
         unscoredCount: unscoredControls.length,
       },
     });
+
+    try {
+      await this.notifyReviewersOfSubmission(id, user, {
+        assessed: progress.overall.assessed,
+        total: progress.overall.total,
+        incomplete,
+      });
+    } catch {
+      // Submission is already recorded; the email queue retries delivery separately.
+    }
 
     return this.getWorkspace(id, user);
   }

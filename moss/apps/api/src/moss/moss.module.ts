@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { EvidenceModule } from '../evidence/evidence.module';
+import { EmailModule } from '../email/email.module';
 import { MossCatalogueController } from './catalogue/moss-catalogue.controller';
 import { MossCatalogueService } from './catalogue/moss-catalogue.service';
 import { MossAssessmentsController } from './assessments/moss-assessments.controller';
@@ -16,7 +17,7 @@ import { MossEvidenceService } from './evidence/moss-evidence.service';
 import { MossReportsService } from './reports/moss-reports.service';
 
 @Module({
-  imports: [AuditModule, forwardRef(() => EvidenceModule)],
+  imports: [AuditModule, forwardRef(() => EvidenceModule), forwardRef(() => EmailModule)],
   controllers: [MossCatalogueController, MossAssessmentsController, MossSitesController],
   providers: [
     MossCatalogueService,

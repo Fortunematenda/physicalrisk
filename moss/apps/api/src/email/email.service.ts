@@ -544,6 +544,24 @@ export class EmailService {
       case 'assessment_approved':
         lines.push(`<p>Assessment <strong>${payload.reference || ''}</strong> has been approved.</p>`);
         break;
+      case 'moss_review_pending':
+        lines.push(`<p>Dear ${escapeHtml(payload.firstName || 'Colleague')},</p>`);
+        lines.push(
+          `<p>MOSS assessment <strong>${escapeHtml(payload.reference)}</strong>${
+            payload.title ? ` · ${escapeHtml(payload.title)}` : ''
+          } for <strong>${escapeHtml(payload.organisationName || 'the organisation')}</strong> was submitted by ${escapeHtml(
+            payload.submittedBy || 'an analyst',
+          )} and is pending your review.</p>`,
+        );
+        if (payload.incomplete) {
+          lines.push(
+            `<p>Note: it was submitted with ${escapeHtml(payload.assessed)} of ${escapeHtml(payload.total)} controls scored.</p>`,
+          );
+        }
+        if (payload.url) {
+          lines.push(`<p><a href="${escapeHtml(payload.url)}">Open the assessment to review it</a>.</p>`);
+        }
+        break;
       case 'report_issued':
       case 'report_available': {
         const productReportLabel =
