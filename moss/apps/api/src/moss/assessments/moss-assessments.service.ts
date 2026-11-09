@@ -12,7 +12,6 @@ import {
   AssessmentStatus,
   AssignmentRole,
   AssignmentStatus,
-  SystemRole,
   MossControlAssessmentStatus,
   Prisma,
   ProductCode,
@@ -56,7 +55,7 @@ export class MossAssessmentsService {
     @Optional() private readonly config?: ConfigService,
   ) {}
 
-  /** Assigned reviewers/approvers first; otherwise every active reviewer and super admin. */
+  /** Sales inbox (LEAD_NOTIFY_EMAIL) plus any reviewers/approvers assigned to the assessment. */
   private async notifyReviewersOfSubmission(
     assessmentId: string,
     submitter: AuthUser,
@@ -81,19 +80,14 @@ export class MossAssessmentsService {
     });
     if (!session) return;
 
-    let recipients = session.assignments
-      .map((a) => a.user)
-      .filter((u) => u.isActive && !u.deletedAt);
-    if (recipients.length === 0) {
-      recipients = await this.prisma.user.findMany({
-        where: {
-          isActive: true,
-          deletedAt: null,
-          systemRole: { in: [SystemRole.REVIEWER, SystemRole.SUPER_ADMIN] },
-        },
-        select: { email: true, firstName: true, isActive: true, deletedAt: true },
-      });
-    }
+    const notifyAddress =
+      this.config?.get<string>('LEAD_NOTIFY_EMAIL')?.trim() || 'sales@physicalrisk.com';
+    const recipients: Array<{ email: string; firstName: string | null }> = [
+      { email: notifyAddress, firstName: null },
+      ...session.assignments
+        .map((a) => a.user)
+        .filter((u) => u.isActive && !u.deletedAt),
+    ];
 
     const base = (
       this.config?.get<string>('PUBLIC_URL') ||
