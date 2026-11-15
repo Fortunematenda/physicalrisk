@@ -192,6 +192,118 @@ export class MossReportsService {
         }
       }
 
+      // Colour-coded maturity matrix (illustrative). Scoring remains MOSS 0–4.
+      doc.addPage().fillColor('#111111').fontSize(16).text('Maturity overview matrix');
+      doc.moveDown(0.4).fontSize(9).fillColor('#555555');
+      doc.text(
+        'Illustrative overview of current MOSS domain maturity. Coloured cells mark the assessed band for each domain. ' +
+          'MOSS scores use a 0–4 control maturity scale (Non-existent → Optimised). ' +
+          'Wording aligns with Physical Risk’s Asset Protection Maturity Model (Initial → Optimised) for executive readability; ' +
+          'this page does not change the published MOSS scoring methodology. Areas of concern are domains below Basic (score < 2).',
+        { width: doc.page.width - 96 },
+      );
+      doc.moveDown(0.6);
+
+      {
+        const sortedDomains = [...domainScores].sort((a, b) =>
+          String(a.domainCode || '').localeCompare(String(b.domainCode || '')),
+        );
+        const left = 48;
+        const top = doc.y;
+        const codeW = 36;
+        const nameW = 168;
+        const colW = 42;
+        const rowH = 16;
+        const headerH = 28;
+
+        // Header row
+        doc.rect(left, top, codeW + nameW + colW * 5, headerH).fill('#f8fafc').stroke('#cbd5e1');
+        doc.fillColor('#111111').fontSize(7);
+        doc.text('Code', left + 2, top + 10, { width: codeW - 4 });
+        doc.text('Domain', left + codeW + 2, top + 10, { width: nameW - 4 });
+        for (const score of [0, 1, 2, 3, 4] as const) {
+          const x = left + codeW + nameW + score * colW;
+          doc.rect(x, top, colW, headerH).fill(MATURITY_BAND[score].fill);
+          doc.fillColor('#ffffff').text(String(score), x + 2, top + 4, {
+            width: colW - 4,
+            align: 'center',
+          });
+          doc.fontSize(5).text(MATURITY_BAND[score].label, x + 1, top + 14, {
+            width: colW - 2,
+            align: 'center',
+          });
+          doc.fontSize(7);
+        }
+
+        let rowY = top + headerH;
+        const concerns: string[] = [];
+        for (const domain of sortedDomains) {
+          if (rowY + rowH > doc.page.height - 72) {
+            doc.addPage();
+            rowY = 48;
+          }
+          const label = String(
+            (domain as any).domainName || domain.name || domain.domainCode || 'Domain',
+          );
+          const code = String(domain.domainCode || '');
+          const scoreNum =
+            domain.score == null || Number.isNaN(Number(domain.score))
+              ? null
+              : Number(domain.score);
+          const bandIndex =
+            scoreNum == null ? null : Math.max(0, Math.min(4, Math.round(scoreNum)));
+
+          doc.rect(left, rowY, codeW + nameW + colW * 5, rowH).stroke('#e2e8f0');
+          doc.fillColor('#111111').fontSize(7).text(code, left + 2, rowY + 4, {
+            width: codeW - 4,
+          });
+          doc.text(label.slice(0, 42), left + codeW + 2, rowY + 4, { width: nameW - 4 });
+
+          for (const score of [0, 1, 2, 3, 4] as const) {
+            const x = left + codeW + nameW + score * colW;
+            if (bandIndex === score) {
+              doc.rect(x + 1, rowY + 1, colW - 2, rowH - 2).fill(MATURITY_BAND[score].fill);
+              doc.fillColor('#ffffff').fontSize(8).text('●', x, rowY + 3, {
+                width: colW,
+                align: 'center',
+              });
+            } else {
+              doc.fillColor('#e2e8f0').fontSize(7).text('·', x, rowY + 4, {
+                width: colW,
+                align: 'center',
+              });
+            }
+          }
+
+          if (scoreNum != null && scoreNum < 2) {
+            concerns.push(
+              `${code} — ${label}: ${scoreNum.toFixed(2)} / 4 · ${
+                MATURITY_BAND[bandIndex as number]?.label || 'Low'
+              }`,
+            );
+          }
+          rowY += rowH;
+        }
+
+        doc.y = rowY + 12;
+        doc.fillColor('#111111').fontSize(12).text('Areas of concern');
+        doc.moveDown(0.3).fontSize(9).fillColor('#333333');
+        if (!concerns.length) {
+          doc.text('No domains currently sit below Basic (score < 2).');
+        } else {
+          doc.text(
+            'Domains below Basic maturity (score < 2). These are decision-support highlights, not automatic audit findings.',
+          );
+          doc.moveDown(0.3);
+          concerns.forEach((line) => {
+            const y = doc.y;
+            doc.rect(48, y + 1, 8, 8).fill('#b91c1c');
+            doc.fillColor('#333333').text(line, 62, y);
+            doc.moveDown(0.15);
+          });
+        }
+      }
+
       doc.addPage().fillColor('#111111').fontSize(16).text('Findings');
       doc.moveDown().fontSize(10).fillColor('#333333');
       if (!findings.length) {
