@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatAssessmentProgress,
+  formatMossAssessmentLifecycle,
   formatMossAssessmentStatus,
   formatMossControlStatus,
   formatMossScore,
@@ -23,10 +24,20 @@ describe('MOSS UI helpers', () => {
     expect(formatMossControlStatus('SCORED')).toBe('Scored');
   });
 
-  it('maps 100% session status SUBMITTED to Complete', () => {
-    expect(formatMossAssessmentStatus('SUBMITTED')).toBe('Complete');
+  it('distinguishes submitted-for-review from scoring completion', () => {
+    expect(formatMossAssessmentStatus('SUBMITTED')).toBe('Submitted for review');
     expect(formatMossAssessmentStatus('IN_PROGRESS')).toBe('In Progress');
-    expect(isEditableMossStatus('SUBMITTED')).toBe(true);
+    expect(formatMossAssessmentStatus('REPORT_GENERATED')).toBe('Report generated');
+    expect(isEditableMossStatus('SUBMITTED')).toBe(false);
+    expect(formatMossAssessmentLifecycle({ status: 'SUBMITTED', submittedAt: null })).toBe(
+      'Ready to submit',
+    );
+    expect(
+      formatMossAssessmentLifecycle({
+        status: 'SUBMITTED',
+        submittedAt: '2026-11-01T00:00:00.000Z',
+      }),
+    ).toBe('Submitted for review');
   });
 
   it('formats assessment completion progress (not maturity)', () => {

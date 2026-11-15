@@ -111,7 +111,14 @@ export class MossRecommendationsService {
   async update(
     assessmentId: string,
     recommendationId: string,
-    body: { title?: string; recommendation?: string; status?: string },
+    body: {
+      title?: string;
+      recommendation?: string;
+      status?: string;
+      includeInReport?: boolean;
+      controlCode?: string | null;
+      domainCode?: string | null;
+    },
     user: AuthUser,
   ) {
     const access = await this.assessments.requireMossAssessment(assessmentId, user);
@@ -126,6 +133,16 @@ export class MossRecommendationsService {
         title: body.title?.trim() || undefined,
         summary: body.recommendation?.trim() || undefined,
         status: body.status as RecommendationStatus | undefined,
+        includeInReport:
+          typeof body.includeInReport === 'boolean' ? body.includeInReport : undefined,
+        controlCode:
+          body.controlCode === undefined
+            ? undefined
+            : body.controlCode?.trim().toUpperCase() || null,
+        domainCode:
+          body.domainCode === undefined
+            ? undefined
+            : body.domainCode?.trim().toUpperCase() || null,
       },
     });
 

@@ -59,12 +59,27 @@ export function formatAssessmentProgress(scored: number, total: number, percent?
 export const MOSS_ASSESSMENT_STATUS_LABELS: Record<string, string> = {
   DRAFT: 'Draft',
   IN_PROGRESS: 'In Progress',
-  SUBMITTED: 'Submitted',
+  SUBMITTED: 'Submitted for review',
   REVIEWED: 'Reviewed',
   APPROVED: 'Approved',
+  REPORT_GENERATED: 'Report generated',
+  REPORT_ISSUED: 'Report issued',
   CLOSED: 'Closed',
   ARCHIVED: 'Archived',
 };
+
+/** Prefer submittedAt over raw status so 100% scored ≠ submitted. */
+export function formatMossAssessmentLifecycle(input: {
+  status?: string | null;
+  submittedAt?: string | Date | null;
+  lockedAt?: string | Date | null;
+}): string {
+  if (input.lockedAt || input.status === 'APPROVED') return MOSS_ASSESSMENT_STATUS_LABELS.APPROVED;
+  if (input.status === 'REVIEWED') return MOSS_ASSESSMENT_STATUS_LABELS.REVIEWED;
+  if (input.submittedAt) return MOSS_ASSESSMENT_STATUS_LABELS.SUBMITTED;
+  if (input.status === 'SUBMITTED' && !input.submittedAt) return 'Ready to submit';
+  return formatMossAssessmentStatus(input.status);
+}
 
 /** User-facing assessment session status (completion ≠ maturity score). */
 export function formatMossAssessmentStatus(status?: string | null): string {

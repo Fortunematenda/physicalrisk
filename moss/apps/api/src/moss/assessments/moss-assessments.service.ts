@@ -56,6 +56,70 @@ export class MossAssessmentsService {
   ) {}
 
   /** Sales inbox (LEAD_NOTIFY_EMAIL) plus any reviewers/approvers assigned to the assessment. */
+  /** Lightweight status emails that reuse existing templates without replacing submit mail. */
+  private async notifyMossWorkflow(
+    assessmentId: string,
+    template: 'assessment_approved' | 'assessment_returned',
+    extra: Record<string, unknown>,
+  ) {
+    if (!this.email) return;
+    const session = await this.prisma.assessmentSession.findUnique({
+      where: { id: assessmentId },
+      select: {
+        reference: true,
+        title: true,
+        organisationId: true,
+        createdById: true,
+      },
+    });
+    if (!session) return;
+
+    const [organisation, creator] = await Promise.all([
+      this.prisma.organisation.findUnique({
+        where: { id: session.organisationId },
+        select: { name: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: session.createdById },
+        select: { email: true, firstName: true, isActive: true },
+      }),
+    ]);
+
+    const notifyAddress =
+      this.config?.get<string>('LEAD_NOTIFY_EMAIL')?.trim() || 'sales@physicalrisk.com';
+    const recipients: Array<{ email: string; firstName: string | null }> = [
+      { email: notifyAddress, firstName: null },
+    ];
+    if (creator?.isActive && creator.email) {
+      recipients.push({ email: creator.email, firstName: creator.firstName });
+    }
+
+    const seen = new Set<string>();
+    for (const r of recipients) {
+      const address = r.email?.trim().toLowerCase();
+      if (!address || seen.has(address)) continue;
+      seen.add(address);
+      await this.email.enqueue({
+        recipient: r.email,
+        subject:
+          template === 'assessment_approved'
+            ? `MOSS assessment approved: ${session.reference}`
+            : `MOSS assessment returned: ${session.reference}`,
+        template,
+        relatedType: 'AssessmentSession',
+        relatedId: assessmentId,
+        organisationId: session.organisationId,
+        payload: {
+          firstName: r.firstName,
+          reference: session.reference,
+          title: session.title,
+          organisationName: organisation?.name,
+          ...extra,
+        },
+      });
+    }
+  }
+
   private async notifyReviewersOfSubmission(
     assessmentId: string,
     submitter: AuthUser,
@@ -809,6 +873,8 @@ export class MossAssessmentsService {
       metadata: {},
     });
 
+    await this.notifyMossWorkflow(id, 'assessment_approved', {});
+
     return this.getWorkspace(id, user);
   }
 
@@ -853,6 +919,10 @@ export class MossAssessmentsService {
       entityId: id,
       organisationId: access.organisationId,
       metadata: { comment: comment.trim() },
+    });
+
+    await this.notifyMossWorkflow(id, 'assessment_returned', {
+      reason: comment.trim(),
     });
 
     return this.getWorkspace(id, user);
@@ -1057,15 +1127,38 @@ export class MossAssessmentsService {
 
   /**
    * Session status from control completion only (not domain/overall maturity).
-   * - Not all controls scored → IN_PROGRESS (unless already submitted/terminal)
-   * - All controls scored → SUBMITTED
-   * Does not overwrite locked/terminal/explicitly submitted workflow statuses.
+   * Progress sync only moves DRAFT ↔ IN_PROGRESS.
+   * SUBMITTED requires an explicit submit() with submittedAt — scoring 100% must not
+   * lock the workspace or look "submitted for review" before the analyst submits.
+   * Also heals legacy rows stuck as SUBMITTED without submittedAt.
    */
   private async syncSessionStatusFromProgress(
     assessmentId: string,
     catalogueVersionId: string,
     currentStatus: AssessmentStatus,
   ) {
+    const session = await this.prisma.assessmentSession.findUnique({
+      where: { id: assessmentId },
+      select: { submittedAt: true, status: true, lockedAt: true },
+    });
+    if (!session) return;
+
+    // Heal: older builds set SUBMITTED when all controls were scored, without submit().
+    if (
+      session.status === AssessmentStatus.SUBMITTED &&
+      !session.submittedAt &&
+      !session.lockedAt
+    ) {
+      await this.prisma.assessmentSession.update({
+        where: { id: assessmentId },
+        data: { status: AssessmentStatus.IN_PROGRESS },
+      });
+      return;
+    }
+
+    // Explicit submit (including incomplete-with-confirmation) must not be downgraded.
+    if (session.submittedAt) return;
+
     const terminal = new Set<AssessmentStatus>([
       AssessmentStatus.SUBMITTED,
       AssessmentStatus.APPROVED,
@@ -1079,19 +1172,12 @@ export class MossAssessmentsService {
       AssessmentStatus.EVIDENCE_REVIEW,
       AssessmentStatus.AUTOMATED_EVALUATION_COMPLETE,
     ]);
-    if (terminal.has(currentStatus)) return;
-
-    const session = await this.prisma.assessmentSession.findUnique({
-      where: { id: assessmentId },
-      select: { submittedAt: true, status: true },
-    });
-    // Explicit submit (including incomplete-with-confirmation) must not be downgraded.
-    if (session?.submittedAt) return;
+    if (terminal.has(currentStatus) || terminal.has(session.status)) return;
 
     const progress = await this.progress.forAssessment(assessmentId, catalogueVersionId);
-    const allScored = progress.overall.total > 0 && progress.overall.assessed >= progress.overall.total;
-    const nextStatus = allScored ? AssessmentStatus.SUBMITTED : AssessmentStatus.IN_PROGRESS;
-    if (nextStatus === currentStatus) return;
+    const nextStatus =
+      progress.overall.assessed > 0 ? AssessmentStatus.IN_PROGRESS : AssessmentStatus.DRAFT;
+    if (nextStatus === session.status) return;
 
     await this.prisma.assessmentSession.update({
       where: { id: assessmentId },

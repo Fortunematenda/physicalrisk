@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { AssessmentStatus, ProductCode, ReportType } from '@prisma/client';
+import { MOSS_SCORE_LABELS } from '@moss/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../evidence/storage.service';
 import { AuditService } from '../../audit/audit.service';
@@ -10,6 +11,30 @@ import { MossAssessmentsService } from '../assessments/moss-assessments.service'
 import { MossResultsService } from '../results/moss-results.service';
 
 const BRAND = '#c41230';
+
+/** Colour bands for MOSS maturity 0–4 (display only; scoring unchanged). */
+const MATURITY_BAND: Record<number, { label: string; fill: string }> = {
+  0: { label: MOSS_SCORE_LABELS[0], fill: '#b91c1c' },
+  1: { label: MOSS_SCORE_LABELS[1], fill: '#ea580c' },
+  2: { label: MOSS_SCORE_LABELS[2], fill: '#ca8a04' },
+  3: { label: MOSS_SCORE_LABELS[3], fill: '#16a34a' },
+  4: { label: MOSS_SCORE_LABELS[4], fill: '#0f766e' },
+};
+
+function bandForScore(score: number | null | undefined) {
+  if (score == null || Number.isNaN(Number(score))) return null;
+  const rounded = Math.max(0, Math.min(4, Math.round(Number(score))));
+  return MATURITY_BAND[rounded];
+}
+
+function formatScoreOutOfFour(score: number | null | undefined, display?: string | null) {
+  if (display && /pending/i.test(display)) return display;
+  if (score == null || Number.isNaN(Number(score))) return display || '—';
+  const n = Number(score);
+  const text = Number.isInteger(n) ? String(n) : n.toFixed(2);
+  const band = bandForScore(n);
+  return band ? `${text} / 4 · ${band.label}` : `${text} / 4`;
+}
 
 type MossResultsPayload = Awaited<ReturnType<MossResultsService['getResults']>>;
 
@@ -43,6 +68,7 @@ export class MossReportsService {
       const domainScores = (results.domainScores || []) as Array<{
         domainCode?: string;
         name?: string;
+        domainName?: string;
         score?: number | null;
       }>;
       const findings = results.findings || [];
@@ -68,8 +94,24 @@ export class MossReportsService {
       doc.text(`Generated: ${new Date().toLocaleDateString('en-ZA')}`);
       if (isPreliminary) {
         doc.moveDown().fillColor(BRAND).fontSize(10)
-          .text('PRELIMINARY – Subject to analyst review and approval.');
+          .text(
+            'PRELIMINARY – Scoring may be complete, but this report is not approved. ' +
+              'Use Mark reviewed → Approve & lock on the assessment Results/Controls pages, then generate the Approved Executive Report.',
+          );
+      } else {
+        doc.moveDown().fillColor('#0f766e').fontSize(10)
+          .text('APPROVED – Locked executive report. Later scoring changes require a new revision.');
       }
+
+      const uploadedEvidence = ((results as any).evidenceUploaded || []) as Array<{
+        fileName?: string;
+        controlCode?: string | null;
+        controlName?: string | null;
+        domainCode?: string | null;
+        domainName?: string | null;
+        uploadedByName?: string | null;
+        uploadedAt?: string | Date | null;
+      }>;
 
       doc.addPage().fillColor('#111111').fontSize(16).text('Executive Summary');
       doc.moveDown().fontSize(10).fillColor('#333333');
@@ -77,40 +119,76 @@ export class MossReportsService {
         `This ${isPreliminary ? 'preliminary' : 'approved'} report summarises the MOSS Master Catalogue assessment for ${
           results.organisation?.name || 'the organisation'
         }. ` +
-          'Scores reflect control maturity (0–4) aggregated with the published MOSS methodology. ' +
+          'Scores reflect control maturity on a 0–4 scale (Non-existent → Optimised), aggregated with the published MOSS methodology. ' +
+          '100% scoring completion is not the same as analyst approval. ' +
           'This report does not include Cost Leakage financial estimates and is not an audit opinion.',
       );
       doc.moveDown().fillColor('#111111').fontSize(11);
-      doc.text(`Overall MOSS score: ${results.overallScoreDisplay ?? '—'}`);
-      doc.text(`Domain maturity: ${results.domainMaturityDisplay ?? '—'}`);
-      doc.text(`Completion: ${Number(results.completenessPercent || 0).toFixed(1)}%`);
+      doc.text(
+        `Overall MOSS score: ${formatScoreOutOfFour(
+          results.overallScore as number | null,
+          results.overallScoreDisplay,
+        )}`,
+      );
+      {
+        const dm = results.domainMaturityDisplay;
+        const dmText =
+          !dm || dm === '—' || /pending/i.test(String(dm))
+            ? dm || '—'
+            : String(dm).includes('/ 4')
+              ? String(dm)
+              : `${dm} / 4`;
+        doc.text(`Domain maturity: ${dmText}`);
+      }
+      doc.text(`Completion (controls scored): ${Number(results.completenessPercent || 0).toFixed(1)}%`);
+      doc.text(`Workflow status: ${results.status || '—'}${results.submittedAt ? ' · submitted for review' : ''}`);
       doc.text(`Findings: ${findings.length}`);
-      doc.text(`Recommendations: ${recommendations.length}`);
+      doc.text(`Recommendations in this report: ${recommendations.length}`);
+      doc.text(`Evidence uploaded: ${uploadedEvidence.length}`);
       doc.text(`Evidence gaps (informational): ${gaps.length}`);
 
-      doc.moveDown(1.2).fontSize(14).text('Score distribution (controls)');
-      doc.moveDown(0.4).fontSize(10).fillColor('#333333');
-      for (const score of [4, 3, 2, 1, 0] as const) {
-        doc.text(`Score ${score}: ${(distribution as any)[score] ?? 0}`);
+      doc.moveDown(1.2).fontSize(14).fillColor('#111111').text('Maturity colour scale (0–4)');
+      doc.moveDown(0.4);
+      for (const score of [0, 1, 2, 3, 4] as const) {
+        const band = MATURITY_BAND[score];
+        const y = doc.y;
+        doc.rect(48, y, 12, 12).fill(band.fill);
+        doc.fillColor('#333333').fontSize(10).text(
+          `${score} · ${band.label} — ${(distribution as any)[score] ?? 0} control(s)`,
+          68,
+          y,
+        );
+        doc.moveDown(0.15);
       }
-      doc.text(`Unscored: ${(distribution as any).unscored ?? 0}`);
+      doc.fillColor('#333333').text(`Unscored: ${(distribution as any).unscored ?? 0}`);
 
-      doc.moveDown(1.2).fillColor('#111111').fontSize(14).text('Domain scores');
+      doc.moveDown(1.2).fillColor('#111111').fontSize(14).text('Domain scores (D01–D14)');
       doc.moveDown(0.4).fontSize(10).fillColor('#333333');
       if (!domainScores.length) {
         doc.text('No domain scores available. Evaluate the assessment first.');
       } else {
-        const sorted = [...domainScores].sort(
-          (a, b) => Number(b.score ?? -1) - Number(a.score ?? -1),
+        const sorted = [...domainScores].sort((a, b) =>
+          String(a.domainCode || '').localeCompare(String(b.domainCode || '')),
         );
         for (const domain of sorted) {
-          const label = domain.name || domain.domainCode || 'Domain';
-          const code = domain.domainCode ? `${domain.domainCode} — ` : '';
-          const score =
+          const label =
+            (domain as any).domainName || domain.name || domain.domainCode || 'Domain';
+          const code = domain.domainCode || '';
+          const scoreNum =
             domain.score == null || Number.isNaN(Number(domain.score))
+              ? null
+              : Number(domain.score);
+          const band = bandForScore(scoreNum);
+          const scoreText =
+            scoreNum == null
               ? '—'
-              : Number(domain.score).toFixed(2);
-          doc.text(`${code}${label}: ${score}`);
+              : `${scoreNum.toFixed(2)} / 4${band ? ` · ${band.label}` : ''}`;
+          const y = doc.y;
+          if (band) {
+            doc.rect(48, y + 1, 8, 8).fill(band.fill);
+          }
+          doc.fillColor('#333333').text(`${code} — ${label}: ${scoreText}`, band ? 64 : 48, y);
+          doc.moveDown(0.12);
         }
       }
 
@@ -139,7 +217,9 @@ export class MossReportsService {
       doc.addPage().fillColor('#111111').fontSize(16).text('Recommendations');
       doc.moveDown().fontSize(10).fillColor('#333333');
       if (!recommendations.length) {
-        doc.text('No recommendations were selected for this report.');
+        doc.text(
+          'No recommendations are marked for this report. Add them on the Recommendations tab and ensure “Include in report” is enabled.',
+        );
       } else {
         recommendations.slice(0, 40).forEach((recommendation: any, index: number) => {
           doc.fontSize(12).fillColor('#111111').text(
@@ -155,17 +235,58 @@ export class MossReportsService {
         }
       }
 
-      if (gaps.length) {
-        doc.moveDown(1).fillColor('#111111').fontSize(14).text('Evidence gaps (informational)');
-        doc.moveDown(0.4).fontSize(10).fillColor('#333333');
-        doc.text(
-          'Controls with evidence standards but no uploaded evidence. Gaps are not automatic compliance failures.',
-        );
-        gaps.slice(0, 30).forEach((gap: any) => {
-          doc.text(`• ${gap.controlCode}: ${gap.label || 'Evidence not yet uploaded'}`);
+      doc.addPage().fillColor('#111111').fontSize(16).text('Evidence');
+      doc.moveDown().fontSize(10).fillColor('#333333');
+      doc.text(
+        'Uploaded evidence is listed for transparency. Gaps list catalogue standards that still have no upload; gaps are informational and are not automatic compliance failures.',
+      );
+      doc.moveDown(0.8).fillColor('#111111').fontSize(13).text('Uploaded evidence');
+      doc.moveDown(0.3).fontSize(10).fillColor('#333333');
+      if (!uploadedEvidence.length) {
+        doc.text('No evidence documents have been uploaded for this assessment yet.');
+      } else {
+        uploadedEvidence.slice(0, 40).forEach((docItem, index) => {
+          const where = [docItem.domainCode, docItem.controlCode, docItem.controlName]
+            .filter(Boolean)
+            .join(' · ');
+          doc.fontSize(11).fillColor('#111111').text(
+            `${index + 1}. ${docItem.fileName || 'Document'}${where ? ` — ${where}` : ''}`,
+          );
+          const meta = [
+            docItem.uploadedByName ? `Uploaded by ${docItem.uploadedByName}` : null,
+            docItem.uploadedAt
+              ? new Date(docItem.uploadedAt).toLocaleDateString('en-ZA')
+              : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          if (meta) doc.fontSize(9).fillColor('#555555').text(meta);
+          doc.moveDown(0.35);
         });
-        if (gaps.length > 30) {
-          doc.text(`…and ${gaps.length - 30} more.`);
+        if (uploadedEvidence.length > 40) {
+          doc.fillColor('#555555').text(`…and ${uploadedEvidence.length - 40} more documents.`);
+        }
+      }
+
+      doc.moveDown(0.8).fillColor('#111111').fontSize(13).text('Evidence gaps (informational)');
+      doc.moveDown(0.3).fontSize(10).fillColor('#333333');
+      if (!gaps.length) {
+        doc.text('No evidence gaps — every control with catalogue standards has at least one upload.');
+      } else {
+        gaps.slice(0, 40).forEach((gap: any) => {
+          const heading = [gap.domainCode, gap.controlCode, gap.controlName || gap.label]
+            .filter(Boolean)
+            .join(' · ');
+          doc.text(`• ${heading}`);
+          if (Array.isArray(gap.requiredStandards) && gap.requiredStandards.length) {
+            doc.fillColor('#555555').text(
+              `  Expected: ${gap.requiredStandards.slice(0, 3).join('; ')}`,
+            );
+            doc.fillColor('#333333');
+          }
+        });
+        if (gaps.length > 40) {
+          doc.fillColor('#555555').text(`…and ${gaps.length - 40} more.`);
         }
       }
 

@@ -41,6 +41,7 @@ type RecommendationRow = {
   controlCode?: string | null;
   domainCode?: string | null;
   status?: string | null;
+  includeInReport?: boolean | null;
   createdAt?: string;
 };
 
@@ -60,6 +61,7 @@ export default function MossRecommendationsPage() {
   const [editing, setEditing] = useState<RecommendationRow | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editRecommendation, setEditRecommendation] = useState('');
+  const [editIncludeInReport, setEditIncludeInReport] = useState(true);
   const [savingEdit, setSavingEdit] = useState(false);
 
   async function load() {
@@ -124,7 +126,30 @@ export default function MossRecommendationsPage() {
     setEditing(row);
     setEditTitle(row.title);
     setEditRecommendation(row.summary || '');
+    setEditIncludeInReport(row.includeInReport !== false);
     setMenuOpenId(null);
+  }
+
+  async function toggleIncludeInReport(row: RecommendationRow) {
+    const next = row.includeInReport === false;
+    setBusyId(row.id);
+    setError('');
+    setNotice('');
+    setMenuOpenId(null);
+    try {
+      await apiFetch(`/moss/assessments/${id}/recommendations/${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ includeInReport: next }),
+      });
+      setItems((prev) =>
+        prev.map((item) => (item.id === row.id ? { ...item, includeInReport: next } : item)),
+      );
+      setNotice(next ? 'Included in the executive report.' : 'Excluded from the executive report.');
+    } catch (err) {
+      setError(mossApiErrorMessage(err, 'Unable to update report inclusion.'));
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function saveEdit(e: FormEvent) {
@@ -146,12 +171,21 @@ export default function MossRecommendationsPage() {
     try {
       await apiFetch(`/moss/assessments/${id}/recommendations/${editing.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ title: nextTitle, recommendation: nextRecommendation }),
+        body: JSON.stringify({
+          title: nextTitle,
+          recommendation: nextRecommendation,
+          includeInReport: editIncludeInReport,
+        }),
       });
       setItems((prev) =>
         prev.map((item) =>
           item.id === editing.id
-            ? { ...item, title: nextTitle, summary: nextRecommendation }
+            ? {
+                ...item,
+                title: nextTitle,
+                summary: nextRecommendation,
+                includeInReport: editIncludeInReport,
+              }
             : item,
         ),
       );
@@ -195,7 +229,7 @@ export default function MossRecommendationsPage() {
           <h2 className="text-xl font-bold tracking-tight text-slate-900">Recommendations</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
             Capture improvement actions for this MOSS assessment. Recommendations are created
-            manually by the assessor.
+            manually by the assessor. Only items marked “Include in report” appear in the PDF.
           </p>
         </div>
         <Badge variant="secondary" className="shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold">
@@ -348,6 +382,12 @@ export default function MossRecommendationsPage() {
                               {r.status}
                             </Badge>
                           ) : null}
+                          <Badge
+                            variant={r.includeInReport === false ? 'outline' : 'secondary'}
+                            className="rounded-md font-semibold"
+                          >
+                            {r.includeInReport === false ? 'Excluded from PDF' : 'In PDF'}
+                          </Badge>
                         </div>
                       </div>
                       <div className="flex shrink-0 items-start gap-2">
@@ -375,6 +415,14 @@ export default function MossRecommendationsPage() {
                         >
                           <button type="button" role="menuitem" onClick={() => startEdit(r)}>
                             Edit
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={busyId === r.id}
+                            onClick={() => void toggleIncludeInReport(r)}
+                          >
+                            {r.includeInReport === false ? 'Include in report' : 'Exclude from report'}
                           </button>
                           <button
                             type="button"
@@ -433,6 +481,14 @@ export default function MossRecommendationsPage() {
                 className="min-h-[140px] resize-y"
               />
             </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={editIncludeInReport}
+                onChange={(e) => setEditIncludeInReport(e.target.checked)}
+              />
+              Include in executive PDF report
+            </label>
             <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={() => setEditing(null)}>
                 Cancel

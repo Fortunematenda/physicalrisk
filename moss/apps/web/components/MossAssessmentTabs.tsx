@@ -12,7 +12,7 @@ const TABS = [
     match: (p: string, id: string) => p.includes('/recommendations'),
   },
   { href: '/actions', label: 'Actions', match: (p: string, id: string) => p.includes('/actions') },
-  { href: '/results', label: 'Results', match: (p: string, id: string) => p.includes('/results') },
+  { href: '/results', label: 'Results & review', match: (p: string, id: string) => p.includes('/results') },
 ];
 
 export function MossAssessmentTabs({ assessmentId }: { assessmentId?: string }) {
